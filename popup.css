@@ -1,0 +1,99 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 430px;
+  background: #0b1220;
+  color: #e5e7eb;
+  font: 13px/1.35 "Segoe UI", Arial, sans-serif;
+}
+
+.app {
+  padding: 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.brand-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.hype {
+  margin: 0 0 10px;
+  color: #ff3b3b;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.field span {
+  display: block;
+  margin-bottom: 4px;
+  color: #cbd5e1;
+}
+
+input,
+textarea,
+button {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 8px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+button {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 1.2;
+  padding: 10px 12px;
+}
+
+button:hover {
+  background: #1e293b;
+}
+
+.row {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#status {
+  margin: 4px 0 0;
+  color: #93c5fd;
+  min-height: 18px;
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 700;
+}

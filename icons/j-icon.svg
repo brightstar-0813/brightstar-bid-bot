@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="J icon">
+  <rect x="0" y="0" width="128" height="128" rx="22" ry="22" fill="#d90f1f"/>
+  <path
+    d="M81 26h-12v56c0 13-6 20-18 20-9 0-15-4-21-10l-8 9c8 10 18 15 32 15 21 0 39-12 39-37V26z"
+    fill="#ffffff"
+  />
+</svg>
