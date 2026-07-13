@@ -6,10 +6,16 @@ import {
   deleteCustomProfile
 } from "./profiles.js";
 
+const DEFAULT_OUTPUT_DIR = "Resume Applications";
+
 const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
 const deleteProfileBtn = document.getElementById("deleteProfile");
+const jobTitleEl = document.getElementById("jobTitle");
+const companyNameEl = document.getElementById("companyName");
+const jdLinkEl = document.getElementById("jdLink");
 const jdTextEl = document.getElementById("jdText");
+const outputDirEl = document.getElementById("outputDir");
 const pasteJdBtn = document.getElementById("pasteJd");
 const generateBtn = document.getElementById("generate");
 const resetBtn = document.getElementById("reset");
@@ -57,16 +63,34 @@ async function saveSelectedProfile(profileId) {
   await chrome.storage.local.set({ selected_profile_id: profileId });
 }
 
+async function persistJobFields() {
+  await chrome.storage.local.set({
+    last_job_title: jobTitleEl.value,
+    last_company_name: companyNameEl.value,
+    last_jd_link: jdLinkEl.value,
+    last_jd_text: jdTextEl.value,
+    output_dir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR
+  });
+}
+
 async function loadSettings() {
   const data = await chrome.storage.local.get([
     "selected_profile_id",
+    "last_job_title",
+    "last_company_name",
+    "last_jd_link",
     "last_jd_text",
+    "output_dir",
     "generation_status",
     "generation_running"
   ]);
 
   await refreshProfiles(data.selected_profile_id || DEFAULT_PROFILE_ID);
+  jobTitleEl.value = data.last_job_title || "";
+  companyNameEl.value = data.last_company_name || "";
+  jdLinkEl.value = data.last_jd_link || "";
   jdTextEl.value = data.last_jd_text || "";
+  outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
   setStatus(data.generation_status || "");
   generateBtn.disabled = Boolean(data.generation_running);
 }
@@ -85,7 +109,7 @@ async function pasteJdFromClipboard() {
       return;
     }
     jdTextEl.value = jd;
-    await chrome.storage.local.set({ last_jd_text: jd });
+    await persistJobFields();
     setStatus("JD pasted from clipboard.");
   } catch {
     setStatus("Clipboard read failed. Paste JD into the text field manually.");
@@ -94,8 +118,22 @@ async function pasteJdFromClipboard() {
 
 async function generateResume() {
   const profileId = profileSelectEl.value || DEFAULT_PROFILE_ID;
+  const jobTitle = (jobTitleEl.value || "").trim();
+  const companyName = (companyNameEl.value || "").trim();
+  const jdLink = (jdLinkEl.value || "").trim();
   const jd = (jdTextEl.value || "").trim();
+  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
 
+  if (!jobTitle) {
+    setStatus("Enter a job title first.");
+    jobTitleEl.focus();
+    return;
+  }
+  if (!companyName) {
+    setStatus("Enter a company name first.");
+    companyNameEl.focus();
+    return;
+  }
   if (!jd) {
     setStatus("Paste a job description into the JD field first.");
     jdTextEl.focus();
@@ -104,7 +142,11 @@ async function generateResume() {
 
   await chrome.storage.local.set({
     selected_profile_id: profileId,
-    last_jd_text: jd
+    last_job_title: jobTitle,
+    last_company_name: companyName,
+    last_jd_link: jdLink,
+    last_jd_text: jd,
+    output_dir: outputDir
   });
 
   let prompt = "";
@@ -118,7 +160,17 @@ async function generateResume() {
   setStatus("Starting generation...");
   generateBtn.disabled = true;
   try {
-    const res = await chrome.runtime.sendMessage({ type: "start_generation", prompt });
+    const res = await chrome.runtime.sendMessage({
+      type: "start_generation",
+      prompt,
+      jobMeta: {
+        jobTitle,
+        companyName,
+        jdLink,
+        jdText: jd,
+        outputDir
+      }
+    });
     if (!res?.ok) {
       throw new Error(res?.error || "Failed to start generation.");
     }
@@ -191,9 +243,11 @@ profileSelectEl.addEventListener("change", () => {
   saveSelectedProfile(profileSelectEl.value).catch(() => {});
 });
 
-jdTextEl.addEventListener("change", () => {
-  chrome.storage.local.set({ last_jd_text: jdTextEl.value }).catch(() => {});
-});
+for (const el of [jobTitleEl, companyNameEl, jdLinkEl, jdTextEl, outputDirEl]) {
+  el.addEventListener("change", () => {
+    persistJobFields().catch(() => {});
+  });
+}
 
 toggleAddProfileBtn.addEventListener("click", () => {
   const open = addProfileBody.hidden;

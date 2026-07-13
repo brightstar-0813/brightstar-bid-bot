@@ -4,7 +4,7 @@
 
 body {
   margin: 0;
-  width: 430px;
+  width: 460px;
   background: #0b1220;
   color: #e5e7eb;
   font: 13px/1.35 "Segoe UI", Arial, sans-serif;
@@ -42,6 +42,25 @@ h1 {
   letter-spacing: 0.4px;
   font-size: 20px;
   line-height: 1.1;
+}
+
+.section {
+  margin-bottom: 10px;
+}
+
+.section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .field {

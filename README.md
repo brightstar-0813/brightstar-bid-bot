@@ -1,14 +1,16 @@
 # Resume GPT Builder (Chrome Extension)
 
-This extension injects a selected profile's resume prompt + JD into your already-open ChatGPT tab, then auto-downloads a PDF.
+This extension injects a selected profile's resume prompt + JD into your already-open ChatGPT tab, then auto-downloads a PDF and JD text into a job folder.
 
 ## What it does
 
 - Pick a profile (built-in or ones you add in the UI)
+- Fill job title, company name, JD link, and JD text
 - Add new profiles with a name + full prompt content
-- Paste JD into a text field (or load from clipboard)
 - Uses the open ChatGPT web page (no API key)
-- Auto-downloads: `firstname.pdf`
+- Saves into:
+  - `Downloads / [output folder] / [job title] / jd.txt`
+  - `Downloads / [output folder] / [job title] / firstname.pdf`
 
 ## Setup
 
@@ -22,10 +24,12 @@ This extension injects a selected profile's resume prompt + JD into your already
 1. Open `https://chatgpt.com` and make sure you are logged in
 2. Click the extension icon
 3. Select a **Profile** (or add one under **+ Add new profile**)
-4. Paste the JD into the text field (or click **Paste from clipboard**)
-5. Click **Send to Open ChatGPT Tab**
-6. Popup can be closed while it runs; reopen it to check status
-7. Wait for auto-download of `.pdf`
+4. Fill **Job title**, **Company name**, and optional **JD link**
+5. Paste the JD into the text field (or click **Paste from clipboard**)
+6. Set **Output directory** (folder name under your Chrome Downloads folder)
+7. Click **Send to Open ChatGPT Tab**
+8. Popup can be closed while it runs; reopen it to check status
+9. Files appear under `Downloads / [output folder] / [job title] /`
 
 ## Add a profile in the UI
 
@@ -50,5 +54,6 @@ To ship another built-in prompt with the extension:
 
 - Keep ChatGPT tab open while it runs.
 - Popup can be closed while generation runs in background.
+- Output path is relative to Chrome's **Downloads** folder (Chrome extensions cannot write to an arbitrary absolute disk path).
 - After code changes, click **Reload** on the extension card in `chrome://extensions`.
 - Custom profiles can be removed with **Delete selected profile**.

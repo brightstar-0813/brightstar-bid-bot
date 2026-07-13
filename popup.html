@@ -25,6 +25,24 @@
         </button>
       </div>
 
+      <section class="section">
+        <h2 class="section-title">Job details</h2>
+        <div class="grid-2">
+          <label class="field">
+            <span>Job title</span>
+            <input id="jobTitle" type="text" placeholder="e.g. Senior Software Engineer" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Company name</span>
+            <input id="companyName" type="text" placeholder="e.g. Acme Inc." autocomplete="off" />
+          </label>
+        </div>
+        <label class="field">
+          <span>JD link</span>
+          <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
+        </label>
+      </section>
+
       <label class="field">
         <span>Job description (JD)</span>
         <textarea
@@ -37,6 +55,24 @@
       <div class="row row-inline">
         <button type="button" id="pasteJd" class="secondary">Paste from clipboard</button>
       </div>
+
+      <section class="section">
+        <h2 class="section-title">Output directory</h2>
+        <label class="field">
+          <span>Folder under Downloads</span>
+          <input
+            id="outputDir"
+            type="text"
+            placeholder="Resume Applications"
+            autocomplete="off"
+          />
+        </label>
+        <p class="hint">
+          Files save to
+          <code>Downloads / [this folder] / [job title] /</code>
+          as <code>jd.txt</code> and the resume PDF.
+        </p>
+      </section>
 
       <div class="row">
         <button type="button" id="generate">Send to Open ChatGPT Tab</button>

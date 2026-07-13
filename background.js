@@ -22,7 +22,8 @@ async function downloadDataUrl(url, filename) {
       {
         url,
         filename,
-        saveAs: false
+        saveAs: false,
+        conflictAction: "uniquify"
       },
       (downloadId) => {
         if (chrome.runtime.lastError) {
@@ -33,6 +34,36 @@ async function downloadDataUrl(url, filename) {
       }
     );
   });
+}
+
+function sanitizePathSegment(value, fallback = "untitled") {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 80)
+    .trim();
+  return cleaned || fallback;
+}
+
+function joinDownloadPath(...parts) {
+  return parts
+    .map((part) => String(part || "").replace(/^\/+|\/+$/g, "").replace(/\\/g, "/"))
+    .filter(Boolean)
+    .join("/");
+}
+
+function buildJdTxtContent({ jobTitle, companyName, jdLink, jdText }) {
+  return [
+    `Job Title: ${jobTitle || ""}`,
+    `Company: ${companyName || ""}`,
+    `JD Link: ${jdLink || ""}`,
+    "",
+    "---",
+    "",
+    jdText || ""
+  ].join("\n");
 }
 
 function extractHtmlFromResponse(responseText) {
@@ -300,7 +331,7 @@ async function htmlToPdfBase64(html) {
   }
 }
 
-async function autoDownloadResumeFiles(rawText) {
+async function autoDownloadResumeFiles(rawText, jobMeta = {}) {
   const suppliedHtml = extractHtmlFromResponse(rawText);
   const baseHtml = suppliedHtml || toResumeHtml(rawText);
   const normalizedHtml = enforceBulletLengthAndSentence(
@@ -311,12 +342,29 @@ async function autoDownloadResumeFiles(rawText) {
   const pdfBase64 = await htmlToPdfBase64(html);
   const pdfUrl = `data:application/pdf;base64,${pdfBase64}`;
 
+  const outputDir = sanitizePathSegment(jobMeta.outputDir || "Resume Applications", "Resume Applications");
+  const jobFolder = sanitizePathSegment(jobMeta.jobTitle || "untitled-job", "untitled-job");
+  const jobDir = joinDownloadPath(outputDir, jobFolder);
+
+  const jdTxt = buildJdTxtContent({
+    jobTitle: jobMeta.jobTitle || "",
+    companyName: jobMeta.companyName || "",
+    jdLink: jobMeta.jdLink || "",
+    jdText: jobMeta.jdText || ""
+  });
+  const jdUrl = `data:text/plain;charset=utf-8,${encodeURIComponent(jdTxt)}`;
+
   await chrome.storage.local.set({
     last_response: rawText,
     last_html: html,
-    last_plain_text: stripTagsToText(html)
+    last_plain_text: stripTagsToText(html),
+    last_output_dir: jobDir
   });
-  await downloadDataUrl(pdfUrl, `${first}.pdf`);
+
+  await downloadDataUrl(jdUrl, joinDownloadPath(jobDir, "jd.txt"));
+  await downloadDataUrl(pdfUrl, joinDownloadPath(jobDir, `${first}.pdf`));
+
+  return jobDir;
 }
 
 async function automateChatGpt(tabId, prompt) {
@@ -580,10 +628,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         last_response: output,
         generation_running: false
       });
-      await setStatus("Generating PDF...");
-      await autoDownloadResumeFiles(output);
-      await setStatus("Resume generated and downloaded: .pdf");
-      sendResponse({ ok: true });
+      await setStatus("Saving JD and PDF...");
+      const savedDir = await autoDownloadResumeFiles(output, message.jobMeta || {});
+      await setStatus(`Saved to Downloads / ${savedDir}`);
+      sendResponse({ ok: true, savedDir });
     } catch (err) {
       await chrome.storage.local.set({ generation_running: false });
       await setStatus(`Generation failed: ${String(err?.message || err)}`);
