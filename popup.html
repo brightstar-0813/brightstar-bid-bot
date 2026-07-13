@@ -14,10 +14,59 @@
       </div>
       <p class="hype">LETS GET TEH JOBS!!! 💪💪💪💪💪</p>
 
-      <div class="row">
-        <button id="generate">Send to Open ChatGPT Tab</button>
-        <button id="reset">Refresh / Reset</button>
+      <label class="field">
+        <span>Profile</span>
+        <select id="profileSelect"></select>
+      </label>
+
+      <div class="row row-inline">
+        <button type="button" id="deleteProfile" class="secondary danger" hidden>
+          Delete selected profile
+        </button>
       </div>
+
+      <label class="field">
+        <span>Job description (JD)</span>
+        <textarea
+          id="jdText"
+          placeholder="Paste the job description here..."
+          rows="6"
+        ></textarea>
+      </label>
+
+      <div class="row row-inline">
+        <button type="button" id="pasteJd" class="secondary">Paste from clipboard</button>
+      </div>
+
+      <div class="row">
+        <button type="button" id="generate">Send to Open ChatGPT Tab</button>
+        <button type="button" id="reset">Refresh / Reset</button>
+      </div>
+
+      <section class="panel" id="addProfilePanel">
+        <button type="button" class="panel-toggle" id="toggleAddProfile" aria-expanded="false">
+          + Add new profile
+        </button>
+        <div class="panel-body" id="addProfileBody" hidden>
+          <label class="field">
+            <span>Profile name</span>
+            <input id="newProfileName" type="text" placeholder="e.g. Jane Doe" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Prompt content</span>
+            <textarea
+              id="newProfilePrompt"
+              class="prompt-input"
+              placeholder="Paste the full independent resume prompt. Include {JD} where the job description should be inserted."
+              rows="10"
+            ></textarea>
+          </label>
+          <p class="hint">Must include <code>{JD}</code> placeholder for the job description.</p>
+          <div class="row">
+            <button type="button" id="saveProfile">Save profile</button>
+          </div>
+        </div>
+      </section>
 
       <p id="status"></p>
     </main>

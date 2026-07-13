@@ -56,6 +56,7 @@ h1 {
 }
 
 input,
+select,
 textarea,
 button {
   width: 100%;
@@ -66,9 +67,20 @@ button {
   padding: 8px;
 }
 
+select {
+  cursor: pointer;
+}
+
 textarea {
   resize: vertical;
-  min-height: 120px;
+  min-height: 110px;
+}
+
+textarea.prompt-input {
+  min-height: 160px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 button {
@@ -79,14 +91,72 @@ button {
   padding: 10px 12px;
 }
 
+button.secondary {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 10px;
+  color: #cbd5e1;
+}
+
+button.danger {
+  color: #fca5a5;
+  border-color: #7f1d1d;
+}
+
 button:hover {
   background: #1e293b;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .row {
   display: grid;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.row-inline {
+  margin-top: -2px;
+}
+
+.panel {
+  margin: 12px 0 8px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel-toggle {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: #111827;
+  text-align: left;
+  font-size: 14px;
+  color: #e2e8f0;
+}
+
+.panel-toggle:hover {
+  background: #1e293b;
+}
+
+.panel-body {
+  padding: 10px;
+  border-top: 1px solid #334155;
+  background: #0b1220;
+}
+
+.hint {
+  margin: -4px 0 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.hint code {
+  color: #93c5fd;
 }
 
 #status {
