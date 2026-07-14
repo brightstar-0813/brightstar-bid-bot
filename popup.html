@@ -18,6 +18,10 @@
         <span>Profile</span>
         <select id="profileSelect"></select>
       </label>
+      <p class="hint">
+        Resume profiles only. <code>CoverLetter</code> runs automatically after the resume is saved
+        (edit in <code>prompts/cover-letter.js</code>, or add a custom profile named CoverLetter).
+      </p>
 
       <div class="row row-inline">
         <button type="button" id="deleteProfile" class="secondary danger" hidden>
@@ -41,6 +45,16 @@
           <span>JD link</span>
           <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
         </label>
+        <div class="row row-inline">
+          <button type="button" id="copySheetRow" class="secondary">
+            Copy row for spreadsheet
+          </button>
+        </div>
+        <p class="hint">
+          Copies tab-separated
+          <code>JOB URL | JOB TITLE | COMPANY NAME | Date</code>
+          — select an empty row’s first cell in Sheets, then paste.
+        </p>
       </section>
 
       <label class="field">
@@ -69,9 +83,39 @@
         </label>
         <p class="hint">
           Files save to
-          <code>Downloads / [this folder] / [job title] /</code>
+          <code>Downloads / [this folder] / [company name - job title] /</code>
           as <code>jd.txt</code> and the resume PDF.
         </p>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Google Spreadsheet</h2>
+        <label class="field">
+          <span>Spreadsheet link</span>
+          <input
+            id="spreadsheetUrl"
+            type="url"
+            placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
+            autocomplete="off"
+          />
+        </label>
+        <label class="field">
+          <span>Apps Script Web App URL</span>
+          <input
+            id="sheetsWebAppUrl"
+            type="url"
+            placeholder="https://script.google.com/macros/s/.../exec"
+            autocomplete="off"
+          />
+        </label>
+        <p class="hint">
+          One-time setup: open the sheet → Extensions → Apps Script → paste
+          <code>apps-script/Code.gs</code> → Deploy as Web app (Anyone) → paste the Web App URL here.
+          Appends: <code>JOB URL, JOB TITLE, COMPANY NAME, Application Date</code>
+        </p>
+        <div class="row row-inline">
+          <button type="button" id="copyAppsScript" class="secondary">Copy Apps Script</button>
+        </div>
       </section>
 
       <div class="row">

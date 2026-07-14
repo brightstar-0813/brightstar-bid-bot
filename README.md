@@ -1,16 +1,17 @@
 # Resume GPT Builder (Chrome Extension)
 
-This extension injects a selected profile's resume prompt + JD into your already-open ChatGPT tab, then auto-downloads a PDF and JD text into a job folder.
+This extension injects a selected profile's resume prompt + JD into your already-open ChatGPT tab, then saves files and can append a row to Google Sheets.
 
 ## What it does
 
-- Pick a profile (built-in or ones you add in the UI)
+- Pick a resume profile (built-in or ones you add in the UI)
 - Fill job title, company name, JD link, and JD text
-- Add new profiles with a name + full prompt content
-- Uses the open ChatGPT web page (no API key)
-- Saves into:
-  - `Downloads / [output folder] / [job title] / jd.txt`
-  - `Downloads / [output folder] / [job title] / firstname.pdf`
+- Saves into `Downloads / [output folder] / [company name - job title] /`:
+  - `jd.txt`
+  - `Steven_Resume.pdf`
+  - `Cover Letter.pdf` (generated next via the **CoverLetter** prompt)
+- **Copy row for spreadsheet** — copies a tab-separated row to paste into Google Sheets
+- Optionally appends to Google Sheets via Apps Script
 
 ## Setup
 
@@ -23,37 +24,41 @@ This extension injects a selected profile's resume prompt + JD into your already
 
 1. Open `https://chatgpt.com` and make sure you are logged in
 2. Click the extension icon
-3. Select a **Profile** (or add one under **+ Add new profile**)
-4. Fill **Job title**, **Company name**, and optional **JD link**
-5. Paste the JD into the text field (or click **Paste from clipboard**)
-6. Set **Output directory** (folder name under your Chrome Downloads folder)
+3. Select a **Profile** (resume)
+4. Fill **Job title**, **Company name**, and **JD link**
+5. Paste the JD
+6. Set **Output directory**
 7. Click **Send to Open ChatGPT Tab**
-8. Popup can be closed while it runs; reopen it to check status
-9. Files appear under `Downloads / [output folder] / [job title] /`
+8. Wait for resume + cover letter PDFs
 
-## Add a profile in the UI
+## CoverLetter prompt
 
-1. Open the popup
-2. Click **+ Add new profile**
-3. Enter **Profile name**
-4. Paste the full **Prompt content** (must include `{JD}`)
-5. Click **Save profile**
+Built-in file: `prompts/cover-letter.js` (profile title: **CoverLetter**).
 
-Custom profiles are stored in Chrome extension storage (not as files). Built-in profiles stay in `prompts/`.
+It runs automatically after JD + resume are saved. Supports placeholders:
 
-## Built-in prompt files
+- `{JD}`
+- `{JOB_TITLE}`
+- `{COMPANY}`
 
-- `prompts/charlyton.js`
+To override without editing the file: add a custom profile named **CoverLetter** (that one is used instead).
 
-To ship another built-in prompt with the extension:
+## Google Spreadsheet (one-time)
 
-1. Add `prompts/your-id.js` exporting `PROMPT`
-2. Register it in `BUILTIN_PROFILES` inside `profiles.js`
+Chrome cannot write to a spreadsheet from the share/edit link alone. You need a tiny Apps Script web app once:
+
+1. Open your spreadsheet
+2. **Extensions → Apps Script**
+3. In the extension popup, click **Copy Apps Script** (or open `apps-script/Code.gs`)
+4. Paste into Apps Script → **Save**
+5. **Deploy → New deployment → Web app**
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+6. Authorize when prompted
+7. Copy the **Web App URL** into the extension with the spreadsheet link
 
 ## Notes
 
-- Keep ChatGPT tab open while it runs.
-- Popup can be closed while generation runs in background.
-- Output path is relative to Chrome's **Downloads** folder (Chrome extensions cannot write to an arbitrary absolute disk path).
+- Keep ChatGPT tab open while it runs (resume and cover letter each start a new chat).
+- Output path is relative to Chrome's **Downloads** folder.
 - After code changes, click **Reload** on the extension card in `chrome://extensions`.
-- Custom profiles can be removed with **Delete selected profile**.

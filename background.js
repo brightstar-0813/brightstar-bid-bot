@@ -1,6 +1,24 @@
-import { extractName, toResumeHtml } from "./renderer.js";
+import { extractName, toResumeHtml, toCoverLetterHtml } from "./renderer.js";
+import { appendJobToSpreadsheet } from "./sheets.js";
+import { buildCoverLetterPrompt } from "./profiles.js";
 
 let isRunning = false;
+
+chrome.runtime.onInstalled.addListener(() => {
+  isRunning = false;
+  chrome.storage.local.set({
+    generation_running: false,
+    generation_status: "Ready."
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  isRunning = false;
+  chrome.storage.local.set({
+    generation_running: false,
+    generation_status: "Ready."
+  });
+});
 
 async function getOpenChatGptTab() {
   const tabs = await chrome.tabs.query({});
@@ -338,12 +356,13 @@ async function autoDownloadResumeFiles(rawText, jobMeta = {}) {
     boldSkillsSection(splitCombinedRoleHeadlines(enforceHeaderStructure(baseHtml)))
   );
   const html = enforceA4PrintCss(normalizedHtml);
-  const first = detectResumeName(rawText, html);
   const pdfBase64 = await htmlToPdfBase64(html);
   const pdfUrl = `data:application/pdf;base64,${pdfBase64}`;
 
   const outputDir = sanitizePathSegment(jobMeta.outputDir || "Resume Applications", "Resume Applications");
-  const jobFolder = sanitizePathSegment(jobMeta.jobTitle || "untitled-job", "untitled-job");
+  const companyPart = String(jobMeta.companyName || "").trim() || "Company";
+  const titlePart = String(jobMeta.jobTitle || "").trim() || "untitled-job";
+  const jobFolder = sanitizePathSegment(`${companyPart} - ${titlePart}`, "untitled-job");
   const jobDir = joinDownloadPath(outputDir, jobFolder);
 
   const jdTxt = buildJdTxtContent({
@@ -362,9 +381,44 @@ async function autoDownloadResumeFiles(rawText, jobMeta = {}) {
   });
 
   await downloadDataUrl(jdUrl, joinDownloadPath(jobDir, "jd.txt"));
-  await downloadDataUrl(pdfUrl, joinDownloadPath(jobDir, `${first}.pdf`));
+  await downloadDataUrl(pdfUrl, joinDownloadPath(jobDir, "Steven_Resume.pdf"));
 
   return jobDir;
+}
+
+function enforceCoverLetterCss(html) {
+  const css = `
+@page { size: A4; margin: 18mm; }
+body {
+  font-family: "Times New Roman", Times, serif !important;
+  font-size: 11pt !important;
+  line-height: 1.45 !important;
+  color: #000 !important;
+}
+p {
+  margin: 0 0 12px 0 !important;
+  text-align: justify !important;
+}
+`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (match) => `${match}<style>${css}</style>`);
+  }
+  return `<!doctype html><html><head><style>${css}</style></head><body>${html}</body></html>`;
+}
+
+async function autoDownloadCoverLetterPdf(rawText, jobDir) {
+  const suppliedHtml = extractHtmlFromResponse(rawText);
+  const baseHtml = suppliedHtml || toCoverLetterHtml(rawText);
+  const html = enforceCoverLetterCss(baseHtml);
+  const pdfBase64 = await htmlToPdfBase64(html);
+  const pdfUrl = `data:application/pdf;base64,${pdfBase64}`;
+
+  await chrome.storage.local.set({
+    last_cover_letter_response: rawText,
+    last_cover_letter_html: html
+  });
+
+  await downloadDataUrl(pdfUrl, joinDownloadPath(jobDir, "Cover Letter.pdf"));
 }
 
 async function automateChatGpt(tabId, prompt) {
@@ -577,13 +631,10 @@ async function automateChatGpt(tabId, prompt) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "reset_generation_state") {
-    if (isRunning) {
-      sendResponse({ ok: false, error: "Cannot reset while generation is in progress." });
-      return undefined;
-    }
-
     (async () => {
       try {
+        // Always unlock — previous runs can leave storage stuck after reload/crash.
+        isRunning = false;
         const tab = await getOpenChatGptTab();
         if (tab?.id) {
           await chrome.tabs.reload(tab.id);
@@ -595,6 +646,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
         sendResponse({ ok: true });
       } catch (err) {
+        isRunning = false;
+        await chrome.storage.local.set({ generation_running: false });
         sendResponse({ ok: false, error: String(err?.message || err) });
       }
     })();
@@ -620,18 +673,49 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         throw new Error("Open ChatGPT in a browser tab first.");
       }
 
-      await setStatus("Sending prompt and waiting for response...");
+      await setStatus("Sending resume prompt and waiting for response...");
       const output = await automateChatGpt(tab.id, message.prompt);
       if (!output) throw new Error("Empty model response.");
 
       await chrome.storage.local.set({
-        last_response: output,
-        generation_running: false
+        last_response: output
       });
-      await setStatus("Saving JD and PDF...");
-      const savedDir = await autoDownloadResumeFiles(output, message.jobMeta || {});
-      await setStatus(`Saved to Downloads / ${savedDir}`);
-      sendResponse({ ok: true, savedDir });
+      await setStatus("Saving JD and resume PDF...");
+      const jobMeta = message.jobMeta || {};
+      const savedDir = await autoDownloadResumeFiles(output, jobMeta);
+
+      await setStatus("Sending CoverLetter prompt and waiting for response...");
+      const coverPrompt = await buildCoverLetterPrompt({
+        jdText: jobMeta.jdText || "",
+        jobTitle: jobMeta.jobTitle || "",
+        companyName: jobMeta.companyName || ""
+      });
+      const coverOutput = await automateChatGpt(tab.id, coverPrompt);
+      if (!coverOutput) throw new Error("Empty cover letter response.");
+
+      await setStatus("Saving Cover Letter.pdf...");
+      await autoDownloadCoverLetterPdf(coverOutput, savedDir);
+
+      let status = `Saved to Downloads / ${savedDir} (Steven_Resume.pdf + Cover Letter.pdf)`;
+      if (jobMeta.spreadsheetUrl || jobMeta.sheetsWebAppUrl) {
+        await setStatus("Appending row to Google Sheet...");
+        try {
+          await appendJobToSpreadsheet({
+            spreadsheetUrl: jobMeta.spreadsheetUrl,
+            webAppUrl: jobMeta.sheetsWebAppUrl,
+            jobTitle: jobMeta.jobTitle,
+            companyName: jobMeta.companyName,
+            jdLink: jobMeta.jdLink
+          });
+          status = `${status} and appended to Google Sheet`;
+        } catch (sheetErr) {
+          status = `${status}, but sheet append failed: ${String(sheetErr?.message || sheetErr)}`;
+        }
+      }
+
+      await chrome.storage.local.set({ generation_running: false });
+      await setStatus(status);
+      sendResponse({ ok: true, savedDir, status });
     } catch (err) {
       await chrome.storage.local.set({ generation_running: false });
       await setStatus(`Generation failed: ${String(err?.message || err)}`);

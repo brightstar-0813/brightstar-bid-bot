@@ -2,9 +2,14 @@
   "manifest_version": 3,
   "name": "Resume GPT Builder",
   "description": "Generate tailored resumes by automating open ChatGPT tab.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "permissions": ["storage", "downloads", "clipboardRead", "scripting", "tabs", "activeTab", "debugger"],
-  "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -1,12 +1,51 @@
 import {
   DEFAULT_PROFILE_ID,
-  getAllProfiles,
+  getResumeProfiles,
   buildPrompt,
   addCustomProfile,
   deleteCustomProfile
 } from "./profiles.js";
+import { extractSpreadsheetId, buildSheetRowTsv } from "./sheets.js";
 
 const DEFAULT_OUTPUT_DIR = "Resume Applications";
+
+const APPS_SCRIPT_SOURCE = `/**
+ * Resume GPT Builder — paste into Extensions → Apps Script on your spreadsheet,
+ * then Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone).
+ */
+function doPost(e) {
+  try {
+    const data = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+    if (!data.spreadsheetId) {
+      throw new Error("spreadsheetId is required.");
+    }
+
+    const ss = SpreadsheetApp.openById(String(data.spreadsheetId));
+    const sheet = ss.getSheets()[0];
+
+    sheet.appendRow([
+      data.jobLink || "",
+      data.jobTitle || "",
+      data.companyName || "",
+      data.applicationDate || ""
+    ]);
+
+    return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(
+      ContentService.MimeType.JSON
+    );
+  } catch (err) {
+    return ContentService.createTextOutput(
+      JSON.stringify({ ok: false, error: String(err && err.message ? err.message : err) })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet() {
+  return ContentService.createTextOutput(
+    "Resume GPT Builder sheet append endpoint is running."
+  );
+}
+`;
 
 const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
@@ -16,6 +55,10 @@ const companyNameEl = document.getElementById("companyName");
 const jdLinkEl = document.getElementById("jdLink");
 const jdTextEl = document.getElementById("jdText");
 const outputDirEl = document.getElementById("outputDir");
+const spreadsheetUrlEl = document.getElementById("spreadsheetUrl");
+const sheetsWebAppUrlEl = document.getElementById("sheetsWebAppUrl");
+const copyAppsScriptBtn = document.getElementById("copyAppsScript");
+const copySheetRowBtn = document.getElementById("copySheetRow");
 const pasteJdBtn = document.getElementById("pasteJd");
 const generateBtn = document.getElementById("generate");
 const resetBtn = document.getElementById("reset");
@@ -51,7 +94,7 @@ function populateProfileSelect(selectedId) {
 }
 
 async function refreshProfiles(selectedId) {
-  profilesCache = await getAllProfiles();
+  profilesCache = await getResumeProfiles();
   const preferred =
     selectedId ||
     (await chrome.storage.local.get("selected_profile_id")).selected_profile_id ||
@@ -69,7 +112,9 @@ async function persistJobFields() {
     last_company_name: companyNameEl.value,
     last_jd_link: jdLinkEl.value,
     last_jd_text: jdTextEl.value,
-    output_dir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR
+    output_dir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR,
+    spreadsheet_url: spreadsheetUrlEl.value.trim(),
+    sheets_web_app_url: sheetsWebAppUrlEl.value.trim()
   });
 }
 
@@ -81,6 +126,8 @@ async function loadSettings() {
     "last_jd_link",
     "last_jd_text",
     "output_dir",
+    "spreadsheet_url",
+    "sheets_web_app_url",
     "generation_status",
     "generation_running"
   ]);
@@ -91,6 +138,8 @@ async function loadSettings() {
   jdLinkEl.value = data.last_jd_link || "";
   jdTextEl.value = data.last_jd_text || "";
   outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
+  spreadsheetUrlEl.value = data.spreadsheet_url || "";
+  sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
   setStatus(data.generation_status || "");
   generateBtn.disabled = Boolean(data.generation_running);
 }
@@ -116,6 +165,34 @@ async function pasteJdFromClipboard() {
   }
 }
 
+async function copyAppsScript() {
+  try {
+    await navigator.clipboard.writeText(APPS_SCRIPT_SOURCE);
+    setStatus("Apps Script copied. Paste it into Extensions → Apps Script, then deploy as Web app.");
+  } catch {
+    setStatus("Could not copy. Open apps-script/Code.gs in the project instead.");
+  }
+}
+
+async function copySheetRow() {
+  const jobTitle = (jobTitleEl.value || "").trim();
+  const companyName = (companyNameEl.value || "").trim();
+  const jdLink = (jdLinkEl.value || "").trim();
+
+  if (!jobTitle && !companyName && !jdLink) {
+    setStatus("Fill job title, company, and/or JD link before copying.");
+    return;
+  }
+
+  const tsv = buildSheetRowTsv({ jobTitle, companyName, jdLink, includeDate: true });
+  try {
+    await navigator.clipboard.writeText(tsv);
+    setStatus("Sheet row copied. Click the first cell of an empty row in Sheets, then paste (Ctrl+V).");
+  } catch {
+    setStatus("Clipboard write failed. Try again after focusing the popup.");
+  }
+}
+
 async function generateResume() {
   const profileId = profileSelectEl.value || DEFAULT_PROFILE_ID;
   const jobTitle = (jobTitleEl.value || "").trim();
@@ -123,6 +200,8 @@ async function generateResume() {
   const jdLink = (jdLinkEl.value || "").trim();
   const jd = (jdTextEl.value || "").trim();
   const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  const spreadsheetUrl = (spreadsheetUrlEl.value || "").trim();
+  const sheetsWebAppUrl = (sheetsWebAppUrlEl.value || "").trim();
 
   if (!jobTitle) {
     setStatus("Enter a job title first.");
@@ -140,18 +219,33 @@ async function generateResume() {
     return;
   }
 
+  if (spreadsheetUrl || sheetsWebAppUrl) {
+    if (!extractSpreadsheetId(spreadsheetUrl)) {
+      setStatus("Enter a valid Google Spreadsheet link.");
+      spreadsheetUrlEl.focus();
+      return;
+    }
+    if (!sheetsWebAppUrl) {
+      setStatus("Paste the Apps Script Web App URL (one-time setup), or clear the spreadsheet link.");
+      sheetsWebAppUrlEl.focus();
+      return;
+    }
+  }
+
   await chrome.storage.local.set({
     selected_profile_id: profileId,
     last_job_title: jobTitle,
     last_company_name: companyName,
     last_jd_link: jdLink,
     last_jd_text: jd,
-    output_dir: outputDir
+    output_dir: outputDir,
+    spreadsheet_url: spreadsheetUrl,
+    sheets_web_app_url: sheetsWebAppUrl
   });
 
   let prompt = "";
   try {
-    prompt = await buildPrompt(profileId, jd);
+    prompt = await buildPrompt(profileId, jd, { jobTitle, companyName });
   } catch (err) {
     setStatus(String(err.message || err));
     return;
@@ -168,13 +262,15 @@ async function generateResume() {
         companyName,
         jdLink,
         jdText: jd,
-        outputDir
+        outputDir,
+        spreadsheetUrl,
+        sheetsWebAppUrl
       }
     });
     if (!res?.ok) {
       throw new Error(res?.error || "Failed to start generation.");
     }
-    setStatus("Resume generated.");
+    setStatus(res?.status || "Resume generated.");
   } catch (err) {
     setStatus(`Generation failed: ${String(err.message || err)}`);
   } finally {
@@ -243,7 +339,15 @@ profileSelectEl.addEventListener("change", () => {
   saveSelectedProfile(profileSelectEl.value).catch(() => {});
 });
 
-for (const el of [jobTitleEl, companyNameEl, jdLinkEl, jdTextEl, outputDirEl]) {
+for (const el of [
+  jobTitleEl,
+  companyNameEl,
+  jdLinkEl,
+  jdTextEl,
+  outputDirEl,
+  spreadsheetUrlEl,
+  sheetsWebAppUrlEl
+]) {
   el.addEventListener("change", () => {
     persistJobFields().catch(() => {});
   });
@@ -257,6 +361,8 @@ toggleAddProfileBtn.addEventListener("click", () => {
 });
 
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
+copyAppsScriptBtn.addEventListener("click", copyAppsScript);
+copySheetRowBtn.addEventListener("click", copySheetRow);
 generateBtn.addEventListener("click", generateResume);
 resetBtn.addEventListener("click", resetWorkflow);
 saveProfileBtn.addEventListener("click", saveNewProfile);
