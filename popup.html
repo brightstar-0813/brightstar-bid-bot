@@ -69,6 +69,14 @@
       <div class="row row-inline">
         <button type="button" id="pasteJd" class="secondary">Paste from clipboard</button>
       </div>
+      <div class="row">
+        <button type="button" id="copyPrompt">Generate JSON in ChatGPT</button>
+      </div>
+      <p class="hint">
+        Sends the resume prompt to your open ChatGPT tab (starts a new chat). When ChatGPT finishes,
+        copy its JSON reply into the <strong>Resume JSON</strong> box below. If no ChatGPT tab is open,
+        the prompt is copied to your clipboard instead.
+      </p>
 
       <section class="section">
         <h2 class="section-title">Output directory</h2>
@@ -84,11 +92,11 @@
         <p class="hint">
           Files save to
           <code>Downloads / [this folder] / [company name - job title] /</code>
-          as <code>jd.txt</code> and the resume PDF.
+          as <code>jd.txt</code>, resume JSON/HTML/PDF, and Cover Letter.pdf.
         </p>
       </section>
 
-      <section class="section">
+      <section class="section" id="spreadsheetSection" hidden>
         <h2 class="section-title">Google Spreadsheet</h2>
         <label class="field">
           <span>Spreadsheet link</span>
@@ -118,8 +126,32 @@
         </div>
       </section>
 
+      <section class="section">
+        <h2 class="section-title">Resume JSON</h2>
+        <label class="field">
+          <span>Paste the JSON result from ChatGPT</span>
+          <textarea
+            id="manualJsonText"
+            class="prompt-input"
+            placeholder='Paste the full JSON object here, starting with { and ending with }'
+            rows="8"
+          ></textarea>
+        </label>
+        <div class="row row-inline">
+          <button type="button" id="pasteJsonFromClipboard" class="secondary">
+            Paste JSON from clipboard
+          </button>
+        </div>
+        <div class="row">
+          <button type="button" id="saveFromJson">Render resume &amp; cover letter</button>
+        </div>
+        <p class="hint">
+          Renders and saves <code>jd.txt</code> and the resume PDF locally. The cover letter is
+          generated automatically if a ChatGPT tab is open.
+        </p>
+      </section>
+
       <div class="row">
-        <button type="button" id="generate">Send to Open ChatGPT Tab</button>
         <button type="button" id="reset">Refresh / Reset</button>
       </div>
 

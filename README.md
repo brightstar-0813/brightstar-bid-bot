@@ -8,7 +8,9 @@ This extension injects a selected profile's resume prompt + JD into your already
 - Fill job title, company name, JD link, and JD text
 - Saves into `Downloads / [output folder] / [company name - job title] /`:
   - `jd.txt`
-  - `Steven_Resume.pdf`
+  - `Steven_Resume.json` (structured resume content from ChatGPT)
+  - `Steven_Resume.html` (rendered locally from that JSON)
+  - `Steven_Resume.pdf` (printed from the HTML)
   - `Cover Letter.pdf` (generated next via the **CoverLetter** prompt)
 - **Copy row for spreadsheet** — copies a tab-separated row to paste into Google Sheets
 - Optionally appends to Google Sheets via Apps Script
@@ -24,12 +26,14 @@ This extension injects a selected profile's resume prompt + JD into your already
 
 1. Open `https://chatgpt.com` and make sure you are logged in
 2. Click the extension icon
-3. Select a **Profile** (resume)
+3. Select a **Profile** (e.g. **Steven Avon (Salesforce)**)
 4. Fill **Job title**, **Company name**, and **JD link**
 5. Paste the JD
 6. Set **Output directory**
 7. Click **Send to Open ChatGPT Tab**
-8. Wait for resume + cover letter PDFs
+8. Wait for resume + cover letter PDFs (status updates in the popup)
+
+If ChatGPT already shows the resume JSON but files were not saved, fill the job fields and click **Finish from current ChatGPT reply**.
 
 ## CoverLetter prompt
 
@@ -60,5 +64,7 @@ Chrome cannot write to a spreadsheet from the share/edit link alone. You need a 
 ## Notes
 
 - Keep ChatGPT tab open while it runs (resume and cover letter each start a new chat).
+- Resume flow expects **JSON** from ChatGPT; the extension parses it and renders HTML/PDF locally.
 - Output path is relative to Chrome's **Downloads** folder.
 - After code changes, click **Reload** on the extension card in `chrome://extensions`.
+- Salesforce prompt source: `prompts/steven-avon-resume.txt` (also shipped as built-in profile via `prompts/steven-avon.js`).

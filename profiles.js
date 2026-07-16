@@ -1,10 +1,18 @@
 import { PROMPT as charlytonPrompt } from "./prompts/charlyton.js";
+import { PROMPT as stevenAvonPrompt } from "./prompts/steven-avon.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
 
 /** Built-in prompts shipped as separate files under /prompts. */
 export const BUILTIN_PROFILES = [
+  {
+    id: "steven-avon",
+    label: "Steven Avon (Salesforce)",
+    promptTemplate: stevenAvonPrompt,
+    builtin: true,
+    kind: "resume"
+  },
   {
     id: "charlyton",
     label: "Charlyton Santana",

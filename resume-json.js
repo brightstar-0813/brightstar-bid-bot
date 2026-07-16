@@ -1,0 +1,504 @@
+const EXPECTED_BULLET_COUNTS = [
+  { match: /sfa\s*solutions/i, count: 6 },
+  { match: /^amazon$/i, count: 5 },
+  { match: /bhg\s*financial/i, count: 5 },
+  { match: /scholastic/i, count: 4 },
+  { match: /vonage/i, count: 4 },
+  { match: /forefront/i, count: 4 }
+];
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+export function stripMarkdownFences(text) {
+  let trimmed = String(text || "").trim();
+  if (/^```/m.test(trimmed)) {
+    trimmed = trimmed
+      .replace(/^```(?:json|JSON|html|HTML)?\s*\r?\n?/, "")
+      .replace(/\r?\n?```\s*$/, "")
+      .trim();
+  }
+  return trimmed;
+}
+
+function normalizeJsonText(text) {
+  let trimmed = stripMarkdownFences(text)
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\u00A0/g, " ")
+    .trim();
+
+  // ChatGPT code blocks sometimes prefix a bare language label.
+  trimmed = trimmed.replace(/^(json|JSON)\s*\r?\n/, "");
+
+  // Strip common line-number gutters: "12|{..." or "12 {...".
+  if (/^\s*\d+\s*[|:]/.test(trimmed) || /\n\s*\d+\s*[|:]/.test(trimmed)) {
+    trimmed = trimmed
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*\d+\s*[|:]\s?/, ""))
+      .join("\n");
+  }
+
+  return trimmed.trim();
+}
+
+/**
+ * Scan text for every balanced {...} block (ignoring braces inside strings)
+ * and return the parsed objects. This survives leading/trailing prose,
+ * code-fence leftovers, and multiple JSON-ish blocks in one message.
+ */
+function extractBalancedJsonObjects(text) {
+  const str = String(text || "");
+  const objects = [];
+  let depth = 0;
+  let startIdx = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) startIdx = i;
+      depth += 1;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0 && startIdx >= 0) {
+          const candidate = str.slice(startIdx, i + 1);
+          try {
+            objects.push(JSON.parse(candidate));
+          } catch {
+            // ignore non-parseable slice
+          }
+          startIdx = -1;
+        }
+      }
+    }
+  }
+
+  return objects;
+}
+
+function tryParseJson(text) {
+  const trimmed = normalizeJsonText(text);
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // continue
+  }
+
+  // Fast path: first "{" to last "}".
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    } catch {
+      // continue to balanced scan
+    }
+  }
+
+  // Robust path: find the best balanced object (prefer resume-shaped ones).
+  const objects = extractBalancedJsonObjects(trimmed);
+  if (!objects.length) return null;
+
+  const scoreObj = (obj) => {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
+    let score = 0;
+    if (Array.isArray(obj.experience)) score += 100000 + obj.experience.length * 100;
+    if (Array.isArray(obj.certifications)) score += 50000;
+    if (typeof obj.profile === "string") score += 25000;
+    if (typeof obj.name === "string") score += 1000;
+    return score;
+  };
+
+  let best = null;
+  let bestScore = -1;
+  for (const obj of objects) {
+    const s = scoreObj(obj);
+    if (s > bestScore) {
+      best = obj;
+      bestScore = s;
+    }
+  }
+  return best;
+}
+
+function coerceResumeObject(value) {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    const inner = tryParseJson(value);
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) return inner;
+  }
+  return null;
+}
+
+export function extractResumeJson(responseText) {
+  return coerceResumeObject(tryParseJson(responseText));
+}
+
+function totalExperienceBullets(data) {
+  if (!Array.isArray(data?.experience)) return 0;
+  return data.experience.reduce(
+    (sum, job) => sum + (Array.isArray(job?.bullets) ? job.bullets.filter(Boolean).length : 0),
+    0
+  );
+}
+
+/** Soft check: enough content to render a resume PDF. */
+export function isUsableResumeJson(data) {
+  if (!data || typeof data !== "object") return false;
+  if (!String(data.name || "").trim()) return false;
+  if (!String(data.profile || "").trim() || String(data.profile).length < 80) return false;
+  if (!data.education || !String(data.education.school || "").trim()) return false;
+  if (!Array.isArray(data.certifications) || data.certifications.length < 8) return false;
+  if (!Array.isArray(data.skills) || data.skills.length < 2) return false;
+  if (!Array.isArray(data.experience) || data.experience.length < 6) return false;
+  return totalExperienceBullets(data) >= 18;
+}
+
+export function isCompleteResumeJson(data) {
+  if (!isUsableResumeJson(data)) return false;
+  if (!String(data.profile || "").trim() || String(data.profile).length < 120) return false;
+  if (!Array.isArray(data.certifications) || data.certifications.length < 9) return false;
+  if (!Array.isArray(data.skills) || data.skills.length < 3) return false;
+  if (totalExperienceBullets(data) < 20) return false;
+
+  for (const rule of EXPECTED_BULLET_COUNTS) {
+    const job = data.experience.find((j) => rule.match.test(String(j?.company || "").trim()));
+    if (!job || !Array.isArray(job.bullets) || job.bullets.filter(Boolean).length < rule.count) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function mergeJsonFragments(parts) {
+  const cleaned = parts.filter(Boolean).map(normalizeJsonText);
+  let usable = null;
+
+  for (let i = cleaned.length - 1; i >= 0; i -= 1) {
+    const one = extractResumeJson(cleaned[i]);
+    if (isCompleteResumeJson(one)) return one;
+    if (!usable && isUsableResumeJson(one)) usable = one;
+  }
+
+  const combined = extractResumeJson(cleaned.join("\n"));
+  if (isCompleteResumeJson(combined)) return combined;
+  if (isUsableResumeJson(combined)) return combined;
+  return usable || combined;
+}
+
+export function looksLikeAlreadyCompleteRefusal(responseText) {
+  const text = String(responseText || "").toLowerCase();
+  return (
+    text.includes("already complete") ||
+    text.includes("already closed") ||
+    text.includes("nothing remaining") ||
+    text.includes("nothing to continue") ||
+    text.includes("can't truthfully fabricate") ||
+    text.includes("cannot truthfully fabricate") ||
+    (text.includes("properly closed") && text.includes("json"))
+  );
+}
+
+export function resumeJsonNeedsContinuation(rawText, data) {
+  // If we can render a resume, do not ask ChatGPT to continue.
+  if (isUsableResumeJson(data) || isCompleteResumeJson(data)) return false;
+  if (looksLikeAlreadyCompleteRefusal(rawText)) return false;
+
+  const text = String(rawText || "").toLowerCase();
+  const signals = [
+    "multiple parts",
+    "in multiple parts",
+    "exceeds the maximum",
+    "maximum single-response",
+    "response size limit",
+    "too large to",
+    "due to length",
+    "continue in the next",
+    "i will continue",
+    "provide it in multiple",
+    "split into several",
+    "part 1 of",
+    "part 2 of",
+    "combine the parts"
+  ];
+  if (signals.some((s) => text.includes(s))) return true;
+  if (!data) return true;
+
+  const trimmed = normalizeJsonText(rawText);
+  if (trimmed.includes("{") && !trimmed.trim().endsWith("}")) return true;
+  return !isUsableResumeJson(data);
+}
+
+// Pull the real destination out of a markdown link `[text](url)`.
+// Prefer the URL inside the parentheses because the bracket text can be wrong.
+function stripMarkdownLink(value) {
+  const s = String(value || "").trim();
+  const m = s.match(/\[([^\]]*)\]\(([^)]+)\)/);
+  if (m) return m[2].trim();
+  return s;
+}
+
+function cleanEmail(value) {
+  return stripMarkdownLink(value).replace(/^mailto:/i, "").trim();
+}
+
+function cleanUrl(value) {
+  return stripMarkdownLink(value).replace(/\/+$/, "").trim();
+}
+
+function contactLine(data) {
+  const parts = [];
+  if (data.location) parts.push(escapeHtml(data.location));
+  if (data.phone) parts.push(escapeHtml(data.phone));
+  if (data.email) {
+    const email = cleanEmail(data.email);
+    parts.push(`<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`);
+  }
+  if (data.linkedin) {
+    const url = cleanUrl(data.linkedin);
+    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    parts.push(`<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>`);
+  }
+  return parts.join(" | ");
+}
+
+function renderSkills(skills) {
+  return (skills || [])
+    .map((row) => {
+      const category = String(row?.category || "").trim();
+      const items = String(row?.items || "").trim();
+      if (!category && !items) return "";
+      return `<p><strong>${escapeHtml(category)}:</strong> ${escapeHtml(items)}</p>`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderCerts(certs) {
+  const items = (certs || [])
+    .map((c) => `<li>${escapeHtml(c)}</li>`)
+    .join("\n");
+  return `<ul class="certifications">${items}</ul>`;
+}
+
+function renderJobs(jobs) {
+  return (jobs || [])
+    .map((job) => {
+      const company = escapeHtml(job.company || "");
+      const location = escapeHtml(job.location || "");
+      const title = escapeHtml(job.title || "");
+      const dates = escapeHtml(job.dates || "");
+      const project = escapeHtml(job.project || "");
+      const bullets = (job.bullets || [])
+        .filter(Boolean)
+        .map((b) => `<li>${escapeHtml(b)}</li>`)
+        .join("\n");
+
+      return `<article class="job">
+  <div class="job-header">
+    <span class="company">${company}${location ? ` (${location})` : ""} — ${title}</span>
+    <span class="date">${dates}</span>
+  </div>
+  ${project ? `<p class="project">${project}</p>` : ""}
+  <ul>
+${bullets}
+  </ul>
+</article>`;
+    })
+    .join("\n");
+}
+
+export function resumeJsonToHtml(data) {
+  const name = escapeHtml(data.name || "Resume");
+  const headline = escapeHtml(data.headline || "");
+  const edu = data.education || {};
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${name} - Resume</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #222;
+      background: #fff;
+      font-size: 10pt;
+      line-height: 1.35;
+    }
+
+    .resume {
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      border-bottom: 2px solid #1f3b5a;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      margin: 0;
+      color: #1f3b5a;
+      font-size: 23pt;
+      line-height: 1.1;
+    }
+
+    .headline {
+      margin: 4px 0;
+      font-size: 11pt;
+      font-weight: 700;
+    }
+
+    .contact {
+      margin: 0;
+      font-size: 9pt;
+    }
+
+    a {
+      color: #1f3b5a;
+      text-decoration: underline;
+    }
+
+    section {
+      margin: 9px 0;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    h2 {
+      margin: 0 0 5px;
+      padding-bottom: 2px;
+      color: #1f3b5a;
+      border-bottom: 1px solid #b8c4d0;
+      font-size: 11pt;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    p { margin: 0 0 5px; }
+
+    .skills p { margin: 0 0 3px; }
+
+    .certifications {
+      columns: 1;
+      margin: 3px 0 0;
+      padding-left: 17px;
+    }
+
+    .certifications li { break-inside: avoid; }
+
+    .job {
+      margin: 0 0 9px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .job-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-weight: 700;
+    }
+
+    .company { color: #1f3b5a; }
+
+    .date {
+      flex-shrink: 0;
+      white-space: nowrap;
+      font-size: 9pt;
+      font-weight: 400;
+    }
+
+    .project {
+      margin: 2px 0 3px;
+      font-style: italic;
+      font-size: 9.2pt;
+    }
+
+    ul {
+      margin: 3px 0 0;
+      padding-left: 17px;
+    }
+
+    li {
+      margin: 0 0 3px;
+      padding-left: 1px;
+    }
+  </style>
+</head>
+<body>
+  <main class="resume">
+    <header>
+      <h1>${name}</h1>
+      ${headline ? `<p class="headline">${headline}</p>` : ""}
+      <p class="contact">${contactLine(data)}</p>
+    </header>
+
+    <section>
+      <h2>Profile</h2>
+      <p>${escapeHtml(data.profile || "")}</p>
+    </section>
+
+    <section>
+      <h2>Education</h2>
+      <p><strong>${escapeHtml(edu.school || "")}</strong><br>
+      ${escapeHtml(edu.degree || "")}<br>
+      ${escapeHtml(edu.year || "")}</p>
+    </section>
+
+    <section>
+      <h2>Certifications</h2>
+      ${renderCerts(data.certifications)}
+    </section>
+
+    <section class="skills">
+      <h2>Skills</h2>
+      ${renderSkills(data.skills)}
+    </section>
+
+    <section>
+      <h2>Experience</h2>
+      ${renderJobs(data.experience)}
+    </section>
+  </main>
+</body>
+</html>`;
+}

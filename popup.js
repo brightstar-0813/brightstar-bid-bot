@@ -60,8 +60,11 @@ const sheetsWebAppUrlEl = document.getElementById("sheetsWebAppUrl");
 const copyAppsScriptBtn = document.getElementById("copyAppsScript");
 const copySheetRowBtn = document.getElementById("copySheetRow");
 const pasteJdBtn = document.getElementById("pasteJd");
-const generateBtn = document.getElementById("generate");
+const copyPromptBtn = document.getElementById("copyPrompt");
 const resetBtn = document.getElementById("reset");
+const manualJsonTextEl = document.getElementById("manualJsonText");
+const pasteJsonFromClipboardBtn = document.getElementById("pasteJsonFromClipboard");
+const saveFromJsonBtn = document.getElementById("saveFromJson");
 const toggleAddProfileBtn = document.getElementById("toggleAddProfile");
 const addProfileBody = document.getElementById("addProfileBody");
 const newProfileNameEl = document.getElementById("newProfileName");
@@ -141,7 +144,7 @@ async function loadSettings() {
   spreadsheetUrlEl.value = data.spreadsheet_url || "";
   sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
   setStatus(data.generation_status || "");
-  generateBtn.disabled = Boolean(data.generation_running);
+  setBusy(Boolean(data.generation_running));
 }
 
 async function readClipboardText() {
@@ -193,7 +196,7 @@ async function copySheetRow() {
   }
 }
 
-async function generateResume() {
+async function collectJobMetaOrShowError() {
   const profileId = profileSelectEl.value || DEFAULT_PROFILE_ID;
   const jobTitle = (jobTitleEl.value || "").trim();
   const companyName = (companyNameEl.value || "").trim();
@@ -206,29 +209,29 @@ async function generateResume() {
   if (!jobTitle) {
     setStatus("Enter a job title first.");
     jobTitleEl.focus();
-    return;
+    return null;
   }
   if (!companyName) {
     setStatus("Enter a company name first.");
     companyNameEl.focus();
-    return;
+    return null;
   }
   if (!jd) {
     setStatus("Paste a job description into the JD field first.");
     jdTextEl.focus();
-    return;
+    return null;
   }
 
   if (spreadsheetUrl || sheetsWebAppUrl) {
     if (!extractSpreadsheetId(spreadsheetUrl)) {
       setStatus("Enter a valid Google Spreadsheet link.");
       spreadsheetUrlEl.focus();
-      return;
+      return null;
     }
     if (!sheetsWebAppUrl) {
       setStatus("Paste the Apps Script Web App URL (one-time setup), or clear the spreadsheet link.");
       sheetsWebAppUrlEl.focus();
-      return;
+      return null;
     }
   }
 
@@ -243,6 +246,36 @@ async function generateResume() {
     sheets_web_app_url: sheetsWebAppUrl
   });
 
+  return {
+    profileId,
+    jobMeta: {
+      jobTitle,
+      companyName,
+      jdLink,
+      jdText: jd,
+      outputDir,
+      spreadsheetUrl,
+      sheetsWebAppUrl
+    }
+  };
+}
+
+function setBusy(busy) {
+  if (saveFromJsonBtn) saveFromJsonBtn.disabled = busy;
+}
+
+async function copyResumePrompt() {
+  const profileId = profileSelectEl.value || DEFAULT_PROFILE_ID;
+  const jd = (jdTextEl.value || "").trim();
+  const jobTitle = (jobTitleEl.value || "").trim();
+  const companyName = (companyNameEl.value || "").trim();
+
+  if (!jd) {
+    setStatus("Paste a job description into the JD field first.");
+    jdTextEl.focus();
+    return;
+  }
+
   let prompt = "";
   try {
     prompt = await buildPrompt(profileId, jd, { jobTitle, companyName });
@@ -251,31 +284,70 @@ async function generateResume() {
     return;
   }
 
-  setStatus("Starting generation...");
-  generateBtn.disabled = true;
+  await persistJobFields();
+  setStatus("Sending prompt to ChatGPT...");
+
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "send_prompt", prompt });
+    if (res?.ok) {
+      setStatus("Prompt sent to ChatGPT. Wait for the JSON, then paste it into the Resume JSON box below.");
+      return;
+    }
+    // No ChatGPT tab (or send failed) — fall back to clipboard.
+    await navigator.clipboard.writeText(prompt);
+    setStatus(
+      `${res?.error || "Could not send to ChatGPT."} Prompt copied to clipboard — paste it into ChatGPT manually.`
+    );
+  } catch (err) {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setStatus("Prompt copied to clipboard — paste it into ChatGPT manually.");
+    } catch {
+      setStatus(`Failed to send or copy prompt: ${String(err.message || err)}`);
+    }
+  }
+}
+
+async function pasteJsonFromClipboard() {
+  try {
+    const text = await readClipboardText();
+    if (!text) {
+      setStatus("Clipboard is empty.");
+      return;
+    }
+    manualJsonTextEl.value = text;
+    setStatus("JSON pasted from clipboard. Click 'Render resume & cover letter'.");
+  } catch {
+    setStatus("Clipboard read failed. Paste the JSON into the box manually.");
+  }
+}
+
+async function saveFromPastedJson() {
+  const jsonText = (manualJsonTextEl.value || "").trim();
+  if (!jsonText) {
+    setStatus("Paste the resume JSON into the box first.");
+    manualJsonTextEl.focus();
+    return;
+  }
+
+  const collected = await collectJobMetaOrShowError();
+  if (!collected) return;
+
+  setStatus("Rendering resume from pasted JSON...");
+  setBusy(true);
   try {
     const res = await chrome.runtime.sendMessage({
-      type: "start_generation",
-      prompt,
-      jobMeta: {
-        jobTitle,
-        companyName,
-        jdLink,
-        jdText: jd,
-        outputDir,
-        spreadsheetUrl,
-        sheetsWebAppUrl
-      }
+      type: "save_from_json",
+      jsonText,
+      jobMeta: collected.jobMeta
     });
     if (!res?.ok) {
-      throw new Error(res?.error || "Failed to start generation.");
+      throw new Error(res?.error || "Failed to start save from JSON.");
     }
-    setStatus(res?.status || "Resume generated.");
+    setStatus("Running: rendering PDF and saving files from pasted JSON...");
   } catch (err) {
     setStatus(`Generation failed: ${String(err.message || err)}`);
-  } finally {
-    const state = await chrome.storage.local.get(["generation_running"]);
-    generateBtn.disabled = Boolean(state.generation_running);
+    setBusy(false);
   }
 }
 
@@ -286,7 +358,7 @@ async function resetWorkflow() {
       throw new Error(res?.error || "Failed to reset.");
     }
     setStatus("Reset complete. Ready for next run.");
-    generateBtn.disabled = false;
+    setBusy(false);
   } catch (err) {
     setStatus(`Reset failed: ${String(err.message || err)}`);
   }
@@ -363,7 +435,9 @@ toggleAddProfileBtn.addEventListener("click", () => {
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 copySheetRowBtn.addEventListener("click", copySheetRow);
-generateBtn.addEventListener("click", generateResume);
+copyPromptBtn.addEventListener("click", copyResumePrompt);
+pasteJsonFromClipboardBtn.addEventListener("click", pasteJsonFromClipboard);
+saveFromJsonBtn.addEventListener("click", saveFromPastedJson);
 resetBtn.addEventListener("click", resetWorkflow);
 saveProfileBtn.addEventListener("click", saveNewProfile);
 deleteProfileBtn.addEventListener("click", removeSelectedProfile);
@@ -374,5 +448,5 @@ setInterval(async () => {
   if (typeof data.generation_status === "string") {
     setStatus(data.generation_status);
   }
-  generateBtn.disabled = Boolean(data.generation_running);
+  setBusy(Boolean(data.generation_running));
 }, 1200);
