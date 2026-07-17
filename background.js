@@ -462,12 +462,11 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
   });
 }
 
-// Pull the real destination out of a markdown link `[text](url)`.
+// Replace every markdown link `[text](url)` with its destination URL.
 function stripMarkdownLink(value) {
-  const s = String(value || "").trim();
-  const m = s.match(/\[([^\]]*)\]\(([^)]+)\)/);
-  if (m) return m[2].trim();
-  return s;
+  return String(value || "")
+    .replace(/\[([^\]]*)\]\(([^)]+)\)/g, (_match, _text, url) => url)
+    .trim();
 }
 
 function buildCoverLetterHtml(rawText, contact = {}) {
@@ -514,7 +513,8 @@ function buildCoverLetterHtml(rawText, contact = {}) {
     color: #000;
     margin: 0;
   }
-  .cl-header { margin-bottom: 16px; }
+  .cl-header { margin-bottom: 16px; text-align: center; }
+  .cl-header p { text-align: center; }
   .cl-name { font-size: 16pt; font-weight: 700; margin: 0 0 2px 0; }
   .cl-headline { font-weight: 700; margin: 0 0 6px 0; }
   .cl-contact { margin: 0; font-size: 10.5pt; }

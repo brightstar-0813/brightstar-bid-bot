@@ -257,13 +257,12 @@ export function resumeJsonNeedsContinuation(rawText, data) {
   return !isUsableResumeJson(data);
 }
 
-// Pull the real destination out of a markdown link `[text](url)`.
-// Prefer the URL inside the parentheses because the bracket text can be wrong.
+// Replace every markdown link `[text](url)` with its destination URL.
+// The bracket text can be wrong (typos), so the parenthesized URL wins.
 function stripMarkdownLink(value) {
-  const s = String(value || "").trim();
-  const m = s.match(/\[([^\]]*)\]\(([^)]+)\)/);
-  if (m) return m[2].trim();
-  return s;
+  return String(value || "")
+    .replace(/\[([^\]]*)\]\(([^)]+)\)/g, (_match, _text, url) => url)
+    .trim();
 }
 
 function cleanEmail(value) {
