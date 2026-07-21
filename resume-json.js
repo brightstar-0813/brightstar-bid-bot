@@ -38,6 +38,16 @@ function normalizeJsonText(text) {
   // ChatGPT code blocks sometimes prefix a bare language label.
   trimmed = trimmed.replace(/^(json|JSON)\s*\r?\n/, "");
 
+  // Un-mangle markdown-linkified JSON. When ChatGPT prints raw JSON (no code
+  // fence) it auto-links emails/URLs; copying that rendered text injects
+  // `[label](url)` wrappers where the url is percent-encoded and the label
+  // keeps the original characters (real quotes/commas). Keep the label so the
+  // JSON field boundaries are restored. A `]` immediately followed by `(` does
+  // not occur in clean resume JSON, so this is safe for well-formed input.
+  if (/\]\(/.test(trimmed)) {
+    trimmed = trimmed.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  }
+
   // Strip common line-number gutters: "12|{..." or "12 {...".
   if (/^\s*\d+\s*[|:]/.test(trimmed) || /\n\s*\d+\s*[|:]/.test(trimmed)) {
     trimmed = trimmed
@@ -102,6 +112,42 @@ function extractBalancedJsonObjects(text) {
   return objects;
 }
 
+/**
+ * Repair JSON that was truncated mid-copy (a very common paste problem):
+ * append the missing closing brackets/braces based on a bracket stack that
+ * ignores anything inside strings. Also drops a dangling trailing comma.
+ * Returns null when the tail cannot be safely closed (e.g. unterminated string).
+ */
+function closeTruncatedJson(text) {
+  const str = String(text || "");
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+
+  // An unterminated string can't be closed reliably; bail out.
+  if (inString || !stack.length) return null;
+
+  // Remove trailing whitespace and a dangling comma before appending closers.
+  let repaired = str.replace(/\s+$/, "").replace(/,\s*$/, "");
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    repaired += stack[i] === "{" ? "}" : "]";
+  }
+  return repaired;
+}
+
 function tryParseJson(text) {
   const trimmed = normalizeJsonText(text);
   try {
@@ -118,6 +164,25 @@ function tryParseJson(text) {
       return JSON.parse(trimmed.slice(start, end + 1));
     } catch {
       // continue to balanced scan
+    }
+  }
+
+  // Recovery path: JSON truncated mid-copy (missing trailing "]}" etc.).
+  const closed = closeTruncatedJson(trimmed);
+  if (closed) {
+    try {
+      return JSON.parse(closed);
+    } catch {
+      // continue to balanced scan
+    }
+    const cs = closed.indexOf("{");
+    const ce = closed.lastIndexOf("}");
+    if (cs >= 0 && ce > cs) {
+      try {
+        return JSON.parse(closed.slice(cs, ce + 1));
+      } catch {
+        // continue to balanced scan
+      }
     }
   }
 
@@ -270,7 +335,13 @@ function cleanEmail(value) {
 }
 
 function cleanUrl(value) {
-  return stripMarkdownLink(value).replace(/\/+$/, "").trim();
+  let url = stripMarkdownLink(value)
+    .replace(/[[\]]/g, "")
+    .trim();
+  // If corruption left extra text, keep only the first URL-ish token.
+  const match = url.match(/https?:\/\/\S+/i);
+  if (match) url = match[0];
+  return url.replace(/[),.]+$/, "").replace(/\/+$/, "").trim();
 }
 
 function contactLine(data) {

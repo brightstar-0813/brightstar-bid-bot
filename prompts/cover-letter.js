@@ -3,7 +3,7 @@ export const PROMPT = `You are an expert career writer specializing in concise, 
 I will provide a job title, company name, and job description (JD). Write a tailored cover letter for Steven that sounds human, confident, and realistic — not generic or overly salesy.
 
 CANDIDATE
-Name: Steven
+Name: extract  from JD
 Role focus: Senior Software Engineer / full-stack engineer (adapt tone to the JD without copying JD wording)
 
 RULES

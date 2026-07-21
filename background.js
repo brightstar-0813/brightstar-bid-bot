@@ -46,14 +46,25 @@ chrome.runtime.onStartup.addListener(() => {
   });
 });
 
+function isChatGptUrl(url) {
+  return (
+    typeof url === "string" &&
+    (url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/"))
+  );
+}
+
 async function getOpenChatGptTab() {
   const tabs = await chrome.tabs.query({});
-  const match = tabs.find(
-    (tab) =>
-      typeof tab.url === "string" &&
-      (tab.url.startsWith("https://chatgpt.com/") || tab.url.startsWith("https://chat.openai.com/"))
-  );
-  return match || null;
+  const chatTabs = tabs.filter((tab) => isChatGptUrl(tab.url) && typeof tab.id === "number");
+  if (!chatTabs.length) return null;
+
+  // Prefer the ChatGPT tab the user is actually looking at, then the most
+  // recently used one, so the prompt lands in the expected tab.
+  chatTabs.sort((a, b) => {
+    if (!!b.active !== !!a.active) return (b.active ? 1 : 0) - (a.active ? 1 : 0);
+    return (b.lastAccessed || 0) - (a.lastAccessed || 0);
+  });
+  return chatTabs[0];
 }
 
 async function setStatus(status) {
@@ -552,7 +563,24 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}) {
   await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(jobDir, "Cover Letter.pdf"));
 }
 
+async function focusTabForInput(tabId) {
+  // ChatGPT's ProseMirror composer only accepts execCommand/paste insertion
+  // when its tab is the active, focused tab. Bring it to the foreground first.
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab && typeof tab.windowId === "number") {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+    await chrome.tabs.update(tabId, { active: true });
+    // Give the page a moment to regain focus before we type into it.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } catch {
+    // Best-effort focusing; injection below still attempts insertion.
+  }
+}
+
 async function chatgptSendPrompt(tabId, prompt, startNewChat) {
+  await focusTabForInput(tabId);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     args: [prompt, startNewChat],
@@ -624,18 +652,59 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
             selection.removeAllRanges();
             selection.addRange(range);
           }
+
+          // 1) Preferred: simulate a paste. ProseMirror (ChatGPT's editor)
+          //    handles clipboard paste reliably, including multi-line text.
+          let inserted = false;
           try {
-            document.execCommand("insertText", false, text);
+            const dt = new DataTransfer();
+            dt.setData("text/plain", text);
+            const pasteEvent = new ClipboardEvent("paste", {
+              bubbles: true,
+              cancelable: true,
+              clipboardData: dt
+            });
+            el.dispatchEvent(pasteEvent);
+            inserted = (el.innerText || el.textContent || "").trim().length > 0;
           } catch {
-            el.textContent = text;
+            inserted = false;
           }
+
+          // 2) Fallback: execCommand insertText (works when tab is focused).
+          if (!inserted) {
+            try {
+              inserted = document.execCommand("insertText", false, text);
+            } catch {
+              inserted = false;
+            }
+          }
+
+          // 3) Last resort: build paragraphs directly so text at least appears.
+          if (!inserted && !(el.innerText || el.textContent || "").trim()) {
+            el.innerHTML = "";
+            for (const line of String(text).split("\n")) {
+              const p = document.createElement("p");
+              p.textContent = line;
+              el.appendChild(p);
+            }
+          }
+
           el.dispatchEvent(new Event("input", { bubbles: true }));
         }
+      };
+
+      const inputHasText = (el) => {
+        if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+          return (el.value || "").trim().length > 0;
+        }
+        return (el.innerText || el.textContent || "").trim().length > 0;
       };
 
       const clickSendButton = () => {
         const selectors = [
           "button[data-testid='send-button']",
+          "button[data-testid='composer-send-button']",
+          "#composer-submit-button",
           "button[aria-label*='Send']",
           "button[aria-label*='send']"
         ];
@@ -719,11 +788,31 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
         throw new Error("Cannot find ChatGPT message input box.");
       }
 
-      setInputValue(input, fullPrompt);
-      await sleep(250);
-      const sent = sendMessage(input);
+      let filled = false;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        setInputValue(input, fullPrompt);
+        await sleep(300);
+        input = findInput() || input;
+        if (inputHasText(input)) {
+          filled = true;
+          break;
+        }
+      }
+      if (!filled) {
+        throw new Error(
+          "Prompt text did not appear in the ChatGPT input. Keep the ChatGPT tab visible and try again."
+        );
+      }
+
+      // Wait briefly for ChatGPT to enable the send button after typing.
+      let sent = false;
+      for (let i = 0; i < 20; i += 1) {
+        sent = sendMessage(input);
+        if (sent) break;
+        await sleep(200);
+      }
       if (!sent) {
-        throw new Error("Could not trigger send in ChatGPT input.");
+        throw new Error("Prompt was typed but the Send button could not be triggered.");
       }
 
       return { blocksBefore, latestBefore };

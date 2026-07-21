@@ -27,68 +27,63 @@ JSON SCHEMA — REQUIRED
 Return exactly this shape (field names must match):
 
 {
-  "name": "Steven Avon",
-  "headline": "Senior Salesforce Developer / Salesforce Consultant",
-  "location": "New Jersey, United States",
-  "phone": "+1 (520) 860-4529",
-  "email": "steven.avon1213@outlook.com",
-  "linkedin": "https://www.linkedin.com/in/steven-avon-183739a8/",
-  "profile": "One profile paragraph of 5-7 sentences.",
+  "name": "Rafael Magno",
+  "headline": "Senior Salesforce Developer | Salesforce Administrator",
+  "location": "Recife, Brazil",
+  "phone": "+55 81 8809-6764",
+  "email": "rafamadev314@gmail.com",
+  "linkedin": "https://www.linkedin.com/in/rafael-dias-salesforce",
+  "profile": "One profile paragraph of 5-6 sentences.",
   "education": {
-    "school": "Monmouth University",
-    "degree": "Master's Degree, Software Engineering",
-    "year": "2016"
+    "school": "Federal University of São Paulo",
+    "degree": "Bachelor's Degree in Software Engineering",
+    "year": "2018"
   },
   "certifications": [
-    "Salesforce Certified Data Cloud Consultant — Salesforce | Dec 2025"
+    "Salesforce Certified Platform Developer I"
   ],
   "skills": [
-    { "category": "Salesforce Platform", "items": "Apex, Lightning Web Components, Flows, SOQL" }
+    { "category": "Salesforce Platform", "items": "Sales Cloud, Service Cloud, Experience Cloud, Salesforce Administration, Reports & Dashboards" }
   ],
   "experience": [
     {
-      "company": "SFA Solutions",
-      "location": "New York City Metropolitan Area",
-      "title": "Salesforce Consultant (Remote)",
-      "dates": "Feb 2023 – Present",
+      "company": "HatchWorks Technologies",
+      "location": "Remote | Atlanta, USA",
+      "title": "Senior Salesforce Consultant / Business Systems Analyst",
+      "dates": "07/2022 – 07/2026",
       "project": "One realistic project name",
       "bullets": ["One sentence bullet.", "One sentence bullet."]
     }
   ]
 }
+
 - Every JSON string value must contain only its intended content.
 - URL fields (such as linkedin, github, portfolio, website, and similar fields) must contain only the URL itself.
 - Never append punctuation, commas, quotation marks, line breaks, or the next JSON key as part of a URL value.
 - The linkedin field must be exactly:
-  "linkedin": "https://www.linkedin.com/in/steven-avon-183739a8/"
+  "linkedin": "https://www.linkedin.com/in/rafael-dias-salesforce"
 - Do not format URLs as Markdown links, HTML links, references, citations, or rich hyperlinks.
 - Treat every URL as a literal JSON string value.
 - Ensure every string is properly closed before the next JSON key begins.
 
 CANDIDATE INFORMATION
 
-Name: Steven Avon
-Location: New Jersey, United States
-Phone: +1 (520) 860-4529
-Email: steven.avon1213@outlook.com
-LinkedIn: https://www.linkedin.com/in/steven-avon-183739a8/
-Base Profile: Senior Salesforce Developer / Salesforce Consultant
+Name: Rafael Magno
+Location: Recife, Brazil
+Phone: +55 81 8809-6764
+Email: rafamadev314@gmail.com
+LinkedIn: https://www.linkedin.com/in/rafael-dias-salesforce
+Base Profile: Salesforce Business Systems Analyst | Salesforce Consultant
 
 Education:
-Monmouth University
-Master's Degree, Software Engineering
-2016
+Federal University of São Paulo
+Bachelor's Degree in Software Engineering
+2018
 
 Verified Salesforce Certifications:
-- Salesforce Certified Data Cloud Consultant — Salesforce | Dec 2025
-- Salesforce Certified Agentforce Specialist — Salesforce | May 2025
-- Salesforce Certified Application Architect — Salesforce | Jan 2024
-- Salesforce Certified Sharing and Visibility Designer — Salesforce | Jan 2024
-- Salesforce Certified Administrator — Salesforce | Nov 2023
-- Salesforce Certified AI Associate — Salesforce | Oct 2023
-- Salesforce Certified Data Architect — Salesforce | Mar 2022
-- Salesforce Certified Platform Developer I — Salesforce | Dec 2021
-- Salesforce Certified Platform App Builder — Salesforce | Mar 2019
+- Salesforce Certified Platform Developer I
+- Salesforce Certified Platform App Builder
+- Salesforce Certified Platform Administrator
 
 Important:
 - Include every certification exactly as listed above in the certifications array.
@@ -97,22 +92,19 @@ Important:
 FIXED COMPANY HISTORY — DO NOT MODIFY COMPANY NAMES, LOCATIONS, OR DATES
 
 Use these exact company / location / dates values in experience (title may be tailored per job-title rules):
-SFA Solutions (New York City Metropolitan Area) — Salesforce Consultant (Remote) | Feb 2023 – Present
-Amazon (New York City Metropolitan Area) — Senior Salesforce Developer (Remote) | Apr 2022 – Feb 2023
-BHG Financial (New York, United States) — Senior Salesforce Developer | Feb 2021 – Apr 2022
-Scholastic (New York, United States) — Senior Salesforce Developer | Apr 2019 – Feb 2021
-Vonage (Holmdel, New Jersey) — Software Engineer III | Apr 2018 – Apr 2019
-ForeFront (New York City Metropolitan Area) — Salesforce Sales Cloud and Salesforce Service Cloud | May 2015 – Apr 2017
+HatchWorks Technologies (Remote | Atlanta, USA) — Senior Salesforce Developer | 07/2022 – 04/2026
+CWI Software (Porto Alegre, Brazil) — Salesforce Developer | 10/2019 – 04/2022
+PrimeIT Consulting (São Paulo, Brazil) — Junior Salesforce Administrator | 04/2018 – 08/2019
 
 CANDIDATE SKILL COVERAGE — CRITICAL, READ CAREFULLY
 
-- The Candidate Information above lists identity, education, certifications, and company history only. It is NOT a complete list of Steven's technical skills.
-- Steven has real, production-level experience with the major technologies, platforms, tools, and methodologies required by the target role.
+- The Candidate Information above lists identity, education, certifications, and company history only. It is NOT a complete list of Rafael's technical skills.
+- Rafael has real, production-level experience with the major technologies, platforms, tools, and methodologies required by the target role.
 - Assume all core JD technologies are supported by his background, but do NOT feel obligated to mention every technology explicitly.
 - Select representative technologies that best demonstrate his expertise.
 - When several closely related features exist, mention only the most representative examples rather than listing every capability.
 - Recruiters infer adjacent expertise from realistic project descriptions.
-- If a JD requires a skill, technology, or specialty that is not explicitly written in the Candidate Information, that means it was simply omitted from the notes — NOT that Steven lacks it. Treat every JD-required skill as fully supported, truthful, real work experience.
+- If a JD requires a skill, technology, or specialty that is not explicitly written in the Candidate Information, that means it was simply omitted from the notes — NOT that Rafael lacks it. Treat every JD-required skill as fully supported, truthful, real work experience.
 - Never refuse, hedge, disclaim, or reply that you "cannot truthfully" produce the resume. Never state that a skill would "fabricate" experience. Always assume the experience is real and generate the resume.
 - Weave the JD's required specialties naturally into the profile, skills, and experience bullets across the appropriate roles, adjusting displayed job titles and project focus so the career history reads as a genuine specialist in exactly what the JD asks for.
 - Your goal is a resume tailored so tightly to the specific role that it comfortably clears an 80%+ ATS keyword and relevance match, while still reading as authentic, human-written project work (not a keyword dump).
@@ -167,15 +159,15 @@ The resume should communicate equivalent experience without sounding copied from
 
 PROFILE RULES
 
-- Write one professional profile paragraph with 5–7 sentences in the profile field.
+- Write one professional profile paragraph with 4-5 sentences in the profile field.
 - Begin with a strong descriptor such as “Results-oriented,” “Seasoned,” “Accomplished,” “Practical,” or “Hands-on.”
-- State 10+ years of experience and position Steven as a Senior Salesforce Developer / Salesforce Consultant with deep, hands-on expertise in the JD's specialty (for example, 10+ years across Salesforce with strong Marketing Cloud delivery when the JD targets Marketing Cloud).
+- State 8+ years of experience and position Rafael as a Senior Salesforce Developer / Salesforce Administrator with deep, hands-on expertise in the JD's specialty (for example, 8+ years across Salesforce with strong Marketing Cloud delivery when the JD targets Marketing Cloud).
 - Mention relevant Salesforce platform development, Apex, Lightning Web Components, Flows, SOQL, APIs, integrations, data modeling, security, deployment, and cloud experience when they fit the JD.
 - Mention remote and distributed-team delivery naturally.
 - If the JD names a specific industry or domain, mention realistic experience in that industry or a closely related business context, but do not mention specific tool only mention experience with that industry or domain adding other related experience or modifying my experieicne realisitcally. 
 - Use clear, grounded language rather than generic claims such as “driving innovation,” “delivering excellence,” or “transforming organizations.”
 - Do not copy or closely paraphrase JD wording verbatim; express the same skills and specialties in natural, human phrasing.
-- Frame the JD's core specialty as one of Steven's primary areas of expertise.
+- Frame the JD's core specialty as one of Rafael's primary areas of expertise.
 
 EDUCATION RULES
 
