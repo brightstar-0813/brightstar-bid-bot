@@ -267,7 +267,7 @@ h2 + p, h2 + ul, h2 + div, h2 + h3 { margin-top: 3px !important; }
 h3 + p, h3 + ul, .role-meta + p { margin-top: 3px !important; }
 .role-meta + ul { margin-top: 10px !important; }
 a, a:visited {
-  color: #1155cc !important;
+  color: #000 !important;
   text-decoration: underline !important;
 }
 `;
@@ -558,12 +558,13 @@ function buildCoverLetterHtml(rawText, contact = {}) {
   .cl-headline { font-weight: 700; margin: 0 0 6px 0; }
   .cl-contact { margin: 0; font-size: 10.5pt; }
   p { margin: 0 0 12px 0; text-align: justify; }
+  a, a:visited { color: #000; text-decoration: underline; }
   .signature { margin-top: 6px; }
   .signature p { margin: 0 0 2px 0; text-align: left; }
   .signature .cl-name-sign { font-weight: 700; margin-top: 10px; }
   .signature .cl-sign-title { margin-bottom: 4px; }
   .signature .cl-sign-line { font-size: 10.5pt; }
-  .signature a, .signature a:visited { color: #1155cc; text-decoration: underline; }
+  .signature a, .signature a:visited { color: #000; text-decoration: underline; }
 </style>
 </head>
 <body>

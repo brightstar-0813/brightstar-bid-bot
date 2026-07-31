@@ -1,9 +1,11 @@
 import {
-  contactLine,
   escapeHtml,
+  renderCertBadges,
   renderCerts,
+  renderContactBlock,
   renderJobsStacked,
   renderSkills,
+  renderTechnicalSummary,
   wrapHtmlDocument
 } from "./shared.js";
 
@@ -30,12 +32,12 @@ const CSS = `
 
     header.top {
       text-align: center;
-      margin-bottom: 5px;
-      padding-bottom: 3px;
+      margin-bottom: 4px;
+      padding-bottom: 2px;
     }
 
     h1 {
-      margin: 0 0 3px;
+      margin: 0 0 2px;
       font-size: 22.5pt;
       font-weight: 700;
       letter-spacing: 0;
@@ -50,27 +52,59 @@ const CSS = `
       text-align: center;
     }
 
-    .contact {
-      margin: 0 0 2px;
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      text-align: left;
+      margin-top: 2px;
+    }
+
+    .contact-block {
+      flex: 1 1 auto;
+      min-width: 0;
       font-size: 10pt;
-      word-break: break-word;
-      text-align: center;
+      line-height: 1.28;
+      text-align: left;
+    }
+
+    .contact-block div {
+      margin: 0;
+    }
+
+    .cert-badges {
+      flex: 0 0 auto;
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 3px;
+      max-width: 55%;
+    }
+
+    .cert-badge {
+      display: block;
+      width: 48px;
+      height: 53px;
+      flex-shrink: 0;
     }
 
     a, a:visited {
-      color: #1155cc;
+      color: #000;
       text-decoration: underline;
     }
 
+    /* Compact sections — avoid huge empty gaps from forced page breaks */
     section {
-      margin: 9px 0;
-      break-inside: avoid;
-      page-break-inside: avoid;
+      margin: 3px 0 4px;
+      break-inside: auto;
+      page-break-inside: auto;
     }
 
     h2 {
-      margin: 9px 0 4px;
-      padding-bottom: 2px;
+      margin: 5px 0 2px;
+      padding-bottom: 1px;
       font-size: 11pt;
       border-bottom: 1px solid #8b8b8b;
       text-transform: uppercase;
@@ -79,20 +113,30 @@ const CSS = `
     }
 
     h3.role-company {
-      margin: 7px 0 0;
-      font-size: 10.6pt;
+      margin: 5px 0 0;
+      font-size: 11pt;
       color: #000;
       font-weight: 700;
     }
 
-    p.role-meta {
-      margin: 0 0 6px;
+    p.role-title {
+      margin: 0;
+      font-size: 10.8pt;
+      font-weight: 700;
       color: #000;
-      font-style: italic;
+      font-style: normal;
+    }
+
+    p.role-meta {
+      margin: 0 0 2px;
+      font-size: 10pt;
+      font-weight: 400;
+      font-style: normal;
+      color: #000;
     }
 
     p {
-      margin: 0 0 2.6px;
+      margin: 0 0 2px;
       white-space: pre-wrap;
       text-align: justify;
       text-justify: inter-word;
@@ -101,7 +145,7 @@ const CSS = `
     .skills-table {
       width: 100%;
       border-collapse: collapse;
-      margin: 2px 0 4px;
+      margin: 1px 0 2px;
       table-layout: fixed;
       font-size: 10pt;
     }
@@ -109,7 +153,7 @@ const CSS = `
     .skills-table th,
     .skills-table td {
       border: 1px solid #8b8b8b;
-      padding: 3px 6px;
+      padding: 2px 5px;
       vertical-align: top;
       text-align: left;
     }
@@ -131,53 +175,59 @@ const CSS = `
       text-align: left;
     }
 
-    .certifications {
-      margin: 3px 0 6px;
-      padding-left: 18px;
+    .certifications,
+    .tech-summary {
+      margin: 1px 0 2px;
+      padding-left: 16px;
     }
 
-    .certifications li {
-      margin: 0 0 3px;
+    .certifications li,
+    .tech-summary li {
+      margin: 0 0 1.5px;
       text-align: justify;
     }
 
     .job {
-      margin: 0 0 6px;
-      break-inside: avoid;
-      page-break-inside: avoid;
+      margin: 0 0 4px;
+      break-inside: auto;
+      page-break-inside: auto;
     }
 
     .project {
-      margin: 2px 0 3px;
+      margin: 0 0 1px;
       font-style: italic;
       font-size: 10pt;
     }
 
     ul {
-      margin: 3px 0 6px;
-      padding-left: 18px;
+      margin: 1px 0 2px;
+      padding-left: 16px;
     }
 
     li {
-      margin: 0 0 3px;
+      margin: 0 0 1.5px;
       text-align: justify;
       text-justify: inter-word;
-      line-height: 1.18;
+      line-height: 1.16;
     }
 
-    h2 + p, h2 + ul, h2 + div, h2 + h3 { margin-top: 3px; }
-    h3 + p, h3 + ul, .role-meta + p { margin-top: 3px; }
-    .role-meta + ul { margin-top: 10px; }
+    h2 + p, h2 + ul, h2 + div, h2 + h3, h2 + table { margin-top: 2px; }
+    .role-title + .role-meta { margin-top: 0; }
+    .role-meta + ul, .project + ul { margin-top: 2px; }
 `;
 
 export const timesClassicTemplate = {
   id: "times-classic",
   label: "Times Classic (Serif)",
-  description: "Traditional centered header with underlined sections and stacked job titles.",
+  description:
+    "Centered name/headline, contact + cert badges header, company/title/meta experience layout.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");
     const edu = data.education || {};
+    const badges = renderCertBadges(data.certifications, { limit: 5 });
+    const contact = renderContactBlock(data, { linkColor: "#000" });
+    const techSummaryHtml = renderTechnicalSummary(data.technicalSummary);
 
     return wrapHtmlDocument({
       title: `${name} - Resume`,
@@ -186,13 +236,25 @@ export const timesClassicTemplate = {
     <header class="top">
       <h1>${name}</h1>
       ${headline ? `<p class="headline">${headline}</p>` : ""}
-      <p class="contact">${contactLine(data, { linkColor: "#1155cc" })}</p>
+      <div class="header-row">
+        ${contact}
+        ${badges}
+      </div>
     </header>
 
     <section>
       <h2>Profile</h2>
       <p>${escapeHtml(data.profile || "")}</p>
     </section>
+
+    ${
+      techSummaryHtml
+        ? `<section>
+      <h2>Technical Summary</h2>
+      ${techSummaryHtml}
+    </section>`
+        : ""
+    }
 
     <section>
       <h2>Education</h2>

@@ -16,7 +16,7 @@ const CSS = `
       margin: 0;
       padding: 0;
       font-family: Arial, Helvetica, sans-serif;
-      color: #222;
+      color: #000;
       background: #fff;
       font-size: 10pt;
       line-height: 1.35;
@@ -29,14 +29,14 @@ const CSS = `
 
     header {
       text-align: center;
-      border-bottom: 2px solid #1f3b5a;
+      border-bottom: 2px solid #000;
       padding-bottom: 8px;
       margin-bottom: 10px;
     }
 
     h1 {
       margin: 0;
-      color: #1f3b5a;
+      color: #000;
       font-size: 23pt;
       line-height: 1.1;
     }
@@ -52,8 +52,8 @@ const CSS = `
       font-size: 9pt;
     }
 
-    a {
-      color: #1f3b5a;
+    a, a:visited {
+      color: #000;
       text-decoration: underline;
     }
 
@@ -66,8 +66,8 @@ const CSS = `
     h2 {
       margin: 0 0 5px;
       padding-bottom: 2px;
-      color: #1f3b5a;
-      border-bottom: 1px solid #b8c4d0;
+      color: #000;
+      border-bottom: 1px solid #000;
       font-size: 11pt;
       letter-spacing: 0.3px;
       text-transform: uppercase;
@@ -93,15 +93,15 @@ const CSS = `
 
     .skills-table th {
       font-weight: 700;
-      background: #e8eef5;
-      color: #1f3b5a;
+      background: #f2f2f2;
+      color: #000;
       font-size: 9pt;
     }
 
     .skills-table .skill-cat {
       width: 32%;
       font-weight: 700;
-      color: #1f3b5a;
+      color: #000;
       white-space: nowrap;
     }
 
@@ -130,7 +130,7 @@ const CSS = `
       font-weight: 700;
     }
 
-    .company { color: #1f3b5a; }
+    .company { color: #000; }
 
     .date {
       flex-shrink: 0;

@@ -82,6 +82,10 @@ Return exactly this shape (field names must match):
   "email": "matthew.dale.hoffman0513@outlook.com",
   "linkedin": "https://www.linkedin.com/in/hoffmantxstate/",
   "profile": "One summary paragraph of 4-6 sentences.",
+  "technicalSummary": [
+    "One technical capability highlight bullet tailored to the JD.",
+    "Another highlight covering Salesforce delivery depth relevant to the role."
+  ],
   "education": {
     "school": "Texas State University",
     "degree": "Bachelor of Arts (BA), Computer Science",
@@ -128,6 +132,7 @@ WHAT MUST STAY FIXED
 WHAT YOU MUST TAILOR TO THE JD
 - Headline / role positioning
 - Profile / summary
+- Technical Summary bullets
 - Skills categories and skill items
 - Displayed job titles (believable seniority preserved)
 - Project names
@@ -147,6 +152,14 @@ The profile must:
 - Avoid generic buzzwords and keyword stuffing
 - Sound natural, practical, and believable
 - Do not copy JD phrases or sound like a job description
+
+TECHNICAL SUMMARY RULES
+
+Include a technicalSummary array with 6–10 concise bullets.
+Each bullet should highlight a core Salesforce capability theme (platform depth, Apex/LWC, integrations, Service Cloud, DevOps, security, data, OmniStudio, etc.) tailored to the JD.
+Do not duplicate the Skills table as a keyword dump.
+Do not invent certifications or employers inside these bullets.
+Keep each bullet to one sentence.
 
 SKILLS RULES
 
