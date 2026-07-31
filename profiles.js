@@ -1,5 +1,6 @@
 import { PROMPT as charlytonPrompt } from "./prompts/charlyton.js";
 import { PROMPT as stevenAvonPrompt } from "./prompts/steven-avon.js";
+import { PROMPT as matthewDaleHoffmanPrompt } from "./prompts/matthew-dale-hoffman.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
@@ -7,9 +8,20 @@ export const COVER_LETTER_PROFILE_ID = "cover-letter";
 /** Built-in prompts shipped as separate files under /prompts. */
 export const BUILTIN_PROFILES = [
   {
+    id: "matthew-dale-hoffman",
+    label: "Matthew Dale Hoffman (Salesforce)",
+    promptTemplate: matthewDaleHoffmanPrompt,
+    templateId: "times-classic",
+    resumeFilePrefix: "Matthew_Resume",
+    builtin: true,
+    kind: "resume"
+  },
+  {
     id: "steven-avon",
     label: "Steven Avon (Salesforce)",
     promptTemplate: stevenAvonPrompt,
+    templateId: "times-classic",
+    resumeFilePrefix: "Steven_Resume",
     builtin: true,
     kind: "resume"
   },
@@ -17,6 +29,8 @@ export const BUILTIN_PROFILES = [
     id: "charlyton",
     label: "Charlyton Santana",
     promptTemplate: charlytonPrompt,
+    templateId: "classic-blue",
+    resumeFilePrefix: "Charlyton_Resume",
     builtin: true,
     kind: "resume"
   },
@@ -29,7 +43,7 @@ export const BUILTIN_PROFILES = [
   }
 ];
 
-export const DEFAULT_PROFILE_ID = BUILTIN_PROFILES.find((p) => p.kind === "resume")?.id || BUILTIN_PROFILES[0].id;
+export const DEFAULT_PROFILE_ID = "matthew-dale-hoffman";
 
 /** @deprecated Use BUILTIN_PROFILES or getAllProfiles(). */
 export const PROFILES = BUILTIN_PROFILES;

@@ -1,6 +1,7 @@
 import { appendJobToSpreadsheet } from "./sheets.js";
 import { buildCoverLetterPrompt } from "./profiles.js";
 import { resumeJsonToHtml, extractResumeJson } from "./resume-json.js";
+import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 
 let isRunning = false;
 let keepAliveTimer = null;
@@ -396,10 +397,8 @@ function downloadBase64File(base64, mimeType, filename) {
 }
 
 async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
-  const baseHtml = resumeJsonToHtml(resumeData);
-  // Do not run legacy HTML bullet rewriting on JSON-rendered resumes —
-  // it pads certification <li> items and can distort content.
-  const html = enforceA4PrintCss(baseHtml);
+  const templateId = jobMeta.templateId || DEFAULT_TEMPLATE_ID;
+  const html = resumeJsonToHtml(resumeData, templateId);
   const pdfBase64 = await htmlToPdfBase64(html);
 
   const outputDir = sanitizePathSegment(jobMeta.outputDir || "Resume Applications", "Resume Applications");
@@ -425,10 +424,19 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
     // Storage quota should not block downloads.
   }
 
-  await downloadTextFile(jdTxt, "text/plain", joinDownloadPath(jobDir, "jd.txt"));
-  await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(jobDir, "Steven_Resume.pdf"));
+  const resumeFilePrefix = sanitizePathSegment(
+    jobMeta.resumeFilePrefix || "Matthew_Resume",
+    "Matthew_Resume"
+  );
 
-  return jobDir;
+  await downloadTextFile(jdTxt, "text/plain", joinDownloadPath(jobDir, "jd.txt"));
+  await downloadBase64File(
+    pdfBase64,
+    "application/pdf",
+    joinDownloadPath(jobDir, `${resumeFilePrefix}.pdf`)
+  );
+
+  return { jobDir, resumeFilePrefix };
 }
 
 function coverLetterTextToParagraphs(raw) {
@@ -487,29 +495,49 @@ function buildCoverLetterHtml(rawText, contact = {}) {
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;");
 
-  const name = String(contact.name || "Steven Avon").trim();
+  const name = String(contact.name || "Matthew Dale Hoffman").trim();
+  const title = String(contact.signatureTitle || contact.headline || "Salesforce Developer").trim();
+  const email = stripMarkdownLink(contact.email || "matthew.dale.hoffman0513@outlook.com")
+    .replace(/^mailto:/i, "")
+    .trim();
+  const phone = String(contact.phone || "(254) 708-9742")
+    .replace(/^\+1\s*/i, "")
+    .trim();
+  let linkedin = stripMarkdownLink(
+    contact.linkedin || "https://www.linkedin.com/in/hoffmantxstate/"
+  )
+    .replace(/\/+$/, "")
+    .trim();
+  if (linkedin && !/^https?:\/\//i.test(linkedin)) linkedin = `https://${linkedin}`;
+
   const paragraphs = cleanCoverLetterParagraphs(coverLetterTextToParagraphs(rawText), name);
 
   const headerParts = [`<p class="cl-name">${esc(name)}</p>`];
-  if (contact.headline) headerParts.push(`<p class="cl-headline">${esc(contact.headline)}</p>`);
+  if (title) headerParts.push(`<p class="cl-headline">${esc(title)}</p>`);
 
   const contactParts = [];
   if (contact.location) contactParts.push(esc(contact.location));
-  if (contact.phone) contactParts.push(esc(contact.phone));
-  if (contact.email) {
-    const email = stripMarkdownLink(contact.email).replace(/^mailto:/i, "").trim();
-    contactParts.push(`<a href="mailto:${esc(email)}">${esc(email)}</a>`);
-  }
-  if (contact.linkedin) {
-    const url = stripMarkdownLink(contact.linkedin).replace(/\/+$/, "").trim();
-    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    contactParts.push(`<a href="${esc(href)}">${esc(href)}</a>`);
-  }
+  if (phone) contactParts.push(esc(phone));
+  if (email) contactParts.push(`<a href="mailto:${esc(email)}">${esc(email)}</a>`);
+  if (linkedin) contactParts.push(`<a href="${esc(linkedin)}">${esc(linkedin)}</a>`);
   if (contactParts.length) {
     headerParts.push(`<p class="cl-contact">${contactParts.join(" | ")}</p>`);
   }
 
   const bodyHtml = paragraphs.map((p) => `<p>${esc(p)}</p>`).join("\n");
+
+  const signatureLines = [
+    `<p>Sincerely,</p>`,
+    `<p class="cl-name-sign">${esc(name)}</p>`,
+    title ? `<p class="cl-sign-title">${esc(title)}</p>` : "",
+    email
+      ? `<p class="cl-sign-line">✉️ <a href="mailto:${esc(email)}">${esc(email)}</a></p>`
+      : "",
+    phone ? `<p class="cl-sign-line">📞 ${esc(phone)}</p>` : "",
+    linkedin
+      ? `<p class="cl-sign-line">🌐 <a href="${esc(linkedin)}">${esc(linkedin)}</a></p>`
+      : ""
+  ].filter(Boolean);
 
   return `<!doctype html>
 <html lang="en">
@@ -518,7 +546,7 @@ function buildCoverLetterHtml(rawText, contact = {}) {
 <style>
   @page { size: A4; margin: 18mm; }
   body {
-    font-family: "Times New Roman", Times, serif;
+    font-family: "Times New Roman", Times, "Segoe UI Emoji", "Apple Color Emoji", serif;
     font-size: 11pt;
     line-height: 1.45;
     color: #000;
@@ -531,8 +559,11 @@ function buildCoverLetterHtml(rawText, contact = {}) {
   .cl-contact { margin: 0; font-size: 10.5pt; }
   p { margin: 0 0 12px 0; text-align: justify; }
   .signature { margin-top: 6px; }
-  .signature p { margin: 0; text-align: left; }
-  .signature .cl-name-sign { font-weight: 700; }
+  .signature p { margin: 0 0 2px 0; text-align: left; }
+  .signature .cl-name-sign { font-weight: 700; margin-top: 10px; }
+  .signature .cl-sign-title { margin-bottom: 4px; }
+  .signature .cl-sign-line { font-size: 10.5pt; }
+  .signature a, .signature a:visited { color: #1155cc; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -541,8 +572,7 @@ function buildCoverLetterHtml(rawText, contact = {}) {
   </div>
   ${bodyHtml}
   <div class="signature">
-    <p>Sincerely,</p>
-    <p class="cl-name-sign">${esc(name)}</p>
+    ${signatureLines.join("\n    ")}
   </div>
 </body>
 </html>`;
@@ -974,9 +1004,14 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
 async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { runCoverLetter = true } = {}) {
   await setStatus("Rendering resume from JSON, then saving jd.txt + PDF...");
-  const savedDir = await autoDownloadResumeFiles(output, resumeData, jobMeta);
+  const { jobDir: savedDir, resumeFilePrefix } = await autoDownloadResumeFiles(
+    output,
+    resumeData,
+    jobMeta
+  );
+  const resumePdfName = `${resumeFilePrefix}.pdf`;
 
-  let status = `Saved resume to Downloads / ${savedDir} (jd.txt + Steven_Resume.pdf)`;
+  let status = `Saved resume to Downloads / ${savedDir} (jd.txt + ${resumePdfName})`;
 
   if (runCoverLetter && typeof tabId === "number") {
     try {
@@ -994,14 +1029,15 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
 
       await setStatus("Saving Cover Letter.pdf...");
       await autoDownloadCoverLetterPdf(coverOutput, savedDir, {
-        name: resumeData?.name,
-        headline: resumeData?.headline,
+        name: resumeData?.name || "Matthew Dale Hoffman",
+        signatureTitle: "Salesforce Developer",
+        headline: resumeData?.headline || "Salesforce Developer",
         location: resumeData?.location,
-        email: resumeData?.email,
-        phone: resumeData?.phone,
-        linkedin: resumeData?.linkedin
+        email: resumeData?.email || "matthew.dale.hoffman0513@outlook.com",
+        phone: resumeData?.phone || "(254) 708-9742",
+        linkedin: resumeData?.linkedin || "https://www.linkedin.com/in/hoffmantxstate/"
       });
-      status = `Saved to Downloads / ${savedDir} (jd.txt + Steven_Resume.pdf + Cover Letter.pdf)`;
+      status = `Saved to Downloads / ${savedDir} (jd.txt + ${resumePdfName} + Cover Letter.pdf)`;
     } catch (coverErr) {
       status = `${status}, but cover letter failed: ${String(coverErr?.message || coverErr)}`;
     }

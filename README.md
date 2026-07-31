@@ -7,11 +7,9 @@ This extension injects a selected profile's resume prompt + JD into your already
 - Pick a resume profile (built-in or ones you add in the UI)
 - Fill job title, company name, JD link, and JD text
 - Saves into `Downloads / [output folder] / [company name - job title] /`:
-  - `jd.txt`
-  - `Steven_Resume.json` (structured resume content from ChatGPT)
-  - `Steven_Resume.html` (rendered locally from that JSON)
-  - `Steven_Resume.pdf` (printed from the HTML)
-  - `Cover Letter.pdf` (generated next via the **CoverLetter** prompt)
+    - `jd.txt`
+    - `Matthew_Resume.pdf` (or profile-specific prefix such as `Steven_Resume.pdf`)
+    - `Cover Letter.pdf` (generated next via the **CoverLetter** prompt)
 - **Copy row for spreadsheet** — copies a tab-separated row to paste into Google Sheets
 - Optionally appends to Google Sheets via Apps Script
 
@@ -26,14 +24,14 @@ This extension injects a selected profile's resume prompt + JD into your already
 
 1. Open `https://chatgpt.com` and make sure you are logged in
 2. Click the extension icon
-3. Select a **Profile** (e.g. **Steven Avon (Salesforce)**)
+3. Select a **Profile** (default: **Matthew Dale Hoffman (Salesforce)**)
 4. Fill **Job title**, **Company name**, and **JD link**
 5. Paste the JD
 6. Set **Output directory**
-7. Click **Send to Open ChatGPT Tab**
-8. Wait for resume + cover letter PDFs (status updates in the popup)
+7. Click **Generate JSON in ChatGPT**
+8. Paste the JSON into **Resume JSON**, then click **Render resume & cover letter**
 
-If ChatGPT already shows the resume JSON but files were not saved, fill the job fields and click **Finish from current ChatGPT reply**.
+If ChatGPT already returned JSON, paste it and click **Render resume & cover letter**.
 
 ## CoverLetter prompt
 
@@ -67,4 +65,5 @@ Chrome cannot write to a spreadsheet from the share/edit link alone. You need a 
 - Resume flow expects **JSON** from ChatGPT; the extension parses it and renders HTML/PDF locally.
 - Output path is relative to Chrome's **Downloads** folder.
 - After code changes, click **Reload** on the extension card in `chrome://extensions`.
-- Salesforce prompt source: `prompts/steven-avon-resume.txt` (also shipped as built-in profile via `prompts/steven-avon.js`).
+- Matthew prompt source: `prompts/matthew-dale-hoffman-resume.txt` (shipped as built-in profile via `prompts/matthew-dale-hoffman.js`).
+- Salesforce prompt source (Steven): `prompts/steven-avon-resume.txt` (also shipped as built-in profile via `prompts/steven-avon.js`).
