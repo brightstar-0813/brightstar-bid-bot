@@ -85,8 +85,8 @@ const CSS = `
 
     .cert-badge {
       display: block;
-      width: 48px;
-      height: 53px;
+      width: 54px;
+      height: 59px;
       flex-shrink: 0;
     }
 
@@ -103,12 +103,13 @@ const CSS = `
     }
 
     h2 {
-      margin: 5px 0 2px;
-      padding-bottom: 1px;
+      margin: 6px 0 3px;
+      padding-bottom: 2px;
       font-size: 11pt;
-      border-bottom: 1px solid #8b8b8b;
+      font-weight: 700;
+      border-bottom: 1.5px solid #000;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.4px;
       color: #000;
     }
 
@@ -131,7 +132,7 @@ const CSS = `
       margin: 0 0 2px;
       font-size: 10pt;
       font-weight: 400;
-      font-style: normal;
+      font-style: italic;
       color: #000;
     }
 
@@ -152,15 +153,15 @@ const CSS = `
 
     .skills-table th,
     .skills-table td {
-      border: 1px solid #8b8b8b;
-      padding: 2px 5px;
+      border: 1px solid #000;
+      padding: 3px 6px;
       vertical-align: top;
       text-align: left;
     }
 
     .skills-table th {
       font-weight: 700;
-      background: #f2f2f2;
+      background: #e8e8e8;
       font-size: 9.5pt;
     }
 

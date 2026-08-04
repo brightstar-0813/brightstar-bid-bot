@@ -20,7 +20,7 @@ RULES
 
 OUTPUT RULES
 - Return PLAIN TEXT only. Do NOT use HTML, Markdown, code fences, tables, or any tags.
-- Do NOT include a name/contact header — the application adds the header automatically.
+- Do NOT include a name/contact header at the top — start with the salutation only.
 - Do NOT include a signature or the candidate name at the end — the application adds this signature automatically:
   Sincerely,
   Matthew Dale Hoffman

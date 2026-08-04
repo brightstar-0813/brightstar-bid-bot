@@ -108,12 +108,11 @@ function extractBalancedJsonObjects(text) {
 
 /**
  * Repair JSON that was truncated mid-copy (a very common paste problem):
- * append the missing closing brackets/braces based on a bracket stack that
- * ignores anything inside strings. Also drops a dangling trailing comma.
- * Returns null when the tail cannot be safely closed (e.g. unterminated string).
+ * close an open string if needed, drop a dangling comma, then append missing
+ * closing brackets/braces. Returns null when there is nothing useful to close.
  */
 function closeTruncatedJson(text) {
-  const str = String(text || "");
+  let str = String(text || "");
   const stack = [];
   let inString = false;
   let escaped = false;
@@ -128,16 +127,39 @@ function closeTruncatedJson(text) {
     }
     if (ch === '"') inString = true;
     else if (ch === "{" || ch === "[") stack.push(ch);
-    else if (ch === "}" || ch === "]") stack.pop();
+    else if (ch === "}" || ch === "]") {
+      if (stack.length) stack.pop();
+    }
   }
 
-  // An unterminated string can't be closed reliably; bail out.
-  if (inString || !stack.length) return null;
+  if (!stack.length && !inString) return null;
 
-  // Remove trailing whitespace and a dangling comma before appending closers.
+  // Close an unterminated string, then drop a dangling comma.
+  if (inString) str += '"';
   let repaired = str.replace(/\s+$/, "").replace(/,\s*$/, "");
-  for (let i = stack.length - 1; i >= 0; i -= 1) {
-    repaired += stack[i] === "{" ? "}" : "]";
+
+  // Recompute stack after string close for accurate closers.
+  const stack2 = [];
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < repaired.length; i += 1) {
+    const ch = repaired[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack2.push(ch);
+    else if (ch === "}" || ch === "]") {
+      if (stack2.length) stack2.pop();
+    }
+  }
+  if (inString) repaired += '"';
+  repaired = repaired.replace(/,\s*$/, "");
+  for (let i = stack2.length - 1; i >= 0; i -= 1) {
+    repaired += stack2[i] === "{" ? "}" : "]";
   }
   return repaired;
 }
@@ -228,30 +250,71 @@ function totalExperienceBullets(data) {
   );
 }
 
-/** Soft check: enough content to render a resume PDF. */
+/** Detect ChatGPT echoing the schema/example placeholders instead of real resume content. */
+export function looksLikeSchemaPlaceholderResume(data) {
+  if (!data || typeof data !== "object") return true;
+  const blob = [
+    data.headline,
+    data.profile,
+    ...(Array.isArray(data.technicalSummary) ? data.technicalSummary : []),
+    ...(Array.isArray(data.certifications) ? data.certifications : []),
+    ...(Array.isArray(data.experience)
+      ? data.experience.flatMap((j) => [j?.project, ...(j?.bullets || [])])
+      : [])
+  ]
+    .map((x) => String(x || ""))
+    .join("\n");
+
+  const placeholderRe =
+    /One summary paragraph|tailored to the JD|One technical capability|Salesforce delivery depth relevant|One sentence bullet|One realistic project name|JD-aligned Salesforce identity|from the role list above|field names must match|Matching the schema/i;
+  if (placeholderRe.test(blob)) return true;
+
+  // Schema stub usually has only 1 job + 1–2 placeholder bullets + 1 skill row.
+  const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
+  const bullets = totalExperienceBullets(data);
+  const skills = Array.isArray(data.skills) ? data.skills.length : 0;
+  const certs = Array.isArray(data.certifications) ? data.certifications.length : 0;
+  if (jobs <= 1 && bullets <= 3 && skills <= 1 && certs <= 1) return true;
+
+  return false;
+}
+
+/**
+ * Soft check: enough real content to render a resume PDF.
+ * Rejects schema-example stubs that GPT sometimes returns first.
+ */
 export function isUsableResumeJson(data) {
   if (!data || typeof data !== "object") return false;
   if (!String(data.name || "").trim()) return false;
-  if (!String(data.profile || "").trim() || String(data.profile).length < 80) return false;
-  if (!data.education || !String(data.education.school || "").trim()) return false;
-  if (!Array.isArray(data.certifications) || data.certifications.length < 1) return false;
-  if (!Array.isArray(data.skills) || data.skills.length < 2) return false;
-  if (!Array.isArray(data.experience) || data.experience.length < 3) return false;
-  return totalExperienceBullets(data) >= 18;
+  if (looksLikeSchemaPlaceholderResume(data)) return false;
+
+  const profile = String(data.profile || "").trim();
+  if (profile.length < 120) return false;
+
+  const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
+  if (jobs < 3) return false;
+
+  if (totalExperienceBullets(data) < 12) return false;
+
+  if (!Array.isArray(data.skills) || data.skills.length < 3) return false;
+  if (!Array.isArray(data.certifications) || data.certifications.length < 3) return false;
+
+  return true;
 }
 
+/** Strict completeness check used for continuation decisions. */
 export function isCompleteResumeJson(data) {
   if (!isUsableResumeJson(data)) return false;
-  if (!String(data.profile || "").trim() || String(data.profile).length < 120) return false;
-  if (!Array.isArray(data.certifications) || data.certifications.length < 1) return false;
-  if (!Array.isArray(data.skills) || data.skills.length < 3) return false;
-  if (totalExperienceBullets(data) < 20) return false;
+  if (!String(data.profile || "").trim() || String(data.profile).length < 80) return false;
+  if (!Array.isArray(data.skills) || data.skills.length < 1) return false;
+  if (!Array.isArray(data.experience) || data.experience.length < 2) return false;
+  if (totalExperienceBullets(data) < 8) return false;
 
   // Only enforce company-specific bullet floors when that company appears.
   for (const rule of EXPECTED_BULLET_COUNTS) {
     const job = data.experience.find((j) => rule.match.test(String(j?.company || "").trim()));
     if (!job) continue;
-    if (!Array.isArray(job.bullets) || job.bullets.filter(Boolean).length < rule.count) {
+    if (!Array.isArray(job.bullets) || job.bullets.filter(Boolean).length < Math.min(rule.count, 4)) {
       return false;
     }
   }

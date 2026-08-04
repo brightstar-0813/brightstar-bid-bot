@@ -1,17 +1,29 @@
 import {
   DEFAULT_PROFILE_ID,
   getResumeProfiles,
-  buildPrompt,
+  getBuiltinPreset,
+  getActivePerson,
+  setActivePersonId,
+  savePersonProfile,
   addCustomProfile,
-  deleteCustomProfile
+  deleteCustomProfile,
+  BUILTIN_PROFILES,
+  COVER_LETTER_PROFILE_ID
 } from "./profiles.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { extractSpreadsheetId, buildSheetRowTsv } from "./sheets.js";
+import { parseJobsCsv, filterJobsByChannel, isLinkedInJob } from "./csv.js";
+import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 
 const DEFAULT_OUTPUT_DIR = "Resume Applications";
+const QUEUE_KEY = "job_queue";
+const ALL_US_JOBS_KEY = "all_us_jobs";
+const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
+const BATCH_STATE_KEY = "batch_state";
+const DEFAULT_CHANNEL_FILTER = "general";
 
 const APPS_SCRIPT_SOURCE = `/**
- * Resume GPT Builder — paste into Extensions → Apps Script on your spreadsheet,
+ * Brightstar Bid bot — paste into Extensions → Apps Script on your spreadsheet,
  * then Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone).
  */
 function doPost(e) {
@@ -43,15 +55,51 @@ function doPost(e) {
 
 function doGet() {
   return ContentService.createTextOutput(
-    "Resume GPT Builder sheet append endpoint is running."
+    "Brightstar Bid bot sheet append endpoint is running."
   );
 }
 `;
 
 const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
+const presetSelectEl = document.getElementById("presetSelect");
 const templateSelectEl = document.getElementById("templateSelect");
 const deleteProfileBtn = document.getElementById("deleteProfile");
+const togglePersonPanelBtn = document.getElementById("togglePersonPanel");
+const personPanelBody = document.getElementById("personPanelBody");
+const personLabelEl = document.getElementById("personLabel");
+const personNameEl = document.getElementById("personName");
+const personEmailEl = document.getElementById("personEmail");
+const personPhoneEl = document.getElementById("personPhone");
+const personLinkedinEl = document.getElementById("personLinkedin");
+const personLocationEl = document.getElementById("personLocation");
+const personResumePrefixEl = document.getElementById("personResumePrefix");
+const personSignatureTitleEl = document.getElementById("personSignatureTitle");
+const personMasterResumeEl = document.getElementById("personMasterResume");
+const personResumePromptEl = document.getElementById("personResumePrompt");
+const personCoverPromptEl = document.getElementById("personCoverPrompt");
+const masterResumeFileEl = document.getElementById("masterResumeFile");
+const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
+const clearMasterResumeBtn = document.getElementById("clearMasterResume");
+const loadPresetBtn = document.getElementById("loadPreset");
+const savePersonBtn = document.getElementById("savePerson");
+const savePersonAsNewBtn = document.getElementById("savePersonAsNew");
+const personSaveStatusEl = document.getElementById("personSaveStatus");
+const personSaveHintEl = document.getElementById("personSaveHint");
+
+const csvFileEl = document.getElementById("csvFile");
+const csvSummaryEl = document.getElementById("csvSummary");
+const queueListEl = document.getElementById("queueList");
+const batchStartBtn = document.getElementById("batchStart");
+const batchPauseBtn = document.getElementById("batchPause");
+const batchSkipBtn = document.getElementById("batchSkip");
+const batchStopBtn = document.getElementById("batchStop");
+const filterGeneralBtn = document.getElementById("filterGeneral");
+const filterLinkedInBtn = document.getElementById("filterLinkedIn");
+const filterAllBtn = document.getElementById("filterAll");
+
+const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
+const manualPanelBody = document.getElementById("manualPanelBody");
 const jobTitleEl = document.getElementById("jobTitle");
 const companyNameEl = document.getElementById("companyName");
 const jdLinkEl = document.getElementById("jdLink");
@@ -62,22 +110,72 @@ const sheetsWebAppUrlEl = document.getElementById("sheetsWebAppUrl");
 const copyAppsScriptBtn = document.getElementById("copyAppsScript");
 const copySheetRowBtn = document.getElementById("copySheetRow");
 const pasteJdBtn = document.getElementById("pasteJd");
-const copyPromptBtn = document.getElementById("copyPrompt");
+const runOneOffBtn = document.getElementById("runOneOff");
+const autofillPageBtn = document.getElementById("autofillPage");
 const resetBtn = document.getElementById("reset");
-const manualJsonTextEl = document.getElementById("manualJsonText");
-const pasteJsonFromClipboardBtn = document.getElementById("pasteJsonFromClipboard");
-const saveFromJsonBtn = document.getElementById("saveFromJson");
-const toggleAddProfileBtn = document.getElementById("toggleAddProfile");
-const addProfileBody = document.getElementById("addProfileBody");
-const newProfileNameEl = document.getElementById("newProfileName");
-const newProfilePromptEl = document.getElementById("newProfilePrompt");
-const saveProfileBtn = document.getElementById("saveProfile");
 
 let profilesCache = [];
 let templatesCache = [];
+let queueCache = [];
+let allUsJobsCache = [];
+let channelFilter = DEFAULT_CHANNEL_FILTER;
+let batchState = "idle";
+let editingPersonId = null;
+
+if (masterResumeFileEl) {
+  masterResumeFileEl.setAttribute("accept", MASTER_RESUME_ACCEPT);
+}
 
 function setStatus(message) {
   statusEl.textContent = message;
+}
+
+function setPersonSaveStatus(message, { ok = true } = {}) {
+  if (!personSaveStatusEl) return;
+  if (!message) {
+    personSaveStatusEl.hidden = true;
+    personSaveStatusEl.textContent = "";
+    personSaveStatusEl.className = "person-save-status";
+    return;
+  }
+  personSaveStatusEl.hidden = false;
+  personSaveStatusEl.textContent = message;
+  personSaveStatusEl.className = `person-save-status ${ok ? "ok" : "err"}`;
+  try {
+    personSaveStatusEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  } catch {
+    // ignore
+  }
+}
+
+function isEditingBuiltin() {
+  return BUILTIN_PROFILES.some((b) => b.id === editingPersonId && b.kind !== "coverLetter");
+}
+
+function syncSaveButtonLabels() {
+  if (!savePersonBtn || !savePersonAsNewBtn) return;
+  if (isEditingBuiltin()) {
+    savePersonBtn.textContent = "Save as my person";
+    savePersonAsNewBtn.textContent = "Duplicate as new";
+    if (personSaveHintEl) {
+      personSaveHintEl.textContent =
+        "Built-in preset is read-only. Save as my person keeps your tailor prompt; each CSV job fills {JD} automatically.";
+    }
+  } else if (editingPersonId) {
+    savePersonBtn.textContent = "Save changes";
+    savePersonAsNewBtn.textContent = "Duplicate as new";
+    if (personSaveHintEl) {
+      personSaveHintEl.textContent =
+        "Save your tailor prompt here. Job descriptions come from the CSV per row — do not paste JDs into this box.";
+    }
+  } else {
+    savePersonBtn.textContent = "Save person";
+    savePersonAsNewBtn.textContent = "Duplicate as new";
+    if (personSaveHintEl) {
+      personSaveHintEl.textContent =
+        "Paste the resume tailor prompt once (include {JD} as a placeholder). CSV supplies each job’s JD automatically.";
+    }
+  }
 }
 
 function populateTemplateSelect(selectedId) {
@@ -93,9 +191,19 @@ function populateTemplateSelect(selectedId) {
   templateSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_TEMPLATE_ID;
 }
 
-function templateIdForProfile(profileId) {
-  const profile = profilesCache.find((p) => p.id === profileId);
-  return profile?.templateId || DEFAULT_TEMPLATE_ID;
+function populatePresetSelect() {
+  presetSelectEl.innerHTML = "";
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "— Built-in presets —";
+  presetSelectEl.appendChild(blank);
+  for (const p of BUILTIN_PROFILES) {
+    if (p.kind === "coverLetter" || p.id === COVER_LETTER_PROFILE_ID) continue;
+    const option = document.createElement("option");
+    option.value = p.id;
+    option.textContent = p.label;
+    presetSelectEl.appendChild(option);
+  }
 }
 
 function syncDeleteButton() {
@@ -117,17 +225,56 @@ function populateProfileSelect(selectedId) {
   syncDeleteButton();
 }
 
+function fillPersonForm(person) {
+  editingPersonId = person?.id || null;
+  personLabelEl.value = person?.label || "";
+  personNameEl.value = person?.name || person?.label || "";
+  personEmailEl.value = person?.email || "";
+  personPhoneEl.value = person?.phone || "";
+  personLinkedinEl.value = person?.linkedin || "";
+  personLocationEl.value = person?.location || "";
+  personResumePrefixEl.value = person?.resumeFilePrefix || "";
+  personSignatureTitleEl.value = person?.signatureTitle || "";
+  personMasterResumeEl.value = person?.masterResume || "";
+  personResumePromptEl.value = person?.promptTemplate || "";
+  personCoverPromptEl.value = person?.coverLetterPrompt || "";
+  if (person?.templateId) {
+    templateSelectEl.value = person.templateId;
+  }
+  masterResumeFileHintEl.textContent = person?.masterResume
+    ? `Master resume loaded (${person.masterResume.length} chars).`
+    : "";
+  syncSaveButtonLabels();
+  setPersonSaveStatus("");
+}
+
+function readPersonForm({ asNew = false } = {}) {
+  return {
+    id: asNew ? null : editingPersonId,
+    label: personLabelEl.value.trim(),
+    name: personNameEl.value.trim() || personLabelEl.value.trim(),
+    email: personEmailEl.value.trim(),
+    phone: personPhoneEl.value.trim(),
+    linkedin: personLinkedinEl.value.trim(),
+    location: personLocationEl.value.trim(),
+    resumeFilePrefix: personResumePrefixEl.value.trim() || "Resume",
+    signatureTitle: personSignatureTitleEl.value.trim(),
+    masterResume: personMasterResumeEl.value,
+    promptTemplate: personResumePromptEl.value,
+    coverLetterPrompt: personCoverPromptEl.value,
+    templateId: templateSelectEl.value || DEFAULT_TEMPLATE_ID
+  };
+}
+
 async function refreshProfiles(selectedId) {
   profilesCache = await getResumeProfiles();
   const preferred =
     selectedId ||
+    (await chrome.storage.local.get("active_person_id")).active_person_id ||
     (await chrome.storage.local.get("selected_profile_id")).selected_profile_id ||
     DEFAULT_PROFILE_ID;
   populateProfileSelect(preferred);
-}
-
-async function saveSelectedTemplate(templateId) {
-  await chrome.storage.local.set({ selected_template_id: templateId });
+  populatePresetSelect();
 }
 
 async function refreshTemplates(selectedId) {
@@ -139,14 +286,14 @@ async function refreshTemplates(selectedId) {
   populateTemplateSelect(preferred);
 }
 
-async function saveSelectedProfile(profileId) {
-  await chrome.storage.local.set({ selected_profile_id: profileId });
-}
-
-async function applyProfileTemplateDefault(profileId) {
-  const templateId = templateIdForProfile(profileId);
-  templateSelectEl.value = templateId;
-  await saveSelectedTemplate(templateId);
+async function loadActivePersonIntoForm() {
+  const person = await getActivePerson();
+  fillPersonForm(person);
+  if (person?.templateId) {
+    await chrome.storage.local.set({ selected_template_id: person.templateId });
+    templateSelectEl.value = person.templateId;
+  }
+  syncSaveButtonLabels();
 }
 
 async function persistJobFields() {
@@ -164,6 +311,7 @@ async function persistJobFields() {
 async function loadSettings() {
   const data = await chrome.storage.local.get([
     "selected_profile_id",
+    "active_person_id",
     "selected_template_id",
     "last_job_title",
     "last_company_name",
@@ -173,11 +321,17 @@ async function loadSettings() {
     "spreadsheet_url",
     "sheets_web_app_url",
     "generation_status",
-    "generation_running"
+    "generation_running",
+    QUEUE_KEY,
+    ALL_US_JOBS_KEY,
+    JOB_CHANNEL_FILTER_KEY,
+    BATCH_STATE_KEY
   ]);
 
-  await refreshProfiles(data.selected_profile_id || DEFAULT_PROFILE_ID);
-  await refreshTemplates(data.selected_template_id || templateIdForProfile(profileSelectEl.value));
+  await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
+  await refreshTemplates(data.selected_template_id || DEFAULT_TEMPLATE_ID);
+  await loadActivePersonIntoForm();
+
   jobTitleEl.value = data.last_job_title || "";
   companyNameEl.value = data.last_company_name || "";
   jdLinkEl.value = data.last_jd_link || "";
@@ -186,16 +340,444 @@ async function loadSettings() {
   spreadsheetUrlEl.value = data.spreadsheet_url || "";
   sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
   setStatus(data.generation_status || "");
-  setBusy(Boolean(data.generation_running));
+
+  channelFilter = data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER;
+  allUsJobsCache = Array.isArray(data[ALL_US_JOBS_KEY])
+    ? data[ALL_US_JOBS_KEY].map((j) => ({
+        ...j,
+        isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j)
+      }))
+    : [];
+  queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  batchState = data[BATCH_STATE_KEY] || "idle";
+
+  // Re-apply filter if we have the full US list; otherwise keep existing queue.
+  if (allUsJobsCache.length) {
+    await applyChannelFilter(channelFilter, { persist: false });
+  } else {
+    syncChannelFilterButtons();
+    renderQueue();
+    updateCsvSummaryFromQueue();
+  }
+
+  setBusy(Boolean(data.generation_running) || batchState === "running");
+
+  // Open person editor when the active profile is still a built-in (setup not finished).
+  const active = profilesCache.find((p) => p.id === profileSelectEl.value);
+  if (active?.builtin) {
+    personPanelBody.hidden = false;
+    togglePersonPanelBtn.setAttribute("aria-expanded", "true");
+    syncSaveButtonLabels();
+    setPersonSaveStatus(
+      "Paste your resume tailor prompt once (put {JD} as a placeholder — each CSV job fills it automatically). Then Save as my person.",
+      { ok: true }
+    );
+  }
+}
+
+function updateCsvSummaryFromQueue() {
+  if (!allUsJobsCache.length && !queueCache.length) {
+    csvSummaryEl.textContent = "No CSV loaded.";
+    return;
+  }
+  const liTotal = allUsJobsCache.filter((j) => j.isLinkedIn || isLinkedInJob(j)).length;
+  const genTotal = allUsJobsCache.length - liTotal;
+  const done = queueCache.filter((j) => j.status === "done").length;
+  const pending = queueCache.filter((j) => j.status === "pending").length;
+  const errors = queueCache.filter((j) => j.status === "error").length;
+  const filterLabel =
+    channelFilter === "linkedin" ? "LI only" : channelFilter === "all" ? "All" : "General only";
+  csvSummaryEl.textContent = `${queueCache.length} in queue (${filterLabel}) · US total ${allUsJobsCache.length} (General ${genTotal} / LI ${liTotal}) · ${done} done · ${pending} pending · ${errors} error · batch: ${batchState}`;
+}
+
+function syncChannelFilterButtons() {
+  const map = {
+    general: filterGeneralBtn,
+    linkedin: filterLinkedInBtn,
+    all: filterAllBtn
+  };
+  for (const [key, btn] of Object.entries(map)) {
+    if (!btn) continue;
+    btn.classList.toggle("active", key === channelFilter);
+  }
+}
+
+function mergeStatusFromQueue(jobs, previousQueue) {
+  const prevByRow = new Map((previousQueue || []).map((j) => [Number(j.csvRow), j]));
+  return jobs.map((j) => {
+    const prev = prevByRow.get(Number(j.csvRow));
+    if (!prev) return { ...j, status: j.status || "pending" };
+    return {
+      ...j,
+      status: prev.status || "pending",
+      jobDir: prev.jobDir,
+      error: prev.error
+    };
+  });
+}
+
+async function applyChannelFilter(nextFilter, { persist = true } = {}) {
+  channelFilter = nextFilter || DEFAULT_CHANNEL_FILTER;
+  syncChannelFilterButtons();
+  const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
+  queueCache = mergeStatusFromQueue(filtered, queueCache);
+  if (persist) {
+    await chrome.storage.local.set({
+      [JOB_CHANNEL_FILTER_KEY]: channelFilter,
+      [QUEUE_KEY]: queueCache,
+      [ALL_US_JOBS_KEY]: allUsJobsCache
+    });
+  }
+  updateCsvSummaryFromQueue();
+  renderQueue();
+  setStatus(
+    channelFilter === "general"
+      ? `Showing General (non-LinkedIn) jobs — ${queueCache.length} in queue.`
+      : channelFilter === "linkedin"
+        ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
+        : `Showing all US jobs — ${queueCache.length} in queue.`
+  );
+}
+
+function badgeClass(status) {
+  const s = String(status || "pending");
+  if (s === "done") return "badge badge-done";
+  if (s === "running") return "badge badge-running";
+  if (s === "skipped") return "badge badge-skipped";
+  if (s === "error") return "badge badge-error";
+  if (s === "paused") return "badge badge-paused";
+  return "badge badge-pending";
+}
+
+function renderQueue() {
+  queueListEl.innerHTML = "";
+  if (!queueCache.length) return;
+
+  for (const job of queueCache) {
+    const item = document.createElement("div");
+    item.className = "queue-item";
+    item.dataset.csvRow = String(job.csvRow);
+
+    const rowEl = document.createElement("div");
+    rowEl.className = "csv-row";
+    rowEl.textContent = String(job.csvRow);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = job.title || "Untitled";
+    title.title = job.title || "";
+    const sub = document.createElement("div");
+    sub.className = "sub";
+    sub.textContent = `${job.company || ""}${job.location ? " · " + job.location : ""}`;
+    const badge = document.createElement("span");
+    badge.className = badgeClass(job.status);
+    badge.textContent = job.status || "pending";
+    meta.appendChild(title);
+    meta.appendChild(sub);
+    meta.appendChild(badge);
+    if (job.isLinkedIn || isLinkedInJob(job)) {
+      const liBadge = document.createElement("span");
+      liBadge.className = "badge badge-li";
+      liBadge.textContent = "LI";
+      meta.appendChild(liBadge);
+    }
+    if (job.error) {
+      const err = document.createElement("div");
+      err.className = "sub";
+      err.textContent = job.error;
+      err.title = job.error;
+      meta.appendChild(err);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "secondary";
+    openBtn.textContent = "Open";
+    openBtn.disabled = !job.jdLink;
+    openBtn.addEventListener("click", () => openJob(job));
+
+    const revealBtn = document.createElement("button");
+    revealBtn.type = "button";
+    revealBtn.className = "secondary";
+    revealBtn.textContent = "Files";
+    revealBtn.disabled = !job.jobDir && job.status !== "done";
+    revealBtn.addEventListener("click", () => revealJobFiles(job));
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.textContent = "Apply";
+    applyBtn.addEventListener("click", () => applyAssist(job));
+
+    actions.appendChild(openBtn);
+    actions.appendChild(revealBtn);
+    actions.appendChild(applyBtn);
+
+    item.appendChild(rowEl);
+    item.appendChild(meta);
+    item.appendChild(actions);
+    queueListEl.appendChild(item);
+  }
+}
+
+async function persistQueue() {
+  await chrome.storage.local.set({ [QUEUE_KEY]: queueCache });
+  updateCsvSummaryFromQueue();
+  renderQueue();
+}
+
+async function onCsvSelected(file) {
+  if (!file) return;
+  setStatus("Parsing CSV…");
+  try {
+    const text = await file.text();
+    const result = parseJobsCsv(text);
+    allUsJobsCache = result.usJobs.map((j) => ({ ...j, status: "pending" }));
+    await chrome.storage.local.set({
+      batch_state: "idle",
+      csv_file_name: file.name,
+      csv_total_rows: result.totalRows,
+      csv_dropped_non_us: result.droppedNonUs,
+      [ALL_US_JOBS_KEY]: allUsJobsCache,
+      [JOB_CHANNEL_FILTER_KEY]: channelFilter || DEFAULT_CHANNEL_FILTER
+    });
+    batchState = "idle";
+    await applyChannelFilter(channelFilter || DEFAULT_CHANNEL_FILTER);
+    setStatus(
+      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (General ${result.generalCount} / LI ${result.linkedInCount}). Filter: ${channelFilter}.`
+    );
+  } catch (err) {
+    setStatus(`CSV parse failed: ${String(err.message || err)}`);
+  }
+}
+
+async function openJob(job) {
+  if (!job?.jdLink) {
+    setStatus("No JD link for this job.");
+    return;
+  }
+  await chrome.runtime.sendMessage({ type: "open_job_url", url: job.jdLink });
+}
+
+async function revealJobFiles(job) {
+  const res = await chrome.runtime.sendMessage({
+    type: "reveal_job_files",
+    csvRow: job.csvRow,
+    jobDir: job.jobDir || ""
+  });
+  if (!res?.ok) {
+    setStatus(res?.error || "Could not reveal files. Generate this job first.");
+    return;
+  }
+  setStatus(`Revealed files for row ${job.csvRow}.`);
+}
+
+async function applyAssist(job) {
+  await openJob(job);
+  if (job.jobDir || job.status === "done") {
+    await revealJobFiles(job);
+  }
+  const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
+  if (!res?.ok) {
+    setStatus(
+      `Opened job${job.jobDir ? " + files" : ""}. Autofill: ${res?.error || "focus the application tab and click Autofill this page."}`
+    );
+    return;
+  }
+  setStatus(`Apply assist: opened job, revealed files, autofilled ${res.filled || 0} field(s).`);
+}
+
+async function sendBatch(type) {
+  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  await chrome.storage.local.set({ output_dir: outputDir });
+  const res = await chrome.runtime.sendMessage({ type, outputDir });
+  if (!res?.ok) {
+    setStatus(res?.error || `Batch ${type} failed.`);
+    return;
+  }
+  if (type === "batch_start" || type === "batch_resume") {
+    setStatus(
+      `${res.status || "Batch started."} Tip: leave ChatGPT visible/focused — closing this popup helps auto-Send.`
+    );
+    return;
+  }
+  setStatus(res.status || `Batch ${type} ok.`);
+}
+
+async function savePerson({ asNew = false } = {}) {
+  // Keep the editor open so the user can see success/error next to the button.
+  personPanelBody.hidden = false;
+  togglePersonPanelBtn.setAttribute("aria-expanded", "true");
+
+  const person = readPersonForm({ asNew });
+
+  if (!person.label?.trim() && !person.name?.trim()) {
+    setPersonSaveStatus("Enter a display name (or full name) before saving.", { ok: false });
+    personLabelEl.focus();
+    setStatus("Display name required to save person.");
+    return;
+  }
+  if (!person.promptTemplate?.trim()) {
+    setPersonSaveStatus(
+      "Paste your resume tailor prompt (ChatGPT instructions). Do not paste job descriptions here — those come from the CSV.",
+      { ok: false }
+    );
+    personResumePromptEl.focus();
+    setStatus("Resume tailor prompt is required.");
+    return;
+  }
+  if (!person.promptTemplate.includes("{JD}")) {
+    setPersonSaveStatus(
+      "Add the {JD} placeholder in your tailor prompt. The extension replaces it with each CSV job’s description automatically.",
+      { ok: false }
+    );
+    personResumePromptEl.focus();
+    setStatus("Add {JD} placeholder for auto CSV job descriptions.");
+    return;
+  }
+  if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
+    setPersonSaveStatus(
+      "Your prompt uses {MASTER_RESUME}. Paste resume text or upload .txt / .pdf / .docx first.",
+      { ok: false }
+    );
+    personMasterResumeEl.focus();
+    setStatus("Master resume required for {MASTER_RESUME}.");
+    return;
+  }
+
+  savePersonBtn.disabled = true;
+  savePersonAsNewBtn.disabled = true;
+  setPersonSaveStatus("Saving…");
+  try {
+    let saved;
+    let created = false;
+    let fromBuiltin = false;
+
+    if (asNew) {
+      saved = await addCustomProfile({
+        label: person.label || person.name,
+        name: person.name || person.label,
+        email: person.email,
+        phone: person.phone,
+        linkedin: person.linkedin,
+        location: person.location,
+        masterResume: person.masterResume,
+        promptTemplate: person.promptTemplate,
+        coverLetterPrompt: person.coverLetterPrompt,
+        resumeFilePrefix: person.resumeFilePrefix,
+        templateId: person.templateId,
+        signatureTitle: person.signatureTitle
+      });
+      await setActivePersonId(saved.id);
+      created = true;
+    } else {
+      const result = await savePersonProfile(person);
+      // Support both new { profile, created } shape and legacy bare profile
+      saved = result?.profile || result;
+      created = Boolean(result?.created);
+      fromBuiltin = Boolean(result?.fromBuiltin);
+    }
+
+    await chrome.storage.local.set({
+      selected_template_id: person.templateId,
+      resume_file_prefix: person.resumeFilePrefix || saved.resumeFilePrefix,
+      selected_profile_id: saved.id,
+      active_person_id: saved.id
+    });
+    await refreshProfiles(saved.id);
+    fillPersonForm({ ...saved, builtin: false });
+
+    let msg;
+    if (asNew || created) {
+      msg = fromBuiltin
+        ? `Saved as your person “${saved.label}” (custom). It is now the Active person.`
+        : `Created “${saved.label}” and set it as Active person.`;
+    } else {
+      msg = `Saved changes for “${saved.label}”. Ready to run CSV batch.`;
+    }
+    setPersonSaveStatus(msg, { ok: true });
+    setStatus(msg);
+  } catch (err) {
+    const message = String(err.message || err);
+    setPersonSaveStatus(message, { ok: false });
+    setStatus(message);
+  } finally {
+    savePersonBtn.disabled = false;
+    savePersonAsNewBtn.disabled = false;
+    syncSaveButtonLabels();
+  }
+}
+
+async function onMasterResumeFile(file) {
+  if (!file) return;
+  masterResumeFileHintEl.textContent = `Reading ${file.name}…`;
+  try {
+    const { text, fileName } = await extractMasterResumeFromFile(file);
+    personMasterResumeEl.value = text;
+    masterResumeFileHintEl.textContent = `Loaded ${fileName} (${text.length} chars). Save person to keep it.`;
+    setStatus(`Master resume loaded from ${fileName}.`);
+  } catch (err) {
+    masterResumeFileHintEl.textContent = String(err.message || err);
+    setStatus(String(err.message || err));
+  }
+}
+
+async function loadPresetIntoEditor() {
+  const id = presetSelectEl.value;
+  if (!id) {
+    setStatus("Pick a built-in preset first.");
+    return;
+  }
+  const preset = getBuiltinPreset(id);
+  if (!preset) {
+    setStatus("Preset not found.");
+    return;
+  }
+  fillPersonForm({ ...preset, id: editingPersonId && !String(editingPersonId).startsWith("matthew") && !BUILTIN_PROFILES.some((b) => b.id === editingPersonId) ? editingPersonId : preset.id });
+  personPanelBody.hidden = false;
+  togglePersonPanelBtn.setAttribute("aria-expanded", "true");
+  setStatus(`Loaded preset "${preset.label}" into editor. Add/upload master resume text, then Save person.`);
+}
+
+async function removeSelectedProfile() {
+  const profileId = profileSelectEl.value;
+  const selected = profilesCache.find((p) => p.id === profileId);
+  if (!selected || selected.builtin) {
+    setStatus("Built-in profiles cannot be deleted.");
+    return;
+  }
+  if (!window.confirm(`Delete person "${selected.label}"?`)) return;
+  try {
+    await deleteCustomProfile(profileId);
+    await refreshProfiles(DEFAULT_PROFILE_ID);
+    await loadActivePersonIntoForm();
+    setStatus(`Deleted: ${selected.label}`);
+  } catch (err) {
+    setStatus(String(err.message || err));
+  }
+}
+
+async function onProfileChange() {
+  const profileId = profileSelectEl.value;
+  syncDeleteButton();
+  await setActivePersonId(profileId);
+  await loadActivePersonIntoForm();
+  const person = await getActivePerson();
+  await chrome.storage.local.set({
+    resume_file_prefix: person.resumeFilePrefix || "Resume",
+    selected_template_id: person.templateId || DEFAULT_TEMPLATE_ID
+  });
 }
 
 async function readClipboardText() {
-  const text = await navigator.clipboard.readText();
-  return text.trim();
+  return (await navigator.clipboard.readText()).trim();
 }
 
 async function pasteJdFromClipboard() {
-  setStatus("Reading JD from clipboard...");
   try {
     const jd = await readClipboardText();
     if (!jd) {
@@ -213,9 +795,9 @@ async function pasteJdFromClipboard() {
 async function copyAppsScript() {
   try {
     await navigator.clipboard.writeText(APPS_SCRIPT_SOURCE);
-    setStatus("Apps Script copied. Paste it into Extensions → Apps Script, then deploy as Web app.");
+    setStatus("Apps Script copied.");
   } catch {
-    setStatus("Could not copy. Open apps-script/Code.gs in the project instead.");
+    setStatus("Could not copy. Open apps-script/Code.gs instead.");
   }
 }
 
@@ -223,190 +805,94 @@ async function copySheetRow() {
   const jobTitle = (jobTitleEl.value || "").trim();
   const companyName = (companyNameEl.value || "").trim();
   const jdLink = (jdLinkEl.value || "").trim();
-
   if (!jobTitle && !companyName && !jdLink) {
     setStatus("Fill job title, company, and/or JD link before copying.");
     return;
   }
-
   const tsv = buildSheetRowTsv({ jobTitle, companyName, jdLink, includeDate: true });
   try {
     await navigator.clipboard.writeText(tsv);
-    setStatus("Sheet row copied. Click the first cell of an empty row in Sheets, then paste (Ctrl+V).");
+    setStatus("Sheet row copied.");
   } catch {
-    setStatus("Clipboard write failed. Try again after focusing the popup.");
+    setStatus("Clipboard write failed.");
   }
 }
 
-async function collectJobMetaOrShowError() {
-  const profileId = profileSelectEl.value || DEFAULT_PROFILE_ID;
-  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
+function setBusy(busy) {
+  batchStartBtn.disabled = busy && batchState === "running";
+  runOneOffBtn.disabled = busy;
+}
+
+async function runOneOff() {
   const jobTitle = (jobTitleEl.value || "").trim();
   const companyName = (companyNameEl.value || "").trim();
-  const jdLink = (jdLinkEl.value || "").trim();
   const jd = (jdTextEl.value || "").trim();
+  const jdLink = (jdLinkEl.value || "").trim();
   const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
-  const spreadsheetUrl = (spreadsheetUrlEl.value || "").trim();
-  const sheetsWebAppUrl = (sheetsWebAppUrlEl.value || "").trim();
 
   if (!jobTitle) {
     setStatus("Enter a job title first.");
-    jobTitleEl.focus();
-    return null;
+    return;
   }
   if (!companyName) {
     setStatus("Enter a company name first.");
-    companyNameEl.focus();
-    return null;
+    return;
   }
   if (!jd) {
-    setStatus("Paste a job description into the JD field first.");
-    jdTextEl.focus();
-    return null;
+    setStatus("Paste a job description first.");
+    return;
   }
 
-  if (spreadsheetUrl || sheetsWebAppUrl) {
-    if (!extractSpreadsheetId(spreadsheetUrl)) {
-      setStatus("Enter a valid Google Spreadsheet link.");
-      spreadsheetUrlEl.focus();
-      return null;
-    }
-    if (!sheetsWebAppUrl) {
-      setStatus("Paste the Apps Script Web App URL (one-time setup), or clear the spreadsheet link.");
-      sheetsWebAppUrlEl.focus();
-      return null;
-    }
+  const person = await getActivePerson();
+  if (!person.promptTemplate?.includes("{JD}")) {
+    setStatus("Active person needs a tailor prompt with {JD} (auto-filled from each CSV job). Open the person editor.");
+    return;
+  }
+  if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
+    setStatus("Upload or paste a master resume (text/PDF/DOCX) — not JSON.");
+    return;
   }
 
-  const profile = profilesCache.find((p) => p.id === profileId);
-  const resumeFilePrefix = profile?.resumeFilePrefix || "Matthew_Resume";
+  await persistJobFields();
+  setBusy(true);
+  setStatus("Starting one-off generation (auto — no JSON paste)…");
 
-  await chrome.storage.local.set({
-    selected_profile_id: profileId,
-    selected_template_id: templateId,
-    last_job_title: jobTitle,
-    last_company_name: companyName,
-    last_jd_link: jdLink,
-    last_jd_text: jd,
-    output_dir: outputDir,
-    spreadsheet_url: spreadsheetUrl,
-    sheets_web_app_url: sheetsWebAppUrl,
-    resume_file_prefix: resumeFilePrefix
-  });
-
-  return {
-    profileId,
+  const res = await chrome.runtime.sendMessage({
+    type: "run_one_off",
     jobMeta: {
       jobTitle,
       companyName,
       jdLink,
       jdText: jd,
       outputDir,
-      spreadsheetUrl,
-      sheetsWebAppUrl,
-      templateId,
-      resumeFilePrefix
+      spreadsheetUrl: spreadsheetUrlEl.value.trim(),
+      sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
+      templateId: person.templateId || templateSelectEl.value || DEFAULT_TEMPLATE_ID,
+      resumeFilePrefix: person.resumeFilePrefix || "Resume",
+      profileId: person.id
     }
-  };
-}
+  });
 
-function setBusy(busy) {
-  if (saveFromJsonBtn) saveFromJsonBtn.disabled = busy;
-}
-
-async function copyResumePrompt() {
-  const profileId = profileSelectEl.value || DEFAULT_PROFILE_ID;
-  const jd = (jdTextEl.value || "").trim();
-  const jobTitle = (jobTitleEl.value || "").trim();
-  const companyName = (companyNameEl.value || "").trim();
-
-  if (!jd) {
-    setStatus("Paste a job description into the JD field first.");
-    jdTextEl.focus();
-    return;
-  }
-
-  let prompt = "";
-  try {
-    prompt = await buildPrompt(profileId, jd, { jobTitle, companyName });
-  } catch (err) {
-    setStatus(String(err.message || err));
-    return;
-  }
-
-  await persistJobFields();
-  setStatus("Sending prompt to ChatGPT...");
-
-  try {
-    const res = await chrome.runtime.sendMessage({ type: "send_prompt", prompt });
-    if (res?.ok) {
-      setStatus("Prompt sent to ChatGPT. Wait for the JSON, then paste it into the Resume JSON box below.");
-      return;
-    }
-    // No ChatGPT tab (or send failed) — fall back to clipboard.
-    await navigator.clipboard.writeText(prompt);
-    setStatus(
-      `${res?.error || "Could not send to ChatGPT."} Prompt copied to clipboard — paste it into ChatGPT manually.`
-    );
-  } catch (err) {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setStatus("Prompt copied to clipboard — paste it into ChatGPT manually.");
-    } catch {
-      setStatus(`Failed to send or copy prompt: ${String(err.message || err)}`);
-    }
-  }
-}
-
-async function pasteJsonFromClipboard() {
-  try {
-    const text = await readClipboardText();
-    if (!text) {
-      setStatus("Clipboard is empty.");
-      return;
-    }
-    manualJsonTextEl.value = text;
-    setStatus("JSON pasted from clipboard. Click 'Render resume & cover letter'.");
-  } catch {
-    setStatus("Clipboard read failed. Paste the JSON into the box manually.");
-  }
-}
-
-async function saveFromPastedJson() {
-  const jsonText = (manualJsonTextEl.value || "").trim();
-  if (!jsonText) {
-    setStatus("Paste the resume JSON into the box first.");
-    manualJsonTextEl.focus();
-    return;
-  }
-
-  const collected = await collectJobMetaOrShowError();
-  if (!collected) return;
-
-  setStatus("Rendering resume from pasted JSON...");
-  setBusy(true);
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: "save_from_json",
-      jsonText,
-      jobMeta: collected.jobMeta
-    });
-    if (!res?.ok) {
-      throw new Error(res?.error || "Failed to start save from JSON.");
-    }
-    setStatus("Running: rendering PDF and saving files from pasted JSON...");
-  } catch (err) {
-    setStatus(`Generation failed: ${String(err.message || err)}`);
+  if (!res?.ok) {
+    setStatus(res?.error || "One-off failed to start.");
     setBusy(false);
   }
+}
+
+async function autofillThisPage() {
+  const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
+  if (!res?.ok) {
+    setStatus(res?.error || "Autofill failed. Focus the application tab first.");
+    return;
+  }
+  setStatus(`Autofilled ${res.filled || 0} field(s) on the active page.`);
 }
 
 async function resetWorkflow() {
   try {
     const res = await chrome.runtime.sendMessage({ type: "reset_generation_state" });
-    if (!res?.ok) {
-      throw new Error(res?.error || "Failed to reset.");
-    }
+    if (!res?.ok) throw new Error(res?.error || "Failed to reset.");
+    batchState = "idle";
     setStatus("Reset complete. Ready for next run.");
     setBusy(false);
   } catch (err) {
@@ -414,113 +900,95 @@ async function resetWorkflow() {
   }
 }
 
-async function saveNewProfile() {
-  const label = newProfileNameEl.value;
-  const promptTemplate = newProfilePromptEl.value;
-
-  saveProfileBtn.disabled = true;
-  try {
-    const profile = await addCustomProfile({ label, promptTemplate });
-    newProfileNameEl.value = "";
-    newProfilePromptEl.value = "";
-    await chrome.storage.local.set({ selected_profile_id: profile.id });
-    await refreshProfiles(profile.id);
-    addProfileBody.hidden = true;
-    toggleAddProfileBtn.setAttribute("aria-expanded", "false");
-    setStatus(`Profile saved: ${profile.label}`);
-  } catch (err) {
-    setStatus(String(err.message || err));
-  } finally {
-    saveProfileBtn.disabled = false;
-  }
-}
-
-async function removeSelectedProfile() {
-  const profileId = profileSelectEl.value;
-  const selected = profilesCache.find((p) => p.id === profileId);
-  if (!selected || selected.builtin) {
-    setStatus("Built-in profiles cannot be deleted.");
-    return;
-  }
-
-  const ok = window.confirm(`Delete profile "${selected.label}"?`);
-  if (!ok) return;
-
-  try {
-    await deleteCustomProfile(profileId);
-    await chrome.storage.local.set({ selected_profile_id: DEFAULT_PROFILE_ID });
-    await refreshProfiles(DEFAULT_PROFILE_ID);
-    setStatus(`Deleted profile: ${selected.label}`);
-  } catch (err) {
-    setStatus(String(err.message || err));
-  }
-}
-
+// Events
 profileSelectEl.addEventListener("change", () => {
-  syncDeleteButton();
-  const profileId = profileSelectEl.value;
-  const profile = profilesCache.find((p) => p.id === profileId);
-  saveSelectedProfile(profileId).catch(() => {});
-  applyProfileTemplateDefault(profileId).catch(() => {});
-  chrome.storage.local
-    .set({ resume_file_prefix: profile?.resumeFilePrefix || "Matthew_Resume" })
-    .catch(() => {});
+  onProfileChange().catch((e) => setStatus(String(e.message || e)));
 });
 
 templateSelectEl.addEventListener("change", () => {
-  saveSelectedTemplate(templateSelectEl.value).catch(() => {});
+  chrome.storage.local.set({ selected_template_id: templateSelectEl.value }).catch(() => {});
 });
 
-for (const el of [
-  jobTitleEl,
-  companyNameEl,
-  jdLinkEl,
-  jdTextEl,
-  outputDirEl,
-  spreadsheetUrlEl,
-  sheetsWebAppUrlEl
-]) {
+togglePersonPanelBtn.addEventListener("click", () => {
+  const open = personPanelBody.hidden;
+  personPanelBody.hidden = !open;
+  togglePersonPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) syncSaveButtonLabels();
+});
+
+toggleManualPanelBtn.addEventListener("click", () => {
+  const open = manualPanelBody.hidden;
+  manualPanelBody.hidden = !open;
+  toggleManualPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+});
+
+loadPresetBtn.addEventListener("click", () => loadPresetIntoEditor().catch((e) => setStatus(String(e.message || e))));
+savePersonBtn.addEventListener("click", () => savePerson({ asNew: false }));
+savePersonAsNewBtn.addEventListener("click", () => savePerson({ asNew: true }));
+deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
+clearMasterResumeBtn.addEventListener("click", () => {
+  personMasterResumeEl.value = "";
+  masterResumeFileEl.value = "";
+  masterResumeFileHintEl.textContent = "";
+});
+masterResumeFileEl.addEventListener("change", () => {
+  const file = masterResumeFileEl.files?.[0];
+  onMasterResumeFile(file).catch((e) => setStatus(String(e.message || e)));
+});
+
+csvFileEl.addEventListener("change", () => {
+  const file = csvFileEl.files?.[0];
+  onCsvSelected(file).catch((e) => setStatus(String(e.message || e)));
+});
+
+filterGeneralBtn?.addEventListener("click", () => {
+  applyChannelFilter("general").catch((e) => setStatus(String(e.message || e)));
+});
+filterLinkedInBtn?.addEventListener("click", () => {
+  applyChannelFilter("linkedin").catch((e) => setStatus(String(e.message || e)));
+});
+filterAllBtn?.addEventListener("click", () => {
+  applyChannelFilter("all").catch((e) => setStatus(String(e.message || e)));
+});
+
+batchStartBtn.addEventListener("click", () => sendBatch("batch_start"));
+batchPauseBtn.addEventListener("click", () => sendBatch("batch_pause"));
+batchSkipBtn.addEventListener("click", () => sendBatch("batch_skip"));
+batchStopBtn.addEventListener("click", () => sendBatch("batch_stop"));
+
+pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
+copyAppsScriptBtn.addEventListener("click", copyAppsScript);
+copySheetRowBtn.addEventListener("click", copySheetRow);
+runOneOffBtn.addEventListener("click", runOneOff);
+autofillPageBtn.addEventListener("click", autofillThisPage);
+resetBtn.addEventListener("click", resetWorkflow);
+
+for (const el of [jobTitleEl, companyNameEl, jdLinkEl, jdTextEl, outputDirEl, spreadsheetUrlEl, sheetsWebAppUrlEl]) {
   el.addEventListener("change", () => {
     persistJobFields().catch(() => {});
   });
 }
 
-toggleAddProfileBtn.addEventListener("click", () => {
-  const open = addProfileBody.hidden;
-  addProfileBody.hidden = !open;
-  toggleAddProfileBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) newProfileNameEl.focus();
-});
-
-pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
-copyAppsScriptBtn.addEventListener("click", copyAppsScript);
-copySheetRowBtn.addEventListener("click", copySheetRow);
-copyPromptBtn.addEventListener("click", copyResumePrompt);
-pasteJsonFromClipboardBtn.addEventListener("click", pasteJsonFromClipboard);
-saveFromJsonBtn.addEventListener("click", saveFromPastedJson);
-resetBtn.addEventListener("click", resetWorkflow);
-saveProfileBtn.addEventListener("click", saveNewProfile);
-deleteProfileBtn.addEventListener("click", removeSelectedProfile);
-
-// Popup shortcuts: Ctrl+Shift+V paste JSON; Ctrl+Enter render.
-document.addEventListener("keydown", (e) => {
-  const key = String(e.key || "").toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === "v") {
-    e.preventDefault();
-    pasteJsonFromClipboard().catch(() => {});
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && key === "enter") {
-    e.preventDefault();
-    saveFromPastedJson().catch(() => {});
-  }
-});
-
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
+
 setInterval(async () => {
-  const data = await chrome.storage.local.get(["generation_status", "generation_running"]);
+  const data = await chrome.storage.local.get([
+    "generation_status",
+    "generation_running",
+    QUEUE_KEY,
+    BATCH_STATE_KEY
+  ]);
   if (typeof data.generation_status === "string") {
     setStatus(data.generation_status);
   }
-  setBusy(Boolean(data.generation_running));
+  if (Array.isArray(data[QUEUE_KEY])) {
+    queueCache = data[QUEUE_KEY];
+    renderQueue();
+    updateCsvSummaryFromQueue();
+  }
+  batchState = data[BATCH_STATE_KEY] || "idle";
+  setBusy(Boolean(data.generation_running) || batchState === "running");
 }, 1200);
+
+// silence unused import warning path for extractSpreadsheetId when sheets hidden
+void extractSpreadsheetId;

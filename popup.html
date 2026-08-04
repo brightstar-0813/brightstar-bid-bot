@@ -3,143 +3,223 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Resume GPT Builder</title>
+    <title>Brightstar Bid bot</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main class="app">
       <div class="brand">
-        <img src="icons/j-icon.svg" alt="J icon" class="brand-icon" />
-        <h1>Resume GPT Builder</h1>
-        <p class="hype">LETS GET TEH JOBS!!! 💪</p>
+        <img src="icons/brightstar-icon.svg" alt="Brightstar" class="brand-icon" />
+        <h1>Brightstar Bid bot</h1>
+        <p class="hype">BID BRIGHT. WIN MORE.</p>
       </div>
 
-      <div class="toolbar">
-        <label class="field">
-          <span>Profile</span>
-          <select id="profileSelect"></select>
-        </label>
-        <label class="field">
-          <span>Template</span>
-          <select id="templateSelect"></select>
-        </label>
-        <button type="button" id="deleteProfile" class="secondary danger compact" hidden title="Delete selected profile">
-          Delete
-        </button>
-      </div>
-
+      <!-- Active person -->
       <section class="section">
-        <div class="grid-2">
-          <label class="field">
-            <span>Job title</span>
-            <input id="jobTitle" type="text" placeholder="Senior Software Engineer" autocomplete="off" />
+        <div class="row-split">
+          <label class="field grow">
+            <span>Active person</span>
+            <select id="profileSelect"></select>
           </label>
-          <label class="field">
-            <span>Company</span>
-            <input id="companyName" type="text" placeholder="Acme Inc." autocomplete="off" />
-          </label>
+          <button type="button" id="deleteProfile" class="secondary danger compact" hidden title="Delete selected person">
+            Delete
+          </button>
         </div>
         <div class="row-split">
           <label class="field grow">
-            <span>JD link</span>
-            <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
+            <span>Load preset into editor</span>
+            <select id="presetSelect">
+              <option value="">— Built-in presets —</option>
+            </select>
           </label>
-          <button type="button" id="copySheetRow" class="secondary compact" title="Copy sheet row">
-            Copy row
-          </button>
+          <button type="button" id="loadPreset" class="secondary compact">Load</button>
+        </div>
+        <button type="button" class="panel-toggle secondary" id="togglePersonPanel" aria-expanded="false">
+          Edit person / master resume / prompts
+        </button>
+        <div class="panel-body" id="personPanelBody" hidden>
+          <div class="grid-2">
+            <label class="field">
+              <span>Display name</span>
+              <input id="personLabel" type="text" placeholder="Jane Doe" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Full name (autofill)</span>
+              <input id="personName" type="text" placeholder="Jane Doe" autocomplete="off" />
+            </label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Email</span>
+              <input id="personEmail" type="email" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Phone</span>
+              <input id="personPhone" type="text" autocomplete="off" />
+            </label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>LinkedIn</span>
+              <input id="personLinkedin" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Location</span>
+              <input id="personLocation" type="text" placeholder="City, State" autocomplete="off" />
+            </label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Resume PDF prefix</span>
+              <input id="personResumePrefix" type="text" placeholder="Jane_Resume" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Signature title</span>
+              <input id="personSignatureTitle" type="text" placeholder="Salesforce Developer" autocomplete="off" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Template</span>
+            <select id="templateSelect"></select>
+          </label>
+
+          <label class="field">
+            <span>Master resume (text, or upload .txt / .pdf / .docx — not JSON)</span>
+            <textarea
+              id="personMasterResume"
+              class="prompt-input"
+              placeholder="Paste your master resume as plain text here, or upload a file below…"
+              rows="4"
+            ></textarea>
+          </label>
+          <div class="row-split">
+            <label class="field grow">
+              <span>Upload master resume file</span>
+              <input id="masterResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
+            </label>
+            <button type="button" id="clearMasterResume" class="secondary compact">Clear</button>
+          </div>
+          <p class="hint" id="masterResumeFileHint"></p>
+
+          <label class="field">
+            <span>Resume tailor prompt (instructions for ChatGPT — JD comes from CSV automatically)</span>
+            <textarea
+              id="personResumePrompt"
+              class="prompt-input"
+              placeholder="Paste your resume-tailoring prompt. Put {JD} where each job’s description should be inserted automatically from the CSV. Optional: {MASTER_RESUME}, {JOB_TITLE}, {COMPANY}."
+              rows="5"
+            ></textarea>
+          </label>
+          <label class="field">
+            <span>Cover letter prompt (optional — JD also auto-filled from CSV via {JD})</span>
+            <textarea
+              id="personCoverPrompt"
+              class="prompt-input"
+              placeholder="Leave blank for built-in CoverLetter. Put {JD} for auto CSV job description. Also: {JOB_TITLE}, {COMPANY}, {NAME}…"
+              rows="4"
+            ></textarea>
+          </label>
+
+          <p class="hint" id="personSaveHint">
+            Paste the tailor prompt once (not the JD). Each CSV job’s description replaces {JD} automatically when the batch runs.
+          </p>
+          <p id="personSaveStatus" class="person-save-status" hidden></p>
+          <div class="row row-2 person-save-row">
+            <button type="button" id="savePerson" class="primary">Save person</button>
+            <button type="button" id="savePersonAsNew" class="secondary">Duplicate as new</button>
+          </div>
         </div>
       </section>
 
-      <label class="field">
-        <span>Job description (JD)</span>
-        <textarea
-          id="jdText"
-          placeholder="Paste the job description here..."
-          rows="3"
-        ></textarea>
-      </label>
+      <!-- CSV batch -->
+      <section class="section">
+        <p class="section-title">CSV batch (US jobs only)</p>
+        <label class="field">
+          <span>Upload LinkedIn / Fantastic Jobs CSV</span>
+          <input id="csvFile" type="file" accept=".csv,text/csv" />
+        </label>
+        <div class="channel-toggle" role="group" aria-label="Job source filter">
+          <span class="channel-label">Apply source</span>
+          <button type="button" class="channel-btn active" id="filterGeneral" data-filter="general" title="Non-LinkedIn / ATS jobs (easier to apply)">
+            General
+          </button>
+          <button type="button" class="channel-btn" id="filterLinkedIn" data-filter="linkedin" title="LinkedIn-hosted jobs">
+            LI
+          </button>
+          <button type="button" class="channel-btn" id="filterAll" data-filter="all" title="All US jobs">
+            All
+          </button>
+        </div>
+        <p class="hint" id="csvSummary">No CSV loaded.</p>
+        <div class="row row-4">
+          <button type="button" id="batchStart">Start</button>
+          <button type="button" id="batchPause" class="secondary">Pause</button>
+          <button type="button" id="batchSkip" class="secondary">Skip</button>
+          <button type="button" id="batchStop" class="secondary danger">Stop</button>
+        </div>
+        <div id="queueList" class="queue-list"></div>
+      </section>
 
-      <div class="row row-2">
-        <button type="button" id="pasteJd" class="secondary">Paste JD</button>
-        <button type="button" id="copyPrompt">Generate JSON in ChatGPT</button>
-      </div>
+      <!-- Manual one-off -->
+      <section class="section">
+        <button type="button" class="panel-toggle secondary" id="toggleManualPanel" aria-expanded="false">
+          Manual one-off job
+        </button>
+        <div class="panel-body" id="manualPanelBody" hidden>
+          <div class="grid-2">
+            <label class="field">
+              <span>Job title</span>
+              <input id="jobTitle" type="text" placeholder="Senior Software Engineer" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Company</span>
+              <input id="companyName" type="text" placeholder="Acme Inc." autocomplete="off" />
+            </label>
+          </div>
+          <div class="row-split">
+            <label class="field grow">
+              <span>JD link</span>
+              <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
+            </label>
+            <button type="button" id="copySheetRow" class="secondary compact" title="Copy sheet row">
+              Copy row
+            </button>
+          </div>
+          <label class="field">
+            <span>Job description (JD)</span>
+            <textarea id="jdText" placeholder="Paste the job description here..." rows="3"></textarea>
+          </label>
+          <div class="row row-2">
+            <button type="button" id="pasteJd" class="secondary">Paste JD</button>
+            <button type="button" id="runOneOff">Generate (auto)</button>
+          </div>
+          <p class="hint">Sends prompt to ChatGPT, waits for JSON automatically, then saves resume + cover letter. No JSON paste needed.</p>
+        </div>
+      </section>
 
       <div class="row-split">
         <label class="field grow">
           <span>Output folder (under Downloads)</span>
-          <input
-            id="outputDir"
-            type="text"
-            placeholder="Resume Applications"
-            autocomplete="off"
-          />
+          <input id="outputDir" type="text" placeholder="Resume Applications" autocomplete="off" />
         </label>
+      </div>
+
+      <div class="row row-2">
+        <button type="button" id="autofillPage" class="secondary">Autofill this page</button>
+        <button type="button" id="reset" class="secondary">Refresh / Reset</button>
       </div>
 
       <section class="section" id="spreadsheetSection" hidden>
         <label class="field">
           <span>Spreadsheet link</span>
-          <input
-            id="spreadsheetUrl"
-            type="url"
-            placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-            autocomplete="off"
-          />
+          <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />
         </label>
         <div class="row-split">
           <label class="field grow">
             <span>Apps Script Web App URL</span>
-            <input
-              id="sheetsWebAppUrl"
-              type="url"
-              placeholder="https://script.google.com/macros/s/.../exec"
-              autocomplete="off"
-            />
+            <input id="sheetsWebAppUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" />
           </label>
           <button type="button" id="copyAppsScript" class="secondary compact">Copy script</button>
-        </div>
-      </section>
-
-      <label class="field">
-        <span>Resume JSON <em class="kbd">Ctrl+Shift+V</em></span>
-        <textarea
-          id="manualJsonText"
-          class="prompt-input"
-          placeholder='Paste JSON { ... } — then Ctrl+Enter to render'
-          rows="4"
-        ></textarea>
-      </label>
-
-      <div class="row row-2">
-        <button type="button" id="pasteJsonFromClipboard" class="secondary">Paste JSON</button>
-        <button type="button" id="saveFromJson">Render resume &amp; cover letter</button>
-      </div>
-
-      <div class="row row-2">
-        <button type="button" id="reset" class="secondary">Refresh / Reset</button>
-        <button type="button" class="panel-toggle secondary" id="toggleAddProfile" aria-expanded="false">
-          + Add profile
-        </button>
-      </div>
-
-      <section class="panel" id="addProfilePanel">
-        <div class="panel-body" id="addProfileBody" hidden>
-          <label class="field">
-            <span>Profile name</span>
-            <input id="newProfileName" type="text" placeholder="e.g. Jane Doe" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>Prompt (must include {JD})</span>
-            <textarea
-              id="newProfilePrompt"
-              class="prompt-input"
-              placeholder="Paste the full resume prompt. Include {JD}."
-              rows="5"
-            ></textarea>
-          </label>
-          <div class="row">
-            <button type="button" id="saveProfile">Save profile</button>
-          </div>
         </div>
       </section>
 

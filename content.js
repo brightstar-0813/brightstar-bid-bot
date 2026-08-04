@@ -1,16 +1,15 @@
 /**
- * Keyboard shortcuts on ChatGPT (no popup needed):
- * - Double-tap Ctrl (JetBrains-style), or
- * - Ctrl+Shift+V
- * Reads resume JSON from the clipboard and runs the same render + cover letter
- * pipeline as the popup "Render resume & cover letter" button.
+ * Keyboard shortcuts on ChatGPT (optional fallback):
+ * - Double-tap Ctrl, or Ctrl+Shift+V
+ * Reads resume JSON from the clipboard and runs render + cover letter.
+ * Preferred flow: use the popup CSV batch / Generate (auto) — no JSON paste needed.
  *
  * Reload the extension, then refresh the ChatGPT tab after installing/updating.
  */
 (() => {
   const DOUBLE_TAP_MS = 500;
   const DEFAULT_OUTPUT_DIR = "Resume Applications";
-  const DEFAULT_TEMPLATE_ID = "classic-blue";
+  const DEFAULT_TEMPLATE_ID = "times-classic";
 
   let lastCtrlTap = 0;
   let ctrlUsedAsModifier = false;

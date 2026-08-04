@@ -44,6 +44,6 @@ function doPost(e) {
 
 function doGet() {
   return ContentService.createTextOutput(
-    "Resume GPT Builder sheet append endpoint is running."
+    "Brightstar Bid bot sheet append endpoint is running."
   );
 }
