@@ -1322,16 +1322,20 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameTok
 
 /** Pause between finished jobs so ChatGPT is less likely to rate-limit.
  * Each job = new chat + resume + cover letter (2–3 sends). */
-const JOB_GAP_MS = 90 * 1000;
-/** When rate-limited, always wait at least this long after seeing the modal
- * (clicking "Got it" does NOT mean the limit is gone). */
-const RATE_LIMIT_BASE_WAIT_MS = 5 * 60 * 1000;
+const JOB_GAP_MS = 45 * 1000;
+/** Minimum wait after a rate-limit modal before we probe “cleared”.
+ * ChatGPT often recovers in ~1–2 min; we resume early once the UI is gone. */
+const RATE_LIMIT_BASE_WAIT_MS = 90 * 1000;
 /** Cap how long we sit on one rate-limit encounter. */
-const RATE_LIMIT_MAX_WAIT_MS = 20 * 60 * 1000;
-/** Extra quiet time after any rate-limit hit before the next Send. */
-const RATE_LIMIT_AFTER_HIT_MS = 5 * 60 * 1000;
+const RATE_LIMIT_MAX_WAIT_MS = 8 * 60 * 1000;
+/** Quiet time after a hit before the next Send (overlaps with the wait above). */
+const RATE_LIMIT_AFTER_HIT_MS = 75 * 1000;
+/** How often to re-check whether the rate-limit UI is gone. */
+const RATE_LIMIT_PROBE_MS = 20 * 1000;
+/** Brief settle after the UI clears before sending again. */
+const RATE_LIMIT_CLEAR_SETTLE_MS = 8 * 1000;
 /** Gap before cover-letter send in the same chat. */
-const COVER_LETTER_GAP_MS = 15 * 1000;
+const COVER_LETTER_GAP_MS = 8 * 1000;
 
 /** Timestamp of the last ChatGPT rate-limit detection (ms). */
 let lastRateLimitHitAt = 0;
@@ -1342,10 +1346,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Human-readable remaining wait (seconds under ~2 min). */
+function formatWaitLeft(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s < 120) return `${s}s`;
+  return `${Math.ceil(s / 60)}m`;
+}
+
 function currentJobGapMs() {
-  // 90s → 2.5m → 4m after repeated hits
-  if (rateLimitHitsThisBatch >= 3) return Math.max(JOB_GAP_MS, 4 * 60 * 1000);
-  if (rateLimitHitsThisBatch >= 1) return Math.max(JOB_GAP_MS, 150 * 1000);
+  // 45s → 75s → 2m after repeated hits (still protective, not batch-killing)
+  if (rateLimitHitsThisBatch >= 3) return Math.max(JOB_GAP_MS, 2 * 60 * 1000);
+  if (rateLimitHitsThisBatch >= 1) return Math.max(JOB_GAP_MS, 75 * 1000);
   return JOB_GAP_MS;
 }
 
@@ -1411,16 +1422,18 @@ async function enforcePostRateLimitCooldown() {
   const until = Date.now() + left;
   while (Date.now() < until) {
     if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
-    const mins = Math.max(1, Math.ceil((until - Date.now()) / 60000));
-    await setStatus(`Post rate-limit cooldown (~${mins}m left). Leave ChatGPT open…`);
-    await sleep(Math.min(15000, until - Date.now()));
+    await setStatus(
+      `Post rate-limit cooldown (~${formatWaitLeft(until - Date.now())} left). Leave ChatGPT open…`
+    );
+    await sleep(Math.min(5000, until - Date.now()));
     await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
   }
 }
 
 /**
  * If ChatGPT is rate-limiting, wait (with status updates). Clicking "Got it"
- * only closes the UI — we still wait the full cooldown before sending again.
+ * only closes the UI — we still wait a short minimum, then resume as soon as
+ * the limit banner stays gone (adaptive, not a fixed 5–10 min sit).
  */
 async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_MS } = {}) {
   await enforcePostRateLimitCooldown();
@@ -1432,49 +1445,49 @@ async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_
   rateLimitHitsThisBatch += 1;
 
   const started = Date.now();
-  // Always wait the base period first — modal dismissal ≠ limit cleared.
-  let waitSlice = RATE_LIMIT_BASE_WAIT_MS;
   await setStatus(
-    `ChatGPT rate limit — waiting ${Math.round(waitSlice / 60000)} min (Got it only closes the dialog)…`
+    `ChatGPT rate limit — waiting ~${formatWaitLeft(RATE_LIMIT_BASE_WAIT_MS)}, then probing (Got it only closes the dialog)…`
   );
 
   while (Date.now() - started < maxWaitMs) {
     if (batchControl.skipCurrent || batchControl.stop) {
       throw new Error("__SKIP__");
     }
+
     const remaining = Math.max(0, maxWaitMs - (Date.now() - started));
-    const slice = Math.min(waitSlice, remaining, 60000);
+    const slice = Math.min(RATE_LIMIT_PROBE_MS, remaining);
     const until = Date.now() + slice;
     while (Date.now() < until) {
       if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
-      await sleep(5000);
+      await sleep(Math.min(5000, until - Date.now()));
       await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
-      const leftMin = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+      const elapsed = Date.now() - started;
+      const minLeft = Math.max(0, RATE_LIMIT_BASE_WAIT_MS - elapsed);
       await setStatus(
-        `ChatGPT rate limit — cooling down (~${leftMin}m in this wait). Do not send manually…`
+        minLeft > 0
+          ? `ChatGPT rate limit — min wait (~${formatWaitLeft(minLeft)}), then probe…`
+          : `ChatGPT rate limit — probing if clear (~${formatWaitLeft(remaining)} budget left)…`
       );
-      // Keep dismissing if it reappears.
       await detectChatGptRateLimit(tabId);
     }
 
-    // Only consider "cleared" after the mandatory base wait has elapsed.
+    // Do not trust a clear UI until the short minimum wait has elapsed.
     if (Date.now() - started < RATE_LIMIT_BASE_WAIT_MS) {
-      waitSlice = Math.min(Math.round(waitSlice * 1.2), 5 * 60 * 1000);
       continue;
     }
 
     hit = await detectChatGptRateLimit(tabId);
     if (!hit.limited) {
-      lastRateLimitHitAt = Date.now();
-      await setStatus("Rate-limit wait finished — pausing briefly, then continuing…");
-      await sleep(20000);
+      // Do NOT reset lastRateLimitHitAt here — that used to stack another
+      // full after-hit cooldown on top of the wait we already did.
+      await setStatus("Rate limit looks clear — brief settle, then continuing…");
+      await sleep(RATE_LIMIT_CLEAR_SETTLE_MS);
       return true;
     }
-    waitSlice = Math.min(Math.round(waitSlice * 1.4), 5 * 60 * 1000);
   }
 
   throw new Error(
-    "ChatGPT rate limit still active after waiting. Pause the batch 10–15 minutes, then Retry errors."
+    "ChatGPT rate limit still active after waiting. Pause the batch a few minutes, then Retry errors."
   );
 }
 
@@ -3317,7 +3330,7 @@ async function runBatchLoop(outputDir) {
             error: "ChatGPT rate limit — will retry after cooldown"
           });
           await setStatus(
-            `Row ${next.csvRow}: ChatGPT rate limit. Waiting ${Math.round(RATE_LIMIT_BASE_WAIT_MS / 60000)} min, then continuing…`
+            `Row ${next.csvRow}: ChatGPT rate limit. Waiting ~${formatWaitLeft(RATE_LIMIT_BASE_WAIT_MS)}, then continuing…`
           );
           await sleep(RATE_LIMIT_BASE_WAIT_MS);
           continue;
