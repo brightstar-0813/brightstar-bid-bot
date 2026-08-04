@@ -107,6 +107,7 @@ const batchSkipBtn = document.getElementById("batchSkip");
 const forceSaveChatgptBtn = document.getElementById("forceSaveChatgpt");
 const batchStopBtn = document.getElementById("batchStop");
 const clearJobsBtn = document.getElementById("clearJobs");
+const retryErrorsBtn = document.getElementById("retryErrors");
 const filterGeneralBtn = document.getElementById("filterGeneral");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
 const filterAllBtn = document.getElementById("filterAll");
@@ -591,6 +592,15 @@ function renderQueue() {
     actions.appendChild(revealBtn);
     actions.appendChild(applyBtn);
 
+    if (job.status === "error" || job.status === "failed") {
+      const retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.textContent = "Retry";
+      retryBtn.title = "Reset this job and run it again";
+      retryBtn.addEventListener("click", () => retryOneJob(job));
+      actions.appendChild(retryBtn);
+    }
+
     item.appendChild(rowEl);
     item.appendChild(meta);
     item.appendChild(actions);
@@ -706,6 +716,66 @@ async function sendBatch(type) {
     return;
   }
   setStatus(res.status || `Batch ${type} ok.`);
+}
+
+async function retryOneJob(job) {
+  if (!job || job.csvRow == null) return;
+  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  setStatus(`Retrying row ${job.csvRow}…`);
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: "retry_job",
+      csvRow: job.csvRow,
+      outputDir
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || `Retry row ${job.csvRow} failed.`);
+      return;
+    }
+    // Optimistic UI update
+    queueCache = queueCache.map((j) =>
+      Number(j.csvRow) === Number(job.csvRow)
+        ? { ...j, status: "pending", attempts: 0, error: "" }
+        : j
+    );
+    renderQueue();
+    updateCsvSummaryFromQueue();
+    setStatus(res.status || `Row ${job.csvRow} queued for retry.`);
+    await loadSettings().catch(() => {});
+  } catch (err) {
+    setStatus(`Retry failed: ${String(err?.message || err)}`);
+  }
+}
+
+async function retryErrorJobs() {
+  const errors = queueCache.filter((j) => j.status === "error" || j.status === "failed");
+  if (!errors.length) {
+    setStatus("No error jobs to retry.");
+    return;
+  }
+  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  setStatus(`Retrying ${errors.length} error job(s)…`);
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: "retry_error_jobs",
+      outputDir
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || "Retry errors failed.");
+      return;
+    }
+    queueCache = queueCache.map((j) =>
+      j.status === "error" || j.status === "failed"
+        ? { ...j, status: "pending", attempts: 0, error: "" }
+        : j
+    );
+    renderQueue();
+    updateCsvSummaryFromQueue();
+    setStatus(res.status || `Queued ${errors.length} error job(s) for retry.`);
+    await loadSettings().catch(() => {});
+  } catch (err) {
+    setStatus(`Retry errors failed: ${String(err?.message || err)}`);
+  }
 }
 
 async function savePerson({ asNew = false } = {}) {
@@ -1111,6 +1181,9 @@ batchSkipBtn.addEventListener("click", () => sendBatch("batch_skip"));
 batchStopBtn.addEventListener("click", () => sendBatch("batch_stop"));
 clearJobsBtn?.addEventListener("click", () => {
   clearJobsList({ confirmPrompt: true }).catch((e) => setStatus(String(e.message || e)));
+});
+retryErrorsBtn?.addEventListener("click", () => {
+  retryErrorJobs().catch((e) => setStatus(String(e.message || e)));
 });
 forceSaveChatgptBtn.addEventListener("click", async () => {
   setStatus("Reading resume JSON from ChatGPT…");

@@ -3610,6 +3610,99 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (type === "retry_job") {
+    (async () => {
+      try {
+        const csvRow = Number(message.csvRow);
+        if (!Number.isFinite(csvRow)) throw new Error("Missing csvRow.");
+        const queue = await getQueue();
+        const job = queue.find((j) => Number(j.csvRow) === csvRow);
+        if (!job) throw new Error(`Row ${csvRow} not found in queue.`);
+        if (job.status !== "error" && job.status !== "failed" && job.status !== "skipped") {
+          // Allow retry from any non-done state except currently running.
+          if (job.status === "running") {
+            throw new Error(`Row ${csvRow} is already running.`);
+          }
+        }
+        await updateQueueJob(csvRow, {
+          status: "pending",
+          attempts: 0,
+          error: "",
+          jobDir: job.jobDir || ""
+        });
+        const outputDir = message.outputDir || "Resume Applications";
+        if (isRunning) {
+          safeSendResponse(sendResponse, {
+            ok: true,
+            status: `Row ${csvRow} reset to pending — will run after the current job.`
+          });
+          return;
+        }
+        isRunning = true;
+        safeSendResponse(sendResponse, {
+          ok: true,
+          started: true,
+          status: `Retrying row ${csvRow}…`
+        });
+        runBatchLoop(outputDir).catch(async (err) => {
+          isRunning = false;
+          stopKeepAlive();
+          await setBatchState("idle");
+          await chrome.storage.local.set({ generation_running: false });
+          await setStatus(`Retry failed: ${String(err?.message || err)}`);
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "retry_error_jobs") {
+    (async () => {
+      try {
+        const queue = await getQueue();
+        const targets = queue.filter(
+          (j) => j.status === "error" || j.status === "failed" || j.status === "skipped"
+        );
+        if (!targets.length) {
+          safeSendResponse(sendResponse, { ok: false, error: "No error jobs to retry." });
+          return;
+        }
+        const next = queue.map((j) =>
+          j.status === "error" || j.status === "failed" || j.status === "skipped"
+            ? { ...j, status: "pending", attempts: 0, error: "" }
+            : j
+        );
+        await setQueue(next);
+        const outputDir = message.outputDir || "Resume Applications";
+        if (isRunning) {
+          safeSendResponse(sendResponse, {
+            ok: true,
+            status: `Reset ${targets.length} error job(s) to pending — they will run after the current job.`
+          });
+          return;
+        }
+        isRunning = true;
+        safeSendResponse(sendResponse, {
+          ok: true,
+          started: true,
+          status: `Retrying ${targets.length} error job(s)…`
+        });
+        runBatchLoop(outputDir).catch(async (err) => {
+          isRunning = false;
+          stopKeepAlive();
+          await setBatchState("idle");
+          await chrome.storage.local.set({ generation_running: false });
+          await setStatus(`Retry errors failed: ${String(err?.message || err)}`);
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "batch_start" || type === "batch_resume") {
     if (isRunning) {
       safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
