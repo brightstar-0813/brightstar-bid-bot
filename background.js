@@ -3355,6 +3355,35 @@ async function autofillActiveTab() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
 
+  if (type === "clear_job_queue") {
+    (async () => {
+      try {
+        isRunning = false;
+        batchControl.stop = true;
+        batchControl.skipCurrent = true;
+        stopKeepAlive();
+        await chrome.storage.local.set({
+          [QUEUE_KEY]: [],
+          all_us_jobs: [],
+          [BATCH_STATE_KEY]: "idle",
+          generation_running: false,
+          generation_status: "Job list cleared.",
+          csv_file_name: "",
+          csv_total_rows: 0,
+          csv_dropped_non_us: 0,
+          chatgpt_harvested_resume: null,
+          chatgpt_json_ready: false,
+          chatgpt_json_ready_at: 0,
+          last_resume_json: null
+        });
+        safeSendResponse(sendResponse, { ok: true });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "reset_generation_state") {
     (async () => {
       try {
@@ -3366,10 +3395,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           await chrome.tabs.reload(tab.id);
         }
         await chrome.storage.local.set({
-          generation_status: "Reset complete. Ready for next run.",
+          generation_status: "Reset complete. Job list cleared.",
           generation_running: false,
           last_response: "",
-          [BATCH_STATE_KEY]: "idle"
+          [BATCH_STATE_KEY]: "idle",
+          [QUEUE_KEY]: [],
+          all_us_jobs: [],
+          csv_file_name: "",
+          csv_total_rows: 0,
+          csv_dropped_non_us: 0
         });
         safeSendResponse(sendResponse, { ok: true });
       } catch (err) {

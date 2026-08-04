@@ -106,6 +106,7 @@ const batchPauseBtn = document.getElementById("batchPause");
 const batchSkipBtn = document.getElementById("batchSkip");
 const forceSaveChatgptBtn = document.getElementById("forceSaveChatgpt");
 const batchStopBtn = document.getElementById("batchStop");
+const clearJobsBtn = document.getElementById("clearJobs");
 const filterGeneralBtn = document.getElementById("filterGeneral");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
 const filterAllBtn = document.getElementById("filterAll");
@@ -998,12 +999,55 @@ async function autofillThisPage() {
   setStatus(`Autofilled ${res.filled || 0} field(s) on the active page.`);
 }
 
+async function clearJobsList({ confirmPrompt = true } = {}) {
+  if (confirmPrompt) {
+    const n = queueCache.length || allUsJobsCache.length;
+    const ok = window.confirm(
+      n
+        ? `Clear all ${n} job(s) from the list? This cannot be undone.`
+        : "Clear the job list and CSV state?"
+    );
+    if (!ok) return false;
+  }
+
+  try {
+    // Stop any running batch first so it doesn't re-write queue items.
+    await chrome.runtime.sendMessage({ type: "batch_stop" }).catch(() => {});
+    await chrome.runtime.sendMessage({ type: "clear_job_queue" }).catch(() => {});
+  } catch {
+    // continue with local clear
+  }
+
+  queueCache = [];
+  allUsJobsCache = [];
+  batchState = "idle";
+  if (csvFileEl) csvFileEl.value = "";
+
+  await chrome.storage.local.set({
+    [QUEUE_KEY]: [],
+    [ALL_US_JOBS_KEY]: [],
+    [BATCH_STATE_KEY]: "idle",
+    csv_file_name: "",
+    csv_total_rows: 0,
+    csv_dropped_non_us: 0,
+    generation_running: false,
+    generation_status: "Job list cleared."
+  });
+
+  renderQueue();
+  updateCsvSummaryFromQueue();
+  setBusy(false);
+  setStatus("Job list cleared. Upload a CSV to start again.");
+  return true;
+}
+
 async function resetWorkflow() {
   try {
     const res = await chrome.runtime.sendMessage({ type: "reset_generation_state" });
     if (!res?.ok) throw new Error(res?.error || "Failed to reset.");
     batchState = "idle";
-    setStatus("Reset complete. Ready for next run.");
+    await clearJobsList({ confirmPrompt: false });
+    setStatus("Reset complete. Job list cleared — ready for a new CSV.");
     setBusy(false);
   } catch (err) {
     setStatus(`Reset failed: ${String(err.message || err)}`);
@@ -1065,6 +1109,9 @@ batchStartBtn.addEventListener("click", () => sendBatch("batch_start"));
 batchPauseBtn.addEventListener("click", () => sendBatch("batch_pause"));
 batchSkipBtn.addEventListener("click", () => sendBatch("batch_skip"));
 batchStopBtn.addEventListener("click", () => sendBatch("batch_stop"));
+clearJobsBtn?.addEventListener("click", () => {
+  clearJobsList({ confirmPrompt: true }).catch((e) => setStatus(String(e.message || e)));
+});
 forceSaveChatgptBtn.addEventListener("click", async () => {
   setStatus("Reading resume JSON from ChatGPT…");
   try {
