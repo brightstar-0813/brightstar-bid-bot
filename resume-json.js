@@ -107,89 +107,146 @@ function extractBalancedJsonObjects(text) {
 }
 
 /**
- * Repair JSON that was truncated mid-copy (a very common paste problem):
- * close an open string if needed, drop a dangling comma, then append missing
+ * Repair JSON that was truncated mid-stream / mid-copy:
+ * close an open string, strip dangling keys/colons/commas, then append missing
  * closing brackets/braces. Returns null when there is nothing useful to close.
  */
 function closeTruncatedJson(text) {
   let str = String(text || "");
-  const stack = [];
-  let inString = false;
-  let escaped = false;
+  const startBrace = str.indexOf("{");
+  if (startBrace < 0) return null;
+  // Ignore leading prose — only repair from the first object.
+  str = str.slice(startBrace);
 
-  for (let i = 0; i < str.length; i += 1) {
-    const ch = str[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
+  const scan = (input) => {
+    const stack = [];
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < input.length; i += 1) {
+      const ch = input[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{" || ch === "[") stack.push(ch);
+      else if (ch === "}" || ch === "]") {
+        if (stack.length) stack.pop();
+      }
     }
-    if (ch === '"') inString = true;
-    else if (ch === "{" || ch === "[") stack.push(ch);
-    else if (ch === "}" || ch === "]") {
-      if (stack.length) stack.pop();
-    }
-  }
+    return { stack, inString };
+  };
 
+  let { stack, inString } = scan(str);
   if (!stack.length && !inString) return null;
 
-  // Close an unterminated string, then drop a dangling comma.
-  if (inString) str += '"';
-  let repaired = str.replace(/\s+$/, "").replace(/,\s*$/, "");
-
-  // Recompute stack after string close for accurate closers.
-  const stack2 = [];
-  inString = false;
-  escaped = false;
-  for (let i = 0; i < repaired.length; i += 1) {
-    const ch = repaired[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{" || ch === "[") stack2.push(ch);
-    else if (ch === "}" || ch === "]") {
-      if (stack2.length) stack2.pop();
-    }
+  // Close an unterminated string (neutralize a trailing odd backslash first).
+  if (inString) {
+    let backslashes = 0;
+    for (let i = str.length - 1; i >= 0 && str[i] === "\\"; i -= 1) backslashes += 1;
+    if (backslashes % 2 === 1) str += "\\";
+    str += '"';
   }
-  if (inString) repaired += '"';
+
+  let repaired = str.replace(/\s+$/, "");
+  // Strip incomplete trailing property fragments (never strip a finished array value).
+  for (let pass = 0; pass < 4; pass += 1) {
+    const before = repaired;
+    repaired = repaired.replace(/,\s*$/, "");
+    repaired = repaired
+      .replace(/,\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*$/, "")
+      .replace(/\{\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*$/, "{")
+      .replace(/:\s*$/, "");
+    // Bare `"key"` only when we are inside an object (expecting a key), not an array.
+    const top = scan(repaired).stack;
+    if (top[top.length - 1] === "{") {
+      repaired = repaired.replace(/,\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*$/, "");
+    }
+    repaired = repaired.replace(/,\s*$/, "");
+    if (repaired === before) break;
+  }
+
+  ({ stack, inString } = scan(repaired));
+  if (inString) {
+    let backslashes = 0;
+    for (let i = repaired.length - 1; i >= 0 && repaired[i] === "\\"; i -= 1) backslashes += 1;
+    if (backslashes % 2 === 1) repaired += "\\";
+    repaired += '"';
+    repaired = repaired.replace(/,\s*$/, "");
+    ({ stack } = scan(repaired));
+  }
   repaired = repaired.replace(/,\s*$/, "");
-  for (let i = stack2.length - 1; i >= 0; i -= 1) {
-    repaired += stack2[i] === "{" ? "}" : "]";
+  ({ stack } = scan(repaired));
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    repaired += stack[i] === "{" ? "}" : "]";
   }
   return repaired;
 }
 
 function tryParseJson(text) {
   const trimmed = normalizeJsonText(text);
+
+  // Always prefer the richest balanced resume object when several {...} exist
+  // (prompt schema example + real answer often appear in the same transcript).
+  const objects = extractBalancedJsonObjects(trimmed);
+  if (objects.length) {
+    const scoreObj = (obj) => {
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
+      let score = 0;
+      if (Array.isArray(obj.experience)) score += 100000 + obj.experience.length * 1000;
+      if (Array.isArray(obj.certifications)) score += 50000 + obj.certifications.length * 100;
+      if (Array.isArray(obj.skills)) score += 20000 + obj.skills.length * 50;
+      if (typeof obj.profile === "string") score += 25000 + Math.min(obj.profile.length, 500);
+      if (typeof obj.name === "string") score += 1000;
+      const bullets = Array.isArray(obj.experience)
+        ? obj.experience.reduce(
+            (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
+            0
+          )
+        : 0;
+      score += bullets * 25;
+      return score;
+    };
+
+    let best = null;
+    let bestScore = -1;
+    for (const obj of objects) {
+      const s = scoreObj(obj);
+      if (s > bestScore) {
+        best = obj;
+        bestScore = s;
+      }
+    }
+    if (best && Array.isArray(best.experience) && best.experience.length >= 1) {
+      return best;
+    }
+  }
+
   try {
     return JSON.parse(trimmed);
   } catch {
     // continue
   }
 
-  // Fast path: first "{" to last "}".
+  // Fast path: first "{" to last "}" (single-object replies).
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
   if (start >= 0 && end > start) {
     try {
       return JSON.parse(trimmed.slice(start, end + 1));
     } catch {
-      // continue to balanced scan
+      // continue
     }
   }
 
-  // Recovery path: JSON truncated mid-copy (missing trailing "]}" etc.).
   const closed = closeTruncatedJson(trimmed);
   if (closed) {
     try {
       return JSON.parse(closed);
     } catch {
-      // continue to balanced scan
+      // continue
     }
     const cs = closed.indexOf("{");
     const ce = closed.lastIndexOf("}");
@@ -197,35 +254,12 @@ function tryParseJson(text) {
       try {
         return JSON.parse(closed.slice(cs, ce + 1));
       } catch {
-        // continue to balanced scan
+        // ignore
       }
     }
   }
 
-  // Robust path: find the best balanced object (prefer resume-shaped ones).
-  const objects = extractBalancedJsonObjects(trimmed);
-  if (!objects.length) return null;
-
-  const scoreObj = (obj) => {
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
-    let score = 0;
-    if (Array.isArray(obj.experience)) score += 100000 + obj.experience.length * 100;
-    if (Array.isArray(obj.certifications)) score += 50000;
-    if (typeof obj.profile === "string") score += 25000;
-    if (typeof obj.name === "string") score += 1000;
-    return score;
-  };
-
-  let best = null;
-  let bestScore = -1;
-  for (const obj of objects) {
-    const s = scoreObj(obj);
-    if (s > bestScore) {
-      best = obj;
-      bestScore = s;
-    }
-  }
-  return best;
+  return null;
 }
 
 function coerceResumeObject(value) {
@@ -250,6 +284,14 @@ function totalExperienceBullets(data) {
   );
 }
 
+function experienceBulletTexts(data) {
+  if (!Array.isArray(data?.experience)) return [];
+  return data.experience
+    .flatMap((job) => (Array.isArray(job?.bullets) ? job.bullets : []))
+    .map((b) => String(b || "").trim())
+    .filter(Boolean);
+}
+
 /** Detect ChatGPT echoing the schema/example placeholders instead of real resume content. */
 export function looksLikeSchemaPlaceholderResume(data) {
   if (!data || typeof data !== "object") return true;
@@ -266,15 +308,17 @@ export function looksLikeSchemaPlaceholderResume(data) {
     .join("\n");
 
   const placeholderRe =
-    /One summary paragraph|tailored to the JD|One technical capability|Salesforce delivery depth relevant|One sentence bullet|One realistic project name|JD-aligned Salesforce identity|from the role list above|field names must match|Matching the schema/i;
+    /One summary paragraph|tailored to the JD|One technical capability|Salesforce delivery depth relevant|One sentence bullet|One realistic project name|JD-aligned Salesforce identity|from the role list above|field names must match|Matching the schema|\byour (name|title|company)\b|lorem ipsum|<[A-Z_ ]{3,}>|\{\{[a-z_]+\}\}/i;
   if (placeholderRe.test(blob)) return true;
 
-  // Schema stub usually has only 1 job + 1–2 placeholder bullets + 1 skill row.
-  const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
-  const bullets = totalExperienceBullets(data);
-  const skills = Array.isArray(data.skills) ? data.skills.length : 0;
-  const certs = Array.isArray(data.certifications) ? data.certifications.length : 0;
-  if (jobs <= 1 && bullets <= 3 && skills <= 1 && certs <= 1) return true;
+  // Content-shaped stub check (never a job-count check — short real resumes are
+  // legitimate). Placeholder bullets are uniformly tiny or literally repeated.
+  const bullets = experienceBulletTexts(data);
+  if (bullets.length) {
+    const avgLen = bullets.reduce((n, b) => n + b.length, 0) / bullets.length;
+    if (avgLen < 18) return true;
+    if (new Set(bullets.map((b) => b.toLowerCase())).size === 1 && bullets.length > 2) return true;
+  }
 
   return false;
 }
@@ -283,28 +327,78 @@ export function looksLikeSchemaPlaceholderResume(data) {
  * Soft check: enough real content to render a resume PDF.
  * Rejects schema-example stubs that GPT sometimes returns first.
  */
+export function describeResumeGaps(data) {
+  if (!data || typeof data !== "object") return "no parseable JSON yet";
+  if (looksLikeSchemaPlaceholderResume(data)) return "schema stub (not real content yet)";
+  const gaps = [];
+  if (!String(data.name || "").trim()) gaps.push("name");
+  const profile = String(data.profile || "").trim();
+  if (profile.length < 80) gaps.push(`profile(${profile.length}/80)`);
+  const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
+  if (jobs < 3) gaps.push(`jobs(${jobs}/3)`);
+  const bullets = totalExperienceBullets(data);
+  if (bullets < 10) gaps.push(`bullets(${bullets}/10)`);
+  const skills = Array.isArray(data.skills) ? data.skills.length : 0;
+  if (skills < 2) gaps.push(`skills(${skills}/2)`);
+  const certs = Array.isArray(data.certifications) ? data.certifications.length : 0;
+  if (certs < 1) gaps.push(`certs(${certs}/1)`);
+  return gaps.length ? gaps.join(", ") : "";
+}
+
+/**
+ * Minimum bar to render a real PDF. Deliberately relaxed so short/2-job resumes
+ * and people without certifications still automate end to end. The poller only
+ * accepts this tier once ChatGPT has stopped streaming (see isRichResumeJson).
+ */
 export function isUsableResumeJson(data) {
   if (!data || typeof data !== "object") return false;
   if (!String(data.name || "").trim()) return false;
   if (looksLikeSchemaPlaceholderResume(data)) return false;
 
   const profile = String(data.profile || "").trim();
-  if (profile.length < 120) return false;
+  const summary = Array.isArray(data.technicalSummary) ? data.technicalSummary.filter(Boolean).length : 0;
+  if (profile.length < 40 && summary < 3) return false;
+
+  const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
+  if (jobs < 1) return false;
+
+  // At least one role must carry real, non-trivial bullets.
+  const hasDetailedRole = data.experience.some(
+    (j) => Array.isArray(j?.bullets) && j.bullets.filter((b) => String(b || "").trim().length > 25).length >= 2
+  );
+  if (!hasDetailedRole) return false;
+
+  return totalExperienceBullets(data) >= 4;
+}
+
+/**
+ * The full-quality bar. While ChatGPT is still streaming we wait for this, so a
+ * half-streamed (auto-repaired) object is never mistaken for the final answer.
+ */
+export function isRichResumeJson(data) {
+  if (!isUsableResumeJson(data)) return false;
+
+  const profile = String(data.profile || "").trim();
+  if (profile.length < 80) return false;
 
   const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
   if (jobs < 3) return false;
 
-  if (totalExperienceBullets(data) < 12) return false;
+  const bullets = totalExperienceBullets(data);
+  if (bullets < 10) return false;
 
-  if (!Array.isArray(data.skills) || data.skills.length < 3) return false;
-  if (!Array.isArray(data.certifications) || data.certifications.length < 3) return false;
+  const skills = Array.isArray(data.skills) ? data.skills.length : 0;
+  const certs = Array.isArray(data.certifications) ? data.certifications.length : 0;
+  if (jobs >= 4 && bullets >= 20 && profile.length >= 100) return true;
+  if (skills < 2) return false;
+  if (certs < 1) return false;
 
   return true;
 }
 
 /** Strict completeness check used for continuation decisions. */
 export function isCompleteResumeJson(data) {
-  if (!isUsableResumeJson(data)) return false;
+  if (!isRichResumeJson(data)) return false;
   if (!String(data.profile || "").trim() || String(data.profile).length < 80) return false;
   if (!Array.isArray(data.skills) || data.skills.length < 1) return false;
   if (!Array.isArray(data.experience) || data.experience.length < 2) return false;
@@ -335,6 +429,14 @@ export function mergeJsonFragments(parts) {
   const combined = extractResumeJson(cleaned.join("\n"));
   if (isCompleteResumeJson(combined)) return combined;
   if (isUsableResumeJson(combined)) return combined;
+
+  // Truncated object + continuation tail often stitch better without a newline.
+  if (cleaned.length >= 2) {
+    const stitched = extractResumeJson(cleaned.join(""));
+    if (isCompleteResumeJson(stitched)) return stitched;
+    if (isUsableResumeJson(stitched)) return stitched;
+  }
+
   return usable || combined;
 }
 

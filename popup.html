@@ -64,10 +64,119 @@
               <input id="personLinkedin" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off" />
             </label>
             <label class="field">
-              <span>Location</span>
+              <span>Location (city / region)</span>
               <input id="personLocation" type="text" placeholder="City, State" autocomplete="off" />
             </label>
           </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Street address (autofill)</span>
+              <input id="personAddress" type="text" placeholder="129 Cherry Ridge Rd" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>ZIP / postal code</span>
+              <input id="personZip" type="text" placeholder="78626" autocomplete="off" />
+            </label>
+          </div>
+
+          <p class="section-title" style="margin-top:10px">Application / EEO autofill</p>
+          <p class="hint">Used on common voluntary self-ID and eligibility questions. Leave blank to skip.</p>
+          <div class="grid-2">
+            <label class="field">
+              <span>Gender</span>
+              <select id="personGender">
+                <option value="">—</option>
+                <option>Male</option>
+                <option>Female</option>
+                <option>Non-binary</option>
+                <option>Prefer not to say</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Ethnicity / race</span>
+              <select id="personEthnicity">
+                <option value="">—</option>
+                <option>White</option>
+                <option>Black or African American</option>
+                <option>Hispanic or Latino</option>
+                <option>Asian</option>
+                <option>Native American or Alaska Native</option>
+                <option>Native Hawaiian or Pacific Islander</option>
+                <option>Two or more races</option>
+                <option>Prefer not to say</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Disability</span>
+              <select id="personDisability">
+                <option value="">—</option>
+                <option>No, I do not have a disability</option>
+                <option>Yes, I have a disability</option>
+                <option>Prefer not to say</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Veteran status</span>
+              <select id="personVeteran">
+                <option value="">—</option>
+                <option>I am not a protected veteran</option>
+                <option>I identify as a protected veteran</option>
+                <option>Prefer not to say</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Citizenship</span>
+              <select id="personCitizenship">
+                <option value="">—</option>
+                <option>US Citizen</option>
+                <option>Permanent Resident</option>
+                <option>Non-citizen authorized to work</option>
+                <option>Prefer not to say</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Authorized to work in the US?</span>
+              <select id="personWorkAuthorized">
+                <option value="">—</option>
+                <option>Yes</option>
+                <option>No</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Need visa sponsorship?</span>
+              <select id="personSponsorship">
+                <option value="">—</option>
+                <option>No</option>
+                <option>Yes</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Hispanic / Latino?</span>
+              <select id="personHispanicLatino">
+                <option value="">—</option>
+                <option>No</option>
+                <option>Yes</option>
+                <option>Prefer not to say</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Extra autofill values (optional — one per line: label = value)</span>
+            <textarea
+              id="personAutofillExtras"
+              class="prompt-input"
+              placeholder="Examples:&#10;desired salary = 140000&#10;security clearance = None&#10;willing to relocate = Yes"
+              rows="3"
+            ></textarea>
+          </label>
+          <p class="hint">Extras are matched by field label/name on application forms and reused on the next autofill.</p>
           <div class="grid-2">
             <label class="field">
               <span>Resume PDF prefix</span>
@@ -155,6 +264,7 @@
           <button type="button" id="batchStart">Start</button>
           <button type="button" id="batchPause" class="secondary">Pause</button>
           <button type="button" id="batchSkip" class="secondary">Skip</button>
+          <button type="button" id="forceSaveChatgpt" class="secondary">Save JSON now</button>
           <button type="button" id="batchStop" class="secondary danger">Stop</button>
         </div>
         <div id="queueList" class="queue-list"></div>

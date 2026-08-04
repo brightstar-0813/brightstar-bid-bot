@@ -3,25 +3,304 @@ import {
   buildCoverLetterPrompt,
   buildPrompt,
   getActivePerson,
-  getAutofillContact
+  getAutofillContact,
+  mergeAutofillExtras
 } from "./profiles.js";
-import { resumeJsonToHtml, extractResumeJson, isUsableResumeJson, looksLikeSchemaPlaceholderResume } from "./resume-json.js";
+import {
+  resumeJsonToHtml,
+  extractResumeJson,
+  isUsableResumeJson,
+  isRichResumeJson,
+  looksLikeSchemaPlaceholderResume,
+  describeResumeGaps
+} from "./resume-json.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
 const APPLY_HISTORY_KEY = "apply_history";
 
+/** A row is retried this many times before the batch moves on without it. */
+const MAX_JOB_ATTEMPTS = 2;
+/** Retries of the resume prompt inside one chat before the row is failed.
+ * Keep at 1 — DOM recognition must win; automatic re-prompts just hide the
+ * already-generated JSON further up the chat and make harvest harder. */
+const MAX_JSON_ATTEMPTS = 1;
+
 const JSON_RETRY_PROMPT = `Your previous reply was not usable (it looked like a schema stub or incomplete JSON). Return ONLY one complete valid resume JSON object with REAL tailored content.
 
 Rules:
 - No markdown, no code fences, no commentary before or after the JSON
 - Start with { and end with }
-- Include filled: name, headline, location, phone, email, linkedin, profile (4–6 real sentences), technicalSummary (6–10 real bullets), education, ALL certifications from the source list, skills (multiple categories), experience (all 4 employers with full bullet counts)
+- Include filled: name, headline, location, phone, email, linkedin, profile (4–6 real sentences), technicalSummary (6–10 real bullets), education, ALL certifications from the source list, skills (multiple categories), experience (all employers with full bullet counts)
 - NEVER output placeholder text such as "One summary paragraph", "One sentence bullet", "tailored to the JD", or "One realistic project name"
 - Finish the entire JSON in one message. Do not ask clarifying questions.
 
 Output JSON now.`;
+
+/**
+ * Dedicated deep DOM scan (all assistant turns + page-wide <pre>).
+ * Used when the narrow poller misses JSON the user can clearly see.
+ */
+async function deepHarvestResumeFromTab(tabId) {
+  if (typeof tabId !== "number") return null;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const texts = [];
+        const seen = new Set();
+        const push = (t) => {
+          let s = String(t || "")
+            .replace(/\uFEFF/g, "")
+            .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/\u00A0/g, " ")
+            .trim();
+          if (s.length < 80) return;
+          const fp = `${s.length}:${s.slice(0, 60)}:${s.slice(-30)}`;
+          if (seen.has(fp)) return;
+          seen.add(fp);
+          texts.push(s.slice(0, 500000));
+        };
+        const blocks = Array.from(
+          document.querySelectorAll(
+            "[data-message-author-role='assistant'], [data-turn='assistant'], section[data-turn='assistant']"
+          )
+        );
+        const startBi = Math.max(0, blocks.length - 20);
+        for (let bi = startBi; bi < blocks.length; bi += 1) {
+          const block = blocks[bi];
+          for (const el of block.querySelectorAll(
+            "pre code, pre, code, [class*='language-json'], [class*='markdown'], [class*='prose']"
+          )) {
+            push(el.innerText || el.textContent || "");
+          }
+          push(block.innerText || block.textContent || "");
+        }
+        for (const el of document.querySelectorAll("main pre, main pre code, [class*='language-json']")) {
+          const t = el.innerText || el.textContent || "";
+          if (t.includes('"experience"')) push(t);
+        }
+
+        const extractBalanced = (str) => {
+          const out = [];
+          const input = String(str || "").slice(0, 400000);
+          let depth = 0;
+          let startIdx = -1;
+          let inString = false;
+          let escaped = false;
+          for (let i = 0; i < input.length; i += 1) {
+            const ch = input[i];
+            if (inString) {
+              if (escaped) escaped = false;
+              else if (ch === "\\") escaped = true;
+              else if (ch === '"') inString = false;
+              continue;
+            }
+            if (ch === '"') {
+              inString = true;
+              continue;
+            }
+            if (ch === "{") {
+              if (depth === 0) startIdx = i;
+              depth += 1;
+            } else if (ch === "}") {
+              if (depth > 0) {
+                depth -= 1;
+                if (depth === 0 && startIdx >= 0) {
+                  out.push(input.slice(startIdx, i + 1));
+                  startIdx = -1;
+                  if (out.length >= 16) break;
+                }
+              }
+            }
+          }
+          return out;
+        };
+
+        const scoreObj = (obj) => {
+          if (!obj || typeof obj !== "object") return -1;
+          const jobs = Array.isArray(obj.experience) ? obj.experience.length : 0;
+          const bullets = Array.isArray(obj.experience)
+            ? obj.experience.reduce(
+                (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
+                0
+              )
+            : 0;
+          if (!obj.name && jobs < 1) return -1;
+          return (
+            jobs * 10000 +
+            bullets * 40 +
+            (Array.isArray(obj.certifications) ? obj.certifications.length * 30 : 0) +
+            (Array.isArray(obj.skills) ? obj.skills.length * 20 : 0) +
+            String(obj.profile || "").length
+          );
+        };
+
+        let best = null;
+        let bestScore = -1;
+        for (const raw of texts) {
+          if (!raw.includes('"experience"')) continue;
+          const normalized = raw
+            .replace(/[\u201C\u201D]/g, '"')
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/^```(?:json|JSON)?\s*/i, "")
+            .replace(/```\s*$/i, "");
+          for (const slice of extractBalanced(normalized)) {
+            try {
+              const obj = JSON.parse(slice);
+              const s = scoreObj(obj);
+              if (s > bestScore) {
+                best = obj;
+                bestScore = s;
+              }
+            } catch {
+              // continue
+            }
+          }
+          try {
+            const a = normalized.indexOf("{");
+            const b = normalized.lastIndexOf("}");
+            if (a >= 0 && b > a) {
+              const obj = JSON.parse(normalized.slice(a, b + 1));
+              const s = scoreObj(obj);
+              if (s > bestScore) {
+                best = obj;
+                bestScore = s;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+        return best;
+      }
+    });
+    const data = results?.[0]?.result;
+    if (data && typeof data === "object") return data;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Read resume JSON that is ALREADY on the ChatGPT page.
+ * Prefer the explicit chatgpt_json_ready flag set by the content script after
+ * streaming settles — that means "use this JSON and generate files now".
+ */
+async function tryRecognizeResumeOnPage(tabId) {
+  if (isUsableResumeJson(lastUsableResumeData)) return lastUsableResumeData;
+
+  try {
+    const stored = await chrome.storage.local.get([
+      "chatgpt_json_ready",
+      "chatgpt_json_ready_at",
+      "chatgpt_harvested_resume",
+      "last_resume_json"
+    ]);
+    if (stored.chatgpt_json_ready && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+      lastUsableResumeData = stored.chatgpt_harvested_resume;
+      return stored.chatgpt_harvested_resume;
+    }
+    if (isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+      lastUsableResumeData = stored.chatgpt_harvested_resume;
+      return stored.chatgpt_harvested_resume;
+    }
+    if (isUsableResumeJson(stored.last_resume_json)) {
+      lastUsableResumeData = stored.last_resume_json;
+      return stored.last_resume_json;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (typeof tabId !== "number") return null;
+
+  const deep = await deepHarvestResumeFromTab(tabId);
+  if (isUsableResumeJson(deep)) {
+    lastUsableResumeData = deep;
+    await chrome.storage.local
+      .set({
+        chatgpt_harvested_resume: deep,
+        chatgpt_harvested_at: Date.now(),
+        chatgpt_json_ready: true,
+        chatgpt_json_ready_at: Date.now(),
+        last_resume_json: deep
+      })
+      .catch(() => {});
+    return deep;
+  }
+
+  try {
+    const state = await withTimeout(
+      chatgptPollState(tabId, { harvestJson: true }),
+      20000,
+      "Page harvest timed out."
+    );
+    if (isUsableResumeJson(state.resumeData)) {
+      lastUsableResumeData = state.resumeData;
+      await chrome.storage.local
+        .set({
+          chatgpt_harvested_resume: state.resumeData,
+          chatgpt_harvested_at: Date.now(),
+          chatgpt_json_ready: true,
+          chatgpt_json_ready_at: Date.now(),
+          last_resume_json: state.resumeData
+        })
+        .catch(() => {});
+      return state.resumeData;
+    }
+    const fromText = extractResumeJson(state.latest);
+    if (isUsableResumeJson(fromText)) {
+      lastUsableResumeData = fromText;
+      await chrome.storage.local
+        .set({
+          chatgpt_harvested_resume: fromText,
+          chatgpt_harvested_at: Date.now(),
+          chatgpt_json_ready: true,
+          chatgpt_json_ready_at: Date.now(),
+          last_resume_json: fromText
+        })
+        .catch(() => {});
+      return fromText;
+    }
+  } catch {
+    // ignore — caller may retry prompting
+  }
+  return null;
+}
+
+/** Wait for the page ready flag / harvest after ChatGPT finishes streaming. */
+async function waitForJsonReadyFlag(tabId, { since = 0, timeoutMs = 20000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (batchControl.skipCurrent || batchControl.stop) return null;
+    try {
+      const stored = await chrome.storage.local.get([
+        "chatgpt_json_ready",
+        "chatgpt_json_ready_at",
+        "chatgpt_harvested_resume"
+      ]);
+      const readyAt = Number(stored.chatgpt_json_ready_at || 0);
+      if (
+        stored.chatgpt_json_ready &&
+        readyAt >= since &&
+        isUsableResumeJson(stored.chatgpt_harvested_resume)
+      ) {
+        lastUsableResumeData = stored.chatgpt_harvested_resume;
+        return stored.chatgpt_harvested_resume;
+      }
+    } catch {
+      // ignore
+    }
+    const harvested = await tryRecognizeResumeOnPage(tabId);
+    if (isUsableResumeJson(harvested)) return harvested;
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  return tryRecognizeResumeOnPage(tabId);
+}
 
 function describeUnusableResume(rawText, data) {
   const preview = String(rawText || "")
@@ -29,38 +308,43 @@ function describeUnusableResume(rawText, data) {
     .trim()
     .slice(0, 160);
   if (!data || typeof data !== "object") {
+    if (/"experience"|"name"|"profile"/.test(String(rawText || ""))) {
+      return `Resume JSON was on screen but could not be recognized/parsed for file generation. Click “Save JSON now” or retry. Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
+    }
     if (/^\s*\{/.test(String(rawText || "").trim())) {
-      return `ChatGPT JSON was truncated/incomplete and could not be repaired. Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
+      return `ChatGPT JSON could not be recognized/parsed for file generation. Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
     }
     return `ChatGPT did not return resume JSON (got text/HTML instead). Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
   }
   if (looksLikeSchemaPlaceholderResume(data)) {
     return `ChatGPT returned schema placeholder text instead of a filled resume (e.g. "One summary paragraph…"). Retry the job after reload. Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
   }
+  // Mirror the minimum bar in isUsableResumeJson so the message is actionable.
   const missing = [];
   if (!String(data.name || "").trim()) missing.push("name");
-  if (!String(data.profile || "").trim() || String(data.profile).length < 120) missing.push("profile");
-  if (!Array.isArray(data.experience) || data.experience.length < 3) missing.push("experience(≥3)");
+  if (String(data.profile || "").trim().length < 40) missing.push("profile(<40 chars)");
+  if (!Array.isArray(data.experience) || data.experience.length < 1) missing.push("experience");
   const bullets = Array.isArray(data.experience)
     ? data.experience.reduce(
         (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
         0
       )
     : 0;
-  if (bullets < 12) missing.push(`bullets(${bullets}<12)`);
-  if (!Array.isArray(data.skills) || data.skills.length < 3) missing.push("skills");
-  if (!Array.isArray(data.certifications) || data.certifications.length < 3) missing.push("certifications");
+  if (bullets < 4) missing.push(`bullets(${bullets}<4)`);
   if (missing.length) {
-    return `Resume JSON incomplete (${missing.join(", ")}). Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
+    return `Resume JSON recognized but incomplete for PDF (${missing.join(", ")}). Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
   }
-  return `Resume JSON not usable. Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
+  return `Resume JSON not usable for file generation. Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
 }
 let isRunning = false;
 let keepAliveTimer = null;
+/** Last usable resume object harvested during ChatGPT polling (survives messy page text). */
+let lastUsableResumeData = null;
 let batchControl = {
   pauseAfterCurrent: false,
   skipCurrent: false,
-  stop: false
+  stop: false,
+  forceProceed: false
 };
 
 function startKeepAlive() {
@@ -69,6 +353,11 @@ function startKeepAlive() {
   keepAliveTimer = setInterval(() => {
     chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
   }, 15000);
+  try {
+    chrome.alarms.create("brightstar-tick", { periodInMinutes: 1 });
+  } catch {
+    // alarms may be unavailable in some contexts
+  }
 }
 
 function stopKeepAlive() {
@@ -76,7 +365,54 @@ function stopKeepAlive() {
     clearInterval(keepAliveTimer);
     keepAliveTimer = null;
   }
+  try {
+    chrome.alarms.clear("brightstar-tick");
+  } catch {
+    // alarms may be unavailable in some contexts
+  }
 }
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name !== "brightstar-tick") return;
+  (async () => {
+    const data = await chrome.storage.local.get([
+      "generation_heartbeat",
+      BATCH_STATE_KEY,
+      "generation_running",
+      QUEUE_KEY,
+      "batch_output_dir"
+    ]);
+    const batchState = data[BATCH_STATE_KEY];
+    if (batchState !== "running") return;
+
+    const age = Date.now() - Number(data.generation_heartbeat || 0);
+    // Service worker died mid-batch: heartbeat goes stale while UI still says running.
+    if (age > 90000 && !isRunning) {
+      await setStatus("Batch heartbeat lost — auto-resuming from pending jobs…");
+      const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+      const fixed = queue.map((j) =>
+        j.status === "running"
+          ? { ...j, status: "pending", error: "Auto-resumed after worker sleep" }
+          : j
+      );
+      await chrome.storage.local.set({
+        [QUEUE_KEY]: fixed,
+        generation_running: true,
+        generation_heartbeat: Date.now()
+      });
+      const outputDir = data.batch_output_dir || "Resume Applications";
+      isRunning = true;
+      runBatchLoop(outputDir).catch(async (err) => {
+        isRunning = false;
+        await setStatus(`Auto-resume failed: ${String(err?.message || err)}`);
+        await chrome.storage.local.set({ generation_running: false });
+        await setBatchState("paused");
+      });
+    } else {
+      await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
+    }
+  })().catch(() => {});
+});
 
 function safeSendResponse(sendResponse, payload) {
   try {
@@ -89,24 +425,35 @@ function safeSendResponse(sendResponse, payload) {
 chrome.runtime.onInstalled.addListener(() => {
   isRunning = false;
   stopKeepAlive();
-  recoverInterruptedBatch("Ready.");
+  recoverInterruptedBatch("Ready.").then(resumeBatchIfInterrupted);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   isRunning = false;
   stopKeepAlive();
-  recoverInterruptedBatch("Ready.");
+  recoverInterruptedBatch("Ready.").then(resumeBatchIfInterrupted);
 });
 
-async function recoverInterruptedBatch(statusMessage = "Ready.") {
+/**
+ * @param {string} statusMessage
+ * @param {{retryFailed?: boolean}} [options] retryFailed resets rows that hit the
+ *   attempt ceiling so an explicit Start re-runs them.
+ * @returns {Promise<boolean>} whether a batch was running when it was interrupted
+ */
+async function recoverInterruptedBatch(statusMessage = "Ready.", { retryFailed = false } = {}) {
   try {
     const data = await chrome.storage.local.get([QUEUE_KEY, BATCH_STATE_KEY, "generation_running"]);
     const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+    const wasRunning = data[BATCH_STATE_KEY] === "running";
     let changed = false;
     const next = queue.map((j) => {
       if (j.status === "running") {
         changed = true;
-        return { ...j, status: "pending", error: "Interrupted — click Start to retry" };
+        return { ...j, status: "pending", error: "Interrupted — resuming" };
+      }
+      if (retryFailed && (j.status === "failed" || j.status === "error")) {
+        changed = true;
+        return { ...j, status: "pending", attempts: 0, error: "" };
       }
       return j;
     });
@@ -117,13 +464,35 @@ async function recoverInterruptedBatch(statusMessage = "Ready.") {
     };
     if (changed) patch[QUEUE_KEY] = next;
     await chrome.storage.local.set(patch);
+    return wasRunning;
   } catch {
     await chrome.storage.local.set({
       generation_running: false,
       generation_status: statusMessage,
       [BATCH_STATE_KEY]: "idle"
     });
+    return false;
   }
+}
+
+/** Chrome restarted / the worker was evicted mid-batch: pick the queue back up. */
+async function resumeBatchIfInterrupted(wasRunning) {
+  if (!wasRunning || isRunning) return;
+  const data = await chrome.storage.local.get([QUEUE_KEY, "batch_output_dir"]);
+  const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  const hasWork = queue.some(
+    (j) => j.status === "pending" || (j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS)
+  );
+  if (!hasWork) return;
+
+  isRunning = true;
+  await setStatus("Resuming interrupted batch…");
+  runBatchLoop(data.batch_output_dir || "Resume Applications").catch(async (err) => {
+    isRunning = false;
+    await setStatus(`Auto-resume failed: ${String(err?.message || err)}`);
+    await chrome.storage.local.set({ generation_running: false });
+    await setBatchState("paused");
+  });
 }
 
 function isChatGptUrl(url) {
@@ -147,11 +516,37 @@ async function getOpenChatGptTab() {
   return chatTabs[0];
 }
 
+/**
+ * Full automation must not stall on a missing tab: open ChatGPT ourselves when
+ * none is present. Signed-out users still get a clear error from the send step.
+ */
+async function ensureChatGptTab() {
+  const existing = await getOpenChatGptTab();
+  if (existing && typeof existing.id === "number") return existing;
+
+  await setStatus("No ChatGPT tab open — opening one…");
+  const tab = await chrome.tabs.create({ url: "https://chatgpt.com/", active: true });
+  if (typeof tab?.id !== "number") {
+    throw new Error("Open ChatGPT in a browser tab first.");
+  }
+  try {
+    await withTimeout(waitForTabComplete(tab.id, 30000), 32000, "Timed out opening ChatGPT.");
+  } catch {
+    // Slow load is fine — the composer wait below covers it.
+  }
+  for (let i = 0; i < 40; i += 1) {
+    const state = await readChatReadiness(tab.id);
+    if (state.hasInput) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return chrome.tabs.get(tab.id);
+}
+
 async function setStatus(status) {
   await chrome.storage.local.set({ generation_status: status });
 }
 
-async function downloadDataUrl(url, filename) {
+function startDownload(url, filename) {
   return new Promise((resolve, reject) => {
     chrome.downloads.download(
       {
@@ -165,10 +560,74 @@ async function downloadDataUrl(url, filename) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
+        if (typeof downloadId !== "number") {
+          reject(new Error("Chrome refused the download (no id returned)."));
+          return;
+        }
         resolve(downloadId);
       }
     );
   });
+}
+
+/**
+ * chrome.downloads.download() resolves as soon as the download *starts*, so an
+ * interrupted write (blocked, disk full, bad path) used to be reported as a
+ * success. Wait for the terminal state and surface the real error instead.
+ */
+function waitForDownloadComplete(downloadId, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const finish = (err, filename) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      chrome.downloads.onChanged.removeListener(onChanged);
+      if (err) reject(err);
+      else resolve(filename || "");
+    };
+
+    const inspect = (item) => {
+      if (!item) return;
+      if (item.state === "complete") finish(null, item.filename);
+      else if (item.state === "interrupted") {
+        finish(new Error(`Download interrupted (${item.error || "unknown reason"}).`));
+      }
+    };
+
+    const onChanged = (delta) => {
+      if (delta.id !== downloadId) return;
+      if (delta.state?.current === "complete") {
+        chrome.downloads.search({ id: downloadId }).then(
+          (items) => finish(null, items?.[0]?.filename || ""),
+          () => finish(null, "")
+        );
+      } else if (delta.state?.current === "interrupted") {
+        finish(new Error(`Download interrupted (${delta.error?.current || "unknown reason"}).`));
+      }
+    };
+    chrome.downloads.onChanged.addListener(onChanged);
+
+    // The terminal state can land before the listener attaches (data: URLs are fast).
+    const check = () => {
+      chrome.downloads.search({ id: downloadId }).then((items) => inspect(items?.[0]), () => {});
+    };
+    const poll = setInterval(check, 1000);
+    check();
+
+    const timer = setTimeout(() => {
+      // Slow disk is not a failure — treat a still-running download as started.
+      finish(null, "");
+    }, timeoutMs);
+  });
+}
+
+async function downloadDataUrl(url, filename) {
+  const downloadId = await startDownload(url, filename);
+  await waitForDownloadComplete(downloadId);
+  return downloadId;
 }
 
 /** data: URLs have size limits — keep JD downloads under a safe ceiling. */
@@ -388,6 +847,22 @@ function waitForTabComplete(tabId, timeoutMs = 15000) {
   });
 }
 
+function withTimeout(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 function debuggerAttach(debuggee) {
   return new Promise((resolve, reject) => {
     chrome.debugger.attach(debuggee, "1.3", () => {
@@ -418,31 +893,71 @@ function debuggerCommand(debuggee, method, params = {}) {
   });
 }
 
-async function htmlToPdfBase64(html) {
-  const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-  const tab = await chrome.tabs.create({ url, active: false });
+/**
+ * Render HTML → PDF via a background tab + debugger.
+ * Times out if Chrome's "Allow debugger" prompt is ignored.
+ */
+async function htmlToPdfBase64Once(html, { active = false } = {}) {
+  // active:false by default — stealing focus here breaks ChatGPT's composer
+  // between jobs. The last retry falls back to a visible tab.
+  const tab = await chrome.tabs.create({ url: "about:blank", active });
   if (!tab.id) throw new Error("Failed to create render tab.");
   const tabId = tab.id;
+  const debuggee = { tabId };
+
+  const printParams = {
+    printBackground: true,
+    paperWidth: 8.27,
+    paperHeight: 11.69,
+    marginTop: 0.4,
+    marginBottom: 0.4,
+    marginLeft: 0.35,
+    marginRight: 0.35,
+    preferCSSPageSize: true
+  };
 
   try {
-    await waitForTabComplete(tabId);
-    // Give layout/fonts a brief moment after "complete".
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const debuggee = { tabId };
-    await debuggerAttach(debuggee);
+    await withTimeout(waitForTabComplete(tabId, 10000), 12000, "Timed out opening blank render tab.");
+    await withTimeout(
+      debuggerAttach(debuggee),
+      15000,
+      "PDF debugger attach timed out. Click Allow on Chrome's debugger permission prompt, then retry."
+    );
     try {
       await debuggerCommand(debuggee, "Page.enable");
-      const result = await debuggerCommand(debuggee, "Page.printToPDF", {
-        printBackground: true,
-        paperWidth: 8.27,
-        paperHeight: 11.69,
-        marginTop: 0.4,
-        marginBottom: 0.4,
-        marginLeft: 0.35,
-        marginRight: 0.35,
-        preferCSSPageSize: true
-      });
-      if (!result?.data) throw new Error("PDF generation failed.");
+
+      let loaded = false;
+      try {
+        const frameTree = await debuggerCommand(debuggee, "Page.getFrameTree");
+        const frameId = frameTree?.frameTree?.frame?.id;
+        if (frameId) {
+          await debuggerCommand(debuggee, "Page.setDocumentContent", {
+            frameId,
+            html: String(html || "")
+          });
+          loaded = true;
+        }
+      } catch {
+        loaded = false;
+      }
+
+      if (!loaded) {
+        // Fallback for environments where setDocumentContent is blocked.
+        await setStatus("PDF fallback: loading HTML via data URL…");
+        await chrome.tabs.update(tabId, {
+          url: `data:text/html;charset=utf-8,${encodeURIComponent(String(html || ""))}`
+        });
+        await withTimeout(waitForTabComplete(tabId, 15000), 18000, "Timed out loading resume HTML for PDF.");
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await setStatus("Printing PDF…");
+      const result = await withTimeout(
+        debuggerCommand(debuggee, "Page.printToPDF", printParams),
+        45000,
+        "Page.printToPDF timed out."
+      );
+      if (!result?.data) throw new Error("PDF generation returned empty data.");
       return result.data;
     } finally {
       await debuggerDetach(debuggee);
@@ -454,6 +969,32 @@ async function htmlToPdfBase64(html) {
       // tab may already be closed
     }
   }
+}
+
+/** Render HTML → PDF, retrying transient debugger/attach failures automatically. */
+async function htmlToPdfBase64(html, { attempts = 3 } = {}) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const lastTry = attempt === attempts;
+      await setStatus(
+        attempt === 1
+          ? "Generating PDF… (click Allow if Chrome asks about debugging)"
+          : `Generating PDF… retry ${attempt}/${attempts}${lastTry ? " (visible tab)" : ""}`
+      );
+      return await htmlToPdfBase64Once(html, { active: lastTry });
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || err);
+      // A debuggee already attached (DevTools open, or a previous run left it
+      // attached) is the common transient case — back off and try again.
+      if (attempt < attempts) {
+        await setStatus(`PDF attempt ${attempt} failed (${msg}). Retrying…`);
+        await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr || "PDF generation failed."));
 }
 
 // MV3 service workers have no URL.createObjectURL / Blob URL support,
@@ -507,23 +1048,7 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
     throw new Error(`Failed to save jd.txt: ${String(err?.message || err)}`);
   }
 
-  let html = "";
-  try {
-    html = resumeJsonToHtml(resumeData, templateId);
-  } catch (err) {
-    throw new Error(`Resume HTML render failed: ${String(err?.message || err)}`);
-  }
-
-  await setStatus(`Saving ${resumePdfName} → Downloads / ${jobDir}`);
-  try {
-    const pdfBase64 = await htmlToPdfBase64(html);
-    await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(jobDir, resumePdfName));
-    saved.pdf = true;
-  } catch (err) {
-    saved.pdfError = `${resumePdfName} failed (Allow debugger if Chrome prompts): ${String(err?.message || err)}`;
-    throw new Error(saved.pdfError);
-  }
-
+  // Persist JSON snapshot immediately so progress is visible even if PDF hangs.
   try {
     await chrome.storage.local.set({
       last_response: String(rawText || "").slice(0, 200000),
@@ -532,6 +1057,27 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
     });
   } catch {
     // ignore
+  }
+
+  let html = "";
+  try {
+    await setStatus("Building resume HTML…");
+    html = resumeJsonToHtml(resumeData, templateId);
+  } catch (err) {
+    throw new Error(`Resume HTML render failed: ${String(err?.message || err)}`);
+  }
+
+  await setStatus(
+    `Saving ${resumePdfName}… (Allow debugger if Chrome prompts — do not ignore the dialog)`
+  );
+  try {
+    const pdfBase64 = await htmlToPdfBase64(html);
+    await setStatus(`Downloading ${resumePdfName}…`);
+    await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(jobDir, resumePdfName));
+    saved.pdf = true;
+  } catch (err) {
+    saved.pdfError = `${resumePdfName} failed: ${String(err?.message || err)}`;
+    throw new Error(saved.pdfError);
   }
 
   return { jobDir, resumeFilePrefix: `${nameToken}_Resume`, nameToken, resumePdfName, saved };
@@ -692,11 +1238,74 @@ async function focusTabForInput(tabId) {
   }
 }
 
+/** True when the tab shows an empty composer and zero assistant messages. */
+async function readChatReadiness(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const input =
+          document.querySelector("#prompt-textarea") ||
+          document.querySelector("div.ProseMirror[contenteditable='true']") ||
+          document.querySelector("textarea[placeholder*='Message']");
+        return {
+          hasInput: Boolean(input && input.offsetParent !== null),
+          assistantBlocks: document.querySelectorAll("[data-message-author-role='assistant']").length,
+          userBlocks: document.querySelectorAll("[data-message-author-role='user']").length
+        };
+      }
+    });
+    return results?.[0]?.result || { hasInput: false, assistantBlocks: -1, userBlocks: -1 };
+  } catch {
+    return { hasInput: false, assistantBlocks: -1, userBlocks: -1 };
+  }
+}
+
+/**
+ * Hard-guarantee a blank chat before each job. Clicking ChatGPT's "New chat"
+ * control silently no-ops on some builds, and the poller then harvests the
+ * PREVIOUS job's resume JSON — wrong resume, saved under the new company.
+ * Navigating the tab is deterministic; the in-page click stays as a fallback.
+ */
+async function ensureFreshChat(tabId) {
+  let base = "https://chatgpt.com/";
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (typeof tab?.url === "string" && tab.url.startsWith("https://chat.openai.com")) {
+      base = "https://chat.openai.com/";
+    }
+  } catch {
+    // default to chatgpt.com
+  }
+
+  try {
+    await chrome.tabs.update(tabId, { url: base });
+    await withTimeout(waitForTabComplete(tabId, 30000), 32000, "Timed out loading a new ChatGPT chat.");
+  } catch {
+    return false;
+  }
+
+  // The composer mounts after load; assistant blocks must be gone.
+  for (let i = 0; i < 40; i += 1) {
+    const state = await readChatReadiness(tabId);
+    if (state.hasInput && state.assistantBlocks === 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
 async function chatgptSendPrompt(tabId, prompt, startNewChat) {
+  // Navigate to a blank chat first; only fall back to the in-page "New chat"
+  // click when navigation did not produce an empty conversation.
+  let needsInPageNewChat = Boolean(startNewChat);
+  if (startNewChat) {
+    await setStatus("Opening a fresh ChatGPT chat…");
+    needsInPageNewChat = !(await ensureFreshChat(tabId));
+  }
   await focusTabForInput(tabId);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    args: [prompt, startNewChat],
+    args: [prompt, needsInPageNewChat],
     func: async (fullPrompt, shouldStartNewChat) => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -1122,40 +1731,59 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
 
       const collectTextCandidates = () => {
         const out = [];
-        const push = (t) => {
-          const text = String(t || "").trim();
-          if (text.length > 40) out.push(text);
+        const seen = new Set();
+        const push = (t, maxLen = 500000) => {
+          let text = String(t || "")
+            .replace(/\uFEFF/g, "")
+            .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/\u00A0/g, " ")
+            .trim();
+          if (text.length > maxLen) text = text.slice(0, maxLen);
+          if (text.length < 40) return;
+          const fp = `${text.length}:${text.slice(0, 60)}:${text.slice(-30)}`;
+          if (seen.has(fp)) return;
+          seen.add(fp);
+          out.push(text);
         };
-        for (const el of document.querySelectorAll("pre, pre code, code, [data-testid*='code'], [class*='code'], [class*='Code']")) {
-          push(el.innerText || el.textContent || "");
-        }
-        // Artifact / side panels / monaco-like editors
-        for (const el of document.querySelectorAll(
-          "[class*='artifact'], [class*='Artifact'], [class*='canvas'], [class*='Canvas'], [role='textbox'], .cm-content, .monaco-editor"
-        )) {
-          push(el.innerText || el.textContent || "");
-        }
-        const blocks = document.querySelectorAll("[data-message-author-role='assistant']");
+
+        // Deep scan: last 20 assistant turns (retries push good JSON out of last-3).
+        const blocks = document.querySelectorAll(
+          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
+        );
         if (blocks.length) {
-          const last = blocks[blocks.length - 1];
-          push(last.innerText || last.textContent || "");
-          for (const pre of last.querySelectorAll("pre, code")) {
-            push(pre.innerText || pre.textContent || "");
+          const start = Math.max(0, blocks.length - 20);
+          for (let bi = start; bi < blocks.length; bi += 1) {
+            const block = blocks[bi];
+            for (const el of block.querySelectorAll(
+              "pre code, pre, code, [class*='language-json'], [class*='markdown'], [class*='prose'], [class*='code'], [class*='artifact'], [data-message-content], .cm-content"
+            )) {
+              push(el.innerText || el.textContent || "");
+            }
+            push(block.innerText || block.textContent || "");
           }
         }
-        // Whole page fallback — find largest JSON-looking slice
-        push(document.body?.innerText || "");
+
+        // Page-wide JSON code blocks
+        for (const el of document.querySelectorAll(
+          "main pre, main pre code, [class*='language-json'], [class*='artifact'] pre, [class*='Artifact'] pre, [data-testid*='code'] pre, .monaco-editor .view-lines, .cm-content"
+        )) {
+          const t = el.innerText || el.textContent || "";
+          if (t.includes('"experience"') || t.includes('"name"')) push(t);
+        }
         return out;
       };
 
       const extractBalancedObjects = (str) => {
         const objects = [];
+        // Cap work — huge ChatGPT transcripts must not freeze the poller.
+        const input = String(str || "").slice(0, 400000);
         let depth = 0;
         let startIdx = -1;
         let inString = false;
         let escaped = false;
-        for (let i = 0; i < str.length; i += 1) {
-          const ch = str[i];
+        for (let i = 0; i < input.length; i += 1) {
+          const ch = input[i];
           if (inString) {
             if (escaped) escaped = false;
             else if (ch === "\\") escaped = true;
@@ -1173,8 +1801,10 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
             if (depth > 0) {
               depth -= 1;
               if (depth === 0 && startIdx >= 0) {
-                objects.push(str.slice(startIdx, i + 1));
+                objects.push(input.slice(startIdx, i + 1));
                 startIdx = -1;
+                // Enough candidates — stop early
+                if (objects.length >= 8) break;
               }
             }
           }
@@ -1182,20 +1812,161 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         return objects;
       };
 
+      const normalizeCandidate = (text) => {
+        let t = String(text || "")
+          .replace(/^\uFEFF/, "")
+          .replace(/[\u201C\u201D]/g, '"')
+          .replace(/[\u2018\u2019]/g, "'")
+          .replace(/\u00A0/g, " ")
+          .trim();
+        if (/^```/m.test(t)) {
+          t = t.replace(/^```(?:json|JSON)?\s*\r?\n?/, "").replace(/\r?\n?```\s*$/, "").trim();
+        }
+        t = t.replace(/^(json|JSON)\s*\r?\n/, "");
+        if (/\]\(/.test(t)) t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+        return t;
+      };
+
+      const closeTruncated = (text) => {
+        let str = String(text || "");
+        const brace = str.indexOf("{");
+        if (brace < 0) return null;
+        str = str.slice(brace);
+        const scan = (input) => {
+          const stack = [];
+          let inString = false;
+          let escaped = false;
+          for (let i = 0; i < input.length; i += 1) {
+            const ch = input[i];
+            if (inString) {
+              if (escaped) escaped = false;
+              else if (ch === "\\") escaped = true;
+              else if (ch === '"') inString = false;
+              continue;
+            }
+            if (ch === '"') inString = true;
+            else if (ch === "{" || ch === "[") stack.push(ch);
+            else if (ch === "}" || ch === "]") {
+              if (stack.length) stack.pop();
+            }
+          }
+          return { stack, inString };
+        };
+        let { stack, inString } = scan(str);
+        if (!stack.length && !inString) return null;
+        if (inString) {
+          let bs = 0;
+          for (let i = str.length - 1; i >= 0 && str[i] === "\\"; i -= 1) bs += 1;
+          if (bs % 2 === 1) str += "\\";
+          str += '"';
+        }
+        let repaired = str.replace(/\s+$/, "");
+        for (let pass = 0; pass < 4; pass += 1) {
+          const before = repaired;
+          repaired = repaired.replace(/,\s*$/, "");
+          repaired = repaired
+            .replace(/,\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*$/, "")
+            .replace(/\{\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*$/, "{")
+            .replace(/:\s*$/, "");
+          const top = scan(repaired).stack;
+          if (top[top.length - 1] === "{") {
+            repaired = repaired.replace(/,\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*$/, "");
+          }
+          repaired = repaired.replace(/,\s*$/, "");
+          if (repaired === before) break;
+        }
+        ({ stack, inString } = scan(repaired));
+        if (inString) {
+          repaired += '"';
+          repaired = repaired.replace(/,\s*$/, "");
+          ({ stack } = scan(repaired));
+        }
+        repaired = repaired.replace(/,\s*$/, "");
+        ({ stack } = scan(repaired));
+        for (let i = stack.length - 1; i >= 0; i -= 1) {
+          repaired += stack[i] === "{" ? "}" : "]";
+        }
+        return repaired;
+      };
+
+      const scoreObj = (obj) => {
+        if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
+        const jobs = Array.isArray(obj.experience) ? obj.experience.length : 0;
+        const certs = Array.isArray(obj.certifications) ? obj.certifications.length : 0;
+        const skills = Array.isArray(obj.skills) ? obj.skills.length : 0;
+        const bullets = Array.isArray(obj.experience)
+          ? obj.experience.reduce(
+              (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
+              0
+            )
+          : 0;
+        const profileLen = String(obj.profile || "").length;
+        if (!obj.name && jobs < 1) return -1;
+        return (
+          jobs * 10000 +
+          bullets * 50 +
+          certs * 20 +
+          skills * 10 +
+          profileLen +
+          (obj.name ? 500 : 0)
+        );
+      };
+
+      /** Parse every {...} in text and return the richest resume-shaped object. */
+      const parseBestObject = (raw) => {
+        const normalized = normalizeCandidate(raw);
+        let best = null;
+        let bestScore = -1;
+        const consider = (obj) => {
+          const s = scoreObj(obj);
+          if (s > bestScore) {
+            best = obj;
+            bestScore = s;
+          }
+        };
+        for (const slice of extractBalancedObjects(normalized)) {
+          try {
+            consider(JSON.parse(slice));
+          } catch {
+            // continue
+          }
+        }
+        try {
+          const start = normalized.indexOf("{");
+          const end = normalized.lastIndexOf("}");
+          if (start >= 0 && end > start) consider(JSON.parse(normalized.slice(start, end + 1)));
+        } catch {
+          // continue
+        }
+        if (!best || bestScore < 10000) {
+          const closed = closeTruncated(normalized);
+          if (closed) {
+            try {
+              consider(JSON.parse(closed));
+            } catch {
+              // ignore
+            }
+          }
+        }
+        return best;
+      };
+
       const harvestBestJsonText = () => {
         let best = "";
         let bestScore = -1;
         for (const candidate of collectTextCandidates()) {
-          // Direct candidate
-          const directScore = scorePayload(candidate);
-          if (candidate.includes('"name"') && candidate.includes('"experience"') && directScore > bestScore) {
-            best = candidate;
-            bestScore = directScore;
+          if (candidate.includes('"name"') && candidate.includes('"experience"')) {
+            const directScore = scorePayload(candidate);
+            if (directScore > bestScore) {
+              best = candidate;
+              bestScore = directScore;
+            }
           }
-          // Balanced objects inside candidate
-          for (const obj of extractBalancedObjects(candidate)) {
+          for (const obj of extractBalancedObjects(normalizeCandidate(candidate))) {
+            if (!obj.includes('"name"')) continue;
+            if (!(obj.includes('"experience"') || obj.includes('"profile"'))) continue;
             const s = scorePayload(obj);
-            if (obj.includes('"name"') && (obj.includes('"experience"') || obj.includes('"profile"')) && s > bestScore) {
+            if (s > bestScore) {
               best = obj;
               bestScore = s;
             }
@@ -1229,13 +2000,23 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
       };
 
       const blocks = Array.from(
-        document.querySelectorAll("[data-message-author-role='assistant']")
+        document.querySelectorAll(
+          "[data-message-author-role='assistant'], [data-turn='assistant'], section[data-turn='assistant']"
+        )
       );
       if (blocks.length) {
         blocks[blocks.length - 1].scrollIntoView({ block: "end", inline: "nearest" });
       }
 
-      let latest = blocks.length ? readAssistantBlock(blocks[blocks.length - 1]) : "";
+      let latest = "";
+      if (blocks.length) {
+        // Score many assistant blocks — retries push the good JSON out of last-3.
+        const start = Math.max(0, blocks.length - 20);
+        for (let bi = start; bi < blocks.length; bi += 1) {
+          const text = readAssistantBlock(blocks[bi]);
+          if (scorePayload(text) > scorePayload(latest)) latest = text;
+        }
+      }
       if (shouldHarvestJson) {
         const harvested = harvestBestJsonText();
         if (scorePayload(harvested) > scorePayload(latest)) {
@@ -1243,11 +2024,45 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         }
       }
 
+      // Parse on-page so background gets a structured object (avoids huge-string IPC issues).
+      // ALWAYS keep the raw `latest` text — never replace it with a partial parse.
+      // A schema stub can parse first while the full resume JSON is still in the reply.
+      let resumeData = null;
+      if (shouldHarvestJson && latest) {
+        let bestObj = null;
+        let bestObjScore = -1;
+        for (const raw of [latest, ...collectTextCandidates()].filter(Boolean)) {
+          const obj = parseBestObject(raw);
+          if (!obj) continue;
+          const s = scoreObj(obj);
+          if (s > bestObjScore) {
+            bestObj = obj;
+            bestObjScore = s;
+          }
+        }
+        resumeData = bestObj;
+      }
+
+      // Large Matthew-style resumes are ~15–30KB JSON. Shipping 200KB of raw page
+      // text + the object through executeScript routinely times out the poller —
+      // which is exactly when the user can SEE the JSON but files never generate.
+      // When we already recognized a solid resume object, only send a tiny preview.
+      const recognizedWell =
+        resumeData &&
+        Array.isArray(resumeData.experience) &&
+        resumeData.experience.length >= 1 &&
+        scoreObj(resumeData) >= 20000;
+
       return {
         blockCount: blocks.length,
-        latest,
+        latest: recognizedWell
+          ? String(latest || "").slice(0, 2000)
+          : String(latest || "").slice(0, 120000),
+        resumeData,
+        jobCount: Array.isArray(resumeData?.experience) ? resumeData.experience.length : 0,
         generating: isGenerating(),
-        harvestedJson: shouldHarvestJson
+        harvestedJson: shouldHarvestJson,
+        recognizedWell: Boolean(recognizedWell)
       };
     }
   });
@@ -1256,7 +2071,7 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
   if (results[0].result === undefined && results[0].error) {
     throw new Error(String(results[0].error.message || results[0].error));
   }
-  return results[0].result || { blockCount: 0, latest: "", generating: false };
+  return results[0].result || { blockCount: 0, latest: "", resumeData: null, generating: false };
 }
 
 function looksSettledAssistantText(text, { expectResumeJson = false } = {}) {
@@ -1296,56 +2111,200 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   const { blocksBefore, latestBefore } = await chatgptSendPrompt(tabId, prompt, startNewChat);
 
   const timeoutMs = 6 * 60 * 1000;
+  // Consecutive no-growth polls (≈1s each) after streaming stops before we give
+  // up on the current answer and let the caller re-prompt.
+  const SETTLE_HITS = 6;
+  /** Extra pause after stream ends so the full JSON paints into the DOM. */
+  const POST_STREAM_DELAY_MS = 2500;
   const start = Date.now();
   let lastText = "";
   let sawGeneration = false;
   let stableHits = 0;
   let lastLen = 0;
-  let usableHits = 0;
+  let postStreamDelayDone = false;
+
+  // Ignore any previous job's harvested JSON / ready flag.
+  if (expectResumeJson) {
+    await chrome.storage.local
+      .set({
+        chatgpt_harvested_resume: null,
+        chatgpt_harvested_at: 0,
+        chatgpt_harvested_jobs: 0,
+        chatgpt_json_ready: false,
+        chatgpt_json_ready_at: 0
+      })
+      .catch(() => {});
+  }
 
   while (Date.now() - start < timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
 
-    const state = await chatgptPollState(tabId, { harvestJson: expectResumeJson });
-    if (state.generating) sawGeneration = true;
-    if (state.latest) lastText = state.latest;
+    if (batchControl.skipCurrent) {
+      throw new Error("__SKIP__");
+    }
+
+    // Ready flag from content.js = JSON complete on page → generate files now.
+    if (expectResumeJson) {
+      try {
+        const stored = await chrome.storage.local.get([
+          "chatgpt_json_ready",
+          "chatgpt_json_ready_at",
+          "chatgpt_harvested_resume",
+          "chatgpt_harvested_at"
+        ]);
+        const readyAt = Number(stored.chatgpt_json_ready_at || stored.chatgpt_harvested_at || 0);
+        const harvested = stored.chatgpt_harvested_resume;
+        if (
+          readyAt >= start &&
+          (stored.chatgpt_json_ready || isUsableResumeJson(harvested)) &&
+          isUsableResumeJson(harvested)
+        ) {
+          lastUsableResumeData = harvested;
+          await setStatus(
+            `Resume JSON ready flag set (${harvested.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
+          );
+          return JSON.stringify(harvested);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (expectResumeJson && batchControl.forceProceed && isUsableResumeJson(lastUsableResumeData)) {
+      batchControl.forceProceed = false;
+      await setStatus(`Force-save: using harvested JSON. Saving…`);
+      return JSON.stringify(lastUsableResumeData);
+    }
+
+    let state = { latest: "", resumeData: null, generating: false, blockCount: 0, jobCount: 0 };
+    try {
+      state = await withTimeout(
+        chatgptPollState(tabId, { harvestJson: expectResumeJson }),
+        8000,
+        "ChatGPT page poll timed out (harvest too slow)."
+      );
+    } catch (pollErr) {
+      await setStatus(`${label} (poll warning: ${String(pollErr?.message || pollErr)})`);
+      // Still allow force-save / storage harvest on next loop — do not block forever.
+      continue;
+    }
+    if (state.generating) {
+      sawGeneration = true;
+      postStreamDelayDone = false;
+    }
+
+    // Stream just finished → wait for DOM settle, then harvest (user's requested delay).
+    if (expectResumeJson && sawGeneration && !state.generating && !postStreamDelayDone) {
+      postStreamDelayDone = true;
+      await setStatus(`${label} — stream finished, waiting ${POST_STREAM_DELAY_MS / 1000}s for JSON to settle…`);
+      await new Promise((r) => setTimeout(r, POST_STREAM_DELAY_MS));
+      await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
+      const settled = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 12000 });
+      if (isUsableResumeJson(settled)) {
+        await setStatus(
+          `Resume JSON recognized after settle (${settled.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
+        );
+        return JSON.stringify(settled);
+      }
+      // Re-poll once after the delay so `state` below is fresh.
+      try {
+        state = await withTimeout(
+          chatgptPollState(tabId, { harvestJson: true }),
+          8000,
+          "ChatGPT page poll timed out (harvest too slow)."
+        );
+      } catch {
+        // keep previous state
+      }
+    }
+
+    // Keep the richest raw text seen — never shrink away a full reply.
+    if (state.latest) {
+      if (
+        !lastText ||
+        state.latest.length >= lastText.length ||
+        (state.latest.includes('"experience"') && !lastText.includes('"experience"'))
+      ) {
+        lastText = state.latest;
+      }
+    }
 
     const elapsedSec = Math.round((Date.now() - start) / 1000);
-    const parsed = expectResumeJson ? extractResumeJson(lastText) : null;
+    let parsed = null;
+    if (expectResumeJson) {
+      // Recognize from BOTH the structured poll parse and a fresh parse of raw text.
+      // The page often contains a small schema example AND the real resume JSON;
+      // taking only the first object used to miss the complete reply the user can see.
+      const fromPoll = state.resumeData && typeof state.resumeData === "object" ? state.resumeData : null;
+      const fromText = extractResumeJson(lastText);
+      const fromHarvest = isUsableResumeJson(lastUsableResumeData) ? lastUsableResumeData : null;
+      const rank = (obj) => {
+        if (!obj || typeof obj !== "object") return -1;
+        const jobs = Array.isArray(obj.experience) ? obj.experience.length : 0;
+        const bullets = Array.isArray(obj.experience)
+          ? obj.experience.reduce(
+              (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
+              0
+            )
+          : 0;
+        return (
+          (isUsableResumeJson(obj) ? 1000000 : 0) +
+          (isRichResumeJson(obj) ? 500000 : 0) +
+          jobs * 10000 +
+          bullets * 50 +
+          String(obj.profile || "").length
+        );
+      };
+      parsed = [fromPoll, fromText, fromHarvest].reduce((best, cur) => (rank(cur) > rank(best) ? cur : best), null);
+    }
     const usable = expectResumeJson && isUsableResumeJson(parsed);
+    const rich = usable && isRichResumeJson(parsed);
+    if (usable) {
+      lastUsableResumeData = parsed;
+      await chrome.storage.local
+        .set({
+          last_resume_json: parsed,
+          chatgpt_harvested_resume: parsed,
+          chatgpt_harvested_at: Date.now(),
+          chatgpt_json_ready: true,
+          chatgpt_json_ready_at: Date.now()
+        })
+        .catch(() => {});
+    }
 
-    if (elapsedSec > 0 && elapsedSec % 4 === 0) {
+    if (elapsedSec > 0 && elapsedSec % 2 === 0) {
       const waitHint = expectResumeJson
         ? usable
-          ? ", full JSON ready"
-          : looksLikeSchemaPlaceholderResume(parsed)
-            ? ", waiting (schema stub — not saving yet)"
-            : parsed?.name
-              ? `, partial JSON (${parsed.name})`
-              : ""
+          ? `, JSON ready (${parsed?.experience?.length || "?"} jobs) — saving files`
+          : parsed
+            ? `, waiting: ${describeResumeGaps(parsed) || "almost ready"} (jobs=${state.jobCount || 0})`
+            : lastText.includes('"experience"')
+              ? ", JSON visible — settling…"
+              : ", waiting for JSON"
         : "";
       await setStatus(
-        `${label} (${elapsedSec}s, ${lastText.length || 0} chars${state.generating ? ", streaming" : ""}${waitHint})`
+        `${label} (${elapsedSec}s${state.generating ? ", streaming" : ""}${waitHint})`
       );
     }
 
-    // Resume JSON mode: as soon as page has usable JSON, SAVE (don't require "fresh" heuristics).
-    if (expectResumeJson && usable) {
-      usableHits += 1;
-      // Save immediately once not streaming, or after 2 consecutive usable polls.
-      if (!state.generating || usableHits >= 2) {
-        await setStatus(`Resume JSON found (${parsed.name || "ok"}). Writing jd.txt / resume files…`);
-        return lastText;
-      }
-      continue;
+    // Nothing arrived at all: Send never registered. Fail fast instead of
+    // burning the whole timeout — the caller retries with a fresh chat.
+    if (!sawGeneration && !state.generating && state.blockCount <= blocksBefore && elapsedSec > 120) {
+      throw new Error("ChatGPT never started a reply (Send did not register).");
+    }
+
+    // Recognized resume JSON → generate files (jd + resume PDF + cover letter).
+    if (expectResumeJson && usable && (rich || !state.generating || state.recognizedWell || postStreamDelayDone)) {
+      await setStatus(
+        `Resume JSON recognized (${parsed.name || "ok"}, ${parsed.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
+      );
+      return JSON.stringify(parsed);
     }
 
     const isFreshText = Boolean(lastText) && lastText !== (latestBefore || "");
     const isNewBlock = state.blockCount > blocksBefore;
-    if (!isFreshText && !isNewBlock && !(expectResumeJson && lastText.length > 200)) continue;
-
-    usableHits = 0;
+    if (!isFreshText && !isNewBlock && !(expectResumeJson && (lastText.length > 200 || usable))) continue;
 
     if (state.generating) {
       if (lastText.length > lastLen + 80) {
@@ -1369,7 +2328,26 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     stableHits += 1;
 
     if (expectResumeJson) {
-      // Still incomplete — keep waiting / harvesting.
+      if (stableHits >= 1 && usable) {
+        await setStatus(
+          `Resume JSON recognized (${parsed.name || "ok"}, ${parsed.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
+        );
+        return JSON.stringify(parsed);
+      }
+      // Settled without a usable parse — deep harvest, never stub-trigger a retry loop.
+      if (stableHits >= SETTLE_HITS) {
+        const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 10000 });
+        if (isUsableResumeJson(rescued)) {
+          await setStatus(
+            `Resume JSON rescued from page (${rescued.experience?.length || 0} jobs). Saving files…`
+          );
+          return JSON.stringify(rescued);
+        }
+        if (isUsableResumeJson(lastUsableResumeData)) {
+          return JSON.stringify(lastUsableResumeData);
+        }
+        return lastText;
+      }
       continue;
     }
 
@@ -1382,12 +2360,20 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   }
 
   if (expectResumeJson && isUsableResumeJson(extractResumeJson(lastText))) {
+    lastUsableResumeData = extractResumeJson(lastText);
     return lastText;
+  }
+  if (expectResumeJson) {
+    const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 8000 });
+    if (isUsableResumeJson(rescued)) return JSON.stringify(rescued);
+  }
+  if (expectResumeJson && isUsableResumeJson(lastUsableResumeData)) {
+    return JSON.stringify(lastUsableResumeData);
   }
 
   throw new Error(
     expectResumeJson
-      ? "Timed out waiting for complete resume JSON from ChatGPT."
+      ? "Timed out waiting to recognize complete resume JSON from ChatGPT (JSON may be on screen — click Save JSON now)."
       : "Timed out waiting for ChatGPT response."
   );
 }
@@ -1424,12 +2410,29 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         companyName: jobMeta.companyName || ""
       });
       // IMPORTANT: same chat as resume (one chat per position).
-      const coverOutput = await automateChatGpt(tabId, coverPrompt, {
-        newChat: false,
-        expectResumeJson: false,
-        statusLabel: "Waiting for cover letter (same chat)…"
-      });
-      if (!coverOutput) throw new Error("Empty cover letter response.");
+      let coverOutput = "";
+      for (let attempt = 1; attempt <= 2 && !String(coverOutput || "").trim(); attempt += 1) {
+        try {
+          coverOutput = await automateChatGpt(
+            tabId,
+            attempt === 1
+              ? coverPrompt
+              : "Your previous reply was empty or unusable. Write the full cover letter body now as plain text — no JSON, no markdown, no commentary.",
+            {
+              newChat: false,
+              expectResumeJson: false,
+              statusLabel:
+                attempt === 1
+                  ? "Waiting for cover letter (same chat)…"
+                  : "Retrying cover letter (same chat)…"
+            }
+          );
+        } catch (attemptErr) {
+          if (attempt === 2) throw attemptErr;
+          await setStatus(`Cover letter attempt 1 failed (${String(attemptErr?.message || attemptErr)}). Retrying…`);
+        }
+      }
+      if (!String(coverOutput || "").trim()) throw new Error("Empty cover letter response.");
 
       const token = nameToken || outputNameToken(jobMeta, resumeData);
       const coverPdfName = `${token}_Cover Letter.pdf`;
@@ -1524,7 +2527,7 @@ async function rememberApplyHistory(csvRow, entry) {
  * resume (with JD) → save files → cover letter in the same chat → save CL.
  */
 async function runAutoJob(jobMeta) {
-  const tab = await getOpenChatGptTab();
+  const tab = await ensureChatGptTab();
   if (!tab || typeof tab.id !== "number") {
     throw new Error("Open ChatGPT in a browser tab first.");
   }
@@ -1546,32 +2549,83 @@ async function runAutoJob(jobMeta) {
   }
 
   // Step A: new chat + resume JSON (JD is already inside the prompt via {JD}).
-  let rawOutput = await automateChatGpt(tab.id, prompt, {
-    newChat: true,
-    expectResumeJson: true,
-    statusLabel: `Chat 1/1 · resume JSON (${jobMeta.companyName || "job"})…`
-  });
+  // After ChatGPT finishes, wait for the page "JSON ready" flag (set by the
+  // content script after a settle delay) and generate files — do NOT spam
+  // "not usable / retry" prompts when complete JSON is already on screen.
+  lastUsableResumeData = null;
+  const rowLabel = jobMeta.csvRow != null ? `${jobMeta.csvRow} · ` : "";
+  let rawOutput = "";
+  let resumeData = null;
+  const promptStartedAt = Date.now();
 
-  if (batchControl.skipCurrent || batchControl.stop) {
-    throw new Error("__SKIP__");
+  for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt += 1) {
+    const isFirst = attempt === 1;
+
+    // Before any follow-up prompt: settle + harvest. Never re-prompt if ready.
+    if (!isFirst) {
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: waiting for JSON ready flag (no re-prompt yet)…`
+      );
+      const already = await waitForJsonReadyFlag(tab.id, {
+        since: promptStartedAt,
+        timeoutMs: 15000
+      });
+      if (isUsableResumeJson(already)) {
+        resumeData = already;
+        rawOutput = JSON.stringify(already);
+        await setStatus(
+          `Row ${rowLabel}${jobMeta.companyName}: JSON ready (${already.experience?.length || 0} jobs). Saving files…`
+        );
+        break;
+      }
+      // Still nothing usable — only then one clean re-prompt.
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: no ready JSON yet — one re-prompt (${attempt}/${MAX_JSON_ATTEMPTS})…`
+      );
+    }
+
+    rawOutput = await automateChatGpt(tab.id, isFirst ? prompt : JSON_RETRY_PROMPT, {
+      newChat: isFirst,
+      expectResumeJson: true,
+      statusLabel: isFirst
+        ? `Chat 1/1 · resume JSON (${jobMeta.companyName || "job"})…`
+        : `Same chat · retry resume JSON (${jobMeta.companyName || "job"})…`
+    });
+
+    if (batchControl.skipCurrent || batchControl.stop) {
+      throw new Error("__SKIP__");
+    }
+
+    resumeData = extractResumeJson(rawOutput);
+    if (!isUsableResumeJson(resumeData) && isUsableResumeJson(lastUsableResumeData)) {
+      resumeData = lastUsableResumeData;
+    }
+    if (!isUsableResumeJson(resumeData)) {
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: post-reply settle — checking JSON ready flag…`
+      );
+      const harvested = await waitForJsonReadyFlag(tab.id, {
+        since: promptStartedAt,
+        timeoutMs: 12000
+      });
+      if (isUsableResumeJson(harvested)) resumeData = harvested;
+    }
+    if (isUsableResumeJson(resumeData)) break;
   }
 
-  let resumeData = extractResumeJson(rawOutput);
   if (!isUsableResumeJson(resumeData)) {
-    await setStatus(
-      `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: JSON incomplete — retry in same chat…`
-    );
-    rawOutput = await automateChatGpt(tab.id, JSON_RETRY_PROMPT, {
-      newChat: false,
-      expectResumeJson: true,
-      statusLabel: `Same chat · retry resume JSON (${jobMeta.companyName || "job"})…`
+    const lastChance = await waitForJsonReadyFlag(tab.id, {
+      since: promptStartedAt,
+      timeoutMs: 8000
     });
-    resumeData = extractResumeJson(rawOutput);
+    if (isUsableResumeJson(lastChance)) resumeData = lastChance;
   }
 
   if (!isUsableResumeJson(resumeData)) {
     throw new Error(describeUnusableResume(rawOutput, resumeData));
   }
+
+  await setStatus(`JSON accepted (${resumeData.name || "ok"}). Saving jd.txt + PDF…`);
 
   // Save JD + resume immediately (before cover letter), same chat continues after.
   const enrichedMeta = {
@@ -1608,9 +2662,13 @@ async function runAutoJob(jobMeta) {
 }
 
 async function runBatchLoop(outputDir) {
-  batchControl = { pauseAfterCurrent: false, skipCurrent: false, stop: false };
+  batchControl = { pauseAfterCurrent: false, skipCurrent: false, stop: false, forceProceed: false };
   await setBatchState("running");
-  await chrome.storage.local.set({ generation_running: true });
+  await chrome.storage.local.set({
+    generation_running: true,
+    batch_output_dir: outputDir || "Resume Applications",
+    generation_heartbeat: Date.now()
+  });
   startKeepAlive();
 
   try {
@@ -1624,10 +2682,20 @@ async function runBatchLoop(outputDir) {
       }
 
       const queue = await getQueue();
-      const next = queue.find((j) => j.status === "pending" || j.status === "error");
+      // Fresh rows first, then rows that errored but still have retries left.
+      // Rows at the attempt ceiling become "failed" and are never re-picked, so
+      // the loop always terminates.
+      const next =
+        queue.find((j) => j.status === "pending") ||
+        queue.find((j) => j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS);
       if (!next) {
+        const failed = queue.filter((j) => j.status === "failed" || j.status === "error").length;
         await setBatchState("idle");
-        await setStatus("Batch complete — no pending US jobs left.");
+        await setStatus(
+          failed
+            ? `Batch complete — ${queue.filter((j) => j.status === "done").length} saved, ${failed} failed (use Start to retry failed rows).`
+            : "Batch complete — no pending US jobs left."
+        );
         await chrome.storage.local.set({ generation_running: false });
         return;
       }
@@ -1689,11 +2757,34 @@ async function runBatchLoop(outputDir) {
         }
         if (batchControl.stop) break;
 
-        await updateQueueJob(next.csvRow, { status: "error", error: msg.slice(0, 240) });
-        await setBatchState("paused");
-        await setStatus(`Row ${next.csvRow} failed: ${msg}. Batch paused.`);
-        await chrome.storage.local.set({ generation_running: false });
-        return;
+        // Only a global blocker (no ChatGPT tab / signed out) pauses the batch.
+        // Anything row-specific must not stop the remaining jobs.
+        if (/Open ChatGPT in a browser tab first/i.test(msg)) {
+          await updateQueueJob(next.csvRow, {
+            status: "pending",
+            error: "Waiting for a ChatGPT tab"
+          });
+          await setBatchState("paused");
+          await setStatus(`Batch paused: ${msg}`);
+          await chrome.storage.local.set({ generation_running: false });
+          return;
+        }
+
+        const attempts = Number(next.attempts || 0) + 1;
+        const exhausted = attempts >= MAX_JOB_ATTEMPTS;
+        await updateQueueJob(next.csvRow, {
+          status: exhausted ? "failed" : "error",
+          attempts,
+          error: msg.slice(0, 240)
+        });
+        await setStatus(
+          exhausted
+            ? `Row ${next.csvRow} failed after ${attempts} attempts: ${msg}. Moving to the next job…`
+            : `Row ${next.csvRow} error (attempt ${attempts}/${MAX_JOB_ATTEMPTS}): ${msg}. Continuing…`
+        );
+        // Give ChatGPT a breath before the next job (rate limits, UI settling).
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        continue;
       }
 
       if (batchControl.pauseAfterCurrent) {
@@ -1762,19 +2853,80 @@ async function revealJobFiles({ csvRow, jobDir }) {
 
 function autofillPageFunc(contact) {
   const filled = [];
+  const learned = {};
   const name = String(contact.name || "").trim();
   const email = String(contact.email || "").trim();
   const phone = String(contact.phone || "").trim();
   const linkedin = String(contact.linkedin || "").trim();
   const location = String(contact.location || "").trim();
+  const address = String(contact.address || "").trim();
+  const zip = String(contact.zip || "").trim();
+  const city = String(contact.city || "").trim();
+  const state = String(contact.state || "").trim();
+  const country = String(contact.country || "").trim();
+  const gender = String(contact.gender || "").trim();
+  const ethnicity = String(contact.ethnicity || "").trim();
+  const disability = String(contact.disability || "").trim();
+  const veteran = String(contact.veteran || "").trim();
+  const citizenship = String(contact.citizenship || "").trim();
+  const workAuthorized = String(contact.workAuthorized || "").trim();
+  const sponsorship = String(contact.sponsorship || "").trim();
+  const hispanicLatino = String(contact.hispanicLatino || "").trim();
+  const extras =
+    contact.extras && typeof contact.extras === "object" && !Array.isArray(contact.extras)
+      ? contact.extras
+      : {};
   const first = name.split(/\s+/)[0] || "";
   const last = name.split(/\s+/).slice(1).join(" ") || "";
 
   const setNativeValue = (el, value) => {
     if (!el || value == null || value === "") return false;
     const tag = (el.tagName || "").toLowerCase();
+    if (tag === "select") {
+      if (el.disabled) return false;
+      const want = String(value).toLowerCase().trim();
+      let matched = null;
+      for (const opt of Array.from(el.options)) {
+        const ov = String(opt.value || "").toLowerCase().trim();
+        const ot = String(opt.textContent || "").toLowerCase().trim();
+        if (!ov && !ot) continue;
+        if (ov === want || ot === want || ot.includes(want) || want.includes(ot)) {
+          matched = opt.value;
+          if (ov === want || ot === want) break;
+        }
+      }
+      if (matched == null) return false;
+      el.value = matched;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
     if (tag !== "input" && tag !== "textarea" && !el.isContentEditable) return false;
     if (el.disabled || el.readOnly) return false;
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    if (type === "radio" || type === "checkbox") {
+      const labelText = [
+        el.value,
+        el.getAttribute("aria-label"),
+        el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
+        el.closest("label")?.textContent
+      ]
+        .join(" ")
+        .toLowerCase();
+      const want = String(value).toLowerCase();
+      const yesNo = /^(yes|no)$/i.test(value);
+      const matches =
+        labelText.includes(want) ||
+        String(el.value || "").toLowerCase() === want ||
+        (yesNo && want === "yes" && /\byes\b|true|\by\b/.test(`${labelText} ${el.value}`)) ||
+        (yesNo && want === "no" && /\bno\b|false|\bn\b/.test(`${labelText} ${el.value}`));
+      if (!matches) return false;
+      el.checked = true;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return true;
+    }
     const proto =
       tag === "textarea"
         ? window.HTMLTextAreaElement.prototype
@@ -1787,29 +2939,44 @@ function autofillPageFunc(contact) {
     return true;
   };
 
-  const scoreField = (el, hints) => {
-    const blob = [
+  const fieldBlob = (el) =>
+    [
       el.name,
       el.id,
       el.placeholder,
       el.getAttribute("aria-label"),
       el.getAttribute("autocomplete"),
       el.getAttribute("data-test"),
-      el.className
+      el.getAttribute("data-testid"),
+      el.className,
+      el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
+      el.closest("label")?.textContent,
+      el.closest("fieldset")?.querySelector("legend")?.textContent,
+      el.closest("[role='group']")?.getAttribute("aria-label")
     ]
       .join(" ")
-      .toLowerCase();
-    return hints.some((h) => blob.includes(h));
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const scoreField = (el, hints) => {
+    const blob = fieldBlob(el);
+    return hints.some((h) => blob.includes(String(h).toLowerCase()));
   };
 
-  const inputs = Array.from(document.querySelectorAll("input, textarea"));
+  const controls = Array.from(document.querySelectorAll("input, textarea, select"));
+  const used = new Set();
   const tryFill = (hints, value, label) => {
     if (!value) return;
-    for (const el of inputs) {
+    for (const el of controls) {
+      if (used.has(el)) continue;
       const type = (el.getAttribute("type") || "text").toLowerCase();
-      if (["hidden", "submit", "button", "checkbox", "radio", "file"].includes(type)) continue;
-      if (scoreField(el, hints) && setNativeValue(el, value)) {
+      if (["hidden", "submit", "button", "file", "password"].includes(type)) continue;
+      if (!scoreField(el, hints)) continue;
+      if (setNativeValue(el, value)) {
+        used.add(el);
         filled.push(label);
+        learned[label] = value;
         return;
       }
     }
@@ -1821,9 +2988,116 @@ function autofillPageFunc(contact) {
   tryFill(["first name", "firstname", "given-name", "given_name"], first, "firstName");
   tryFill(["last name", "lastname", "family-name", "surname"], last, "lastName");
   tryFill(["full name", "fullname", "applicant", "candidate name", "your name"], name, "name");
-  tryFill(["city", "location", "address locality"], location, "location");
+  tryFill(
+    [
+      "street address",
+      "address line 1",
+      "address1",
+      "address_1",
+      "addr1",
+      "mailing address",
+      "home address",
+      "street",
+      "address-line1"
+    ],
+    address,
+    "address"
+  );
+  tryFill(
+    ["address line 2", "address2", "addr2", "address-line2", "apt", "suite", "unit"],
+    extras["address line 2"] || extras.address2 || "",
+    "address2"
+  );
+  tryFill(["city", "address locality", "locality", "town"], city || "", "city");
+  tryFill(["state", "province", "region", "address region"], state, "state");
+  tryFill(
+    ["zip", "postal", "postcode", "postal code", "postal-code"],
+    zip || extras.zip || extras.postal || "",
+    "zip"
+  );
+  tryFill(["country", "nation"], country || extras.country || "", "country");
+  tryFill(["current location", "location"], location, "location");
 
-  return { filled: filled.length, fields: filled };
+  tryFill(["gender", "sex", "gender identity"], gender, "gender");
+  tryFill(["ethnicity", "race", "race/ethnicity", "racial"], ethnicity, "ethnicity");
+  tryFill(["hispanic", "latino", "latina", "latinx"], hispanicLatino, "hispanicLatino");
+  tryFill(["disability", "disabled", "disability status"], disability, "disability");
+  tryFill(["veteran", "protected veteran", "military status", "veteran status"], veteran, "veteran");
+  tryFill(["citizenship", "citizen status", "nationality"], citizenship, "citizenship");
+  tryFill(
+    [
+      "authorized to work",
+      "work authorization",
+      "legally authorized",
+      "eligible to work",
+      "work authorized",
+      "right to work"
+    ],
+    workAuthorized,
+    "workAuthorized"
+  );
+  tryFill(
+    [
+      "sponsorship",
+      "visa sponsorship",
+      "require sponsorship",
+      "need sponsorship",
+      "immigration sponsorship",
+      "future sponsorship"
+    ],
+    sponsorship,
+    "sponsorship"
+  );
+
+  for (const [key, value] of Object.entries(extras)) {
+    const k = String(key || "").trim().toLowerCase();
+    const v = String(value || "").trim();
+    if (!k || !v) continue;
+    if (
+      [
+        "address",
+        "city",
+        "state",
+        "zip",
+        "postal",
+        "country",
+        "email",
+        "phone",
+        "name",
+        "gender",
+        "ethnicity",
+        "disability",
+        "veteran",
+        "citizenship"
+      ].includes(k)
+    ) {
+      continue;
+    }
+    tryFill([k, ...k.split(/\s+/)], v, `extra:${k}`);
+  }
+
+  for (const el of controls) {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    if (["hidden", "submit", "button", "checkbox", "radio", "file", "password"].includes(type)) continue;
+    if ((el.tagName || "").toLowerCase() === "select") continue;
+    const val = String(el.value || "").trim();
+    if (!val || val.length < 2 || val.length > 120) continue;
+    const blob = fieldBlob(el);
+    if (!blob || blob.length < 2) continue;
+    if (Object.values(learned).some((v) => String(v) === val)) continue;
+    if ([name, email, phone, linkedin, address, city, state, location, zip].includes(val)) continue;
+    const key = blob
+      .replace(/[^a-z0-9 ]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .slice(0, 4)
+      .join(" ");
+    if (key && !learned[key] && !extras[key]) {
+      learned[`discovered:${key}`] = val;
+    }
+  }
+
+  return { filled: filled.length, fields: filled, learned };
 }
 
 async function autofillActiveTab() {
@@ -1835,13 +3109,18 @@ async function autofillActiveTab() {
     );
 
   if (!tab?.id) throw new Error("No active application tab. Focus the job form tab first.");
-  if (tab.url && (tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") || tab.url.startsWith("edge://"))) {
+  if (
+    tab.url &&
+    (tab.url.startsWith("chrome://") ||
+      tab.url.startsWith("chrome-extension://") ||
+      tab.url.startsWith("edge://"))
+  ) {
     throw new Error("Cannot autofill Chrome system pages. Focus the job application tab.");
   }
 
   const contact = await getAutofillContact();
-  if (!contact.name && !contact.email && !contact.phone) {
-    throw new Error("Active person has no contact fields. Edit person and save name/email/phone.");
+  if (!contact.name && !contact.email && !contact.phone && !contact.address) {
+    throw new Error("Active person has no contact fields. Edit person and save name/email/phone/address.");
   }
 
   const results = await chrome.scripting.executeScript({
@@ -1849,9 +3128,31 @@ async function autofillActiveTab() {
     args: [contact],
     func: autofillPageFunc
   });
+  const result = results?.[0]?.result || { filled: 0, fields: [], learned: {} };
 
-  return results?.[0]?.result || { filled: 0, fields: [] };
+  try {
+    const learned = result.learned || {};
+    const toSave = {};
+    for (const [k, v] of Object.entries(learned)) {
+      const key = String(k || "")
+        .replace(/^extra:/, "")
+        .replace(/^discovered:/, "")
+        .trim();
+      const val = String(v || "").trim();
+      if (!key || !val) continue;
+      if (["email", "phone", "name", "firstname", "lastname", "linkedin"].includes(key)) continue;
+      toSave[key] = val;
+    }
+    if (Object.keys(toSave).length) {
+      await mergeAutofillExtras(toSave);
+    }
+  } catch {
+    // learning is best-effort
+  }
+
+  return result;
 }
+
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
@@ -1972,6 +3273,98 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (type === "force_save_chatgpt_resume") {
+    (async () => {
+      try {
+        const tab = await getOpenChatGptTab();
+        if (!tab?.id) throw new Error("Open the ChatGPT tab that has the resume JSON.");
+
+        await setStatus("Force-save: collecting resume JSON…");
+
+        let data = message.resumeData && typeof message.resumeData === "object" ? message.resumeData : null;
+
+        if (!isUsableResumeJson(data)) {
+          const stored = await chrome.storage.local.get([
+            "chatgpt_harvested_resume",
+            "last_resume_json"
+          ]);
+          if (isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+            data = stored.chatgpt_harvested_resume;
+          } else if (isUsableResumeJson(stored.last_resume_json)) {
+            data = stored.last_resume_json;
+          }
+        }
+
+        if (!isUsableResumeJson(data)) {
+          const state = await withTimeout(
+            chatgptPollState(tab.id, { harvestJson: true }),
+            20000,
+            "Timed out reading ChatGPT page."
+          );
+          data = state.resumeData;
+          if (!isUsableResumeJson(data)) data = extractResumeJson(state.latest);
+        }
+
+        if (!isUsableResumeJson(data)) {
+          throw new Error(
+            `Could not find full resume JSON (${describeResumeGaps(data) || "empty"}). On ChatGPT click "Brightstar: Save resume JSON" (bottom-right), or copy the JSON and use Ctrl+Shift+V.`
+          );
+        }
+
+        lastUsableResumeData = data;
+        await chrome.storage.local.set({ last_resume_json: data, chatgpt_harvested_resume: data });
+
+        // Abort any stuck poller waiting on this job.
+        batchControl.forceProceed = true;
+        batchControl.skipCurrent = false;
+
+        const queue = await getQueue();
+        const job =
+          queue.find((j) => j.status === "running") ||
+          queue.find((j) => j.status === "pending" || j.status === "error");
+        if (!job) throw new Error("No queue job to attach files to. Upload CSV / Start batch first.");
+
+        const person = await getActivePerson();
+        await setStatus(
+          `Force-save: writing files for row ${job.csvRow} (${data.experience?.length || 0} jobs)…`
+        );
+
+        // Always save directly — do not wait for a stuck poller.
+        const result = await saveResumeAndCoverLetter(
+          tab.id,
+          JSON.stringify(data, null, 2),
+          data,
+          {
+            csvRow: job.csvRow,
+            jobTitle: job.title,
+            companyName: job.company,
+            jdLink: job.jdLink || "",
+            jdText: job.jdText || "",
+            outputDir: "Resume Applications",
+            templateId: person.templateId,
+            resumeFilePrefix: person.resumeFilePrefix
+          },
+          { runCoverLetter: true }
+        );
+
+        await updateQueueJob(job.csvRow, {
+          status: "done",
+          jobDir: result.savedDir,
+          error: ""
+        });
+        batchControl.forceProceed = false;
+        // If a poller is still waiting on this same job, skip it so the batch advances.
+        batchControl.skipCurrent = true;
+        await setStatus(`Force-saved row ${job.csvRow}. ${result.status}`);
+        safeSendResponse(sendResponse, { ok: true, status: result.status, savedDir: result.savedDir });
+      } catch (err) {
+        await setStatus(`Force-save failed: ${String(err?.message || err)}`);
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "batch_status") {
     (async () => {
       const data = await chrome.storage.local.get([BATCH_STATE_KEY, QUEUE_KEY, "generation_status"]);
@@ -1993,8 +3386,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     isRunning = true;
     safeSendResponse(sendResponse, { ok: true, started: true, status: "Batch started…" });
     (async () => {
-      // Clear leftover "running" rows from a killed service worker.
-      await recoverInterruptedBatch("Starting batch…").catch(() => {});
+      // Clear leftover "running" rows from a killed service worker, and give
+      // rows that hit the attempt ceiling a fresh set of attempts.
+      await recoverInterruptedBatch("Starting batch…", { retryFailed: true }).catch(() => {});
       isRunning = true;
       await runBatchLoop(message.outputDir || "Resume Applications");
     })().catch(async (err) => {

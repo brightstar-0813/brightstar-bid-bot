@@ -335,7 +335,401 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes.generation_status || !toastEl) return;
     const status = changes.generation_status.newValue || "";
-    const done = /saved to downloads|generation failed|saved resume to downloads/i.test(status);
+    const done =
+      /saved to downloads|generation failed|saved resume to downloads|Force-saved|Saving jd\.txt|Saving files/i.test(
+        status
+      );
     showToast(status, { sticky: !done });
+  });
+
+  function isStreaming() {
+    const stopBtn =
+      document.querySelector("button[data-testid='stop-button']") ||
+      document.querySelector("button[aria-label='Stop streaming']") ||
+      document.querySelector("button[aria-label='Stop generating']");
+    return Boolean(stopBtn && stopBtn.offsetParent !== null);
+  }
+
+  /**
+   * Deep-scan the ChatGPT page for the richest resume JSON.
+   * CRITICAL: scan ALL assistant turns + every <pre>/code block — not just the
+   * last 3. Retry prompts create new messages that push the good JSON out of a
+   * narrow window, which is why the user can see JSON while the bot re-prompts.
+   */
+  function harvestResumeFromPage() {
+    const texts = [];
+    const seen = new Set();
+    const push = (t) => {
+      let s = String(t || "")
+        .replace(/\uFEFF/g, "")
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/\u00A0/g, " ")
+        .trim();
+      if (s.length < 80) return;
+      // Dedupe by a short fingerprint so we don't parse the same block 10 times.
+      const fp = `${s.length}:${s.slice(0, 80)}:${s.slice(-40)}`;
+      if (seen.has(fp)) return;
+      seen.add(fp);
+      texts.push(s.slice(0, 500000));
+    };
+
+    const looksResumeish = (s) =>
+      (s.includes('"experience"') || s.includes('"Experience"')) &&
+      (s.includes('"name"') || s.includes('"Name"') || s.includes('"profile"'));
+
+    // 1) Every assistant message (cap at last 20 for performance).
+    const blocks = Array.from(
+      document.querySelectorAll(
+        "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
+      )
+    );
+    const start = Math.max(0, blocks.length - 20);
+    for (let bi = start; bi < blocks.length; bi += 1) {
+      const block = blocks[bi];
+      for (const el of block.querySelectorAll(
+        "pre code, pre, code, [class*='language-json'], [class*='hljs'], [class*='markdown'], [class*='prose'], [class*='code'], [class*='Code'], [class*='artifact'], [data-message-content], .cm-content"
+      )) {
+        push(el.innerText || el.textContent || "");
+      }
+      push(block.innerText || block.textContent || "");
+    }
+
+    // 2) Page-wide code / artifact panels (JSON often lives here when virtualized).
+    for (const el of document.querySelectorAll(
+      "pre code, pre, [class*='language-json'], [class*='artifact'] pre, [class*='Artifact'] pre, [data-testid*='code'] pre, .cm-content, .monaco-editor .view-lines, main pre, main code"
+    )) {
+      const t = el.innerText || el.textContent || "";
+      if (looksResumeish(t) || t.includes('"experience"')) push(t);
+    }
+
+    // 3) Fallback: walk text nodes under main that contain "experience".
+    if (!texts.some(looksResumeish)) {
+      const main = document.querySelector("main") || document.body;
+      const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+      let node;
+      let buf = "";
+      while ((node = walker.nextNode())) {
+        const v = node.nodeValue || "";
+        if (v.includes("experience") || v.includes("{") || buf) {
+          buf += v;
+          if (buf.length > 400000) break;
+        }
+      }
+      if (buf.length > 200) push(buf);
+    }
+
+    const extractBalanced = (str) => {
+      const out = [];
+      const input = String(str || "").slice(0, 400000);
+      let depth = 0;
+      let startIdx = -1;
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < input.length; i += 1) {
+        const ch = input[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+        if (ch === "{") {
+          if (depth === 0) startIdx = i;
+          depth += 1;
+        } else if (ch === "}") {
+          if (depth > 0) {
+            depth -= 1;
+            if (depth === 0 && startIdx >= 0) {
+              out.push(input.slice(startIdx, i + 1));
+              startIdx = -1;
+              if (out.length >= 16) break;
+            }
+          }
+        }
+      }
+      return out;
+    };
+
+    const closeTruncated = (text) => {
+      let str = String(text || "");
+      const brace = str.indexOf("{");
+      if (brace < 0) return null;
+      str = str.slice(brace);
+      const scan = (input) => {
+        const stack = [];
+        let inString = false;
+        let escaped = false;
+        for (let i = 0; i < input.length; i += 1) {
+          const ch = input[i];
+          if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === "\\") escaped = true;
+            else if (ch === '"') inString = false;
+            continue;
+          }
+          if (ch === '"') inString = true;
+          else if (ch === "{" || ch === "[") stack.push(ch);
+          else if (ch === "}" || ch === "]") {
+            if (stack.length) stack.pop();
+          }
+        }
+        return { stack, inString };
+      };
+      let { stack, inString } = scan(str);
+      if (!stack.length && !inString) return null;
+      if (inString) {
+        let bs = 0;
+        for (let i = str.length - 1; i >= 0 && str[i] === "\\"; i -= 1) bs += 1;
+        if (bs % 2 === 1) str += "\\";
+        str += '"';
+      }
+      let repaired = str.replace(/\s+$/, "");
+      for (let pass = 0; pass < 4; pass += 1) {
+        const before = repaired;
+        repaired = repaired.replace(/,\s*$/, "");
+        repaired = repaired
+          .replace(/,\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*$/, "")
+          .replace(/\{\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*$/, "{")
+          .replace(/:\s*$/, "");
+        const top = scan(repaired).stack;
+        if (top[top.length - 1] === "{") {
+          repaired = repaired.replace(/,\s*"[^"\\]*(?:\\.[^"\\]*)*"\s*$/, "");
+        }
+        repaired = repaired.replace(/,\s*$/, "");
+        if (repaired === before) break;
+      }
+      ({ stack, inString } = scan(repaired));
+      if (inString) {
+        repaired += '"';
+        repaired = repaired.replace(/,\s*$/, "");
+        ({ stack } = scan(repaired));
+      }
+      repaired = repaired.replace(/,\s*$/, "");
+      ({ stack } = scan(repaired));
+      for (let i = stack.length - 1; i >= 0; i -= 1) {
+        repaired += stack[i] === "{" ? "}" : "]";
+      }
+      return repaired;
+    };
+
+    const scoreObj = (obj) => {
+      if (!obj || typeof obj !== "object") return -1;
+      const jobs = Array.isArray(obj.experience) ? obj.experience.length : 0;
+      const bullets = Array.isArray(obj.experience)
+        ? obj.experience.reduce(
+            (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
+            0
+          )
+        : 0;
+      const certs = Array.isArray(obj.certifications) ? obj.certifications.length : 0;
+      const skills = Array.isArray(obj.skills) ? obj.skills.length : 0;
+      if (!obj.name && jobs < 1) return -1;
+      // Prefer fuller resumes so an older complete reply beats a newer stub.
+      return jobs * 10000 + bullets * 40 + certs * 30 + skills * 20 + String(obj.profile || "").length;
+    };
+
+    const tryParse = (raw) => {
+      const normalized = String(raw || "")
+        .replace(/^\uFEFF/, "")
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/\u00A0/g, " ")
+        .trim()
+        .replace(/^```(?:json|JSON)?\s*\r?\n?/, "")
+        .replace(/\r?\n?```\s*$/, "")
+        .replace(/^(json|JSON)\s*\r?\n/, "")
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+
+      let bestLocalObj = null;
+      let bestLocal = -1;
+      const consider = (obj) => {
+        if (!obj || typeof obj !== "object") return;
+        const s = scoreObj(obj);
+        if (s > bestLocal) {
+          bestLocalObj = obj;
+          bestLocal = s;
+        }
+      };
+      for (const slice of extractBalanced(normalized)) {
+        try {
+          consider(JSON.parse(slice));
+        } catch {
+          // continue
+        }
+      }
+      try {
+        const start = normalized.indexOf("{");
+        const end = normalized.lastIndexOf("}");
+        if (start >= 0 && end > start) consider(JSON.parse(normalized.slice(start, end + 1)));
+      } catch {
+        // continue
+      }
+      if (!bestLocalObj || bestLocal < 10000) {
+        const closed = closeTruncated(normalized);
+        if (closed) {
+          try {
+            consider(JSON.parse(closed));
+          } catch {
+            // ignore
+          }
+        }
+      }
+      return bestLocalObj;
+    };
+
+    let best = null;
+    let bestScore = -1;
+    for (const raw of texts) {
+      if (!looksResumeish(raw) && !raw.includes('"experience"')) continue;
+      const obj = tryParse(raw);
+      if (!obj) continue;
+      const s = scoreObj(obj);
+      if (s > bestScore) {
+        best = obj;
+        bestScore = s;
+      }
+    }
+    return best;
+  }
+
+  async function persistHarvest({ allowStreaming = false } = {}) {
+    // A half-streamed object parses (the extractor repairs truncated JSON) but
+    // is missing roles — never publish it as the finished answer.
+    if (!allowStreaming && isStreaming()) {
+      await chrome.storage.local.set({ chatgpt_json_ready: false }).catch(() => {});
+      return null;
+    }
+    const data = harvestResumeFromPage();
+    if (!data || !Array.isArray(data.experience) || !data.experience.length) return null;
+
+    // Lightweight "usable resume" check (content script cannot import resume-json.js).
+    const nameOk = Boolean(String(data.name || "").trim());
+    const profile = String(data.profile || "").trim();
+    const summary = Array.isArray(data.technicalSummary) ? data.technicalSummary.filter(Boolean).length : 0;
+    const bullets = data.experience.reduce(
+      (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
+      0
+    );
+    const stub = /One summary paragraph|One sentence bullet|One realistic project name|tailored to the JD/i.test(
+      JSON.stringify(data)
+    );
+    const usable =
+      nameOk &&
+      !stub &&
+      bullets >= 4 &&
+      (profile.length >= 40 || summary >= 3) &&
+      data.experience.some(
+        (j) =>
+          Array.isArray(j?.bullets) &&
+          j.bullets.filter((b) => String(b || "").trim().length > 25).length >= 2
+      );
+
+    await chrome.storage.local.set({
+      chatgpt_harvested_resume: data,
+      chatgpt_harvested_at: Date.now(),
+      chatgpt_harvested_jobs: data.experience.length,
+      // Explicit ready flag so the background can advance to file generation
+      // without re-prompting ChatGPT.
+      chatgpt_json_ready: Boolean(usable),
+      chatgpt_json_ready_at: usable ? Date.now() : 0
+    });
+    return data;
+  }
+
+  // After streaming stops, wait briefly for the DOM to finish painting the
+  // full JSON, then harvest and raise the ready flag.
+  let wasStreaming = false;
+  let settleTimer = null;
+  const watchStreaming = () => {
+    const streaming = isStreaming();
+    if (streaming) {
+      wasStreaming = true;
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+      chrome.storage.local.set({ chatgpt_json_ready: false }).catch(() => {});
+      return;
+    }
+    if (wasStreaming && !settleTimer) {
+      wasStreaming = false;
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        persistHarvest().catch(() => {});
+      }, 2500);
+    }
+  };
+
+  function ensureSaveButton() {
+    if (document.getElementById("brightstar-save-json-btn")) return;
+    const btn = document.createElement("button");
+    btn.id = "brightstar-save-json-btn";
+    btn.type = "button";
+    btn.textContent = "Brightstar: Save resume JSON";
+    Object.assign(btn.style, {
+      position: "fixed",
+      zIndex: "2147483646",
+      right: "16px",
+      bottom: "72px",
+      padding: "10px 14px",
+      background: "#0b3d5c",
+      color: "#fff",
+      border: "none",
+      borderRadius: "8px",
+      font: "13px/1.3 Arial, Helvetica, sans-serif",
+      fontWeight: "700",
+      cursor: "pointer",
+      boxShadow: "0 4px 14px rgba(0,0,0,0.28)"
+    });
+    btn.addEventListener("click", async () => {
+      try {
+        showToast("Harvesting resume JSON from this page…", { sticky: true });
+        const data = await persistHarvest({ allowStreaming: true });
+        if (!data) {
+          showToast("No full resume JSON found on page. Scroll to the JSON block, then click again.");
+          return;
+        }
+        showToast(`Found JSON (${data.experience.length} jobs). Saving files…`, { sticky: true });
+        const res = await chrome.runtime.sendMessage({
+          type: "force_save_chatgpt_resume",
+          resumeData: data
+        });
+        if (!res?.ok) {
+          showToast(res?.error || "Save failed.");
+          return;
+        }
+        showToast(res.status || "Save started.");
+      } catch (err) {
+        showToast(`Save failed: ${String(err?.message || err)}`);
+      }
+    });
+    (document.body || document.documentElement).appendChild(btn);
+  }
+
+  ensureSaveButton();
+  // Fast harvest while a batch/one-off is running so recognition → file save is snappy.
+  let harvestTimer = null;
+  const scheduleHarvest = (ms) => {
+    if (harvestTimer) clearInterval(harvestTimer);
+    harvestTimer = setInterval(() => {
+      ensureSaveButton();
+      watchStreaming();
+      persistHarvest().catch(() => {});
+    }, ms);
+  };
+  scheduleHarvest(4000);
+  chrome.storage.local.get(["generation_running"], (data) => {
+    if (data.generation_running) scheduleHarvest(1000);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.generation_running) {
+      scheduleHarvest(changes.generation_running.newValue ? 1000 : 4000);
+    }
   });
 })();

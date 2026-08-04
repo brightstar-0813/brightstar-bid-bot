@@ -7,7 +7,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
-- **CSV batch**: upload LinkedIn / Fantastic Jobs CSV → keep **US jobs only** → auto queue with Start / Pause / Skip / Stop
+- **CSV batch**: upload LinkedIn / Fantastic Jobs CSV → keep **US jobs only** → **auto-starts file generation** (Start / Pause / Skip / Stop still available)
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Saves under `Downloads / [output folder] / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
@@ -17,6 +17,20 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 - **Apply assist**: Open job URL, reveal saved files, autofill name/email/phone/LinkedIn on the application page
 - Manual one-off job still available (also auto — no JSON paste)
 
+### Unattended run (v1.4)
+
+The batch is designed to finish a whole CSV without supervision:
+
+- **Fresh chat guaranteed** — each job navigates the tab to a blank chat, so a job can never harvest the previous job's JSON
+- **Deep DOM recognition** — scans up to 20 assistant turns + all page `<pre>`/JSON code blocks (retries used to hide the good JSON outside a 3-message window); curly quotes are normalized
+- **No auto re-prompt spam** — does not send “not usable” retry prompts when JSON is already on the page; click **Save JSON now** if needed
+- **JSON ready flag** — after ChatGPT finishes streaming, waits ~2.5s for the DOM to settle, then sets `chatgpt_json_ready` and saves files
+- **Short resumes work** — 1–2 employers, or no certifications, no longer blocks the run (only genuine schema/placeholder output is rejected)
+- **A bad row no longer stops the batch** — the row is retried once, then marked `failed` and the queue moves on. Click **Start** again to retry failed rows
+- **Downloads are verified** — a file counts as saved only when Chrome reports it complete; interruptions surface as errors instead of silent success
+- **PDFs render in a background tab** and retry automatically (the last retry uses a visible tab)
+- **Self-healing** — a missing ChatGPT tab is opened automatically, and a batch interrupted by a browser restart or a sleeping service worker resumes on its own
+
 ## Workflow
 
 ```mermaid
@@ -25,7 +39,7 @@ flowchart TD
   savePerson --> uploadCsv[Upload LinkedIn or Fantastic Jobs CSV]
   uploadCsv --> filterUs[Keep US jobs only assign CSV row N]
   filterUs --> queue[Job queue pending]
-  queue --> startBatch[Start batch ChatGPT tab open]
+  queue --> startBatch[Auto-start file generation]
   startBatch --> resumeChat[ONE new ChatGPT chat: resume prompt + JD]
   resumeChat --> pollJson[Auto-poll until resume JSON]
   pollJson --> saveFiles[Save jd.txt + Name_Resume.pdf]
@@ -66,7 +80,7 @@ flowchart TD
    - **LI** — LinkedIn-hosted jobs only
    - **All** — every US job
 3. Confirm summary counts (General vs LI)
-4. Click **Start** (ChatGPT tab must be open)
+4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows
 5. Use **Pause** / **Skip** / **Stop** as needed
 6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill)
 

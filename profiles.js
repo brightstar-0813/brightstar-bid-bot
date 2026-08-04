@@ -18,9 +18,20 @@ export const BUILTIN_PROFILES = [
     phone: "+1 (254) 708-9742",
     linkedin: "https://www.linkedin.com/in/hoffmantxstate/",
     location: "Georgetown, Texas, United States",
+    address: "129 Cherry Ridge Rd",
+    zip: "",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
     signatureTitle: "Salesforce Developer",
     masterResume: "",
-    coverLetterPrompt: coverLetterPrompt
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {}
   },
   {
     id: COVER_LETTER_PROFILE_ID,
@@ -59,7 +70,8 @@ export function applyPlaceholders(
     email = "",
     phone = "",
     linkedin = "",
-    location = ""
+    location = "",
+    address = ""
   } = {}
 ) {
   return String(template || "")
@@ -71,7 +83,8 @@ export function applyPlaceholders(
     .replaceAll("{EMAIL}", email)
     .replaceAll("{PHONE}", phone)
     .replaceAll("{LINKEDIN}", linkedin)
-    .replaceAll("{LOCATION}", location);
+    .replaceAll("{LOCATION}", location)
+    .replaceAll("{ADDRESS}", address);
 }
 
 export async function getCustomProfiles() {
@@ -119,26 +132,41 @@ export async function getActivePerson() {
 }
 
 function normalizePerson(p) {
-  if (!p) {
-    return {
-      id: DEFAULT_PROFILE_ID,
-      label: "Matthew Dale Hoffman (Salesforce)",
-      name: "Matthew Dale Hoffman",
-      email: "",
-      phone: "",
-      linkedin: "",
-      location: "",
-      masterResume: "",
-      promptTemplate: "",
-      coverLetterPrompt: "",
-      resumeFilePrefix: "Matthew_Resume",
-      templateId: "times-classic",
-      signatureTitle: "Salesforce Developer",
-      builtin: true,
-      kind: "resume"
-    };
-  }
+  const empty = {
+    id: DEFAULT_PROFILE_ID,
+    label: "Matthew Dale Hoffman (Salesforce)",
+    name: "Matthew Dale Hoffman",
+    email: "",
+    phone: "",
+    linkedin: "",
+    location: "",
+    address: "",
+    zip: "",
+    gender: "",
+    ethnicity: "",
+    disability: "",
+    veteran: "",
+    citizenship: "",
+    workAuthorized: "",
+    sponsorship: "",
+    hispanicLatino: "",
+    masterResume: "",
+    promptTemplate: "",
+    coverLetterPrompt: "",
+    resumeFilePrefix: "Matthew_Resume",
+    templateId: "times-classic",
+    signatureTitle: "Salesforce Developer",
+    autofillExtras: {},
+    builtin: true,
+    kind: "resume"
+  };
+  if (!p) return empty;
+  const extras =
+    p.autofillExtras && typeof p.autofillExtras === "object" && !Array.isArray(p.autofillExtras)
+      ? { ...p.autofillExtras }
+      : {};
   return {
+    ...empty,
     id: p.id,
     label: p.label || p.name || "Person",
     name: p.name || p.label || "",
@@ -146,12 +174,23 @@ function normalizePerson(p) {
     phone: p.phone || "",
     linkedin: p.linkedin || "",
     location: p.location || "",
+    address: p.address || "",
+    zip: p.zip || "",
+    gender: p.gender || "",
+    ethnicity: p.ethnicity || "",
+    disability: p.disability || "",
+    veteran: p.veteran || "",
+    citizenship: p.citizenship || "",
+    workAuthorized: p.workAuthorized || "",
+    sponsorship: p.sponsorship || "",
+    hispanicLatino: p.hispanicLatino || "",
     masterResume: p.masterResume || "",
     promptTemplate: p.promptTemplate || "",
     coverLetterPrompt: p.coverLetterPrompt || "",
     resumeFilePrefix: p.resumeFilePrefix || "Resume",
     templateId: p.templateId || "times-classic",
     signatureTitle: p.signatureTitle || p.headline || "",
+    autofillExtras: extras,
     builtin: Boolean(p.builtin),
     kind: p.kind || "resume"
   };
@@ -205,7 +244,8 @@ function personPlaceholderExtras(person, extras = {}) {
     email: person.email || "",
     phone: person.phone || "",
     linkedin: person.linkedin || "",
-    location: person.location || ""
+    location: person.location || "",
+    address: person.address || ""
   };
 }
 
@@ -253,11 +293,22 @@ export async function addCustomProfile({
   phone = "",
   linkedin = "",
   location = "",
+  address = "",
+  zip = "",
+  gender = "",
+  ethnicity = "",
+  disability = "",
+  veteran = "",
+  citizenship = "",
+  workAuthorized = "",
+  sponsorship = "",
+  hispanicLatino = "",
   masterResume = "",
   coverLetterPrompt = "",
   resumeFilePrefix = "",
   templateId = "",
-  signatureTitle = ""
+  signatureTitle = "",
+  autofillExtras = {}
 } = {}) {
   const displayName = String(label || name || "").trim();
   const prompt = String(promptTemplate || "").trim();
@@ -283,6 +334,11 @@ export async function addCustomProfile({
       ? "coverLetter"
       : "resume";
 
+  const extras =
+    autofillExtras && typeof autofillExtras === "object" && !Array.isArray(autofillExtras)
+      ? { ...autofillExtras }
+      : {};
+
   const profile = {
     id,
     label: displayName,
@@ -293,11 +349,22 @@ export async function addCustomProfile({
     phone: String(phone || "").trim(),
     linkedin: String(linkedin || "").trim(),
     location: String(location || "").trim(),
+    address: String(address || "").trim(),
+    zip: String(zip || "").trim(),
+    gender: String(gender || "").trim(),
+    ethnicity: String(ethnicity || "").trim(),
+    disability: String(disability || "").trim(),
+    veteran: String(veteran || "").trim(),
+    citizenship: String(citizenship || "").trim(),
+    workAuthorized: String(workAuthorized || "").trim(),
+    sponsorship: String(sponsorship || "").trim(),
+    hispanicLatino: String(hispanicLatino || "").trim(),
     masterResume: String(masterResume || ""),
     coverLetterPrompt: String(coverLetterPrompt || "").trim(),
     resumeFilePrefix: String(resumeFilePrefix || slugify(displayName).replace(/-/g, "_") || "Resume"),
     templateId: String(templateId || "times-classic").trim(),
-    signatureTitle: String(signatureTitle || "").trim()
+    signatureTitle: String(signatureTitle || "").trim(),
+    autofillExtras: extras
   };
   custom.push(profile);
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: custom });
@@ -329,12 +396,26 @@ export async function savePersonProfile(person) {
     phone: String(person?.phone || "").trim(),
     linkedin: String(person?.linkedin || "").trim(),
     location: String(person?.location || "").trim(),
+    address: String(person?.address || "").trim(),
+    zip: String(person?.zip || "").trim(),
+    gender: String(person?.gender || "").trim(),
+    ethnicity: String(person?.ethnicity || "").trim(),
+    disability: String(person?.disability || "").trim(),
+    veteran: String(person?.veteran || "").trim(),
+    citizenship: String(person?.citizenship || "").trim(),
+    workAuthorized: String(person?.workAuthorized || "").trim(),
+    sponsorship: String(person?.sponsorship || "").trim(),
+    hispanicLatino: String(person?.hispanicLatino || "").trim(),
     masterResume: String(person?.masterResume || ""),
     promptTemplate: prompt,
     coverLetterPrompt: cl,
     resumeFilePrefix: String(person?.resumeFilePrefix || "Resume").trim() || "Resume",
     templateId: String(person?.templateId || "times-classic").trim(),
     signatureTitle: String(person?.signatureTitle || "").trim(),
+    autofillExtras:
+      person?.autofillExtras && typeof person.autofillExtras === "object" && !Array.isArray(person.autofillExtras)
+        ? { ...person.autofillExtras }
+        : {},
     kind: "resume"
   };
 
@@ -403,12 +484,75 @@ export async function deleteCustomProfile(profileId) {
 /** Contact fields used for ATS autofill / cover letter signature. */
 export async function getAutofillContact() {
   const person = await getActivePerson();
+  const location = person.location || "";
+  const parts = location.split(",").map((s) => s.trim()).filter(Boolean);
   return {
     name: person.name || person.label || "",
     email: person.email || "",
     phone: person.phone || "",
     linkedin: person.linkedin || "",
-    location: person.location || "",
-    signatureTitle: person.signatureTitle || ""
+    location,
+    address: person.address || "",
+    zip: person.zip || "",
+    city: parts[0] || "",
+    state: parts[1] || "",
+    country: parts[2] || parts[parts.length - 1] || "",
+    gender: person.gender || "",
+    ethnicity: person.ethnicity || "",
+    disability: person.disability || "",
+    veteran: person.veteran || "",
+    citizenship: person.citizenship || "",
+    workAuthorized: person.workAuthorized || "",
+    sponsorship: person.sponsorship || "",
+    hispanicLatino: person.hispanicLatino || "",
+    signatureTitle: person.signatureTitle || "",
+    extras: person.autofillExtras || {}
   };
+}
+
+/**
+ * Merge newly learned autofill values into the active custom person.
+ * Built-in profiles are skipped (caller should Save as my person first).
+ */
+export async function mergeAutofillExtras(learned) {
+  if (!learned || typeof learned !== "object") return null;
+  const person = await getActivePerson();
+  if (!person?.id || person.builtin) return null;
+  const nextExtras = { ...(person.autofillExtras || {}) };
+  let changed = false;
+  for (const [key, value] of Object.entries(learned)) {
+    const k = String(key || "").trim().toLowerCase();
+    const v = String(value || "").trim();
+    if (!k || !v) continue;
+    if (nextExtras[k] === v) continue;
+    nextExtras[k] = v;
+    changed = true;
+  }
+  // Promote well-known keys onto first-class fields when empty.
+  const patch = { ...person, autofillExtras: nextExtras };
+  const promote = [
+    ["address", ["address", "street address", "address line 1"]],
+    ["zip", ["zip", "postal", "postal code"]],
+    ["gender", ["gender", "sex"]],
+    ["ethnicity", ["ethnicity", "race", "race ethnicity"]],
+    ["disability", ["disability", "disabled"]],
+    ["veteran", ["veteran", "veteran status"]],
+    ["citizenship", ["citizenship", "citizen"]],
+    ["workAuthorized", ["work authorized", "authorized to work", "work authorization"]],
+    ["sponsorship", ["sponsorship", "visa sponsorship", "require sponsorship"]],
+    ["hispanicLatino", ["hispanic", "latino", "hispanic latino"]]
+  ];
+  for (const [field, keys] of promote) {
+    if (patch[field]) continue;
+    for (const k of keys) {
+      if (learned[k]) {
+        patch[field] = String(learned[k]).trim();
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) return person;
+  const result = await savePersonProfile(patch);
+  return result?.profile || patch;
 }

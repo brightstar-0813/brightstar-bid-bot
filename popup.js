@@ -73,6 +73,17 @@ const personEmailEl = document.getElementById("personEmail");
 const personPhoneEl = document.getElementById("personPhone");
 const personLinkedinEl = document.getElementById("personLinkedin");
 const personLocationEl = document.getElementById("personLocation");
+const personAddressEl = document.getElementById("personAddress");
+const personZipEl = document.getElementById("personZip");
+const personGenderEl = document.getElementById("personGender");
+const personEthnicityEl = document.getElementById("personEthnicity");
+const personDisabilityEl = document.getElementById("personDisability");
+const personVeteranEl = document.getElementById("personVeteran");
+const personCitizenshipEl = document.getElementById("personCitizenship");
+const personWorkAuthorizedEl = document.getElementById("personWorkAuthorized");
+const personSponsorshipEl = document.getElementById("personSponsorship");
+const personHispanicLatinoEl = document.getElementById("personHispanicLatino");
+const personAutofillExtrasEl = document.getElementById("personAutofillExtras");
 const personResumePrefixEl = document.getElementById("personResumePrefix");
 const personSignatureTitleEl = document.getElementById("personSignatureTitle");
 const personMasterResumeEl = document.getElementById("personMasterResume");
@@ -93,6 +104,7 @@ const queueListEl = document.getElementById("queueList");
 const batchStartBtn = document.getElementById("batchStart");
 const batchPauseBtn = document.getElementById("batchPause");
 const batchSkipBtn = document.getElementById("batchSkip");
+const forceSaveChatgptBtn = document.getElementById("forceSaveChatgpt");
 const batchStopBtn = document.getElementById("batchStop");
 const filterGeneralBtn = document.getElementById("filterGeneral");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
@@ -225,6 +237,43 @@ function populateProfileSelect(selectedId) {
   syncDeleteButton();
 }
 
+function extrasToText(extras) {
+  if (!extras || typeof extras !== "object") return "";
+  return Object.entries(extras)
+    .filter(([k, v]) => String(k).trim() && String(v).trim())
+    .map(([k, v]) => `${k} = ${v}`)
+    .join("\n");
+}
+
+function textToExtras(text) {
+  const out = {};
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const m = trimmed.match(/^([^=:]+)\s*[=:]\s*(.+)$/);
+    if (!m) continue;
+    const key = m[1].trim().toLowerCase();
+    const value = m[2].trim();
+    if (key && value) out[key] = value;
+  }
+  return out;
+}
+
+function setSelectValue(el, value) {
+  if (!el) return;
+  const v = String(value || "");
+  el.value = v;
+  if (el.value !== v && v) {
+    // Match by option text when value attribute differs.
+    for (const opt of el.options) {
+      if (opt.value === v || opt.textContent.trim() === v) {
+        el.value = opt.value;
+        break;
+      }
+    }
+  }
+}
+
 function fillPersonForm(person) {
   editingPersonId = person?.id || null;
   personLabelEl.value = person?.label || "";
@@ -233,6 +282,17 @@ function fillPersonForm(person) {
   personPhoneEl.value = person?.phone || "";
   personLinkedinEl.value = person?.linkedin || "";
   personLocationEl.value = person?.location || "";
+  personAddressEl.value = person?.address || "";
+  personZipEl.value = person?.zip || "";
+  setSelectValue(personGenderEl, person?.gender);
+  setSelectValue(personEthnicityEl, person?.ethnicity);
+  setSelectValue(personDisabilityEl, person?.disability);
+  setSelectValue(personVeteranEl, person?.veteran);
+  setSelectValue(personCitizenshipEl, person?.citizenship);
+  setSelectValue(personWorkAuthorizedEl, person?.workAuthorized);
+  setSelectValue(personSponsorshipEl, person?.sponsorship);
+  setSelectValue(personHispanicLatinoEl, person?.hispanicLatino);
+  personAutofillExtrasEl.value = extrasToText(person?.autofillExtras);
   personResumePrefixEl.value = person?.resumeFilePrefix || "";
   personSignatureTitleEl.value = person?.signatureTitle || "";
   personMasterResumeEl.value = person?.masterResume || "";
@@ -257,6 +317,17 @@ function readPersonForm({ asNew = false } = {}) {
     phone: personPhoneEl.value.trim(),
     linkedin: personLinkedinEl.value.trim(),
     location: personLocationEl.value.trim(),
+    address: personAddressEl.value.trim(),
+    zip: personZipEl.value.trim(),
+    gender: personGenderEl.value.trim(),
+    ethnicity: personEthnicityEl.value.trim(),
+    disability: personDisabilityEl.value.trim(),
+    veteran: personVeteranEl.value.trim(),
+    citizenship: personCitizenshipEl.value.trim(),
+    workAuthorized: personWorkAuthorizedEl.value.trim(),
+    sponsorship: personSponsorshipEl.value.trim(),
+    hispanicLatino: personHispanicLatinoEl.value.trim(),
+    autofillExtras: textToExtras(personAutofillExtrasEl.value),
     resumeFilePrefix: personResumePrefixEl.value.trim() || "Resume",
     signatureTitle: personSignatureTitleEl.value.trim(),
     masterResume: personMasterResumeEl.value,
@@ -384,7 +455,7 @@ function updateCsvSummaryFromQueue() {
   const genTotal = allUsJobsCache.length - liTotal;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
-  const errors = queueCache.filter((j) => j.status === "error").length;
+  const errors = queueCache.filter((j) => j.status === "error" || j.status === "failed").length;
   const filterLabel =
     channelFilter === "linkedin" ? "LI only" : channelFilter === "all" ? "All" : "General only";
   csvSummaryEl.textContent = `${queueCache.length} in queue (${filterLabel}) · US total ${allUsJobsCache.length} (General ${genTotal} / LI ${liTotal}) · ${done} done · ${pending} pending · ${errors} error · batch: ${batchState}`;
@@ -410,6 +481,7 @@ function mergeStatusFromQueue(jobs, previousQueue) {
     return {
       ...j,
       status: prev.status || "pending",
+      attempts: prev.attempts || 0,
       jobDir: prev.jobDir,
       error: prev.error
     };
@@ -445,6 +517,7 @@ function badgeClass(status) {
   if (s === "running") return "badge badge-running";
   if (s === "skipped") return "badge badge-skipped";
   if (s === "error") return "badge badge-error";
+  if (s === "failed") return "badge badge-failed";
   if (s === "paused") return "badge badge-paused";
   return "badge badge-pending";
 }
@@ -537,22 +610,48 @@ async function onCsvSelected(file) {
     const text = await file.text();
     const result = parseJobsCsv(text);
     allUsJobsCache = result.usJobs.map((j) => ({ ...j, status: "pending" }));
+    // Fresh upload: do not carry over done/error from a previous CSV.
+    queueCache = [];
     await chrome.storage.local.set({
       batch_state: "idle",
       csv_file_name: file.name,
       csv_total_rows: result.totalRows,
       csv_dropped_non_us: result.droppedNonUs,
       [ALL_US_JOBS_KEY]: allUsJobsCache,
-      [JOB_CHANNEL_FILTER_KEY]: channelFilter || DEFAULT_CHANNEL_FILTER
+      [JOB_CHANNEL_FILTER_KEY]: channelFilter || DEFAULT_CHANNEL_FILTER,
+      [QUEUE_KEY]: []
     });
     batchState = "idle";
     await applyChannelFilter(channelFilter || DEFAULT_CHANNEL_FILTER);
     setStatus(
       `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (General ${result.generalCount} / LI ${result.linkedInCount}). Filter: ${channelFilter}.`
     );
+
+    // File generation is fully automatic after upload — Start is only needed to resume.
+    if (queueCache.some((j) => j.status === "pending" || j.status === "error" || j.status === "failed")) {
+      await autoStartBatchAfterCsv();
+    }
   } catch (err) {
     setStatus(`CSV parse failed: ${String(err.message || err)}`);
   }
+}
+
+async function autoStartBatchAfterCsv() {
+  const person = await getActivePerson();
+  if (!person.promptTemplate?.includes("{JD}")) {
+    setStatus(
+      `CSV loaded (${queueCache.length} in queue). Add {JD} to the tailor prompt, Save person, then click Start.`
+    );
+    return;
+  }
+  if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
+    setStatus(
+      `CSV loaded (${queueCache.length} in queue). Upload/paste master resume, Save person, then click Start.`
+    );
+    return;
+  }
+  setStatus(`CSV loaded — starting file generation for ${queueCache.length} job(s)…`);
+  await sendBatch("batch_start");
 }
 
 async function openJob(job) {
@@ -665,6 +764,17 @@ async function savePerson({ asNew = false } = {}) {
         phone: person.phone,
         linkedin: person.linkedin,
         location: person.location,
+        address: person.address,
+        zip: person.zip,
+        gender: person.gender,
+        ethnicity: person.ethnicity,
+        disability: person.disability,
+        veteran: person.veteran,
+        citizenship: person.citizenship,
+        workAuthorized: person.workAuthorized,
+        sponsorship: person.sponsorship,
+        hispanicLatino: person.hispanicLatino,
+        autofillExtras: person.autofillExtras,
         masterResume: person.masterResume,
         promptTemplate: person.promptTemplate,
         coverLetterPrompt: person.coverLetterPrompt,
@@ -955,6 +1065,20 @@ batchStartBtn.addEventListener("click", () => sendBatch("batch_start"));
 batchPauseBtn.addEventListener("click", () => sendBatch("batch_pause"));
 batchSkipBtn.addEventListener("click", () => sendBatch("batch_skip"));
 batchStopBtn.addEventListener("click", () => sendBatch("batch_stop"));
+forceSaveChatgptBtn.addEventListener("click", async () => {
+  setStatus("Reading resume JSON from ChatGPT…");
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "force_save_chatgpt_resume" });
+    if (!res?.ok) {
+      setStatus(res?.error || "Force-save failed.");
+      return;
+    }
+    setStatus(res.status || "Force-save started.");
+    await loadSettings();
+  } catch (err) {
+    setStatus(`Force-save failed: ${String(err?.message || err)}`);
+  }
+});
 
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);

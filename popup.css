@@ -374,6 +374,11 @@ input[type="file"] {
   color: #fca5a5;
 }
 
+.badge-failed {
+  background: #450a0a;
+  color: #f87171;
+}
+
 .badge-paused {
   background: #3b0764;
   color: #e9d5ff;
