@@ -10,6 +10,7 @@ import {
   resumeJsonToHtml,
   extractResumeJson,
   isUsableResumeJson,
+  isMinimallySaveableResume,
   isRichResumeJson,
   resumeJsonLooksComplete,
   sanitizeResumeData,
@@ -238,7 +239,7 @@ async function tryRecognizeResumeOnPage(tabId) {
   if (typeof tabId !== "number") return null;
 
   const deep = await deepHarvestResumeFromTab(tabId);
-  if (isUsableResumeJson(deep)) {
+  if (isUsableResumeJson(deep) || isMinimallySaveableResume(deep)) {
     lastUsableResumeData = deep;
     await chrome.storage.local
       .set({
@@ -349,6 +350,22 @@ function describeUnusableResume(rawText, data) {
       )
     : 0;
   if (bullets < 4) missing.push(`bullets(${bullets}<4)`);
+  const avg =
+    bullets > 0
+      ? Math.round(
+          (Array.isArray(data.experience)
+            ? data.experience.reduce(
+                (n, j) =>
+                  n +
+                  (Array.isArray(j?.bullets)
+                    ? j.bullets.reduce((m, b) => m + String(b || "").trim().length, 0)
+                    : 0),
+                0
+              )
+            : 0) / bullets
+        )
+      : 0;
+  if (avg > 0 && avg < 40) missing.push(`avgBulletLen(${avg}<40)`);
   if (missing.length) {
     return `Resume JSON recognized but incomplete for PDF (${missing.join(", ")}). Preview: "${preview}${preview.length >= 160 ? "…" : ""}"`;
   }
@@ -2400,13 +2417,15 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
   const { blocksBefore, latestBefore } = await chatgptSendPrompt(tabId, prompt, startNewChat);
 
-  const timeoutMs = 6 * 60 * 1000;
+  // Active polling budget (rate-limit cooldowns do NOT count against this).
+  const timeoutMs = expectResumeJson ? 12 * 60 * 1000 : 4 * 60 * 1000;
   // Consecutive no-growth polls (≈1s each) after streaming stops before we give
   // up on the current answer and let the caller re-prompt.
   const SETTLE_HITS = 6;
   /** Extra pause after stream ends so the full JSON paints into the DOM. */
   const POST_STREAM_DELAY_MS = 2500;
   const start = Date.now();
+  let pausedMs = 0;
   let lastText = "";
   let sawGeneration = false;
   let stableHits = 0;
@@ -2427,7 +2446,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       .catch(() => {});
   }
 
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() - start - pausedMs < timeoutMs) {
     await sleep(1000);
     await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
 
@@ -2439,7 +2458,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     try {
       const rate = await detectChatGptRateLimit(tabId);
       if (rate.limited) {
+        const pauseStart = Date.now();
         await waitOutChatGptRateLimit(tabId);
+        pausedMs += Date.now() - pauseStart;
         continue;
       }
     } catch (rateErr) {
@@ -2458,7 +2479,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         ]);
         const readyAt = Number(stored.chatgpt_json_ready_at || stored.chatgpt_harvested_at || 0);
         const harvested = stored.chatgpt_harvested_resume;
-        if (readyAt >= start && isUsableResumeJson(harvested)) {
+        if (readyAt >= start && (isUsableResumeJson(harvested) || isMinimallySaveableResume(harvested))) {
           lastUsableResumeData = harvested;
           await setStatus(
             `Resume JSON ready flag set (${harvested.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
@@ -2497,10 +2518,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     if (expectResumeJson && sawGeneration && !state.generating && !postStreamDelayDone) {
       postStreamDelayDone = true;
       await setStatus(`${label} — stream finished, waiting ${POST_STREAM_DELAY_MS / 1000}s for JSON to settle…`);
+      const settlePauseStart = Date.now();
       await new Promise((r) => setTimeout(r, POST_STREAM_DELAY_MS));
+      pausedMs += Date.now() - settlePauseStart;
       await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
       const settled = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 12000 });
-      if (isUsableResumeJson(settled)) {
+      if (isUsableResumeJson(settled) || isMinimallySaveableResume(settled)) {
         await setStatus(
           `Resume JSON recognized after settle (${settled.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
         );
@@ -2540,7 +2563,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       }
     }
 
-    const elapsedSec = Math.round((Date.now() - start) / 1000);
+    const elapsedSec = Math.round((Date.now() - start - pausedMs) / 1000);
     let parsed = null;
     if (expectResumeJson) {
       // Recognize from BOTH the structured poll parse and a fresh parse of raw text.
@@ -2589,9 +2612,10 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       );
     }
     const usable = expectResumeJson && isUsableResumeJson(parsed);
+    const softOk = expectResumeJson && !usable && isMinimallySaveableResume(parsed);
     const rich = usable && isRichResumeJson(parsed);
     const looksComplete = usable && resumeJsonLooksComplete(parsed);
-    if (usable) {
+    if (usable || softOk) {
       lastUsableResumeData = parsed;
       await chrome.storage.local
         .set({
@@ -2606,7 +2630,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     if (elapsedSec > 0 && elapsedSec % 2 === 0) {
       const waitHint = expectResumeJson
-        ? usable
+        ? usable || softOk
           ? `, JSON ready (${parsed?.experience?.length || "?"} jobs)${
               state.generating ? " — GPT still busy, saving anyway" : " — saving files"
             }`
@@ -2643,6 +2667,13 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         `Resume JSON recognized (${parsed.name || "ok"}, ${parsed.experience?.length || 0} jobs)${
           state.generating ? " while GPT still busy" : ""
         }. Saving jd.txt + resume + cover letter…`
+      );
+      return JSON.stringify(parsed);
+    }
+    // Soft acceptance only after stream settles (avoid mid-stream thin repairs).
+    if (expectResumeJson && softOk && (!state.generating || postStreamDelayDone)) {
+      await setStatus(
+        `Resume JSON accepted (soft bar, ${parsed.experience?.length || 0} jobs). Saving files…`
       );
       return JSON.stringify(parsed);
     }
@@ -2733,10 +2764,19 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     return lastText;
   }
   if (expectResumeJson) {
-    const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 8000 });
-    if (isUsableResumeJson(rescued)) return JSON.stringify(rescued);
+    const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 15000 });
+    if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
+      return JSON.stringify(rescued);
+    }
+    for (let i = 0; i < 4; i += 1) {
+      const deep = await tryRecognizeResumeOnPage(tabId);
+      if (isUsableResumeJson(deep) || isMinimallySaveableResume(deep)) {
+        return JSON.stringify(deep);
+      }
+      await sleep(1200);
+    }
   }
-  if (expectResumeJson && isUsableResumeJson(lastUsableResumeData)) {
+  if (expectResumeJson && (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData))) {
     return JSON.stringify(lastUsableResumeData);
   }
 
@@ -3000,10 +3040,14 @@ async function runAutoJob(jobMeta) {
     }
 
     resumeData = extractResumeJson(rawOutput);
-    if (!isUsableResumeJson(resumeData) && isUsableResumeJson(lastUsableResumeData)) {
+    if (
+      !isUsableResumeJson(resumeData) &&
+      !isMinimallySaveableResume(resumeData) &&
+      (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData))
+    ) {
       resumeData = lastUsableResumeData;
     }
-    if (!isUsableResumeJson(resumeData)) {
+    if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
       await setStatus(
         `Row ${rowLabel}${jobMeta.companyName}: post-reply settle — checking JSON ready flag…`
       );
@@ -3011,15 +3055,17 @@ async function runAutoJob(jobMeta) {
         since: promptStartedAt,
         timeoutMs: 20000
       });
-      if (isUsableResumeJson(harvested)) resumeData = harvested;
+      if (isUsableResumeJson(harvested) || isMinimallySaveableResume(harvested)) {
+        resumeData = harvested;
+      }
     }
     // JSON markers on screen but still unusable → harvest harder, do NOT re-prompt
     // (re-prompts push the good JSON up the chat and make recognition worse).
-    if (!isUsableResumeJson(resumeData)) {
+    if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
       const deep = await tryRecognizeResumeOnPage(tab.id);
-      if (isUsableResumeJson(deep)) resumeData = deep;
+      if (isUsableResumeJson(deep) || isMinimallySaveableResume(deep)) resumeData = deep;
     }
-    if (isUsableResumeJson(resumeData)) break;
+    if (isUsableResumeJson(resumeData) || isMinimallySaveableResume(resumeData)) break;
 
     // Only re-prompt when there is no resume-shaped JSON visible at all.
     const pageHasJsonMarkers = /"experience"|"profile"|"technicalSummary"/.test(
@@ -3033,33 +3079,58 @@ async function runAutoJob(jobMeta) {
     }
   }
 
-  if (!isUsableResumeJson(resumeData)) {
+  if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     const lastChance = await waitForJsonReadyFlag(tab.id, {
       since: promptStartedAt,
-      timeoutMs: 15000
+      timeoutMs: 20000
     });
-    if (isUsableResumeJson(lastChance)) resumeData = lastChance;
+    if (isUsableResumeJson(lastChance) || isMinimallySaveableResume(lastChance)) {
+      resumeData = lastChance;
+    }
   }
-  if (!isUsableResumeJson(resumeData) && isUsableResumeJson(lastUsableResumeData)) {
+  if (
+    !isUsableResumeJson(resumeData) &&
+    !isMinimallySaveableResume(resumeData) &&
+    (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData))
+  ) {
     resumeData = lastUsableResumeData;
   }
-  if (!isUsableResumeJson(resumeData)) {
+  if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     try {
       const stored = await chrome.storage.local.get([
         "chatgpt_harvested_resume",
         "last_resume_json"
       ]);
-      if (isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+      if (isUsableResumeJson(stored.chatgpt_harvested_resume) || isMinimallySaveableResume(stored.chatgpt_harvested_resume)) {
         resumeData = stored.chatgpt_harvested_resume;
-      } else if (isUsableResumeJson(stored.last_resume_json)) {
+      } else if (isUsableResumeJson(stored.last_resume_json) || isMinimallySaveableResume(stored.last_resume_json)) {
         resumeData = stored.last_resume_json;
       }
     } catch {
       // ignore
     }
   }
+  // JSON visibly on screen but still not accepted — keep deep-harvesting before ERROR.
+  if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
+    await setStatus(
+      `Row ${rowLabel}${jobMeta.companyName}: JSON still not accepted — final deep harvest…`
+    );
+    for (let i = 0; i < 5; i += 1) {
+      const deep = await tryRecognizeResumeOnPage(tab.id);
+      if (isUsableResumeJson(deep) || isMinimallySaveableResume(deep)) {
+        resumeData = deep;
+        break;
+      }
+      const fromRaw = extractResumeJson(rawOutput);
+      if (isUsableResumeJson(fromRaw) || isMinimallySaveableResume(fromRaw)) {
+        resumeData = fromRaw;
+        break;
+      }
+      await sleep(1500);
+    }
+  }
 
-  if (!isUsableResumeJson(resumeData)) {
+  if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     throw new Error(describeUnusableResume(rawOutput, resumeData));
   }
 

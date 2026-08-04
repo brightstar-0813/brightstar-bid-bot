@@ -506,9 +506,28 @@ export function isUsableResumeJson(data) {
   if (!hasDetailedRole) return false;
 
   if (totalExperienceBullets(data) < 4) return false;
-  // Reject obviously thin one-liners even if count is high.
-  if (averageBulletLength(data) < 55) return false;
+  // Soft floor — BA/analyst bullets can be shorter than deep Salesforce essays.
+  // (Was 55; that rejected finished JSON and looked like a "parse" failure after waits.)
+  if (averageBulletLength(data) < 40) return false;
   return true;
+}
+
+/**
+ * Last-chance bar when JSON is clearly on the page but strict gates failed.
+ * Still rejects schema stubs / empty shells.
+ */
+export function isMinimallySaveableResume(data) {
+  if (!data || typeof data !== "object") return false;
+  if (!String(data.name || "").trim()) return false;
+  if (looksLikeSchemaPlaceholderResume(data)) return false;
+  const jobs = Array.isArray(data.experience) ? data.experience : [];
+  if (jobs.length < 1) return false;
+  const bullets = experienceBulletTexts(data).filter((b) => String(b).trim().length >= 25);
+  if (bullets.length < 4) return false;
+  const hasBody =
+    String(data.profile || "").trim().length >= 40 ||
+    (Array.isArray(data.technicalSummary) && data.technicalSummary.filter(Boolean).length >= 2);
+  return hasBody;
 }
 
 /**
