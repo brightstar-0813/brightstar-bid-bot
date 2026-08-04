@@ -545,6 +545,27 @@
         .replace(/^(json|JSON)\s*\r?\n/, "")
         .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
 
+      const looseFix = (s) => {
+        let t = String(s || "");
+        for (let i = 0; i < 8; i += 1) {
+          const n = t.replace(/,\s*([}\]])/g, "$1");
+          if (n === t) break;
+          t = n;
+        }
+        return t;
+      };
+      const parseOne = (s) => {
+        try {
+          return JSON.parse(s);
+        } catch {
+          try {
+            return JSON.parse(looseFix(s));
+          } catch {
+            return null;
+          }
+        }
+      };
+
       let bestLocalObj = null;
       let bestLocal = -1;
       const consider = (obj) => {
@@ -556,28 +577,16 @@
         }
       };
       for (const slice of extractBalanced(normalized)) {
-        try {
-          consider(JSON.parse(slice));
-        } catch {
-          // continue
-        }
+        consider(parseOne(slice));
       }
-      try {
+      {
         const start = normalized.indexOf("{");
         const end = normalized.lastIndexOf("}");
-        if (start >= 0 && end > start) consider(JSON.parse(normalized.slice(start, end + 1)));
-      } catch {
-        // continue
+        if (start >= 0 && end > start) consider(parseOne(normalized.slice(start, end + 1)));
       }
       if (!bestLocalObj || bestLocal < 10000) {
         const closed = closeTruncated(normalized);
-        if (closed) {
-          try {
-            consider(JSON.parse(closed));
-          } catch {
-            // ignore
-          }
-        }
+        if (closed) consider(parseOne(closed));
       }
       return bestLocalObj;
     };
@@ -597,20 +606,94 @@
     return best;
   }
 
+  /** Click ChatGPT code-block Copy buttons and read clipboard — virtualized
+   * editors often only expose visible lines via innerText. */
+  async function harvestFromCopyButtons() {
+    const texts = [];
+    const buttons = Array.from(document.querySelectorAll("button"));
+    for (const btn of buttons.slice(0, 40)) {
+      const label = `${btn.getAttribute("aria-label") || ""} ${btn.textContent || ""}`.toLowerCase();
+      if (!/\bcopy\b|clipboard/.test(label)) continue;
+      const nearby =
+        btn.closest("pre, [class*='code'], [class*='Code'], [class*='group'], [class*='overflow']") ||
+        btn.parentElement;
+      const nearbyText = nearby ? nearby.innerText || nearby.textContent || "" : "";
+      if (nearbyText && !nearbyText.includes('"experience"') && nearbyText.length > 200) continue;
+      try {
+        btn.click();
+        await new Promise((r) => setTimeout(r, 120));
+        const clip = await navigator.clipboard.readText();
+        if (clip && clip.includes('"experience"') && clip.length > 200) {
+          texts.push(clip.slice(0, 500000));
+        }
+      } catch {
+        // clipboard may be blocked
+      }
+    }
+    return texts;
+  }
+
   async function persistHarvest({ allowStreaming = false } = {}) {
-    // A half-streamed object parses (the extractor repairs truncated JSON) but
-    // is missing roles — never publish it as the finished answer.
-    if (!allowStreaming && isStreaming()) {
-      await chrome.storage.local.set({ chatgpt_json_ready: false }).catch(() => {});
+    const streaming = isStreaming();
+    let best = harvestResumeFromPage();
+    // Clipboard copy only when DOM harvest looks thin (virtualized code blocks)
+    // or the user/manual path asked for a force save — avoid clobbering clipboard
+    // on every quiet poll.
+    const jobs = Array.isArray(best?.experience) ? best.experience.length : 0;
+    const needCopy =
+      allowStreaming ||
+      !best ||
+      jobs < 2 ||
+      (streaming && jobs < 3);
+    if (needCopy) {
+      let copied = [];
+      try {
+        copied = await harvestFromCopyButtons();
+      } catch {
+        copied = [];
+      }
+      for (const clip of copied) {
+        const probe = (() => {
+          try {
+            const start = clip.indexOf("{");
+            const end = clip.lastIndexOf("}");
+            if (start < 0 || end <= start) return null;
+            let s = clip.slice(start, end + 1);
+            for (let i = 0; i < 8; i += 1) {
+              const n = s.replace(/,\s*([}\]])/g, "$1");
+              if (n === s) break;
+              s = n;
+            }
+            return JSON.parse(s);
+          } catch {
+            return null;
+          }
+        })();
+        if (
+          probe &&
+          Array.isArray(probe.experience) &&
+          probe.experience.length > (best?.experience?.length || 0)
+        ) {
+          best = probe;
+        }
+      }
+    }
+    if (!best || !Array.isArray(best.experience) || !best.experience.length) {
+      if (streaming && !allowStreaming) {
+        return null;
+      }
       return null;
     }
-    const data = harvestResumeFromPage();
-    if (!data || !Array.isArray(data.experience) || !data.experience.length) return null;
+
+    const data = best;
 
     // Lightweight "usable resume" check (content script cannot import resume-json.js).
     const nameOk = Boolean(String(data.name || "").trim());
     const profile = String(data.profile || "").trim();
     const summary = Array.isArray(data.technicalSummary) ? data.technicalSummary.filter(Boolean).length : 0;
+    const skills = Array.isArray(data.skills) ? data.skills.filter(Boolean).length : 0;
+    const certs = Array.isArray(data.certifications) ? data.certifications.filter(Boolean).length : 0;
+    const edu = Array.isArray(data.education) ? data.education.length : 0;
     const bullets = data.experience.reduce(
       (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
       0
@@ -628,21 +711,44 @@
           Array.isArray(j?.bullets) &&
           j.bullets.filter((b) => String(b || "").trim().length > 25).length >= 2
       );
+    // Tail sections or a large experience block ⇒ past mid-stream truncation.
+    const looksComplete =
+      usable &&
+      (skills >= 1 ||
+        certs >= 1 ||
+        edu >= 1 ||
+        (data.experience.length >= 3 && bullets >= 8 && profile.length >= 60) ||
+        (data.experience.length >= 2 && bullets >= 10 && profile.length >= 40));
 
-    await chrome.storage.local.set({
-      chatgpt_harvested_resume: data,
-      chatgpt_harvested_at: Date.now(),
-      chatgpt_harvested_jobs: data.experience.length,
-      // Explicit ready flag so the background can advance to file generation
-      // without re-prompting ChatGPT.
-      chatgpt_json_ready: Boolean(usable),
-      chatgpt_json_ready_at: usable ? Date.now() : 0
-    });
+    // While streaming, only raise ready when the object looks finished.
+    // Manual save (allowStreaming) accepts any usable object.
+    const ready = allowStreaming
+      ? Boolean(usable)
+      : streaming
+        ? Boolean(looksComplete)
+        : Boolean(usable);
+
+    if (!ready && streaming && !allowStreaming && !usable) {
+      return null;
+    }
+
+    // Always persist a usable object so background can read it even if ready=false.
+    if (usable || ready) {
+      await chrome.storage.local.set({
+        chatgpt_harvested_resume: data,
+        chatgpt_harvested_at: Date.now(),
+        chatgpt_harvested_jobs: data.experience.length,
+        chatgpt_json_ready: Boolean(ready),
+        chatgpt_json_ready_at: ready ? Date.now() : 0,
+        last_resume_json: data
+      });
+    }
     return data;
   }
 
   // After streaming stops, wait briefly for the DOM to finish painting the
   // full JSON, then harvest and raise the ready flag.
+  // Also harvest WHILE streaming — GPT often stays "busy" after JSON is done.
   let wasStreaming = false;
   let settleTimer = null;
   const watchStreaming = () => {
@@ -653,7 +759,9 @@
         clearTimeout(settleTimer);
         settleTimer = null;
       }
-      chrome.storage.local.set({ chatgpt_json_ready: false }).catch(() => {});
+      // Do NOT clear chatgpt_json_ready here — that raced with recognition and
+      // blocked file save while the stop button lingered after complete JSON.
+      persistHarvest().catch(() => {});
       return;
     }
     if (wasStreaming && !settleTimer) {

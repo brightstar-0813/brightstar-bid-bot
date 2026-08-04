@@ -11,6 +11,8 @@ import {
   extractResumeJson,
   isUsableResumeJson,
   isRichResumeJson,
+  resumeJsonLooksComplete,
+  sanitizeResumeData,
   looksLikeSchemaPlaceholderResume,
   describeResumeGaps
 } from "./resume-json.js";
@@ -23,9 +25,9 @@ const APPLY_HISTORY_KEY = "apply_history";
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
 /** Retries of the resume prompt inside one chat before the row is failed.
- * Keep at 1 — DOM recognition must win; automatic re-prompts just hide the
- * already-generated JSON further up the chat and make harvest harder. */
-const MAX_JSON_ATTEMPTS = 1;
+ * 2 = one clean re-prompt when GPT returned prose/HTML with no JSON on page.
+ * When JSON is already visible we harvest instead of re-prompting. */
+const MAX_JSON_ATTEMPTS = 2;
 
 const JSON_RETRY_PROMPT = `Your previous reply was not usable (it looked like a schema stub or incomplete JSON). Return ONLY one complete valid resume JSON object with REAL tailored content.
 
@@ -140,6 +142,26 @@ async function deepHarvestResumeFromTab(tabId) {
 
         let best = null;
         let bestScore = -1;
+        const looseFix = (s) => {
+          let t = String(s || "");
+          for (let i = 0; i < 8; i += 1) {
+            const n = t.replace(/,\s*([}\]])/g, "$1");
+            if (n === t) break;
+            t = n;
+          }
+          return t;
+        };
+        const tryParse = (s) => {
+          try {
+            return JSON.parse(s);
+          } catch {
+            try {
+              return JSON.parse(looseFix(s));
+            } catch {
+              return null;
+            }
+          }
+        };
         for (const raw of texts) {
           if (!raw.includes('"experience"')) continue;
           const normalized = raw
@@ -148,30 +170,27 @@ async function deepHarvestResumeFromTab(tabId) {
             .replace(/^```(?:json|JSON)?\s*/i, "")
             .replace(/```\s*$/i, "");
           for (const slice of extractBalanced(normalized)) {
-            try {
-              const obj = JSON.parse(slice);
-              const s = scoreObj(obj);
-              if (s > bestScore) {
-                best = obj;
-                bestScore = s;
-              }
-            } catch {
-              // continue
+            const obj = tryParse(slice);
+            if (!obj) continue;
+            const s = scoreObj(obj);
+            if (s > bestScore) {
+              best = obj;
+              bestScore = s;
             }
           }
-          try {
+          {
             const a = normalized.indexOf("{");
             const b = normalized.lastIndexOf("}");
             if (a >= 0 && b > a) {
-              const obj = JSON.parse(normalized.slice(a, b + 1));
-              const s = scoreObj(obj);
-              if (s > bestScore) {
-                best = obj;
-                bestScore = s;
+              const obj = tryParse(normalized.slice(a, b + 1));
+              if (obj) {
+                const s = scoreObj(obj);
+                if (s > bestScore) {
+                  best = obj;
+                  bestScore = s;
+                }
               }
             }
-          } catch {
-            // ignore
           }
         }
         return best;
@@ -281,14 +300,13 @@ async function waitForJsonReadyFlag(tabId, { since = 0, timeoutMs = 20000 } = {}
       const stored = await chrome.storage.local.get([
         "chatgpt_json_ready",
         "chatgpt_json_ready_at",
-        "chatgpt_harvested_resume"
+        "chatgpt_harvested_resume",
+        "chatgpt_harvested_at"
       ]);
       const readyAt = Number(stored.chatgpt_json_ready_at || 0);
-      if (
-        stored.chatgpt_json_ready &&
-        readyAt >= since &&
-        isUsableResumeJson(stored.chatgpt_harvested_resume)
-      ) {
+      const harvestedAt = Number(stored.chatgpt_harvested_at || 0);
+      const stamp = Math.max(readyAt, harvestedAt);
+      if (stamp >= since && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
         lastUsableResumeData = stored.chatgpt_harvested_resume;
         return stored.chatgpt_harvested_resume;
       }
@@ -1100,8 +1118,14 @@ function coverLetterTextToParagraphs(raw) {
       .replace(/&nbsp;/g, " ");
   }
 
-  // Strip markdown code fences if present.
+  // Strip markdown code fences / links ChatGPT sometimes injects.
   s = s.replace(/```[a-z]*\s*/gi, "").replace(/```/g, "");
+  s = s.replace(/\[([^\]]*)\]\(([^)]+)\)/g, "$1");
+  s = s.replace(/https?:\/\/[^\s)]+/gi, (url) => {
+    // Keep bare URLs out of the letter body — signature already has LinkedIn.
+    if (/linkedin\.com/i.test(url) || /mailto:/i.test(url)) return "";
+    return url;
+  });
 
   return s
     .split(/\n\s*\n+/)
@@ -1121,8 +1145,40 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
     if (nameLc && lc === nameLc) return false; // trailing full-name line
     if (firstNameLc && lc === firstNameLc) return false; // trailing first-name line
     if (/^(email|phone|linkedin|mobile|tel)\s*:/i.test(p)) return false; // contact echoes
+    // Drop accidental JSON / resume dumps into the letter body.
+    if (/^\s*\{/.test(p) && /"experience"|"technicalSummary"/i.test(p)) return false;
+    if (/^["']?name["']?\s*:/i.test(p)) return false;
     return true;
   });
+}
+
+function looksLikeCoverLetterBody(text) {
+  const s = String(text || "").trim();
+  if (s.length < 120) return false;
+  if (/^\s*\{/.test(s) && /"experience"|"technicalSummary"/i.test(s)) return false;
+  if (/dear\s+/i.test(s) || /hiring\s+(manager|team)/i.test(s)) return true;
+  // Plain multi-paragraph letter without salutation still OK if long enough.
+  return s.length >= 220 && !/"experience"\s*:/.test(s);
+}
+
+/** Prefer person-profile contact over ChatGPT-mangled JSON fields. */
+async function finalizeResumeData(resumeData) {
+  let data = sanitizeResumeData(resumeData) || resumeData;
+  if (!data || typeof data !== "object") return data;
+  try {
+    const contact = await getAutofillContact();
+    data = {
+      ...data,
+      name: contact.name || data.name,
+      email: contact.email || data.email,
+      phone: contact.phone || data.phone,
+      linkedin: contact.linkedin || data.linkedin,
+      location: contact.location || data.location
+    };
+  } catch {
+    // keep sanitized data
+  }
+  return sanitizeResumeData(data);
 }
 
 // Replace every markdown link `[text](url)` with its destination URL.
@@ -1917,7 +1973,28 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         const normalized = normalizeCandidate(raw);
         let best = null;
         let bestScore = -1;
+        const looseFix = (s) => {
+          let t = String(s || "");
+          for (let i = 0; i < 8; i += 1) {
+            const n = t.replace(/,\s*([}\]])/g, "$1");
+            if (n === t) break;
+            t = n;
+          }
+          return t;
+        };
+        const tryParse = (s) => {
+          try {
+            return JSON.parse(s);
+          } catch {
+            try {
+              return JSON.parse(looseFix(s));
+            } catch {
+              return null;
+            }
+          }
+        };
         const consider = (obj) => {
+          if (!obj || typeof obj !== "object") return;
           const s = scoreObj(obj);
           if (s > bestScore) {
             best = obj;
@@ -1925,28 +2002,16 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
           }
         };
         for (const slice of extractBalancedObjects(normalized)) {
-          try {
-            consider(JSON.parse(slice));
-          } catch {
-            // continue
-          }
+          consider(tryParse(slice));
         }
-        try {
+        {
           const start = normalized.indexOf("{");
           const end = normalized.lastIndexOf("}");
-          if (start >= 0 && end > start) consider(JSON.parse(normalized.slice(start, end + 1)));
-        } catch {
-          // continue
+          if (start >= 0 && end > start) consider(tryParse(normalized.slice(start, end + 1)));
         }
         if (!best || bestScore < 10000) {
           const closed = closeTruncated(normalized);
-          if (closed) {
-            try {
-              consider(JSON.parse(closed));
-            } catch {
-              // ignore
-            }
-          }
+          if (closed) consider(tryParse(closed));
         }
         return best;
       };
@@ -2046,19 +2111,58 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
       // Large Matthew-style resumes are ~15–30KB JSON. Shipping 200KB of raw page
       // text + the object through executeScript routinely times out the poller —
       // which is exactly when the user can SEE the JSON but files never generate.
-      // When we already recognized a solid resume object, only send a tiny preview.
+      // Persist into extension storage HERE so recognition survives return timeouts.
       const recognizedWell =
         resumeData &&
         Array.isArray(resumeData.experience) &&
         resumeData.experience.length >= 1 &&
-        scoreObj(resumeData) >= 20000;
+        scoreObj(resumeData) >= 15000;
+
+      if (recognizedWell && resumeData) {
+        try {
+          const jobs = resumeData.experience.length;
+          const bullets = Array.isArray(resumeData.experience)
+            ? resumeData.experience.reduce(
+                (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
+                0
+              )
+            : 0;
+          const profile = String(resumeData.profile || "").trim();
+          const skills = Array.isArray(resumeData.skills) ? resumeData.skills.length : 0;
+          const certs = Array.isArray(resumeData.certifications)
+            ? resumeData.certifications.length
+            : 0;
+          const edu = Array.isArray(resumeData.education) ? resumeData.education.length : 0;
+          const looksComplete =
+            Boolean(String(resumeData.name || "").trim()) &&
+            bullets >= 4 &&
+            (profile.length >= 40 ||
+              (Array.isArray(resumeData.technicalSummary) &&
+                resumeData.technicalSummary.filter(Boolean).length >= 3)) &&
+            (skills >= 1 ||
+              certs >= 1 ||
+              edu >= 1 ||
+              (jobs >= 3 && bullets >= 8 && profile.length >= 60) ||
+              (jobs >= 2 && bullets >= 10));
+          chrome.storage.local.set({
+            chatgpt_harvested_resume: resumeData,
+            chatgpt_harvested_at: Date.now(),
+            chatgpt_harvested_jobs: jobs,
+            chatgpt_json_ready: Boolean(looksComplete),
+            chatgpt_json_ready_at: looksComplete ? Date.now() : 0,
+            last_resume_json: resumeData
+          });
+        } catch {
+          // storage may be temporarily unavailable
+        }
+      }
 
       return {
         blockCount: blocks.length,
-        latest: recognizedWell
-          ? String(latest || "").slice(0, 2000)
-          : String(latest || "").slice(0, 120000),
-        resumeData,
+        // Never return a mid-JSON 2KB stub as "latest" — that poisons parsing
+        // when the full object is already in resumeData / storage.
+        latest: recognizedWell ? "" : String(latest || "").slice(0, 120000),
+        resumeData: recognizedWell ? resumeData : resumeData,
         jobCount: Array.isArray(resumeData?.experience) ? resumeData.experience.length : 0,
         generating: isGenerating(),
         harvestedJson: shouldHarvestJson,
@@ -2121,6 +2225,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   let sawGeneration = false;
   let stableHits = 0;
   let lastLen = 0;
+  let lastJobCount = 0;
   let postStreamDelayDone = false;
 
   // Ignore any previous job's harvested JSON / ready flag.
@@ -2155,11 +2260,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         ]);
         const readyAt = Number(stored.chatgpt_json_ready_at || stored.chatgpt_harvested_at || 0);
         const harvested = stored.chatgpt_harvested_resume;
-        if (
-          readyAt >= start &&
-          (stored.chatgpt_json_ready || isUsableResumeJson(harvested)) &&
-          isUsableResumeJson(harvested)
-        ) {
+        if (readyAt >= start && isUsableResumeJson(harvested)) {
           lastUsableResumeData = harvested;
           await setStatus(
             `Resume JSON ready flag set (${harvested.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
@@ -2238,6 +2339,22 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       // taking only the first object used to miss the complete reply the user can see.
       const fromPoll = state.resumeData && typeof state.resumeData === "object" ? state.resumeData : null;
       const fromText = extractResumeJson(lastText);
+      let fromStorage = null;
+      try {
+        const stored = await chrome.storage.local.get([
+          "chatgpt_harvested_resume",
+          "chatgpt_harvested_at",
+          "last_resume_json"
+        ]);
+        const stamp = Number(stored.chatgpt_harvested_at || 0);
+        if (stamp >= start && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+          fromStorage = stored.chatgpt_harvested_resume;
+        } else if (stamp >= start && isUsableResumeJson(stored.last_resume_json)) {
+          fromStorage = stored.last_resume_json;
+        }
+      } catch {
+        // ignore
+      }
       const fromHarvest = isUsableResumeJson(lastUsableResumeData) ? lastUsableResumeData : null;
       const rank = (obj) => {
         if (!obj || typeof obj !== "object") return -1;
@@ -2251,15 +2368,20 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         return (
           (isUsableResumeJson(obj) ? 1000000 : 0) +
           (isRichResumeJson(obj) ? 500000 : 0) +
+          (resumeJsonLooksComplete(obj) ? 250000 : 0) +
           jobs * 10000 +
           bullets * 50 +
           String(obj.profile || "").length
         );
       };
-      parsed = [fromPoll, fromText, fromHarvest].reduce((best, cur) => (rank(cur) > rank(best) ? cur : best), null);
+      parsed = [fromPoll, fromText, fromStorage, fromHarvest].reduce(
+        (best, cur) => (rank(cur) > rank(best) ? cur : best),
+        null
+      );
     }
     const usable = expectResumeJson && isUsableResumeJson(parsed);
     const rich = usable && isRichResumeJson(parsed);
+    const looksComplete = usable && resumeJsonLooksComplete(parsed);
     if (usable) {
       lastUsableResumeData = parsed;
       await chrome.storage.local
@@ -2276,7 +2398,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     if (elapsedSec > 0 && elapsedSec % 2 === 0) {
       const waitHint = expectResumeJson
         ? usable
-          ? `, JSON ready (${parsed?.experience?.length || "?"} jobs) — saving files`
+          ? `, JSON ready (${parsed?.experience?.length || "?"} jobs)${
+              state.generating ? " — GPT still busy, saving anyway" : " — saving files"
+            }`
           : parsed
             ? `, waiting: ${describeResumeGaps(parsed) || "almost ready"} (jobs=${state.jobCount || 0})`
             : lastText.includes('"experience"')
@@ -2295,9 +2419,21 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     // Recognized resume JSON → generate files (jd + resume PDF + cover letter).
-    if (expectResumeJson && usable && (rich || !state.generating || state.recognizedWell || postStreamDelayDone)) {
+    // ChatGPT often keeps the stop/thinking UI after the JSON object is already
+    // complete on the page — do not wait for stream end in that case.
+    if (
+      expectResumeJson &&
+      usable &&
+      (rich ||
+        looksComplete ||
+        !state.generating ||
+        state.recognizedWell ||
+        postStreamDelayDone)
+    ) {
       await setStatus(
-        `Resume JSON recognized (${parsed.name || "ok"}, ${parsed.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
+        `Resume JSON recognized (${parsed.name || "ok"}, ${parsed.experience?.length || 0} jobs)${
+          state.generating ? " while GPT still busy" : ""
+        }. Saving jd.txt + resume + cover letter…`
       );
       return JSON.stringify(parsed);
     }
@@ -2307,9 +2443,19 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     if (!isFreshText && !isNewBlock && !(expectResumeJson && (lastText.length > 200 || usable))) continue;
 
     if (state.generating) {
-      if (lastText.length > lastLen + 80) {
-        lastLen = lastText.length;
+      if (lastText.length > lastLen + 80 || (state.jobCount || 0) > (lastJobCount || 0)) {
+        lastLen = Math.max(lastLen, lastText.length);
+        lastJobCount = state.jobCount || 0;
         stableHits = 0;
+      } else if (expectResumeJson && usable) {
+        // JSON not growing while stop button still shows → treat as done.
+        stableHits += 1;
+        if (stableHits >= 3) {
+          await setStatus(
+            `Resume JSON stable while GPT still busy (${parsed.experience?.length || 0} jobs). Saving files…`
+          );
+          return JSON.stringify(parsed);
+        }
       }
       continue;
     }
@@ -2386,6 +2532,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
  *  4) save [Name]_Cover Letter.pdf
  */
 async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { runCoverLetter = true } = {}) {
+  resumeData = await finalizeResumeData(resumeData);
   await setStatus("Saving jd.txt + resume PDF…");
   const { jobDir: savedDir, nameToken, resumePdfName, saved } = await autoDownloadResumeFiles(
     output,
@@ -2411,13 +2558,13 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       });
       // IMPORTANT: same chat as resume (one chat per position).
       let coverOutput = "";
-      for (let attempt = 1; attempt <= 2 && !String(coverOutput || "").trim(); attempt += 1) {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          coverOutput = await automateChatGpt(
+          const reply = await automateChatGpt(
             tabId,
             attempt === 1
               ? coverPrompt
-              : "Your previous reply was empty or unusable. Write the full cover letter body now as plain text — no JSON, no markdown, no commentary.",
+              : "Stop. Do NOT return JSON or resume content. Write ONLY a plain-text cover letter body for this job: start with Dear Hiring Manager, then 3–4 short paragraphs. No markdown links, no email/URL lines, no signature block.",
             {
               newChat: false,
               expectResumeJson: false,
@@ -2427,28 +2574,44 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
                   : "Retrying cover letter (same chat)…"
             }
           );
+          if (looksLikeCoverLetterBody(reply)) {
+            coverOutput = reply;
+            break;
+          }
+          coverOutput = reply;
+          if (attempt === 1) {
+            await setStatus("Cover letter looked wrong (JSON/links). Retrying…");
+          }
         } catch (attemptErr) {
           if (attempt === 2) throw attemptErr;
-          await setStatus(`Cover letter attempt 1 failed (${String(attemptErr?.message || attemptErr)}). Retrying…`);
+          await setStatus(
+            `Cover letter attempt 1 failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
+          );
         }
       }
-      if (!String(coverOutput || "").trim()) throw new Error("Empty cover letter response.");
+      if (!looksLikeCoverLetterBody(coverOutput)) {
+        throw new Error(
+          "Cover letter response was unusable (got JSON/resume text or empty). Re-run this row."
+        );
+      }
 
       const token = nameToken || outputNameToken(jobMeta, resumeData);
       const coverPdfName = `${token}_Cover Letter.pdf`;
       await setStatus(`Saving ${coverPdfName}…`);
       const contact = await getAutofillContact();
+      // Always use person-profile contact for the signature — never ChatGPT-mangled JSON fields.
       const cl = await autoDownloadCoverLetterPdf(
         coverOutput,
         savedDir,
         {
-          name: resumeData?.name || contact.name || "Applicant",
-          signatureTitle: contact.signatureTitle || resumeData?.headline || "",
+          name: contact.name || resumeData?.name || "Applicant",
+          signatureTitle:
+            contact.signatureTitle || resumeData?.headline || "Salesforce Professional",
           headline: resumeData?.headline || contact.signatureTitle || "",
-          location: resumeData?.location || contact.location,
-          email: resumeData?.email || contact.email || "",
-          phone: resumeData?.phone || contact.phone || "",
-          linkedin: resumeData?.linkedin || contact.linkedin || ""
+          location: contact.location || resumeData?.location || "",
+          email: contact.email || resumeData?.email || "",
+          phone: contact.phone || resumeData?.phone || "",
+          linkedin: contact.linkedin || resumeData?.linkedin || ""
         },
         token
       );
@@ -2606,19 +2769,54 @@ async function runAutoJob(jobMeta) {
       );
       const harvested = await waitForJsonReadyFlag(tab.id, {
         since: promptStartedAt,
-        timeoutMs: 12000
+        timeoutMs: 20000
       });
       if (isUsableResumeJson(harvested)) resumeData = harvested;
     }
+    // JSON markers on screen but still unusable → harvest harder, do NOT re-prompt
+    // (re-prompts push the good JSON up the chat and make recognition worse).
+    if (!isUsableResumeJson(resumeData)) {
+      const deep = await tryRecognizeResumeOnPage(tab.id);
+      if (isUsableResumeJson(deep)) resumeData = deep;
+    }
     if (isUsableResumeJson(resumeData)) break;
+
+    // Only re-prompt when there is no resume-shaped JSON visible at all.
+    const pageHasJsonMarkers = /"experience"|"profile"|"technicalSummary"/.test(
+      String(rawOutput || "")
+    );
+    if (pageHasJsonMarkers) {
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: JSON visible — skipping re-prompt, final harvest…`
+      );
+      break;
+    }
   }
 
   if (!isUsableResumeJson(resumeData)) {
     const lastChance = await waitForJsonReadyFlag(tab.id, {
       since: promptStartedAt,
-      timeoutMs: 8000
+      timeoutMs: 15000
     });
     if (isUsableResumeJson(lastChance)) resumeData = lastChance;
+  }
+  if (!isUsableResumeJson(resumeData) && isUsableResumeJson(lastUsableResumeData)) {
+    resumeData = lastUsableResumeData;
+  }
+  if (!isUsableResumeJson(resumeData)) {
+    try {
+      const stored = await chrome.storage.local.get([
+        "chatgpt_harvested_resume",
+        "last_resume_json"
+      ]);
+      if (isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+        resumeData = stored.chatgpt_harvested_resume;
+      } else if (isUsableResumeJson(stored.last_resume_json)) {
+        resumeData = stored.last_resume_json;
+      }
+    } catch {
+      // ignore
+    }
   }
 
   if (!isUsableResumeJson(resumeData)) {

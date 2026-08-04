@@ -7,23 +7,26 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function stripMarkdownLink(value) {
-  return String(value || "")
-    .replace(/\[([^\]]*)\]\(([^)]+)\)/g, (_match, _text, url) => url)
-    .trim();
-}
-
 function cleanEmail(value) {
-  return stripMarkdownLink(value).replace(/^mailto:/i, "").trim();
+  // Prefer the visible label for [email](mailto:email); fall back to mailto target.
+  const raw = String(value || "").trim();
+  const md = raw.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+  if (md) {
+    const label = md[1].trim();
+    const target = md[2].replace(/^mailto:/i, "").trim();
+    return (label.includes("@") ? label : target).replace(/^mailto:/i, "").trim();
+  }
+  return raw.replace(/^mailto:/i, "").replace(/[[\]]/g, "").trim();
 }
 
 function cleanUrl(value) {
-  let url = stripMarkdownLink(value)
-    .replace(/[[\]]/g, "")
-    .trim();
-  const match = url.match(/https?:\/\/\S+/i);
+  let url = String(value || "").trim();
+  const md = url.match(/\[([^\]]*)\]\(([^)]+)\)/);
+  if (md) url = md[2] || md[1] || url;
+  url = url.replace(/[[\]]/g, "").trim();
+  const match = url.match(/https?:\/\/[^\s"'<>\\]+/i);
   if (match) url = match[0];
-  return url.replace(/[),.]+$/, "").replace(/\/+$/, "").trim();
+  return url.replace(/[),.]+$/g, "").replace(/\/+$/, "").trim();
 }
 
 export function contactLine(data, { linkColor } = {}) {

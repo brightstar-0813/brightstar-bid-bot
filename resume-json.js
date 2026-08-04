@@ -1,7 +1,7 @@
 const EXPECTED_BULLET_COUNTS = [
-  { match: /accenture\s*federal/i, count: 8 },
-  { match: /^hallmark/i, count: 8 },
-  { match: /^teletech$/i, count: 8 },
+  { match: /accenture\s*federal/i, count: 10 },
+  { match: /^hallmark/i, count: 9 },
+  { match: /^teletech$/i, count: 9 },
   { match: /sfa\s*solutions/i, count: 6 },
   { match: /^amazon$/i, count: 5 },
   { match: /bhg\s*financial/i, count: 5 },
@@ -32,12 +32,33 @@ function normalizeJsonText(text) {
   // ChatGPT code blocks sometimes prefix a bare language label.
   trimmed = trimmed.replace(/^(json|JSON)\s*\r?\n/, "");
 
-  // Un-mangle markdown-linkified JSON. When ChatGPT prints raw JSON (no code
-  // fence) it auto-links emails/URLs; copying that rendered text injects
-  // `[label](url)` wrappers where the url is percent-encoded and the label
-  // keeps the original characters (real quotes/commas). Keep the label so the
-  // JSON field boundaries are restored. A `]` immediately followed by `(` does
-  // not occur in clean resume JSON, so this is safe for well-formed input.
+  // ChatGPT auto-links emails/URLs in raw JSON and can CORRUPT field boundaries:
+  //   "linkedin":"[https://…/","profile":"Salesforce](https://…%22,%22profile%22:%22Salesforce) Rest…"
+  // Repair that pattern before generic [label](url) stripping.
+  trimmed = trimmed.replace(
+    /"linkedin"\s*:\s*"\[(https?:\/\/[^"\]]+)","profile"\s*:\s*"([^"\]]*)\]\(([^)]+)\)/gi,
+    (_m, url, profilePrefix, encodedUrl) => {
+      let profileStart = profilePrefix || "";
+      try {
+        const decoded = decodeURIComponent(String(encodedUrl || ""));
+        const hit = decoded.match(/","profile":"(.*)$/i);
+        if (hit && hit[1]) profileStart = hit[1];
+      } catch {
+        // keep profilePrefix
+      }
+      const cleanUrl = String(url || "").replace(/\/?$/, "/");
+      return `"linkedin":"${cleanUrl}","profile":"${profileStart}`;
+    }
+  );
+
+  // Email autolinks: "email":"[a@b.com](mailto:a@b.com)" → plain email
+  trimmed = trimmed.replace(
+    /"email"\s*:\s*"\[([^\]]+)\]\(mailto:[^)]+\)"/gi,
+    '"email":"$1"'
+  );
+
+  // Un-mangle remaining markdown links. Prefer the visible label (keeps JSON
+  // field text) except we already specialized email/linkedin above.
   if (/\]\(/.test(trimmed)) {
     trimmed = trimmed.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
   }
@@ -51,6 +72,55 @@ function normalizeJsonText(text) {
   }
 
   return trimmed.trim();
+}
+
+/**
+ * Clean contact fields after parse — ChatGPT autolinks often leave markdown or
+ * truncated URLs inside email/linkedin/profile even when JSON still parses.
+ */
+export function sanitizeResumeData(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const out = { ...data };
+
+  const stripMd = (v) =>
+    String(v || "")
+      .replace(/\[([^\]]*)\]\(([^)]+)\)/g, "$1")
+      .trim();
+
+  out.email = stripMd(out.email)
+    .replace(/^mailto:/i, "")
+    .replace(/[[\]]/g, "")
+    .trim();
+
+  let linkedin = stripMd(out.linkedin).replace(/[[\]]/g, "").trim();
+  const urlHit = linkedin.match(/https?:\/\/[^\s"'<>\\]+/i);
+  if (urlHit) linkedin = urlHit[0].replace(/[),.;\]]+$/g, "");
+  if (linkedin && !/^https?:\/\//i.test(linkedin) && /linkedin\.com/i.test(linkedin)) {
+    linkedin = `https://${linkedin.replace(/^\/+/, "")}`;
+  }
+  if (linkedin && /linkedin\.com/i.test(linkedin) && !/\/$/.test(linkedin)) {
+    linkedin = `${linkedin}/`;
+  }
+  // Incomplete/mangled linkedin values are worse than empty (person overlay fills).
+  if (!linkedin || linkedin.includes('","') || !/linkedin\.com/i.test(linkedin)) {
+    linkedin = "";
+  }
+  out.linkedin = linkedin;
+
+  let profile = String(out.profile || "");
+  // Leftover from cross-field autolink: "Salesforce](https://…) Rest of profile"
+  profile = profile.replace(/^[A-Za-z0-9 ._-]*\]\(https?:\/\/[^)]+\)\s*/i, "");
+  profile = stripMd(profile);
+  // If profile accidentally starts with a URL fragment, drop it.
+  profile = profile.replace(/^https?:\/\/\S+\s*/i, "").trim();
+  out.profile = profile;
+
+  out.phone = String(out.phone || "").trim();
+  out.name = String(out.name || "").trim();
+  out.headline = String(out.headline || "").trim();
+  out.location = String(out.location || "").trim();
+
+  return out;
 }
 
 /**
@@ -185,12 +255,85 @@ function closeTruncatedJson(text) {
   return repaired;
 }
 
+/**
+ * ChatGPT JSON often has trailing commas that JSON.parse rejects even when the
+ * resume object is otherwise complete.
+ */
+function sanitizeLooseJson(text) {
+  let s = String(text || "").replace(/^\uFEFF/, "");
+  // Trailing commas before } or ]
+  for (let i = 0; i < 8; i += 1) {
+    const next = s.replace(/,\s*([}\]])/g, "$1");
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+function safeJsonParse(text) {
+  const raw = String(text || "");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // continue
+  }
+  try {
+    return JSON.parse(sanitizeLooseJson(raw));
+  } catch {
+    return null;
+  }
+}
+
 function tryParseJson(text) {
   const trimmed = normalizeJsonText(text);
 
   // Always prefer the richest balanced resume object when several {...} exist
   // (prompt schema example + real answer often appear in the same transcript).
-  const objects = extractBalancedJsonObjects(trimmed);
+  const objects = [...extractBalancedJsonObjects(trimmed)];
+  // Also try loose-sanitized balanced slices when strict parse missed trailing commas.
+  if (!objects.length) {
+    const loose = sanitizeLooseJson(trimmed);
+    if (loose !== trimmed) {
+      for (const obj of extractBalancedJsonObjects(loose)) objects.push(obj);
+    }
+  }
+  // extractBalancedJsonObjects only pushes successful JSON.parse — re-scan with loose parse
+  {
+    const str = sanitizeLooseJson(trimmed);
+    let depth = 0;
+    let startIdx = -1;
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < str.length && objects.length < 24; i += 1) {
+      const ch = str[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") {
+        if (depth === 0) startIdx = i;
+        depth += 1;
+      } else if (ch === "}") {
+        if (depth > 0) {
+          depth -= 1;
+          if (depth === 0 && startIdx >= 0) {
+            const parsed = safeJsonParse(str.slice(startIdx, i + 1));
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              objects.push(parsed);
+            }
+            startIdx = -1;
+          }
+        }
+      }
+    }
+  }
+
   if (objects.length) {
     const scoreObj = (obj) => {
       if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
@@ -224,38 +367,26 @@ function tryParseJson(text) {
     }
   }
 
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // continue
-  }
+  const direct = safeJsonParse(trimmed);
+  if (direct) return direct;
 
   // Fast path: first "{" to last "}" (single-object replies).
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
   if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(trimmed.slice(start, end + 1));
-    } catch {
-      // continue
-    }
+    const slice = safeJsonParse(trimmed.slice(start, end + 1));
+    if (slice) return slice;
   }
 
   const closed = closeTruncatedJson(trimmed);
   if (closed) {
-    try {
-      return JSON.parse(closed);
-    } catch {
-      // continue
-    }
+    const closedParsed = safeJsonParse(closed);
+    if (closedParsed) return closedParsed;
     const cs = closed.indexOf("{");
     const ce = closed.lastIndexOf("}");
     if (cs >= 0 && ce > cs) {
-      try {
-        return JSON.parse(closed.slice(cs, ce + 1));
-      } catch {
-        // ignore
-      }
+      const slice = safeJsonParse(closed.slice(cs, ce + 1));
+      if (slice) return slice;
     }
   }
 
@@ -273,7 +404,7 @@ function coerceResumeObject(value) {
 }
 
 export function extractResumeJson(responseText) {
-  return coerceResumeObject(tryParseJson(responseText));
+  return sanitizeResumeData(coerceResumeObject(tryParseJson(responseText)));
 }
 
 function totalExperienceBullets(data) {
@@ -290,6 +421,12 @@ function experienceBulletTexts(data) {
     .flatMap((job) => (Array.isArray(job?.bullets) ? job.bullets : []))
     .map((b) => String(b || "").trim())
     .filter(Boolean);
+}
+
+function averageBulletLength(data) {
+  const bullets = experienceBulletTexts(data);
+  if (!bullets.length) return 0;
+  return bullets.reduce((n, b) => n + b.length, 0) / bullets.length;
 }
 
 /** Detect ChatGPT echoing the schema/example placeholders instead of real resume content. */
@@ -368,7 +505,10 @@ export function isUsableResumeJson(data) {
   );
   if (!hasDetailedRole) return false;
 
-  return totalExperienceBullets(data) >= 4;
+  if (totalExperienceBullets(data) < 4) return false;
+  // Reject obviously thin one-liners even if count is high.
+  if (averageBulletLength(data) < 55) return false;
+  return true;
 }
 
 /**
@@ -385,15 +525,43 @@ export function isRichResumeJson(data) {
   if (jobs < 3) return false;
 
   const bullets = totalExperienceBullets(data);
-  if (bullets < 10) return false;
+  if (bullets < 20) return false;
+  // Deep bullets (~2–3 lines) — thin one-liners fail even with high counts.
+  if (averageBulletLength(data) < 110) return false;
 
   const skills = Array.isArray(data.skills) ? data.skills.length : 0;
   const certs = Array.isArray(data.certifications) ? data.certifications.length : 0;
-  if (jobs >= 4 && bullets >= 20 && profile.length >= 100) return true;
+  if (jobs >= 4 && bullets >= 30 && profile.length >= 100 && averageBulletLength(data) >= 120) {
+    return true;
+  }
   if (skills < 2) return false;
   if (certs < 1) return false;
 
   return true;
+}
+
+/**
+ * True when the resume object looks finished even if ChatGPT's stop button is
+ * still visible (post-JSON "thinking" / follow-up UI). Tail sections or a large
+ * experience block mean we are past a mid-stream truncated repair.
+ */
+export function resumeJsonLooksComplete(data) {
+  if (isRichResumeJson(data)) return true;
+  if (!isUsableResumeJson(data)) return false;
+
+  const skills = Array.isArray(data.skills) ? data.skills.filter(Boolean).length : 0;
+  const certs = Array.isArray(data.certifications) ? data.certifications.filter(Boolean).length : 0;
+  const edu = Array.isArray(data.education) ? data.education.length : 0;
+  const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
+  const bullets = totalExperienceBullets(data);
+  const profile = String(data.profile || "").trim();
+  const avg = averageBulletLength(data);
+
+  // Prefer finished tail sections + deep bullets over thin mid-stream repairs.
+  if ((skills >= 1 || certs >= 1 || edu >= 1) && jobs >= 3 && bullets >= 20 && avg >= 100) {
+    return true;
+  }
+  return jobs >= 4 && bullets >= 28 && profile.length >= 60 && avg >= 110;
 }
 
 /** Strict completeness check used for continuation decisions. */
