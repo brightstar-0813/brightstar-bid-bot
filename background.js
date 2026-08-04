@@ -2096,6 +2096,54 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         }
         t = t.replace(/^(json|JSON)\s*\r?\n/, "");
         if (/\]\(/.test(t)) t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+        // Escape literal newlines/tabs inside JSON strings (DOM/ChatGPT common).
+        {
+          let out = "";
+          let inString = false;
+          let escaped = false;
+          for (let i = 0; i < t.length; i += 1) {
+            const ch = t[i];
+            const code = ch.charCodeAt(0);
+            if (inString) {
+              if (escaped) {
+                out += ch;
+                escaped = false;
+                continue;
+              }
+              if (ch === "\\") {
+                out += ch;
+                escaped = true;
+                continue;
+              }
+              if (ch === '"') {
+                out += ch;
+                inString = false;
+                continue;
+              }
+              if (ch === "\n") {
+                out += "\\n";
+                continue;
+              }
+              if (ch === "\r") {
+                out += "\\r";
+                continue;
+              }
+              if (ch === "\t") {
+                out += "\\t";
+                continue;
+              }
+              if (code < 32) {
+                out += `\\u${code.toString(16).padStart(4, "0")}`;
+                continue;
+              }
+              out += ch;
+              continue;
+            }
+            if (ch === '"') inString = true;
+            out += ch;
+          }
+          t = out;
+        }
         return t;
       };
 
@@ -2373,12 +2421,22 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         }
       }
 
+      // When recognizedWell, do NOT blank latest to "" — that left background
+      // holding a mid-stream truncated lastText while the full JSON was on screen.
+      // Prefer a compact serialized object (or a short slice) for IPC.
+      let latestOut = String(latest || "").slice(0, 120000);
+      if (recognizedWell && resumeData) {
+        try {
+          latestOut = JSON.stringify(resumeData);
+        } catch {
+          latestOut = latestOut.slice(0, 8000);
+        }
+      }
+
       return {
         blockCount: blocks.length,
-        // Never return a mid-JSON 2KB stub as "latest" — that poisons parsing
-        // when the full object is already in resumeData / storage.
-        latest: recognizedWell ? "" : String(latest || "").slice(0, 120000),
-        resumeData: recognizedWell ? resumeData : resumeData,
+        latest: latestOut,
+        resumeData: resumeData || null,
         jobCount: Array.isArray(resumeData?.experience) ? resumeData.experience.length : 0,
         generating: isGenerating(),
         harvestedJson: shouldHarvestJson,
@@ -2570,9 +2628,36 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       } else if (
         !lastText ||
         state.latest.length >= lastText.length ||
-        (state.latest.includes('"experience"') && !lastText.includes('"experience"'))
+        (state.latest.includes('"experience"') && !lastText.includes('"experience"')) ||
+        // Recognized full object serialized — always replace truncated mid-stream text.
+        (state.recognizedWell && state.resumeData && state.latest.startsWith("{"))
       ) {
         lastText = state.latest;
+      }
+    }
+
+    // Structured object already harvested — prefer it over any stale lastText.
+    if (expectResumeJson && state.recognizedWell && state.resumeData) {
+      lastUsableResumeData = state.resumeData;
+      if (
+        isUsableResumeJson(state.resumeData) ||
+        isMinimallySaveableResume(state.resumeData)
+      ) {
+        await chrome.storage.local
+          .set({
+            last_resume_json: state.resumeData,
+            chatgpt_harvested_resume: state.resumeData,
+            chatgpt_harvested_at: Date.now(),
+            chatgpt_json_ready: true,
+            chatgpt_json_ready_at: Date.now()
+          })
+          .catch(() => {});
+        await setStatus(
+          `Resume JSON recognized (${state.resumeData.name || "ok"}, ${
+            state.resumeData.experience?.length || 0
+          } jobs). Saving jd.txt + resume + cover letter…`
+        );
+        return JSON.stringify(state.resumeData);
       }
     }
 
@@ -2736,14 +2821,32 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       // Settled without a usable parse — deep harvest, never stub-trigger a retry loop.
       if (stableHits >= SETTLE_HITS) {
         const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 10000 });
-        if (isUsableResumeJson(rescued)) {
+        if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
           await setStatus(
             `Resume JSON rescued from page (${rescued.experience?.length || 0} jobs). Saving files…`
           );
           return JSON.stringify(rescued);
         }
-        if (isUsableResumeJson(lastUsableResumeData)) {
+        if (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData)) {
           return JSON.stringify(lastUsableResumeData);
+        }
+        const repaired = extractResumeJson(lastText);
+        if (isUsableResumeJson(repaired) || isMinimallySaveableResume(repaired)) {
+          return JSON.stringify(repaired);
+        }
+        // Truncated mid-stream text looks like JSON in the preview but will not
+        // parse — keep waiting rather than returning poison to the caller.
+        const openBraces = (String(lastText).match(/\{/g) || []).length;
+        const closeBraces = (String(lastText).match(/\}/g) || []).length;
+        if (
+          /"name"|"experience"/.test(lastText) &&
+          (openBraces > closeBraces || !repaired) &&
+          stableHits < SETTLE_HITS + 45
+        ) {
+          await setStatus(
+            `${label} — JSON visible but incomplete/unparsed; harvesting (${stableHits}s settled)…`
+          );
+          continue;
         }
         return lastText;
       }

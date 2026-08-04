@@ -71,7 +71,64 @@ function normalizeJsonText(text) {
       .join("\n");
   }
 
+  // ChatGPT / DOM often leave literal newlines inside JSON string values —
+  // JSON.parse rejects those even when the object is otherwise complete.
+  trimmed = escapeControlCharsInJsonStrings(trimmed);
+
   return trimmed.trim();
+}
+
+/**
+ * Escape raw control characters inside JSON strings so JSON.parse can succeed.
+ * Leaves structure outside strings unchanged.
+ */
+function escapeControlCharsInJsonStrings(text) {
+  const input = String(text || "");
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    const code = ch.charCodeAt(0);
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        out += ch;
+        inString = false;
+        continue;
+      }
+      if (ch === "\n") {
+        out += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        out += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        out += "\\t";
+        continue;
+      }
+      if (code < 32) {
+        out += `\\u${code.toString(16).padStart(4, "0")}`;
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
 }
 
 /**

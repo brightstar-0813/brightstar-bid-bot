@@ -534,7 +534,7 @@
     };
 
     const tryParse = (raw) => {
-      const normalized = String(raw || "")
+      let normalized = String(raw || "")
         .replace(/^\uFEFF/, "")
         .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
         .replace(/[\u2018\u2019]/g, "'")
@@ -544,6 +544,55 @@
         .replace(/\r?\n?```\s*$/, "")
         .replace(/^(json|JSON)\s*\r?\n/, "")
         .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+
+      // Escape literal control chars inside JSON strings (DOM/ChatGPT).
+      {
+        let out = "";
+        let inString = false;
+        let escaped = false;
+        for (let i = 0; i < normalized.length; i += 1) {
+          const ch = normalized[i];
+          const code = ch.charCodeAt(0);
+          if (inString) {
+            if (escaped) {
+              out += ch;
+              escaped = false;
+              continue;
+            }
+            if (ch === "\\") {
+              out += ch;
+              escaped = true;
+              continue;
+            }
+            if (ch === '"') {
+              out += ch;
+              inString = false;
+              continue;
+            }
+            if (ch === "\n") {
+              out += "\\n";
+              continue;
+            }
+            if (ch === "\r") {
+              out += "\\r";
+              continue;
+            }
+            if (ch === "\t") {
+              out += "\\t";
+              continue;
+            }
+            if (code < 32) {
+              out += `\\u${code.toString(16).padStart(4, "0")}`;
+              continue;
+            }
+            out += ch;
+            continue;
+          }
+          if (ch === '"') inString = true;
+          out += ch;
+        }
+        normalized = out;
+      }
 
       const looseFix = (s) => {
         let t = String(s || "");
