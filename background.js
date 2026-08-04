@@ -1154,11 +1154,36 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
 
 function looksLikeCoverLetterBody(text) {
   const s = String(text || "").trim();
-  if (s.length < 120) return false;
-  if (/^\s*\{/.test(s) && /"experience"|"technicalSummary"/i.test(s)) return false;
+  if (s.length < 80) return false;
+  // Resume JSON dumped into the "letter" slot.
+  if (/"experience"\s*:/.test(s) && /"technicalSummary"|"certifications"\s*:/.test(s)) return false;
+  if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
   if (/dear\s+/i.test(s) || /hiring\s+(manager|team)/i.test(s)) return true;
   // Plain multi-paragraph letter without salutation still OK if long enough.
+  const paras = s.split(/\n\s*\n+/).filter((p) => p.trim().length > 40);
+  if (paras.length >= 2 && s.length >= 180) return true;
   return s.length >= 220 && !/"experience"\s*:/.test(s);
+}
+
+/** Read only the newest assistant turn — used so cover letters are not the prior JSON. */
+async function readLatestAssistantPlainText(tabId) {
+  if (typeof tabId !== "number") return "";
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const blocks = document.querySelectorAll(
+          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
+        );
+        if (!blocks.length) return "";
+        const last = blocks[blocks.length - 1];
+        return (last.innerText || last.textContent || "").trim().slice(0, 20000);
+      }
+    });
+    return String(results?.[0]?.result || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 /** Prefer person-profile contact over ChatGPT-mangled JSON fields. */
@@ -1278,6 +1303,113 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameTok
   }
 }
 
+/** Pause between finished jobs so ChatGPT is less likely to rate-limit. */
+const JOB_GAP_MS = 45000;
+/** When rate-limited, wait at least this long before retrying a send. */
+const RATE_LIMIT_BASE_WAIT_MS = 3 * 60 * 1000;
+/** Cap how long we sit on one rate-limit encounter. */
+const RATE_LIMIT_MAX_WAIT_MS = 12 * 60 * 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Detect ChatGPT's "Too many requests" / temporary access limit UI.
+ * Also clicks "Got it" when present so the modal does not block the composer.
+ */
+async function detectChatGptRateLimit(tabId) {
+  if (typeof tabId !== "number") return { limited: false };
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const bodyText = `${document.body?.innerText || ""}`.slice(0, 20000);
+        const limited =
+          /too many requests/i.test(bodyText) ||
+          /making requests too quickly/i.test(bodyText) ||
+          /temporarily limited access(?: to your conversations)?/i.test(bodyText) ||
+          /please wait a few minutes before trying again/i.test(bodyText);
+        // Prefer modal/dialog text so resume/JD content cannot false-trigger.
+        const dialogText = Array.from(
+          document.querySelectorAll('[role="dialog"], [role="alertdialog"], [data-testid*="modal"]')
+        )
+          .map((el) => el.innerText || "")
+          .join("\n");
+        const dialogLimited =
+          /too many requests/i.test(dialogText) ||
+          /making requests too quickly/i.test(dialogText) ||
+          /temporarily limited access/i.test(dialogText);
+        if (!limited && !dialogLimited) return { limited: false, dismissed: false };
+
+        // Dismiss common acknowledgment buttons so we can continue after waiting.
+        let dismissed = false;
+        const buttons = Array.from(document.querySelectorAll("button"));
+        for (const btn of buttons) {
+          const label = `${btn.textContent || ""} ${btn.getAttribute("aria-label") || ""}`.trim();
+          if (/^got it$/i.test(label) || /^ok$/i.test(label) || /^dismiss$/i.test(label)) {
+            try {
+              btn.click();
+              dismissed = true;
+              break;
+            } catch {
+              // ignore
+            }
+          }
+        }
+        return { limited: true, dismissed };
+      }
+    });
+    return results?.[0]?.result || { limited: false };
+  } catch {
+    return { limited: false };
+  }
+}
+
+/**
+ * If ChatGPT is rate-limiting, wait (with status updates) until the banner is
+ * gone or maxWaitMs elapses. Returns true if we had to wait.
+ */
+async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_MS } = {}) {
+  let hit = await detectChatGptRateLimit(tabId);
+  if (!hit.limited) return false;
+
+  const started = Date.now();
+  let waitSlice = RATE_LIMIT_BASE_WAIT_MS;
+  await setStatus(
+    `ChatGPT rate limit detected — waiting ${Math.round(waitSlice / 60000)} min before retrying…`
+  );
+
+  while (Date.now() - started < maxWaitMs) {
+    if (batchControl.skipCurrent || batchControl.stop) {
+      throw new Error("__SKIP__");
+    }
+    const remaining = Math.max(0, maxWaitMs - (Date.now() - started));
+    const slice = Math.min(waitSlice, remaining, 60000);
+    const until = Date.now() + slice;
+    while (Date.now() < until) {
+      if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+      await sleep(5000);
+      await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
+      const leftMin = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+      await setStatus(
+        `ChatGPT rate limit — cooling down (~${leftMin}m left this wait). Leave the tab open…`
+      );
+    }
+    hit = await detectChatGptRateLimit(tabId);
+    if (!hit.limited) {
+      await setStatus("Rate limit cleared — continuing…");
+      await sleep(5000);
+      return true;
+    }
+    waitSlice = Math.min(Math.round(waitSlice * 1.4), 5 * 60 * 1000);
+  }
+
+  throw new Error(
+    "ChatGPT rate limit still active after waiting. Pause the batch a few minutes, then Retry errors."
+  );
+}
+
 async function focusTabForInput(tabId) {
   // ChatGPT's ProseMirror composer only accepts execCommand/paste insertion
   // when its tab is the active, focused tab. Bring it to the foreground first.
@@ -1359,6 +1491,8 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
     needsInPageNewChat = !(await ensureFreshChat(tabId));
   }
   await focusTabForInput(tabId);
+  // Do not send while ChatGPT is rate-limiting — wait it out first.
+  await waitOutChatGptRateLimit(tabId);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     args: [prompt, needsInPageNewChat],
@@ -2242,11 +2376,23 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   }
 
   while (Date.now() - start < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
     await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
 
     if (batchControl.skipCurrent) {
       throw new Error("__SKIP__");
+    }
+
+    // Mid-reply rate-limit banner: cool down, then keep polling for JSON.
+    try {
+      const rate = await detectChatGptRateLimit(tabId);
+      if (rate.limited) {
+        await waitOutChatGptRateLimit(tabId);
+        continue;
+      }
+    } catch (rateErr) {
+      if (String(rateErr?.message || rateErr) === "__SKIP__") throw rateErr;
+      // ignore transient detection errors
     }
 
     // Ready flag from content.js = JSON complete on page → generate files now.
@@ -2320,9 +2466,20 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       }
     }
 
-    // Keep the richest raw text seen — never shrink away a full reply.
+    // Keep the richest raw text seen for resume JSON — never shrink away a full reply.
+    // For cover letters / plain text, ALWAYS prefer the newest assistant turn after
+    // our send (a short letter must replace the previous huge JSON message).
     if (state.latest) {
-      if (
+      if (!expectResumeJson) {
+        if (state.blockCount > blocksBefore) {
+          lastText = state.latest;
+        } else if (
+          !lastText ||
+          (state.latest.length >= lastText.length && !/"experience"\s*:/.test(state.latest))
+        ) {
+          lastText = state.latest;
+        }
+      } else if (
         !lastText ||
         state.latest.length >= lastText.length ||
         (state.latest.includes('"experience"') && !lastText.includes('"experience"'))
@@ -2497,11 +2654,25 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       continue;
     }
 
-    if (stableHits >= 2 && looksSettledAssistantText(lastText, { expectResumeJson })) {
-      return lastText;
-    }
-    if (stableHits >= 5 && sawGeneration) {
-      return lastText;
+    if (!expectResumeJson) {
+      // Still stuck on the previous resume JSON turn — keep waiting for the letter.
+      if (/"experience"\s*:/.test(lastText) && /"name"\s*:/.test(lastText)) {
+        if (state.blockCount > blocksBefore) {
+          const plain = await readLatestAssistantPlainText(tabId);
+          if (plain && looksLikeCoverLetterBody(plain)) return plain;
+        }
+        continue;
+      }
+      if (stableHits >= 2 && looksSettledAssistantText(lastText, { expectResumeJson })) {
+        return lastText;
+      }
+      if (stableHits >= 5 && sawGeneration && looksLikeCoverLetterBody(lastText)) {
+        return lastText;
+      }
+      if (stableHits >= 8 && sawGeneration && lastText.length > 80) {
+        return lastText;
+      }
+      continue;
     }
   }
 
@@ -2517,10 +2688,17 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     return JSON.stringify(lastUsableResumeData);
   }
 
+  if (!expectResumeJson) {
+    const plain = await readLatestAssistantPlainText(tabId);
+    if (looksLikeCoverLetterBody(plain)) return plain;
+    if (looksLikeCoverLetterBody(lastText)) return lastText;
+    if (plain && plain.length > 80 && !/"experience"\s*:/.test(plain)) return plain;
+  }
+
   throw new Error(
     expectResumeJson
       ? "Timed out waiting to recognize complete resume JSON from ChatGPT (JSON may be on screen — click Save JSON now)."
-      : "Timed out waiting for ChatGPT response."
+      : "Timed out waiting for cover letter / ChatGPT response."
   );
 }
 
@@ -2550,6 +2728,9 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
 
   if (runCoverLetter && typeof tabId === "number") {
     try {
+      // Brief pause so ChatGPT finishes any post-JSON UI before the CL prompt.
+      await sleep(2500);
+      await waitOutChatGptRateLimit(tabId).catch(() => {});
       await setStatus("Same chat: sending cover letter prompt…");
       const coverPrompt = await buildCoverLetterPrompt({
         jdText: jobMeta.jdText || "",
@@ -2558,40 +2739,47 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       });
       // IMPORTANT: same chat as resume (one chat per position).
       let coverOutput = "";
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const pickCover = async (reply) => {
+        let text = String(reply || "").trim();
+        if (looksLikeCoverLetterBody(text)) return text;
+        // Stale JSON often comes back from the poller — read the newest turn only.
+        const latest = await readLatestAssistantPlainText(tabId);
+        if (looksLikeCoverLetterBody(latest)) return latest;
+        return text;
+      };
+
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
-          const reply = await automateChatGpt(
-            tabId,
+          const prompt =
             attempt === 1
               ? coverPrompt
-              : "Stop. Do NOT return JSON or resume content. Write ONLY a plain-text cover letter body for this job: start with Dear Hiring Manager, then 3–4 short paragraphs. No markdown links, no email/URL lines, no signature block.",
-            {
-              newChat: false,
-              expectResumeJson: false,
-              statusLabel:
-                attempt === 1
-                  ? "Waiting for cover letter (same chat)…"
-                  : "Retrying cover letter (same chat)…"
-            }
-          );
-          if (looksLikeCoverLetterBody(reply)) {
-            coverOutput = reply;
-            break;
-          }
-          coverOutput = reply;
-          if (attempt === 1) {
-            await setStatus("Cover letter looked wrong (JSON/links). Retrying…");
-          }
+              : attempt === 2
+                ? "Stop. Do NOT return JSON or resume content. Write ONLY a plain-text cover letter body for this job: start with Dear Hiring Manager, then 3–4 short paragraphs. No markdown links, no email/URL lines, no signature block."
+                : "IMPORTANT: Ignore the resume JSON above. Reply with ONLY the cover letter plain text starting with Dear Hiring Manager, — nothing else.";
+          const reply = await automateChatGpt(tabId, prompt, {
+            newChat: false,
+            expectResumeJson: false,
+            statusLabel:
+              attempt === 1
+                ? "Waiting for cover letter (same chat)…"
+                : `Retrying cover letter (attempt ${attempt}/3)…`
+          });
+          coverOutput = await pickCover(reply);
+          if (looksLikeCoverLetterBody(coverOutput)) break;
+          await setStatus("Cover letter looked wrong (JSON/stale reply). Retrying…");
+          await sleep(2000);
         } catch (attemptErr) {
-          if (attempt === 2) throw attemptErr;
+          if (attempt === 3) throw attemptErr;
           await setStatus(
-            `Cover letter attempt 1 failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
+            `Cover letter attempt ${attempt} failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
           );
+          await sleep(2000);
         }
       }
       if (!looksLikeCoverLetterBody(coverOutput)) {
+        // Soft-fail: resume files already saved; do not mark the whole row as failed.
         throw new Error(
-          "Cover letter response was unusable (got JSON/resume text or empty). Re-run this row."
+          "Cover letter response was unusable (got JSON/resume text or empty). Resume PDF was saved — use Retry on this row for the letter."
         );
       }
 
@@ -2909,6 +3097,30 @@ async function runBatchLoop(outputDir) {
       await updateQueueJob(next.csvRow, { status: "running", error: "" });
       await setStatus(`Batch: generating row ${next.csvRow} — ${next.company} / ${next.title}`);
 
+      // Cool down before opening a new chat if ChatGPT already rate-limited us.
+      try {
+        const tab = await ensureChatGptTab();
+        if (tab?.id) await waitOutChatGptRateLimit(tab.id);
+      } catch (preErr) {
+        if (String(preErr?.message || preErr) === "__SKIP__") {
+          batchControl.skipCurrent = false;
+          await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
+          continue;
+        }
+        if (/rate limit/i.test(String(preErr?.message || preErr))) {
+          await updateQueueJob(next.csvRow, {
+            status: "pending",
+            error: "Waiting for ChatGPT rate limit to clear"
+          });
+          await setBatchState("paused");
+          await setStatus(
+            "Batch paused: ChatGPT rate limit. Wait a few minutes, then click Start / Retry errors."
+          );
+          await chrome.storage.local.set({ generation_running: false });
+          return;
+        }
+      }
+
       const jobMeta = {
         csvRow: next.csvRow,
         jobTitle: next.title,
@@ -2946,6 +3158,10 @@ async function runBatchLoop(outputDir) {
           company: next.company
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
+        await setStatus(
+          `Cooling down ${Math.round(JOB_GAP_MS / 1000)}s before next job (rate-limit protection)…`
+        );
+        await sleep(JOB_GAP_MS);
       } catch (err) {
         const msg = String(err?.message || err);
         if (msg === "__SKIP__" || batchControl.skipCurrent) {
@@ -2968,6 +3184,19 @@ async function runBatchLoop(outputDir) {
           return;
         }
 
+        // Rate limit: keep pending (do not burn attempts) and cool down.
+        if (/rate limit|too many requests|requests too quickly|temporarily limited/i.test(msg)) {
+          await updateQueueJob(next.csvRow, {
+            status: "pending",
+            error: "ChatGPT rate limit — will retry after cooldown"
+          });
+          await setStatus(
+            `Row ${next.csvRow}: ChatGPT rate limit. Waiting ${Math.round(RATE_LIMIT_BASE_WAIT_MS / 60000)} min, then continuing…`
+          );
+          await sleep(RATE_LIMIT_BASE_WAIT_MS);
+          continue;
+        }
+
         const attempts = Number(next.attempts || 0) + 1;
         const exhausted = attempts >= MAX_JOB_ATTEMPTS;
         await updateQueueJob(next.csvRow, {
@@ -2980,8 +3209,7 @@ async function runBatchLoop(outputDir) {
             ? `Row ${next.csvRow} failed after ${attempts} attempts: ${msg}. Moving to the next job…`
             : `Row ${next.csvRow} error (attempt ${attempts}/${MAX_JOB_ATTEMPTS}): ${msg}. Continuing…`
         );
-        // Give ChatGPT a breath before the next job (rate limits, UI settling).
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await sleep(Math.max(JOB_GAP_MS, 15000));
         continue;
       }
 
