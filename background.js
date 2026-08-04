@@ -1303,15 +1303,33 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameTok
   }
 }
 
-/** Pause between finished jobs so ChatGPT is less likely to rate-limit. */
-const JOB_GAP_MS = 45000;
-/** When rate-limited, wait at least this long before retrying a send. */
-const RATE_LIMIT_BASE_WAIT_MS = 3 * 60 * 1000;
+/** Pause between finished jobs so ChatGPT is less likely to rate-limit.
+ * Each job = new chat + resume + cover letter (2–3 sends). */
+const JOB_GAP_MS = 90 * 1000;
+/** When rate-limited, always wait at least this long after seeing the modal
+ * (clicking "Got it" does NOT mean the limit is gone). */
+const RATE_LIMIT_BASE_WAIT_MS = 5 * 60 * 1000;
 /** Cap how long we sit on one rate-limit encounter. */
-const RATE_LIMIT_MAX_WAIT_MS = 12 * 60 * 1000;
+const RATE_LIMIT_MAX_WAIT_MS = 20 * 60 * 1000;
+/** Extra quiet time after any rate-limit hit before the next Send. */
+const RATE_LIMIT_AFTER_HIT_MS = 5 * 60 * 1000;
+/** Gap before cover-letter send in the same chat. */
+const COVER_LETTER_GAP_MS = 15 * 1000;
+
+/** Timestamp of the last ChatGPT rate-limit detection (ms). */
+let lastRateLimitHitAt = 0;
+/** Escalate job gaps after repeated rate limits in one batch. */
+let rateLimitHitsThisBatch = 0;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function currentJobGapMs() {
+  // 90s → 2.5m → 4m after repeated hits
+  if (rateLimitHitsThisBatch >= 3) return Math.max(JOB_GAP_MS, 4 * 60 * 1000);
+  if (rateLimitHitsThisBatch >= 1) return Math.max(JOB_GAP_MS, 150 * 1000);
+  return JOB_GAP_MS;
 }
 
 /**
@@ -1324,25 +1342,26 @@ async function detectChatGptRateLimit(tabId) {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
-        const bodyText = `${document.body?.innerText || ""}`.slice(0, 20000);
+        const hay = `${document.body?.innerText || ""}`.slice(0, 40000);
         const limited =
-          /too many requests/i.test(bodyText) ||
-          /making requests too quickly/i.test(bodyText) ||
-          /temporarily limited access(?: to your conversations)?/i.test(bodyText) ||
-          /please wait a few minutes before trying again/i.test(bodyText);
-        // Prefer modal/dialog text so resume/JD content cannot false-trigger.
-        const dialogText = Array.from(
-          document.querySelectorAll('[role="dialog"], [role="alertdialog"], [data-testid*="modal"]')
-        )
-          .map((el) => el.innerText || "")
-          .join("\n");
-        const dialogLimited =
-          /too many requests/i.test(dialogText) ||
-          /making requests too quickly/i.test(dialogText) ||
-          /temporarily limited access/i.test(dialogText);
-        if (!limited && !dialogLimited) return { limited: false, dismissed: false };
+          /too many requests/i.test(hay) ||
+          /making requests too quickly/i.test(hay) ||
+          /temporarily limited access(?: to your conversations)?/i.test(hay) ||
+          (/please wait a few minutes/i.test(hay) && /trying again/i.test(hay));
 
-        // Dismiss common acknowledgment buttons so we can continue after waiting.
+        // Headings / toast nodes often lack role=dialog.
+        const nodes = Array.from(
+          document.querySelectorAll(
+            '[role="dialog"], [role="alertdialog"], [data-testid*="modal"], h2, h3, [class*="toast"], [class*="Toast"], [class*="modal"]'
+          )
+        );
+        const nodeHit = nodes.some((el) => {
+          const t = `${el.innerText || el.textContent || ""}`;
+          return /too many requests/i.test(t) || /making requests too quickly/i.test(t);
+        });
+
+        if (!limited && !nodeHit) return { limited: false, dismissed: false };
+
         let dismissed = false;
         const buttons = Array.from(document.querySelectorAll("button"));
         for (const btn of buttons) {
@@ -1366,18 +1385,40 @@ async function detectChatGptRateLimit(tabId) {
   }
 }
 
+/** Wait out the mandatory quiet window after a prior rate-limit hit. */
+async function enforcePostRateLimitCooldown() {
+  if (!lastRateLimitHitAt) return;
+  const elapsed = Date.now() - lastRateLimitHitAt;
+  const left = RATE_LIMIT_AFTER_HIT_MS - elapsed;
+  if (left <= 0) return;
+  const until = Date.now() + left;
+  while (Date.now() < until) {
+    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+    const mins = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+    await setStatus(`Post rate-limit cooldown (~${mins}m left). Leave ChatGPT open…`);
+    await sleep(Math.min(15000, until - Date.now()));
+    await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
+  }
+}
+
 /**
- * If ChatGPT is rate-limiting, wait (with status updates) until the banner is
- * gone or maxWaitMs elapses. Returns true if we had to wait.
+ * If ChatGPT is rate-limiting, wait (with status updates). Clicking "Got it"
+ * only closes the UI — we still wait the full cooldown before sending again.
  */
 async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_MS } = {}) {
+  await enforcePostRateLimitCooldown();
+
   let hit = await detectChatGptRateLimit(tabId);
   if (!hit.limited) return false;
 
+  lastRateLimitHitAt = Date.now();
+  rateLimitHitsThisBatch += 1;
+
   const started = Date.now();
+  // Always wait the base period first — modal dismissal ≠ limit cleared.
   let waitSlice = RATE_LIMIT_BASE_WAIT_MS;
   await setStatus(
-    `ChatGPT rate limit detected — waiting ${Math.round(waitSlice / 60000)} min before retrying…`
+    `ChatGPT rate limit — waiting ${Math.round(waitSlice / 60000)} min (Got it only closes the dialog)…`
   );
 
   while (Date.now() - started < maxWaitMs) {
@@ -1393,20 +1434,30 @@ async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_
       await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
       const leftMin = Math.max(1, Math.ceil((until - Date.now()) / 60000));
       await setStatus(
-        `ChatGPT rate limit — cooling down (~${leftMin}m left this wait). Leave the tab open…`
+        `ChatGPT rate limit — cooling down (~${leftMin}m in this wait). Do not send manually…`
       );
+      // Keep dismissing if it reappears.
+      await detectChatGptRateLimit(tabId);
     }
+
+    // Only consider "cleared" after the mandatory base wait has elapsed.
+    if (Date.now() - started < RATE_LIMIT_BASE_WAIT_MS) {
+      waitSlice = Math.min(Math.round(waitSlice * 1.2), 5 * 60 * 1000);
+      continue;
+    }
+
     hit = await detectChatGptRateLimit(tabId);
     if (!hit.limited) {
-      await setStatus("Rate limit cleared — continuing…");
-      await sleep(5000);
+      lastRateLimitHitAt = Date.now();
+      await setStatus("Rate-limit wait finished — pausing briefly, then continuing…");
+      await sleep(20000);
       return true;
     }
     waitSlice = Math.min(Math.round(waitSlice * 1.4), 5 * 60 * 1000);
   }
 
   throw new Error(
-    "ChatGPT rate limit still active after waiting. Pause the batch a few minutes, then Retry errors."
+    "ChatGPT rate limit still active after waiting. Pause the batch 10–15 minutes, then Retry errors."
   );
 }
 
@@ -1492,6 +1543,7 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
   }
   await focusTabForInput(tabId);
   // Do not send while ChatGPT is rate-limiting — wait it out first.
+  await enforcePostRateLimitCooldown();
   await waitOutChatGptRateLimit(tabId);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
@@ -2729,7 +2781,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
   if (runCoverLetter && typeof tabId === "number") {
     try {
       // Brief pause so ChatGPT finishes any post-JSON UI before the CL prompt.
-      await sleep(2500);
+      await sleep(COVER_LETTER_GAP_MS);
       await waitOutChatGptRateLimit(tabId).catch(() => {});
       await setStatus("Same chat: sending cover letter prompt…");
       const coverPrompt = await buildCoverLetterPrompt({
@@ -3049,6 +3101,7 @@ async function runAutoJob(jobMeta) {
 
 async function runBatchLoop(outputDir) {
   batchControl = { pauseAfterCurrent: false, skipCurrent: false, stop: false, forceProceed: false };
+  rateLimitHitsThisBatch = 0;
   await setBatchState("running");
   await chrome.storage.local.set({
     generation_running: true,
@@ -3159,9 +3212,9 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
         await setStatus(
-          `Cooling down ${Math.round(JOB_GAP_MS / 1000)}s before next job (rate-limit protection)…`
+          `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job (rate-limit protection)…`
         );
-        await sleep(JOB_GAP_MS);
+        await sleep(currentJobGapMs());
       } catch (err) {
         const msg = String(err?.message || err);
         if (msg === "__SKIP__" || batchControl.skipCurrent) {
@@ -3186,6 +3239,8 @@ async function runBatchLoop(outputDir) {
 
         // Rate limit: keep pending (do not burn attempts) and cool down.
         if (/rate limit|too many requests|requests too quickly|temporarily limited/i.test(msg)) {
+          lastRateLimitHitAt = Date.now();
+          rateLimitHitsThisBatch += 1;
           await updateQueueJob(next.csvRow, {
             status: "pending",
             error: "ChatGPT rate limit — will retry after cooldown"
@@ -3209,7 +3264,7 @@ async function runBatchLoop(outputDir) {
             ? `Row ${next.csvRow} failed after ${attempts} attempts: ${msg}. Moving to the next job…`
             : `Row ${next.csvRow} error (attempt ${attempts}/${MAX_JOB_ATTEMPTS}): ${msg}. Continuing…`
         );
-        await sleep(Math.max(JOB_GAP_MS, 15000));
+        await sleep(Math.max(currentJobGapMs(), 30000));
         continue;
       }
 

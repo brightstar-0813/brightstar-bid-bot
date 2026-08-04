@@ -607,8 +607,13 @@
   }
 
   /** Click ChatGPT code-block Copy buttons and read clipboard — virtualized
-   * editors often only expose visible lines via innerText. */
+   * editors often only expose visible lines via innerText.
+   * Only safe when this document is focused; otherwise ChatGPT shows
+   * "Copy failed because document lost focus". */
   async function harvestFromCopyButtons() {
+    if (document.visibilityState !== "visible" || !document.hasFocus()) {
+      return [];
+    }
     const texts = [];
     const buttons = Array.from(document.querySelectorAll("button"));
     for (const btn of buttons.slice(0, 40)) {
@@ -627,7 +632,7 @@
           texts.push(clip.slice(0, 500000));
         }
       } catch {
-        // clipboard may be blocked
+        // clipboard may be blocked / focus lost
       }
     }
     return texts;
@@ -636,15 +641,15 @@
   async function persistHarvest({ allowStreaming = false } = {}) {
     const streaming = isStreaming();
     let best = harvestResumeFromPage();
-    // Clipboard copy only when DOM harvest looks thin (virtualized code blocks)
-    // or the user/manual path asked for a force save — avoid clobbering clipboard
-    // on every quiet poll.
+    // Never click Copy during background polls — that steals focus and triggers
+    // ChatGPT's "Copy failed because document lost focus" toast. Only try on
+    // explicit manual save when the tab is focused and DOM harvest looks thin.
     const jobs = Array.isArray(best?.experience) ? best.experience.length : 0;
     const needCopy =
-      allowStreaming ||
-      !best ||
-      jobs < 2 ||
-      (streaming && jobs < 3);
+      allowStreaming &&
+      document.hasFocus() &&
+      document.visibilityState === "visible" &&
+      (!best || jobs < 2);
     if (needCopy) {
       let copied = [];
       try {
