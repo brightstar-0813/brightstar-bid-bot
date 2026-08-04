@@ -823,7 +823,7 @@
       settleTimer = setTimeout(() => {
         settleTimer = null;
         persistHarvest().catch(() => {});
-      }, 2500);
+      }, 1200);
     }
   };
 

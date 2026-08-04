@@ -1322,20 +1322,19 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameTok
 
 /** Pause between finished jobs so ChatGPT is less likely to rate-limit.
  * Each job = new chat + resume + cover letter (2–3 sends). */
-const JOB_GAP_MS = 45 * 1000;
-/** Minimum wait after a rate-limit modal before we probe “cleared”.
- * ChatGPT often recovers in ~1–2 min; we resume early once the UI is gone. */
-const RATE_LIMIT_BASE_WAIT_MS = 90 * 1000;
+const JOB_GAP_MS = 20 * 1000;
+/** Minimum wait after a rate-limit modal before we probe “cleared”. */
+const RATE_LIMIT_BASE_WAIT_MS = 45 * 1000;
 /** Cap how long we sit on one rate-limit encounter. */
-const RATE_LIMIT_MAX_WAIT_MS = 8 * 60 * 1000;
+const RATE_LIMIT_MAX_WAIT_MS = 5 * 60 * 1000;
 /** Quiet time after a hit before the next Send (overlaps with the wait above). */
-const RATE_LIMIT_AFTER_HIT_MS = 75 * 1000;
+const RATE_LIMIT_AFTER_HIT_MS = 35 * 1000;
 /** How often to re-check whether the rate-limit UI is gone. */
-const RATE_LIMIT_PROBE_MS = 20 * 1000;
+const RATE_LIMIT_PROBE_MS = 12 * 1000;
 /** Brief settle after the UI clears before sending again. */
-const RATE_LIMIT_CLEAR_SETTLE_MS = 8 * 1000;
+const RATE_LIMIT_CLEAR_SETTLE_MS = 3 * 1000;
 /** Gap before cover-letter send in the same chat. */
-const COVER_LETTER_GAP_MS = 8 * 1000;
+const COVER_LETTER_GAP_MS = 3 * 1000;
 
 /** Timestamp of the last ChatGPT rate-limit detection (ms). */
 let lastRateLimitHitAt = 0;
@@ -1354,9 +1353,9 @@ function formatWaitLeft(ms) {
 }
 
 function currentJobGapMs() {
-  // 45s → 75s → 2m after repeated hits (still protective, not batch-killing)
-  if (rateLimitHitsThisBatch >= 3) return Math.max(JOB_GAP_MS, 2 * 60 * 1000);
-  if (rateLimitHitsThisBatch >= 1) return Math.max(JOB_GAP_MS, 75 * 1000);
+  // 20s → 40s → 75s after repeated hits
+  if (rateLimitHitsThisBatch >= 3) return Math.max(JOB_GAP_MS, 75 * 1000);
+  if (rateLimitHitsThisBatch >= 1) return Math.max(JOB_GAP_MS, 40 * 1000);
   return JOB_GAP_MS;
 }
 
@@ -1471,8 +1470,9 @@ async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_
       await detectChatGptRateLimit(tabId);
     }
 
-    // Do not trust a clear UI until the short minimum wait has elapsed.
-    if (Date.now() - started < RATE_LIMIT_BASE_WAIT_MS) {
+    // After half the min wait, start trusting a clear UI (faster resume).
+    const earlyProbeAt = Math.round(RATE_LIMIT_BASE_WAIT_MS * 0.5);
+    if (Date.now() - started < earlyProbeAt) {
       continue;
     }
 
@@ -1483,6 +1483,11 @@ async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_
       await setStatus("Rate limit looks clear — brief settle, then continuing…");
       await sleep(RATE_LIMIT_CLEAR_SETTLE_MS);
       return true;
+    }
+
+    // Still limited — keep waiting until full base min, then keep probing.
+    if (Date.now() - started < RATE_LIMIT_BASE_WAIT_MS) {
+      continue;
     }
   }
 
@@ -2492,9 +2497,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   const timeoutMs = expectResumeJson ? 12 * 60 * 1000 : 4 * 60 * 1000;
   // Consecutive no-growth polls (≈1s each) after streaming stops before we give
   // up on the current answer and let the caller re-prompt.
-  const SETTLE_HITS = 6;
+  const SETTLE_HITS = 4;
   /** Extra pause after stream ends so the full JSON paints into the DOM. */
-  const POST_STREAM_DELAY_MS = 2500;
+  const POST_STREAM_DELAY_MS = 1200;
   const start = Date.now();
   let pausedMs = 0;
   let lastText = "";
@@ -2593,7 +2598,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       await new Promise((r) => setTimeout(r, POST_STREAM_DELAY_MS));
       pausedMs += Date.now() - settlePauseStart;
       await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
-      const settled = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 12000 });
+      const settled = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 8000 });
       if (isUsableResumeJson(settled) || isMinimallySaveableResume(settled)) {
         await setStatus(
           `Resume JSON recognized after settle (${settled.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
@@ -2841,7 +2846,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         if (
           /"name"|"experience"/.test(lastText) &&
           (openBraces > closeBraces || !repaired) &&
-          stableHits < SETTLE_HITS + 45
+          stableHits < SETTLE_HITS + 20
         ) {
           await setStatus(
             `${label} — JSON visible but incomplete/unparsed; harvesting (${stableHits}s settled)…`
@@ -2880,7 +2885,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     return lastText;
   }
   if (expectResumeJson) {
-    const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 15000 });
+    const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 10000 });
     if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
       return JSON.stringify(rescued);
     }
@@ -2975,13 +2980,13 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           coverOutput = await pickCover(reply);
           if (looksLikeCoverLetterBody(coverOutput)) break;
           await setStatus("Cover letter looked wrong (JSON/stale reply). Retrying…");
-          await sleep(2000);
+          await sleep(1000);
         } catch (attemptErr) {
           if (attempt === 3) throw attemptErr;
           await setStatus(
             `Cover letter attempt ${attempt} failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
           );
-          await sleep(2000);
+          await sleep(1000);
         }
       }
       if (!looksLikeCoverLetterBody(coverOutput)) {
@@ -3127,7 +3132,7 @@ async function runAutoJob(jobMeta) {
       );
       const already = await waitForJsonReadyFlag(tab.id, {
         since: promptStartedAt,
-        timeoutMs: 15000
+        timeoutMs: 8000
       });
       if (isUsableResumeJson(already)) {
         resumeData = already;
@@ -3169,7 +3174,7 @@ async function runAutoJob(jobMeta) {
       );
       const harvested = await waitForJsonReadyFlag(tab.id, {
         since: promptStartedAt,
-        timeoutMs: 20000
+        timeoutMs: 10000
       });
       if (isUsableResumeJson(harvested) || isMinimallySaveableResume(harvested)) {
         resumeData = harvested;
@@ -3198,7 +3203,7 @@ async function runAutoJob(jobMeta) {
   if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     const lastChance = await waitForJsonReadyFlag(tab.id, {
       since: promptStartedAt,
-      timeoutMs: 20000
+      timeoutMs: 10000
     });
     if (isUsableResumeJson(lastChance) || isMinimallySaveableResume(lastChance)) {
       resumeData = lastChance;
@@ -3451,7 +3456,7 @@ async function runBatchLoop(outputDir) {
             ? `Row ${next.csvRow} failed after ${attempts} attempts: ${msg}. Moving to the next job…`
             : `Row ${next.csvRow} error (attempt ${attempts}/${MAX_JOB_ATTEMPTS}): ${msg}. Continuing…`
         );
-        await sleep(Math.max(currentJobGapMs(), 30000));
+        await sleep(currentJobGapMs());
         continue;
       }
 
