@@ -1,5 +1,5 @@
 import { appendJobToSpreadsheet } from "./sheets.js";
-import { notifySlackBatchComplete } from "./slack.js";
+import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus } from "./slack.js";
 import {
   buildCoverLetterPrompt,
   buildPrompt,
@@ -596,6 +596,69 @@ async function ensureChatGptTab() {
 
 async function setStatus(status) {
   await chrome.storage.local.set({ generation_status: status });
+}
+
+/** Fire-and-forget Slack alert; never throws into the batch loop. */
+async function trySlackAlert(opts) {
+  try {
+    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const webhookUrl = String(data.slack_webhook_url || "").trim();
+    if (!webhookUrl) return false;
+    const person = await getActivePerson().catch(() => null);
+    await notifySlackAlert({
+      webhookUrl,
+      personLabel: person?.label || person?.name || "",
+      ...opts
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Per-job Slack status (done / failed / retry). Never throws. */
+async function trySlackJobStatus(opts) {
+  try {
+    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const webhookUrl = String(data.slack_webhook_url || "").trim();
+    if (!webhookUrl) return false;
+    const person = await getActivePerson().catch(() => null);
+    await notifySlackJobStatus({
+      webhookUrl,
+      personLabel: person?.label || person?.name || "",
+      ...opts
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function queueSlackProgress(queue) {
+  const list = Array.isArray(queue) ? queue : await getQueue();
+  return {
+    done: list.filter((j) => j.status === "done").length,
+    failed: list.filter((j) => j.status === "failed").length,
+    remaining: list.filter((j) => ["pending", "running", "error"].includes(j.status)).length,
+    total: list.length
+  };
+}
+
+async function trySlackBatchComplete(summary) {
+  try {
+    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const webhookUrl = String(data.slack_webhook_url || "").trim();
+    if (!webhookUrl) return false;
+    const person = await getActivePerson().catch(() => null);
+    await notifySlackBatchComplete({
+      webhookUrl,
+      personLabel: person?.label || person?.name || "",
+      ...summary
+    });
+    return true;
+  } catch (err) {
+    throw err;
+  }
 }
 
 function startDownload(url, filename) {
@@ -3346,7 +3409,8 @@ async function runBatchLoop(outputDir) {
         queue.find((j) => j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS);
       if (!next) {
         const done = queue.filter((j) => j.status === "done").length;
-        const failed = queue.filter((j) => j.status === "failed" || j.status === "error").length;
+        const failedJobs = queue.filter((j) => j.status === "failed" || j.status === "error");
+        const failed = failedJobs.length;
         const skipped = queue.filter((j) => j.status === "skipped").length;
         await setBatchState("idle");
         let statusMsg = failed
@@ -3354,19 +3418,22 @@ async function runBatchLoop(outputDir) {
           : "Batch complete — no pending US jobs left.";
 
         try {
-          const sheetCfg = await chrome.storage.local.get(["slack_webhook_url"]);
-          const webhookUrl = String(sheetCfg.slack_webhook_url || "").trim();
-          if (webhookUrl) {
+          const cfg = await chrome.storage.local.get(["slack_webhook_url"]);
+          if (String(cfg.slack_webhook_url || "").trim()) {
             await setStatus("Notifying Slack…");
-            const person = await getActivePerson();
-            await notifySlackBatchComplete({
-              webhookUrl,
+            await trySlackBatchComplete({
               done,
               failed,
               skipped,
               total: queue.length,
-              personLabel: person?.label || person?.name || "",
-              outputDir: outputDir || "Resume Applications"
+              outputDir: outputDir || "Resume Applications",
+              errors: failedJobs.map((j) => ({
+                csvRow: j.csvRow,
+                company: j.company,
+                title: j.title,
+                error: j.error || j.status,
+                status: j.status
+              }))
             });
             statusMsg = `${statusMsg} Slack notified.`;
           }
@@ -3451,6 +3518,15 @@ async function runBatchLoop(outputDir) {
           company: next.company
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
+        await trySlackJobStatus({
+          outcome: "done",
+          csvRow: next.csvRow,
+          company: next.company,
+          jobTitle: next.title,
+          jdLink: next.jdLink || "",
+          message: result.status || "Files saved",
+          progress: await queueSlackProgress()
+        });
         await setStatus(
           `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job (rate-limit protection)…`
         );
@@ -3460,6 +3536,14 @@ async function runBatchLoop(outputDir) {
         if (msg === "__SKIP__" || batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
+          await trySlackJobStatus({
+            outcome: "skipped",
+            csvRow: next.csvRow,
+            company: next.company,
+            jobTitle: next.title,
+            jdLink: next.jdLink || "",
+            progress: await queueSlackProgress()
+          });
           continue;
         }
         if (batchControl.stop) break;
@@ -3474,6 +3558,13 @@ async function runBatchLoop(outputDir) {
           await setBatchState("paused");
           await setStatus(`Batch paused: ${msg}`);
           await chrome.storage.local.set({ generation_running: false });
+          await trySlackAlert({
+            title: "Batch paused ⛔",
+            message: msg,
+            csvRow: next.csvRow,
+            company: next.company,
+            jobTitle: next.title
+          });
           return;
         }
 
@@ -3504,6 +3595,17 @@ async function runBatchLoop(outputDir) {
             ? `Row ${next.csvRow} failed after ${attempts} attempts: ${msg}. Moving to the next job…`
             : `Row ${next.csvRow} error (attempt ${attempts}/${MAX_JOB_ATTEMPTS}): ${msg}. Continuing…`
         );
+        await trySlackJobStatus({
+          outcome: exhausted ? "failed" : "error",
+          csvRow: next.csvRow,
+          company: next.company,
+          jobTitle: next.title,
+          jdLink: next.jdLink || "",
+          message: msg,
+          attempts,
+          maxAttempts: MAX_JOB_ATTEMPTS,
+          progress: await queueSlackProgress()
+        });
         await sleep(currentJobGapMs());
         continue;
       }
@@ -4244,7 +4346,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       stopKeepAlive();
       await setBatchState("idle");
       await chrome.storage.local.set({ generation_running: false });
-      await setStatus(`Batch failed: ${String(err?.message || err)}`);
+      const msg = String(err?.message || err);
+      await setStatus(`Batch failed: ${msg}`);
+      await trySlackAlert({
+        title: "Batch failed ❌",
+        message: msg
+      });
     });
     return false;
   }
@@ -4263,9 +4370,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const result = await runAutoJob(message.jobMeta || {});
         await chrome.storage.local.set({ generation_running: false });
         await setStatus(result.status);
+        const meta = message.jobMeta || {};
+        await trySlackJobStatus({
+          outcome: "done",
+          company: meta.companyName,
+          jobTitle: meta.jobTitle,
+          jdLink: meta.jdLink || "",
+          message: result.status || "One-off files saved"
+        });
       } catch (err) {
         await chrome.storage.local.set({ generation_running: false });
-        await setStatus(`Generation failed: ${String(err?.message || err)}`);
+        const msg = String(err?.message || err);
+        await setStatus(`Generation failed: ${msg}`);
+        const meta = message.jobMeta || {};
+        await trySlackJobStatus({
+          outcome: "failed",
+          company: meta.companyName,
+          jobTitle: meta.jobTitle,
+          jdLink: meta.jdLink || "",
+          message: msg
+        });
       } finally {
         isRunning = false;
         stopKeepAlive();

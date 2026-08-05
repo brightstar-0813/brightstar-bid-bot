@@ -138,7 +138,11 @@ If sheet append fails, file generation still succeeds — the status line will n
 
 ## Slack alert (optional)
 
-When a CSV batch has no pending jobs left, the extension can post a summary to your Slack channel (done / failed / skipped counts).
+With a webhook configured, Slack tracks the bot live:
+
+- **Each job** — ✅ done, ❌ failed, ⚠️ error/retry, or ⏭️ skipped (includes queue progress: done / failed / left)
+- **Batch complete** — final counts plus up to 15 error lines
+- **Batch paused / fatal failure** — blocker or uncaught runner error
 
 1. In Slack: create an **Incoming Webhook** for the channel you want (Apps → Incoming WebHooks, or [api.slack.com/apps](https://api.slack.com/apps) → Incoming Webhooks)
 2. Copy the `https://hooks.slack.com/services/...` URL
