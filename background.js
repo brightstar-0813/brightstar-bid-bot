@@ -3518,15 +3518,6 @@ async function runBatchLoop(outputDir) {
           company: next.company
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
-        await trySlackJobStatus({
-          outcome: "done",
-          csvRow: next.csvRow,
-          company: next.company,
-          jobTitle: next.title,
-          jdLink: next.jdLink || "",
-          message: result.status || "Files saved",
-          progress: await queueSlackProgress()
-        });
         await setStatus(
           `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job (rate-limit protection)…`
         );
@@ -3536,14 +3527,6 @@ async function runBatchLoop(outputDir) {
         if (msg === "__SKIP__" || batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
-          await trySlackJobStatus({
-            outcome: "skipped",
-            csvRow: next.csvRow,
-            company: next.company,
-            jobTitle: next.title,
-            jdLink: next.jdLink || "",
-            progress: await queueSlackProgress()
-          });
           continue;
         }
         if (batchControl.stop) break;
@@ -4370,14 +4353,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const result = await runAutoJob(message.jobMeta || {});
         await chrome.storage.local.set({ generation_running: false });
         await setStatus(result.status);
-        const meta = message.jobMeta || {};
-        await trySlackJobStatus({
-          outcome: "done",
-          company: meta.companyName,
-          jobTitle: meta.jobTitle,
-          jdLink: meta.jdLink || "",
-          message: result.status || "One-off files saved"
-        });
       } catch (err) {
         await chrome.storage.local.set({ generation_running: false });
         const msg = String(err?.message || err);

@@ -138,11 +138,14 @@ If sheet append fails, file generation still succeeds — the status line will n
 
 ## Slack alert (optional)
 
-With a webhook configured, Slack tracks the bot live:
+With a webhook configured, Slack only pings when something needs attention — plus a final batch summary:
 
-- **Each job** — ✅ done, ❌ failed, ⚠️ error/retry, or ⏭️ skipped (includes queue progress: done / failed / left)
-- **Batch complete** — final counts plus up to 15 error lines
+- **Job failed ❌** — row exhausted retries (error message + attempt N/M)
+- **Job error ⚠️** — retrying (error message + attempt N/M)
+- **Batch complete** — done / failed / skipped counts (with up to 15 error lines)
 - **Batch paused / fatal failure** — blocker or uncaught runner error
+
+Successful jobs do **not** ping Slack (to keep the channel quiet).
 
 1. In Slack: create an **Incoming Webhook** for the channel you want (Apps → Incoming WebHooks, or [api.slack.com/apps](https://api.slack.com/apps) → Incoming Webhooks)
 2. Copy the `https://hooks.slack.com/services/...` URL
