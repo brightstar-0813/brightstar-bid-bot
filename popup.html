@@ -369,6 +369,31 @@
         </div>
       </section>
 
+      <!-- Slack -->
+      <section class="section" id="slackSection">
+        <header class="section-header">
+          <p class="section-title">6 · Slack alert</p>
+          <p class="section-sub">Notify your channel when a CSV batch finishes</p>
+        </header>
+        <p class="hint">
+          Slack → create an Incoming Webhook for your channel (e.g. #talented_callers) → paste the URL below.
+        </p>
+        <div class="row-split">
+          <label class="field grow">
+            <span>Incoming Webhook URL</span>
+            <input
+              id="slackWebhookUrl"
+              type="url"
+              placeholder="https://hooks.slack.com/services/..."
+              autocomplete="off"
+            />
+          </label>
+          <button type="button" id="testSlack" class="secondary compact" title="Send a test message">
+            Test
+          </button>
+        </div>
+      </section>
+
       <p id="status" class="status-bar"></p>
     </main>
     <script type="module" src="popup.js"></script>

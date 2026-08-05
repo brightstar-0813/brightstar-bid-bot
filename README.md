@@ -49,7 +49,8 @@ flowchart TD
   sheetAppend --> nextJob{More pending jobs?}
   nextJob -->|yes| resumeChat
   nextJob -->|no| done[Batch complete]
-  done --> apply[Apply: Open job + reveal files + autofill form]
+  done --> slackAlert[Optional Slack webhook summary]
+  slackAlert --> apply[Apply: Open job + reveal files + autofill form]
   startBatch -.->|Pause Skip Stop| controls[Batch controls]
 ```
 
@@ -128,3 +129,15 @@ Chrome cannot write from the spreadsheet share link alone:
 5. Reload the extension if you just changed code; values persist in `storage.local`
 
 If sheet append fails, file generation still succeeds — the status line will note the sheet error.
+
+## Slack alert (optional)
+
+When a CSV batch has no pending jobs left, the extension can post a summary to your Slack channel (done / failed / skipped counts).
+
+1. In Slack: create an **Incoming Webhook** for the channel you want (Apps → Incoming WebHooks, or [api.slack.com/apps](https://api.slack.com/apps) → Incoming Webhooks)
+2. Copy the `https://hooks.slack.com/services/...` URL
+3. Paste it into the extension’s **6 · Slack alert** section
+4. Click **Test** to verify the message appears in that channel
+5. Reload the extension if you just changed code
+
+Leave the field blank to skip Slack. Notify failures do not stop the batch.

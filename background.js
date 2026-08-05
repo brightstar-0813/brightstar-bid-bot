@@ -1,4 +1,5 @@
 import { appendJobToSpreadsheet } from "./sheets.js";
+import { notifySlackBatchComplete } from "./slack.js";
 import {
   buildCoverLetterPrompt,
   buildPrompt,
@@ -3328,13 +3329,36 @@ async function runBatchLoop(outputDir) {
         queue.find((j) => j.status === "pending") ||
         queue.find((j) => j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS);
       if (!next) {
+        const done = queue.filter((j) => j.status === "done").length;
         const failed = queue.filter((j) => j.status === "failed" || j.status === "error").length;
+        const skipped = queue.filter((j) => j.status === "skipped").length;
         await setBatchState("idle");
-        await setStatus(
-          failed
-            ? `Batch complete — ${queue.filter((j) => j.status === "done").length} saved, ${failed} failed (use Start to retry failed rows).`
-            : "Batch complete — no pending US jobs left."
-        );
+        let statusMsg = failed
+          ? `Batch complete — ${done} saved, ${failed} failed (use Start to retry failed rows).`
+          : "Batch complete — no pending US jobs left.";
+
+        try {
+          const sheetCfg = await chrome.storage.local.get(["slack_webhook_url"]);
+          const webhookUrl = String(sheetCfg.slack_webhook_url || "").trim();
+          if (webhookUrl) {
+            await setStatus("Notifying Slack…");
+            const person = await getActivePerson();
+            await notifySlackBatchComplete({
+              webhookUrl,
+              done,
+              failed,
+              skipped,
+              total: queue.length,
+              personLabel: person?.label || person?.name || "",
+              outputDir: outputDir || "Resume Applications"
+            });
+            statusMsg = `${statusMsg} Slack notified.`;
+          }
+        } catch (slackErr) {
+          statusMsg = `${statusMsg} Slack notify failed: ${String(slackErr?.message || slackErr)}`;
+        }
+
+        await setStatus(statusMsg);
         await chrome.storage.local.set({ generation_running: false });
         return;
       }

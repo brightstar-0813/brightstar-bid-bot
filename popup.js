@@ -12,6 +12,7 @@ import {
 } from "./profiles.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { extractSpreadsheetId, buildSheetRowTsv } from "./sheets.js";
+import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { parseJobsCsv, filterJobsByChannel, isLinkedInJob } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 
@@ -125,6 +126,8 @@ const outputDirEl = document.getElementById("outputDir");
 const spreadsheetUrlEl = document.getElementById("spreadsheetUrl");
 const sheetsWebAppUrlEl = document.getElementById("sheetsWebAppUrl");
 const copyAppsScriptBtn = document.getElementById("copyAppsScript");
+const slackWebhookUrlEl = document.getElementById("slackWebhookUrl");
+const testSlackBtn = document.getElementById("testSlack");
 const copySheetRowBtn = document.getElementById("copySheetRow");
 const pasteJdBtn = document.getElementById("pasteJd");
 const runOneOffBtn = document.getElementById("runOneOff");
@@ -380,7 +383,8 @@ async function persistJobFields() {
     last_jd_text: jdTextEl.value,
     output_dir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR,
     spreadsheet_url: spreadsheetUrlEl.value.trim(),
-    sheets_web_app_url: sheetsWebAppUrlEl.value.trim()
+    sheets_web_app_url: sheetsWebAppUrlEl.value.trim(),
+    slack_webhook_url: slackWebhookUrlEl.value.trim()
   });
 }
 
@@ -396,6 +400,7 @@ async function loadSettings() {
     "output_dir",
     "spreadsheet_url",
     "sheets_web_app_url",
+    "slack_webhook_url",
     "generation_status",
     "generation_running",
     QUEUE_KEY,
@@ -415,6 +420,7 @@ async function loadSettings() {
   outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
   spreadsheetUrlEl.value = data.spreadsheet_url || "";
   sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
+  slackWebhookUrlEl.value = data.slack_webhook_url || "";
   setStatus(data.generation_status || "");
 
   channelFilter = data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER;
@@ -1008,6 +1014,36 @@ async function copySheetRow() {
   }
 }
 
+async function testSlackWebhook() {
+  const webhookUrl = slackWebhookUrlEl.value.trim();
+  if (!webhookUrl) {
+    setStatus("Paste a Slack Incoming Webhook URL first.");
+    return;
+  }
+  if (!isSlackWebhookUrl(webhookUrl)) {
+    setStatus("URL must look like https://hooks.slack.com/services/...");
+    return;
+  }
+  await persistJobFields();
+  setStatus("Sending Slack test…");
+  try {
+    const person = await getActivePerson();
+    await notifySlackBatchComplete({
+      webhookUrl,
+      done: 0,
+      failed: 0,
+      skipped: 0,
+      total: 0,
+      personLabel: person?.label || person?.name || "(test)",
+      outputDir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR,
+      isTest: true
+    });
+    setStatus("Slack test sent — check your channel.");
+  } catch (err) {
+    setStatus(`Slack test failed: ${String(err?.message || err)}`);
+  }
+}
+
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
   runOneOffBtn.disabled = busy;
@@ -1212,11 +1248,21 @@ forceSaveChatgptBtn.addEventListener("click", async () => {
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 copySheetRowBtn.addEventListener("click", copySheetRow);
+testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
 resetBtn.addEventListener("click", resetWorkflow);
 
-for (const el of [jobTitleEl, companyNameEl, jdLinkEl, jdTextEl, outputDirEl, spreadsheetUrlEl, sheetsWebAppUrlEl]) {
+for (const el of [
+  jobTitleEl,
+  companyNameEl,
+  jdLinkEl,
+  jdTextEl,
+  outputDirEl,
+  spreadsheetUrlEl,
+  sheetsWebAppUrlEl,
+  slackWebhookUrlEl
+]) {
   el.addEventListener("change", () => {
     persistJobFields().catch(() => {});
   });
