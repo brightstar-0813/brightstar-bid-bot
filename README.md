@@ -86,6 +86,12 @@ flowchart TD
 5. Use **Pause** / **Skip** / **Stop** as needed
 6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill)
 
+## Keep the bot open while you bid
+
+Chrome always closes an extension popup when you click outside it, so copying a JD or link dismisses it. Click **Keep open** (top-right of the popup) to move the same UI into Chrome's **side panel**, which stays docked while you browse and copy. On Chrome builds without the side panel it opens a detached window instead.
+
+The **Manual one-off** form also remembers whether it was expanded, and collapses itself once **Generate (auto)** starts.
+
 ## Apply autofill
 
 - Button: **Autofill this page** (focus the application tab first)

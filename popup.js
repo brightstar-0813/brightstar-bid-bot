@@ -22,6 +22,15 @@ const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "general";
+const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
+const DETACHED_WINDOW_KEY = "detached_window_id";
+
+/** "popup" (closes on focus loss), "panel" (docked), or "window" (detached). */
+const UI_CONTEXT = new URLSearchParams(location.search).get("ctx") || "popup";
+document.body.classList.add(`ctx-${UI_CONTEXT}`);
+
+/** Cached so the dock button can call sidePanel.open() inside the user gesture. */
+let currentWindowId = null;
 
 const APPS_SCRIPT_SOURCE = `/**
  * Brightstar Bid bot — paste into Extensions → Apps Script on your spreadsheet,
@@ -129,6 +138,7 @@ const copyAppsScriptBtn = document.getElementById("copyAppsScript");
 const slackWebhookUrlEl = document.getElementById("slackWebhookUrl");
 const testSlackBtn = document.getElementById("testSlack");
 const copySheetRowBtn = document.getElementById("copySheetRow");
+const keepOpenBtn = document.getElementById("keepOpen");
 const pasteJdBtn = document.getElementById("pasteJd");
 const runOneOffBtn = document.getElementById("runOneOff");
 const autofillPageBtn = document.getElementById("autofillPage");
@@ -401,6 +411,7 @@ async function loadSettings() {
     "spreadsheet_url",
     "sheets_web_app_url",
     "slack_webhook_url",
+    MANUAL_PANEL_OPEN_KEY,
     "generation_status",
     "generation_running",
     QUEUE_KEY,
@@ -421,6 +432,7 @@ async function loadSettings() {
   spreadsheetUrlEl.value = data.spreadsheet_url || "";
   sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
+  setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
   setStatus(data.generation_status || "");
 
   channelFilter = data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER;
@@ -1044,6 +1056,45 @@ async function testSlackWebhook() {
   }
 }
 
+async function openDetachedWindow() {
+  const stored = (await chrome.storage.local.get(DETACHED_WINDOW_KEY))[DETACHED_WINDOW_KEY];
+  if (stored != null) {
+    try {
+      await chrome.windows.update(stored, { focused: true, drawAttention: true });
+      window.close();
+      return;
+    } catch {
+      // Remembered window was closed — fall through and make a new one.
+    }
+  }
+  const created = await chrome.windows.create({
+    url: chrome.runtime.getURL("popup.html?ctx=window"),
+    type: "popup",
+    width: 560,
+    height: 780
+  });
+  await chrome.storage.local.set({ [DETACHED_WINDOW_KEY]: created.id });
+  window.close();
+}
+
+function dockOutOfPopup() {
+  const detach = () =>
+    openDetachedWindow().catch((err) =>
+      setStatus(`Could not keep the bot open: ${String(err?.message || err)}`)
+    );
+
+  if (currentWindowId == null || typeof chrome.sidePanel?.open !== "function") {
+    detach();
+    return;
+  }
+
+  // sidePanel.open() only works inside the click gesture, so it must not be
+  // preceded by an await.
+  Promise.resolve(chrome.sidePanel.open({ windowId: currentWindowId }))
+    .then(() => window.close())
+    .catch(detach);
+}
+
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
   runOneOffBtn.disabled = busy;
@@ -1102,7 +1153,10 @@ async function runOneOff() {
   if (!res?.ok) {
     setStatus(res?.error || "One-off failed to start.");
     setBusy(false);
+    return;
   }
+
+  setManualPanelOpen(false);
 }
 
 async function autofillThisPage() {
@@ -1178,6 +1232,16 @@ templateSelectEl.addEventListener("change", () => {
   chrome.storage.local.set({ selected_template_id: templateSelectEl.value }).catch(() => {});
 });
 
+function setManualPanelOpen(open, { persist = true } = {}) {
+  const isOpen = Boolean(open);
+  manualPanelBody.hidden = !isOpen;
+  toggleManualPanelBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  toggleManualPanelBtn.textContent = isOpen ? "Hide one-off job form" : "Expand one-off job form";
+  if (persist) {
+    chrome.storage.local.set({ [MANUAL_PANEL_OPEN_KEY]: isOpen }).catch(() => {});
+  }
+}
+
 togglePersonPanelBtn.addEventListener("click", () => {
   const open = personPanelBody.hidden;
   personPanelBody.hidden = !open;
@@ -1186,9 +1250,7 @@ togglePersonPanelBtn.addEventListener("click", () => {
 });
 
 toggleManualPanelBtn.addEventListener("click", () => {
-  const open = manualPanelBody.hidden;
-  manualPanelBody.hidden = !open;
-  toggleManualPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  setManualPanelOpen(manualPanelBody.hidden);
 });
 
 loadPresetBtn.addEventListener("click", () => loadPresetIntoEditor().catch((e) => setStatus(String(e.message || e))));
@@ -1248,6 +1310,7 @@ forceSaveChatgptBtn.addEventListener("click", async () => {
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 copySheetRowBtn.addEventListener("click", copySheetRow);
+keepOpenBtn.addEventListener("click", dockOutOfPopup);
 testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
@@ -1266,6 +1329,17 @@ for (const el of [
   el.addEventListener("change", () => {
     persistJobFields().catch(() => {});
   });
+}
+
+if (UI_CONTEXT === "popup") {
+  chrome.windows
+    .getCurrent()
+    .then((win) => {
+      currentWindowId = win?.id ?? null;
+    })
+    .catch(() => {});
+} else {
+  keepOpenBtn.hidden = true;
 }
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));

@@ -458,15 +458,31 @@ function safeSendResponse(sendResponse, payload) {
   }
 }
 
+/** The docked panel reuses popup.html but needs the full-width layout. */
+function configureSidePanel() {
+  try {
+    chrome.sidePanel
+      ?.setOptions?.({ path: "popup.html?ctx=panel", enabled: true })
+      ?.catch(() => {});
+    chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false })?.catch(() => {});
+  } catch {
+    // Side panel is unsupported in this Chrome build.
+  }
+}
+
+configureSidePanel();
+
 chrome.runtime.onInstalled.addListener(() => {
   isRunning = false;
   stopKeepAlive();
+  configureSidePanel();
   recoverInterruptedBatch("Ready.").then(resumeBatchIfInterrupted);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   isRunning = false;
   stopKeepAlive();
+  configureSidePanel();
   recoverInterruptedBatch("Ready.").then(resumeBatchIfInterrupted);
 });
 
