@@ -3024,12 +3024,20 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
     status = `${status}. Cover letter skipped: open a ChatGPT tab.`;
   }
 
-  if (jobMeta.spreadsheetUrl || jobMeta.sheetsWebAppUrl) {
+  let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
+  let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
+  if (!spreadsheetUrl || !sheetsWebAppUrl) {
+    const sheetCfg = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
+    if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheet_url || "").trim();
+    if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.sheets_web_app_url || "").trim();
+  }
+  if (spreadsheetUrl && sheetsWebAppUrl) {
     await setStatus("Appending row to Google Sheet...");
     try {
       await appendJobToSpreadsheet({
-        spreadsheetUrl: jobMeta.spreadsheetUrl,
-        webAppUrl: jobMeta.sheetsWebAppUrl,
+        spreadsheetUrl,
+        webAppUrl: sheetsWebAppUrl,
+        jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
         jobTitle: jobMeta.jobTitle,
         companyName: jobMeta.companyName,
         jdLink: jobMeta.jdLink

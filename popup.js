@@ -25,6 +25,8 @@ const DEFAULT_CHANNEL_FILTER = "general";
 const APPS_SCRIPT_SOURCE = `/**
  * Brightstar Bid bot — paste into Extensions → Apps Script on your spreadsheet,
  * then Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone).
+ *
+ * Sheet columns: A No | B Date | C Title | D Company | E Link
  */
 function doPost(e) {
   try {
@@ -37,10 +39,11 @@ function doPost(e) {
     const sheet = ss.getSheets()[0];
 
     sheet.appendRow([
-      data.jobLink || "",
+      data.jobNo || "",
+      data.applicationDate || "",
       data.jobTitle || "",
       data.companyName || "",
-      data.applicationDate || ""
+      data.jobLink || ""
     ]);
 
     return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(
@@ -990,10 +993,16 @@ async function copySheetRow() {
     setStatus("Fill job title, company, and/or JD link before copying.");
     return;
   }
-  const tsv = buildSheetRowTsv({ jobTitle, companyName, jdLink, includeDate: true });
+  const tsv = buildSheetRowTsv({
+    jobNo: "",
+    jobTitle,
+    companyName,
+    jdLink,
+    includeDate: true
+  });
   try {
     await navigator.clipboard.writeText(tsv);
-    setStatus("Sheet row copied.");
+    setStatus("Sheet row copied (No | Date | Title | Company | Link).");
   } catch {
     setStatus("Clipboard write failed.");
   }

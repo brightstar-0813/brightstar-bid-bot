@@ -295,7 +295,7 @@
               <span>JD link</span>
               <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
             </label>
-            <button type="button" id="copySheetRow" class="secondary compact" title="Copy sheet row">
+            <button type="button" id="copySheetRow" class="secondary compact" title="Copy No | Date | Title | Company | Link">
               Copy row
             </button>
           </div>
@@ -323,7 +323,9 @@
         <button type="button" id="reset" class="secondary">Reset jobs / Refresh</button>
       </div>
 
-      <section class="section" id="spreadsheetSection" hidden>
+      <section class="section" id="spreadsheetSection">
+        <p class="section-title">Google Sheet (after each job)</p>
+        <p class="hint">Appends No, Date, Title, Company, Link when files finish. Paste Apps Script → Deploy as Web app, then paste the Web App URL here.</p>
         <label class="field">
           <span>Spreadsheet link</span>
           <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />

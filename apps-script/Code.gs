@@ -10,10 +10,10 @@
  * 5. Copy the Web App URL into the extension's "Web App URL" field
  *
  * After generation, the extension POSTs:
- *   spreadsheetId, jobLink, jobTitle, companyName, applicationDate
+ *   spreadsheetId, jobNo, applicationDate, jobTitle, companyName, jobLink
  *
  * Row order matches your sheet headers:
- *   A JOB URL | B JOB TITLE | C COMPANY NAME | D Application Date
+ *   A No | B Date | C Title | D Company | E Link
  */
 function doPost(e) {
   try {
@@ -26,10 +26,11 @@ function doPost(e) {
     const sheet = ss.getSheets()[0];
 
     sheet.appendRow([
-      data.jobLink || "",
+      data.jobNo || "",
+      data.applicationDate || "",
       data.jobTitle || "",
       data.companyName || "",
-      data.applicationDate || ""
+      data.jobLink || ""
     ]);
 
     return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(

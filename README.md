@@ -45,7 +45,8 @@ flowchart TD
   pollJson --> saveFiles[Save jd.txt + Name_Resume.pdf]
   saveFiles --> clChat[Same chat: cover letter prompt]
   clChat --> saveCl[Save Name_Cover Letter.pdf]
-  saveCl --> nextJob{More pending jobs?}
+  saveCl --> sheetAppend[Append No Date Title Company Link to Google Sheet]
+  sheetAppend --> nextJob{More pending jobs?}
   nextJob -->|yes| resumeChat
   nextJob -->|no| done[Batch complete]
   done --> apply[Apply: Open job + reveal files + autofill form]
@@ -112,4 +113,18 @@ Manual one-off jobs (no CSV row) still use `Company - Title` without the numeric
 
 ## Google Spreadsheet (optional)
 
-Chrome cannot write to a spreadsheet from the share/edit link alone. Use the Apps Script under `apps-script/Code.gs` if you re-enable the spreadsheet section in the popup.
+After each job’s files finish (batch or one-off), the extension can append a row:
+
+| No | Date | Title | Company | Link |
+|----|------|-------|---------|------|
+| CSV row # | M/D/YYYY | job title | company | JD URL |
+
+Chrome cannot write from the spreadsheet share link alone:
+
+1. Open your sheet → put those five headers in row 1 (optional but recommended)
+2. Extensions → Apps Script → paste `apps-script/Code.gs` (or use **Copy script** in the popup) → Save
+3. Deploy → New deployment → Web app → Execute as: **Me**, Who has access: **Anyone**
+4. Paste the spreadsheet link and Web App URL into the extension’s **Google Sheet** section
+5. Reload the extension if you just changed code; values persist in `storage.local`
+
+If sheet append fails, file generation still succeeds — the status line will note the sheet error.

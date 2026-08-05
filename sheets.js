@@ -17,13 +17,24 @@ export function formatApplicationDate(date = new Date()) {
 }
 
 /**
- * Tab-separated row matching sheet columns A–D:
- * JOB URL | JOB TITLE | COMPANY NAME | Application Date
+ * Tab-separated row matching sheet columns A–E:
+ * No | Date | Title | Company | Link
  * Paste into the first cell of an empty row in Google Sheets.
  */
-export function buildSheetRowTsv({ jobTitle, companyName, jdLink, includeDate = true }) {
-  const cells = [jdLink || "", jobTitle || "", companyName || ""];
-  if (includeDate) cells.push(formatApplicationDate());
+export function buildSheetRowTsv({
+  jobNo = "",
+  jobTitle,
+  companyName,
+  jdLink,
+  includeDate = true
+}) {
+  const cells = [
+    jobNo !== "" && jobNo != null ? String(jobNo) : "",
+    includeDate ? formatApplicationDate() : "",
+    jobTitle || "",
+    companyName || "",
+    jdLink || ""
+  ];
   return cells.join("\t");
 }
 
@@ -34,6 +45,7 @@ export function buildSheetRowTsv({ jobTitle, companyName, jdLink, includeDate = 
 export async function appendJobToSpreadsheet({
   spreadsheetUrl,
   webAppUrl,
+  jobNo,
   jobTitle,
   companyName,
   jdLink
@@ -52,10 +64,11 @@ export async function appendJobToSpreadsheet({
 
   const payload = {
     spreadsheetId,
-    jobLink: jdLink || "",
+    jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
+    applicationDate: formatApplicationDate(),
     jobTitle: jobTitle || "",
     companyName: companyName || "",
-    applicationDate: formatApplicationDate()
+    jobLink: jdLink || ""
   };
 
   const response = await fetch(endpoint, {
