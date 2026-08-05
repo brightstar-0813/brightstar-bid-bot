@@ -126,6 +126,8 @@ After each job’s files finish (batch or one-off), the extension can append a r
 |----|------|-------|---------|------|
 | CSV row # | M/D/YYYY | job title | company | JD URL |
 
+**Duplicate prevention:** when you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
+
 Chrome cannot write from the spreadsheet share link alone:
 
 1. Open your sheet → put those five headers in row 1 (optional but recommended)
@@ -133,6 +135,7 @@ Chrome cannot write from the spreadsheet share link alone:
 3. Deploy → New deployment → Web app → Execute as: **Me**, Who has access: **Anyone**
 4. Paste the spreadsheet link and Web App URL into the extension’s **Google Sheet** section
 5. Reload the extension if you just changed code; values persist in `storage.local`
+6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listLinks` / duplicate guard are live
 
 If sheet append fails, file generation still succeeds — the status line will note the sheet error.
 

@@ -361,9 +361,11 @@
       <section class="section" id="spreadsheetSection">
         <header class="section-header">
           <p class="section-title">5 · Google Sheet</p>
-          <p class="section-sub">After each job: No · Date · Title · Company · Link</p>
+          <p class="section-sub">Log bids · skip CSV jobs already on the sheet (by Link)</p>
         </header>
-        <p class="hint">Paste Apps Script → Deploy as Web app, then paste the Web App URL below.</p>
+        <p class="hint">
+          Paste Apps Script → Deploy as Web app (redeploy after updates). Used to append rows and to skip duplicates by job link.
+        </p>
         <label class="field">
           <span>Spreadsheet link</span>
           <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />

@@ -1,5 +1,10 @@
-import { appendJobToSpreadsheet } from "./sheets.js";
-import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus } from "./slack.js";
+import {
+  appendJobToSpreadsheet,
+  fetchExistingJobLinks,
+  buildKnownLinkSet,
+  normalizeJobLink
+} from "./sheets.js";
+import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
 import {
   buildCoverLetterPrompt,
   buildPrompt,
@@ -659,6 +664,99 @@ async function trySlackBatchComplete(summary) {
   } catch (err) {
     throw err;
   }
+}
+
+async function trySlackDuplicates(duplicates, sheetLinkCount) {
+  try {
+    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const webhookUrl = String(data.slack_webhook_url || "").trim();
+    if (!webhookUrl || !duplicates?.length) return false;
+    const person = await getActivePerson().catch(() => null);
+    await notifySlackDuplicates({
+      webhookUrl,
+      duplicates,
+      sheetLinkCount,
+      personLabel: person?.label || person?.name || ""
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getSheetConfig() {
+  const data = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
+  return {
+    spreadsheetUrl: String(data.spreadsheet_url || "").trim(),
+    webAppUrl: String(data.sheets_web_app_url || "").trim()
+  };
+}
+
+/**
+ * Skip queue jobs whose JD link is already on the Google Sheet (or appears
+ * twice in this queue). Alerts Slack with the skipped list.
+ */
+async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
+  const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+  if (!spreadsheetUrl || !webAppUrl) {
+    return {
+      ok: true,
+      checked: false,
+      skipped: 0,
+      reason: "Google Sheet not configured — duplicate check skipped."
+    };
+  }
+
+  await setStatus("Checking Google Sheet for jobs already bid…");
+  let links = [];
+  try {
+    links = await fetchExistingJobLinks({ spreadsheetUrl, webAppUrl });
+  } catch (err) {
+    return {
+      ok: false,
+      checked: false,
+      skipped: 0,
+      error: String(err?.message || err)
+    };
+  }
+
+  const known = buildKnownLinkSet(links);
+  const queue = await getQueue();
+  const duplicates = [];
+  const seenThisQueue = new Set(known);
+
+  const next = queue.map((job) => {
+    // Leave finished / already-skipped rows alone.
+    if (job.status === "done" || job.status === "skipped") return job;
+    const n = normalizeJobLink(job.jdLink || "");
+    if (!n) return job;
+    if (seenThisQueue.has(n)) {
+      duplicates.push(job);
+      return {
+        ...job,
+        status: "skipped",
+        error: "Duplicate — already in Google Sheet (or earlier in this CSV)"
+      };
+    }
+    seenThisQueue.add(n);
+    return job;
+  });
+
+  if (duplicates.length) {
+    await setQueue(next);
+    if (notifySlack) {
+      await trySlackDuplicates(duplicates, links.length);
+    }
+  }
+
+  return {
+    ok: true,
+    checked: true,
+    skipped: duplicates.length,
+    sheetLinkCount: links.length,
+    pendingLeft: next.filter((j) => j.status === "pending" || j.status === "error").length,
+    duplicates
+  };
 }
 
 function startDownload(url, filename) {
@@ -3114,7 +3212,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
   if (spreadsheetUrl && sheetsWebAppUrl) {
     await setStatus("Appending row to Google Sheet...");
     try {
-      await appendJobToSpreadsheet({
+      const sheetResult = await appendJobToSpreadsheet({
         spreadsheetUrl,
         webAppUrl: sheetsWebAppUrl,
         jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
@@ -3122,7 +3220,9 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         companyName: jobMeta.companyName,
         jdLink: jobMeta.jdLink
       });
-      status = `${status} and appended to Google Sheet`;
+      status = sheetResult.duplicate
+        ? `${status} (already on Google Sheet — not re-appended)`
+        : `${status} and appended to Google Sheet`;
     } catch (sheetErr) {
       status = `${status}, but sheet append failed: ${String(sheetErr?.message || sheetErr)}`;
     }
@@ -3391,6 +3491,15 @@ async function runBatchLoop(outputDir) {
   startKeepAlive();
 
   try {
+    const dedupe = await dedupeQueueAgainstSheet({ notifySlack: true });
+    if (dedupe.checked && dedupe.skipped > 0) {
+      await setStatus(
+        `Skipped ${dedupe.skipped} duplicate(s) already on the Google Sheet. Continuing with remaining jobs…`
+      );
+    } else if (dedupe.checked === false && dedupe.error) {
+      await setStatus(`Sheet duplicate check failed (${dedupe.error}). Continuing without it…`);
+    }
+
     while (!batchControl.stop) {
       if (batchControl.pauseAfterCurrent) {
         batchControl.pauseAfterCurrent = false;
@@ -3963,6 +4072,25 @@ async function autofillActiveTab() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
 
+  if (type === "dedupe_queue_against_sheet") {
+    (async () => {
+      try {
+        const result = await dedupeQueueAgainstSheet({
+          notifySlack: message?.notifySlack !== false
+        });
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, {
+          ok: false,
+          checked: false,
+          skipped: 0,
+          error: String(err?.message || err)
+        });
+      }
+    })();
+    return true;
+  }
+
   if (type === "clear_job_queue") {
     (async () => {
       try {
@@ -4350,7 +4478,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
       try {
-        const result = await runAutoJob(message.jobMeta || {});
+        const meta = message.jobMeta || {};
+        const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+        const link = normalizeJobLink(meta.jdLink || "");
+        if (link && spreadsheetUrl && webAppUrl) {
+          try {
+            const links = await fetchExistingJobLinks({ spreadsheetUrl, webAppUrl });
+            if (buildKnownLinkSet(links).has(link)) {
+              await chrome.storage.local.set({ generation_running: false });
+              await setStatus(
+                `Skipped duplicate — already on Google Sheet: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
+              );
+              await trySlackDuplicates(
+                [
+                  {
+                    csvRow: meta.csvRow,
+                    company: meta.companyName,
+                    title: meta.jobTitle,
+                    jdLink: meta.jdLink
+                  }
+                ],
+                links.length
+              );
+              return;
+            }
+          } catch (dupErr) {
+            await setStatus(
+              `Sheet duplicate check failed (${String(dupErr?.message || dupErr)}); continuing one-off…`
+            );
+          }
+        }
+
+        const result = await runAutoJob(meta);
         await chrome.storage.local.set({ generation_running: false });
         await setStatus(result.status);
       } catch (err) {

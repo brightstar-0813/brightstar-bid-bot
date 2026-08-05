@@ -17,6 +17,38 @@ export function formatApplicationDate(date = new Date()) {
 }
 
 /**
+ * Normalize job URLs so sheet vs CSV links still match when tracking
+ * params / trailing slashes differ.
+ */
+export function normalizeJobLink(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    u.hash = "";
+    for (const key of [...u.searchParams.keys()]) {
+      const k = key.toLowerCase();
+      if (
+        k.startsWith("utm_") ||
+        k === "fbclid" ||
+        k === "gclid" ||
+        k === "ref" ||
+        k === "source"
+      ) {
+        u.searchParams.delete(key);
+      }
+    }
+    u.hostname = u.hostname.toLowerCase();
+    let path = u.pathname.replace(/\/+$/, "");
+    if (!path) path = "/";
+    const search = u.searchParams.toString();
+    return `${u.protocol}//${u.hostname}${path}${search ? `?${search}` : ""}`.toLowerCase();
+  } catch {
+    return raw.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+/**
  * Tab-separated row matching sheet columns A–E:
  * No | Date | Title | Company | Link
  * Paste into the first cell of an empty row in Google Sheets.
@@ -38,38 +70,13 @@ export function buildSheetRowTsv({
   return cells.join("\t");
 }
 
-/**
- * Appends one row via the deployed Apps Script web app.
- * Uses text/plain body to avoid CORS preflight issues with Google Apps Script.
- */
-export async function appendJobToSpreadsheet({
-  spreadsheetUrl,
-  webAppUrl,
-  jobNo,
-  jobTitle,
-  companyName,
-  jdLink
-}) {
-  const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
-  if (!spreadsheetId) {
-    throw new Error("Invalid Google Spreadsheet link.");
-  }
-
+async function postSheetWebApp(webAppUrl, payload) {
   const endpoint = String(webAppUrl || "").trim();
   if (!endpoint || !/^https:\/\/script\.google\.com\//i.test(endpoint)) {
     throw new Error(
       "Paste the Apps Script Web App URL (Deploy → Web app). Spreadsheet share link alone cannot be written to from Chrome."
     );
   }
-
-  const payload = {
-    spreadsheetId,
-    jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
-    applicationDate: formatApplicationDate(),
-    jobTitle: jobTitle || "",
-    companyName: companyName || "",
-    jobLink: jdLink || ""
-  };
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -89,11 +96,92 @@ export async function appendJobToSpreadsheet({
   }
 
   if (!response.ok) {
-    throw new Error(parsed?.error || `Sheet append failed (HTTP ${response.status}).`);
+    throw new Error(parsed?.error || `Sheet request failed (HTTP ${response.status}).`);
   }
   if (parsed && parsed.ok === false) {
-    throw new Error(parsed.error || "Sheet append failed.");
+    throw new Error(parsed.error || "Sheet request failed.");
   }
 
-  return { spreadsheetId, ...payload };
+  return parsed || { ok: true };
+}
+
+/**
+ * Appends one row via the deployed Apps Script web app.
+ * Uses text/plain body to avoid CORS preflight issues with Google Apps Script.
+ * Returns { duplicate: true } if the job link is already on the sheet.
+ */
+export async function appendJobToSpreadsheet({
+  spreadsheetUrl,
+  webAppUrl,
+  jobNo,
+  jobTitle,
+  companyName,
+  jdLink
+}) {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid Google Spreadsheet link.");
+  }
+
+  const payload = {
+    action: "append",
+    spreadsheetId,
+    jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
+    applicationDate: formatApplicationDate(),
+    jobTitle: jobTitle || "",
+    companyName: companyName || "",
+    jobLink: jdLink || ""
+  };
+
+  const parsed = await postSheetWebApp(webAppUrl, payload);
+  return { spreadsheetId, duplicate: Boolean(parsed?.duplicate), ...payload };
+}
+
+/**
+ * Fetch all job links already recorded on the sheet (column Link / E).
+ * @returns {Promise<string[]>}
+ */
+export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl }) {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid Google Spreadsheet link.");
+  }
+
+  const parsed = await postSheetWebApp(webAppUrl, {
+    action: "listLinks",
+    spreadsheetId
+  });
+
+  const links = Array.isArray(parsed?.links) ? parsed.links : [];
+  return links.map((l) => String(l || "").trim()).filter(Boolean);
+}
+
+/**
+ * @param {string[]} links
+ * @returns {Set<string>}
+ */
+export function buildKnownLinkSet(links) {
+  const set = new Set();
+  for (const link of links || []) {
+    const n = normalizeJobLink(link);
+    if (n) set.add(n);
+  }
+  return set;
+}
+
+/**
+ * Split jobs into fresh vs already-on-sheet (by normalized JD link).
+ * Jobs without a link are treated as fresh (cannot match).
+ */
+export function partitionJobsBySheetLinks(jobs, knownLinkSet) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const known = knownLinkSet instanceof Set ? knownLinkSet : buildKnownLinkSet(knownLinkSet);
+  const fresh = [];
+  const duplicates = [];
+  for (const job of list) {
+    const n = normalizeJobLink(job?.jdLink || job?.url || "");
+    if (n && known.has(n)) duplicates.push(job);
+    else fresh.push(job);
+  }
+  return { fresh, duplicates };
 }

@@ -220,6 +220,37 @@ export async function notifySlackAlert({
     );
   }
   if (personLabel) lines.push(`• Person: ${personLabel}`);
-  if (message) lines.push(`• Error: ${truncate(message, 400)}`);
+  if (message) lines.push(`• ${truncate(message, 500)}`);
+  return postSlackMessage(webhookUrl, lines.join("\n"));
+}
+
+/**
+ * Summary when CSV/queue jobs are skipped as already on the sheet.
+ */
+export async function notifySlackDuplicates({
+  webhookUrl,
+  duplicates = [],
+  personLabel = "",
+  sheetLinkCount = 0
+}) {
+  const list = Array.isArray(duplicates) ? duplicates : [];
+  const lines = [
+    `*Brightstar Bid bot* — Skipped ${list.length} duplicate job(s) ⏭️`,
+    `• Already on sheet: matched by job link`,
+    sheetLinkCount ? `• Sheet had ${sheetLinkCount} link(s) when checked` : ""
+  ].filter(Boolean);
+  if (personLabel) lines.push(`• Person: ${personLabel}`);
+  const shown = list.slice(0, 12);
+  if (shown.length) {
+    lines.push("", "*Skipped:*");
+    for (const job of shown) {
+      const row = job.csvRow != null ? `#${job.csvRow}` : "?";
+      const who = [job.company, job.title].filter(Boolean).join(" / ") || "job";
+      lines.push(`• ${row} ${who}`);
+    }
+    if (list.length > shown.length) {
+      lines.push(`• …and ${list.length - shown.length} more`);
+    }
+  }
   return postSlackMessage(webhookUrl, lines.join("\n"));
 }
