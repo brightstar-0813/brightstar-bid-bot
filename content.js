@@ -755,9 +755,43 @@
     const stub = /One summary paragraph|One sentence bullet|One realistic project name|tailored to the JD/i.test(
       JSON.stringify(data)
     );
+    // Fixed company history from active person (set by background before each job).
+    const rulesStored = await chrome.storage.local.get(["experience_validation_rules"]);
+    const rules = rulesStored.experience_validation_rules;
+    const cos = data.experience.map((j) => String(j?.company || "").trim());
+    const normalizeKey = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+        .replace(/\s+/g, " ");
+    const companyMatches = (jobCompany, requiredLabel) => {
+      const a = normalizeKey(jobCompany);
+      const b = normalizeKey(requiredLabel);
+      if (!a || !b) return false;
+      if (a === b) return true;
+      if (b.length >= 4 && a.includes(b)) return true;
+      if (a.length >= 4 && b.includes(a)) return true;
+      return false;
+    };
+    let missingEmployers = false;
+    let minJobs = 1;
+    if (rules?.roles?.length) {
+      minJobs = Number(rules.minJobs) || rules.roles.length;
+      missingEmployers =
+        data.experience.length < minJobs ||
+        rules.roles.some((role) => {
+          const need = Math.max(1, Number(role.min) || 1);
+          const have = cos.filter((c) => companyMatches(c, role.label)).length;
+          return have < need;
+        });
+    }
     const usable =
       nameOk &&
       !stub &&
+      !missingEmployers &&
+      data.experience.length >= minJobs &&
       bullets >= 4 &&
       (profile.length >= 40 || summary >= 3) &&
       data.experience.some(
@@ -771,8 +805,8 @@
       (skills >= 1 ||
         certs >= 1 ||
         edu >= 1 ||
-        (data.experience.length >= 3 && bullets >= 8 && profile.length >= 60) ||
-        (data.experience.length >= 2 && bullets >= 10 && profile.length >= 40));
+        (data.experience.length >= minJobs && bullets >= 8 && profile.length >= 60) ||
+        (data.experience.length >= Math.max(2, minJobs) && bullets >= 10 && profile.length >= 40));
 
     // While streaming, only raise ready when the object looks finished.
     // Manual save (allowStreaming) accepts any usable object.

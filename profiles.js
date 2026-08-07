@@ -1,5 +1,10 @@
 import { PROMPT as matthewDaleHoffmanPrompt } from "./prompts/matthew-dale-hoffman.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
+import {
+  normalizeRequiredExperienceInput,
+  parseRequiredExperienceFromPrompt,
+  resolveExperienceRulesForPerson
+} from "./experience-rules.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
 
@@ -31,7 +36,14 @@ export const BUILTIN_PROFILES = [
     signatureTitle: "Salesforce Developer",
     masterResume: "",
     coverLetterPrompt: coverLetterPrompt,
-    autofillExtras: {}
+    autofillExtras: {},
+    // Repeat Accenture twice — two distinct roles in FIXED COMPANY HISTORY.
+    requiredExperience: [
+      "Accenture Federal Services",
+      "Hallmark Cards",
+      "TeleTech",
+      "Accenture Federal Services"
+    ]
   },
   {
     id: COVER_LETTER_PROFILE_ID,
@@ -41,6 +53,8 @@ export const BUILTIN_PROFILES = [
     kind: "coverLetter"
   }
 ];
+
+export { resolveExperienceRulesForPerson, normalizeRequiredExperienceInput, parseRequiredExperienceFromPrompt };
 
 export const DEFAULT_PROFILE_ID = "matthew-dale-hoffman";
 
@@ -157,6 +171,7 @@ function normalizePerson(p) {
     templateId: "times-classic",
     signatureTitle: "Salesforce Developer",
     autofillExtras: {},
+    requiredExperience: [],
     builtin: true,
     kind: "resume"
   };
@@ -165,6 +180,11 @@ function normalizePerson(p) {
     p.autofillExtras && typeof p.autofillExtras === "object" && !Array.isArray(p.autofillExtras)
       ? { ...p.autofillExtras }
       : {};
+  let requiredExperience = normalizeRequiredExperienceInput(p.requiredExperience);
+  // Backfill from FIXED COMPANY HISTORY when older custom profiles omit the field.
+  if (!requiredExperience.length && p.promptTemplate) {
+    requiredExperience = parseRequiredExperienceFromPrompt(p.promptTemplate);
+  }
   return {
     ...empty,
     id: p.id,
@@ -191,6 +211,7 @@ function normalizePerson(p) {
     templateId: p.templateId || "times-classic",
     signatureTitle: p.signatureTitle || p.headline || "",
     autofillExtras: extras,
+    requiredExperience,
     builtin: Boolean(p.builtin),
     kind: p.kind || "resume"
   };
@@ -308,7 +329,8 @@ export async function addCustomProfile({
   resumeFilePrefix = "",
   templateId = "",
   signatureTitle = "",
-  autofillExtras = {}
+  autofillExtras = {},
+  requiredExperience = []
 } = {}) {
   const displayName = String(label || name || "").trim();
   const prompt = String(promptTemplate || "").trim();
@@ -339,6 +361,16 @@ export async function addCustomProfile({
       ? { ...autofillExtras }
       : {};
 
+  let employers = normalizeRequiredExperienceInput(requiredExperience);
+  if (!employers.length && profileKind === "resume") {
+    employers = parseRequiredExperienceFromPrompt(prompt);
+  }
+  if (profileKind === "resume" && employers.length < 2) {
+    throw new Error(
+      "Add Required experience employers (one company per line, at least 2). Repeat a company if they had two roles there. Or include a FIXED COMPANY HISTORY section in the tailor prompt so employers can be detected."
+    );
+  }
+
   const profile = {
     id,
     label: displayName,
@@ -364,7 +396,8 @@ export async function addCustomProfile({
     resumeFilePrefix: String(resumeFilePrefix || slugify(displayName).replace(/-/g, "_") || "Resume"),
     templateId: String(templateId || "times-classic").trim(),
     signatureTitle: String(signatureTitle || "").trim(),
-    autofillExtras: extras
+    autofillExtras: extras,
+    requiredExperience: employers
   };
   custom.push(profile);
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: custom });
@@ -416,6 +449,16 @@ export async function savePersonProfile(person) {
       person?.autofillExtras && typeof person.autofillExtras === "object" && !Array.isArray(person.autofillExtras)
         ? { ...person.autofillExtras }
         : {},
+    requiredExperience: (() => {
+      let employers = normalizeRequiredExperienceInput(person?.requiredExperience);
+      if (!employers.length) employers = parseRequiredExperienceFromPrompt(prompt);
+      if (employers.length < 2) {
+        throw new Error(
+          "Add Required experience employers (one company per line, at least 2). Repeat a company for two roles at the same employer. Or include FIXED COMPANY HISTORY in the tailor prompt."
+        );
+      }
+      return employers;
+    })(),
     kind: "resume"
   };
 

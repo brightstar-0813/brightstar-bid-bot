@@ -10,7 +10,8 @@ import {
   buildPrompt,
   getActivePerson,
   getAutofillContact,
-  mergeAutofillExtras
+  mergeAutofillExtras,
+  resolveExperienceRulesForPerson
 } from "./profiles.js";
 import {
   resumeJsonToHtml,
@@ -21,8 +22,12 @@ import {
   resumeJsonLooksComplete,
   sanitizeResumeData,
   looksLikeSchemaPlaceholderResume,
-  describeResumeGaps
+  describeResumeGaps,
+  missingExperienceCompanies,
+  buildMissingExperienceRetryPrompt,
+  setExperienceValidationRules
 } from "./resume-json.js";
+import { formatRequiredEmployersList } from "./experience-rules.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 
 const QUEUE_KEY = "job_queue";
@@ -32,20 +37,39 @@ const APPLY_HISTORY_KEY = "apply_history";
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
 /** Retries of the resume prompt inside one chat before the row is failed.
- * 2 = one clean re-prompt when GPT returned prose/HTML with no JSON on page.
- * When JSON is already visible we harvest instead of re-prompting. */
-const MAX_JSON_ATTEMPTS = 2;
+ * 3 = initial + up to two re-prompts (e.g. missing employers, then stub/parse).
+ * When JSON is already complete we harvest instead of re-prompting. */
+const MAX_JSON_ATTEMPTS = 3;
 
 const JSON_RETRY_PROMPT = `Your previous reply was not usable (it looked like a schema stub or incomplete JSON). Return ONLY one complete valid resume JSON object with REAL tailored content.
 
 Rules:
 - No markdown, no code fences, no commentary before or after the JSON
 - Start with { and end with }
-- Include filled: name, headline, location, phone, email, linkedin, profile (4–6 real sentences), technicalSummary (6–10 real bullets), education, ALL certifications from the source list, skills (multiple categories), experience (all employers with full bullet counts)
+- Include filled: name, headline, location, phone, email, linkedin, profile (4–6 real sentences), technicalSummary (6–10 real bullets), education, ALL certifications from the source list, skills (multiple categories), experience (ALL employers from FIXED COMPANY HISTORY with full bullet counts — do not omit any company)
 - NEVER output placeholder text such as "One summary paragraph", "One sentence bullet", "tailored to the JD", or "One realistic project name"
 - Finish the entire JSON in one message. Do not ask clarifying questions.
 
 Output JSON now.`;
+
+function buildJsonRetryPrompt(partialData) {
+  const missing = missingExperienceCompanies(partialData);
+  if (missing.length) return buildMissingExperienceRetryPrompt(partialData);
+  return JSON_RETRY_PROMPT;
+}
+
+/** Install per-person experience employer rules for validation + content-script harvest. */
+async function activatePersonExperienceRules(person) {
+  const experienceRules = resolveExperienceRulesForPerson(person);
+  setExperienceValidationRules(experienceRules);
+  await chrome.storage.local
+    .set({
+      experience_validation_rules: experienceRules,
+      experience_validation_person: person?.name || person?.label || ""
+    })
+    .catch(() => {});
+  return experienceRules;
+}
 
 /**
  * Dedicated deep DOM scan (all assistant turns + page-wide <pre>).
@@ -349,6 +373,8 @@ function describeUnusableResume(rawText, data) {
   if (!String(data.name || "").trim()) missing.push("name");
   if (String(data.profile || "").trim().length < 40) missing.push("profile(<40 chars)");
   if (!Array.isArray(data.experience) || data.experience.length < 1) missing.push("experience");
+  const missingCos = missingExperienceCompanies(data);
+  if (missingCos.length) missing.push(`missingCompanies(${missingCos.join("; ")})`);
   const bullets = Array.isArray(data.experience)
     ? data.experience.reduce(
         (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
@@ -3285,6 +3311,17 @@ async function runAutoJob(jobMeta) {
   }
 
   const person = await getActivePerson();
+  const experienceRules = await activatePersonExperienceRules(person);
+  if (experienceRules?.roles?.length) {
+    await setStatus(
+      `Validating experience employers for ${person.name || person.label}: ${formatRequiredEmployersList(experienceRules)}`
+    );
+  } else {
+    await setStatus(
+      `Warning: no required employers configured for ${person.name || person.label} — incomplete experience may be saved. Add them in the person editor.`
+    );
+  }
+
   const profileId = jobMeta.profileId || person.id;
   const prompt = await buildPrompt(profileId, jobMeta.jdText || "", {
     jobTitle: jobMeta.jobTitle || "",
@@ -3331,12 +3368,16 @@ async function runAutoJob(jobMeta) {
         break;
       }
       // Still nothing usable — only then one clean re-prompt.
+      const gapHint = describeResumeGaps(resumeData || already);
       await setStatus(
-        `Row ${rowLabel}${jobMeta.companyName}: no ready JSON yet — one re-prompt (${attempt}/${MAX_JSON_ATTEMPTS})…`
+        `Row ${rowLabel}${jobMeta.companyName}: no ready JSON yet — one re-prompt (${attempt}/${MAX_JSON_ATTEMPTS})${
+          gapHint ? ` [${gapHint}]` : ""
+        }…`
       );
     }
 
-    rawOutput = await automateChatGpt(tab.id, isFirst ? prompt : JSON_RETRY_PROMPT, {
+    const retryPrompt = isFirst ? prompt : buildJsonRetryPrompt(resumeData);
+    rawOutput = await automateChatGpt(tab.id, retryPrompt, {
       newChat: isFirst,
       expectResumeJson: true,
       statusLabel: isFirst
@@ -3376,7 +3417,17 @@ async function runAutoJob(jobMeta) {
     }
     if (isUsableResumeJson(resumeData) || isMinimallySaveableResume(resumeData)) break;
 
-    // Only re-prompt when there is no resume-shaped JSON visible at all.
+    // Missing fixed employers: allow a targeted re-prompt (do not treat as "JSON visible → done").
+    const missingCos = missingExperienceCompanies(resumeData);
+    if (missingCos.length && attempt < MAX_JSON_ATTEMPTS) {
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: experience missing ${missingCos.join(", ")} — re-prompting…`
+      );
+      continue;
+    }
+
+    // Only skip further re-prompt when there is resume-shaped JSON but the gap is
+    // not a missing-employer issue (parse/stub problems harvest better than re-prompt).
     const pageHasJsonMarkers = /"experience"|"profile"|"technicalSummary"/.test(
       String(rawOutput || "")
     );
@@ -4247,6 +4298,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const tab = await getOpenChatGptTab();
         if (!tab?.id) throw new Error("Open the ChatGPT tab that has the resume JSON.");
 
+        const person = await getActivePerson();
+        await activatePersonExperienceRules(person);
+
         await setStatus("Force-save: collecting resume JSON…");
 
         let data = message.resumeData && typeof message.resumeData === "object" ? message.resumeData : null;
@@ -4292,7 +4346,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           queue.find((j) => j.status === "pending" || j.status === "error");
         if (!job) throw new Error("No queue job to attach files to. Upload CSV / Start batch first.");
 
-        const person = await getActivePerson();
         await setStatus(
           `Force-save: writing files for row ${job.csvRow} (${data.experience?.length || 0} jobs)…`
         );

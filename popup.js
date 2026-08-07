@@ -8,8 +8,14 @@ import {
   addCustomProfile,
   deleteCustomProfile,
   BUILTIN_PROFILES,
-  COVER_LETTER_PROFILE_ID
+  COVER_LETTER_PROFILE_ID,
+  normalizeRequiredExperienceInput,
+  parseRequiredExperienceFromPrompt,
+  resolveExperienceRulesForPerson
 } from "./profiles.js";
+import {
+  requiredExperienceToText
+} from "./experience-rules.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { extractSpreadsheetId, buildSheetRowTsv } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
@@ -193,6 +199,8 @@ const personAutofillExtrasEl = document.getElementById("personAutofillExtras");
 const personResumePrefixEl = document.getElementById("personResumePrefix");
 const personSignatureTitleEl = document.getElementById("personSignatureTitle");
 const personMasterResumeEl = document.getElementById("personMasterResume");
+const personRequiredExperienceEl = document.getElementById("personRequiredExperience");
+const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
 const personResumePromptEl = document.getElementById("personResumePrompt");
 const personCoverPromptEl = document.getElementById("personCoverPrompt");
 const masterResumeFileEl = document.getElementById("masterResumeFile");
@@ -407,6 +415,7 @@ function fillPersonForm(person) {
   personResumePrefixEl.value = person?.resumeFilePrefix || "";
   personSignatureTitleEl.value = person?.signatureTitle || "";
   personMasterResumeEl.value = person?.masterResume || "";
+  personRequiredExperienceEl.value = requiredExperienceToText(person?.requiredExperience || []);
   personResumePromptEl.value = person?.promptTemplate || "";
   personCoverPromptEl.value = person?.coverLetterPrompt || "";
   if (person?.templateId) {
@@ -442,6 +451,7 @@ function readPersonForm({ asNew = false } = {}) {
     resumeFilePrefix: personResumePrefixEl.value.trim() || "Resume",
     signatureTitle: personSignatureTitleEl.value.trim(),
     masterResume: personMasterResumeEl.value,
+    requiredExperience: normalizeRequiredExperienceInput(personRequiredExperienceEl.value),
     promptTemplate: personResumePromptEl.value,
     coverLetterPrompt: personCoverPromptEl.value,
     templateId: templateSelectEl.value || DEFAULT_TEMPLATE_ID
@@ -958,6 +968,24 @@ async function savePerson({ asNew = false } = {}) {
     return;
   }
 
+  // Auto-fill required employers from FIXED COMPANY HISTORY when the field is blank.
+  if (!person.requiredExperience?.length) {
+    const detected = parseRequiredExperienceFromPrompt(person.promptTemplate);
+    if (detected.length) {
+      person.requiredExperience = detected;
+      personRequiredExperienceEl.value = requiredExperienceToText(detected);
+    }
+  }
+  if ((person.requiredExperience || []).length < 2) {
+    setPersonSaveStatus(
+      "List required experience employers (one per line, at least 2). Repeat a company for two roles there — or click Detect from prompt.",
+      { ok: false }
+    );
+    personRequiredExperienceEl.focus();
+    setStatus("Required experience employers needed.");
+    return;
+  }
+
   savePersonBtn.disabled = true;
   savePersonAsNewBtn.disabled = true;
   setPersonSaveStatus("Saving…");
@@ -986,6 +1014,7 @@ async function savePerson({ asNew = false } = {}) {
         hispanicLatino: person.hispanicLatino,
         autofillExtras: person.autofillExtras,
         masterResume: person.masterResume,
+        requiredExperience: person.requiredExperience,
         promptTemplate: person.promptTemplate,
         coverLetterPrompt: person.coverLetterPrompt,
         resumeFilePrefix: person.resumeFilePrefix,
@@ -1006,7 +1035,12 @@ async function savePerson({ asNew = false } = {}) {
       selected_template_id: person.templateId,
       resume_file_prefix: person.resumeFilePrefix || saved.resumeFilePrefix,
       selected_profile_id: saved.id,
-      active_person_id: saved.id
+      active_person_id: saved.id,
+      experience_validation_rules: resolveExperienceRulesForPerson({
+        ...saved,
+        requiredExperience: person.requiredExperience || saved.requiredExperience
+      }),
+      experience_validation_person: saved.name || saved.label || ""
     });
     await refreshProfiles(saved.id);
     fillPersonForm({ ...saved, builtin: false });
@@ -1087,9 +1121,12 @@ async function onProfileChange() {
   await setActivePersonId(profileId);
   await loadActivePersonIntoForm();
   const person = await getActivePerson();
+  const rules = resolveExperienceRulesForPerson(person);
   await chrome.storage.local.set({
     resume_file_prefix: person.resumeFilePrefix || "Resume",
-    selected_template_id: person.templateId || DEFAULT_TEMPLATE_ID
+    selected_template_id: person.templateId || DEFAULT_TEMPLATE_ID,
+    experience_validation_rules: rules,
+    experience_validation_person: person.name || person.label || ""
   });
 }
 
@@ -1375,6 +1412,23 @@ loadPresetBtn.addEventListener("click", () => loadPresetIntoEditor().catch((e) =
 savePersonBtn.addEventListener("click", () => savePerson({ asNew: false }));
 savePersonAsNewBtn.addEventListener("click", () => savePerson({ asNew: true }));
 deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
+
+detectRequiredExperienceBtn?.addEventListener("click", () => {
+  const detected = parseRequiredExperienceFromPrompt(personResumePromptEl.value);
+  if (!detected.length) {
+    setPersonSaveStatus(
+      "No employers found. Add a FIXED COMPANY HISTORY section in the prompt, or type companies manually (one per line).",
+      { ok: false }
+    );
+    return;
+  }
+  personRequiredExperienceEl.value = requiredExperienceToText(detected);
+  setPersonSaveStatus(
+    `Detected ${detected.length} employer entr${detected.length === 1 ? "y" : "ies"} from the prompt.`,
+    { ok: true }
+  );
+});
+
 clearMasterResumeBtn.addEventListener("click", () => {
   personMasterResumeEl.value = "";
   masterResumeFileEl.value = "";

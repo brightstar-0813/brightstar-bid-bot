@@ -1,3 +1,11 @@
+import {
+  compileExperienceRules,
+  missingCompaniesForRules,
+  hasAllRequiredCompanies,
+  formatRequiredEmployersList,
+  companyMatches
+} from "./experience-rules.js";
+
 const EXPECTED_BULLET_COUNTS = [
   { match: /accenture\s*federal/i, count: 10 },
   { match: /^hallmark/i, count: 9 },
@@ -9,6 +17,78 @@ const EXPECTED_BULLET_COUNTS = [
   { match: /vonage/i, count: 4 },
   { match: /forefront/i, count: 4 }
 ];
+
+/** Active per-person experience rules (set by background for the current job). */
+let activeExperienceRules = null;
+
+/**
+ * Install validation rules for the active teammate / person.
+ * Pass null to clear. Accepts compiled rules or raw requiredExperience input.
+ */
+export function setExperienceValidationRules(rulesOrInput) {
+  if (!rulesOrInput) {
+    activeExperienceRules = null;
+    return null;
+  }
+  if (rulesOrInput.roles && Array.isArray(rulesOrInput.roles)) {
+    activeExperienceRules = {
+      minJobs: Number(rulesOrInput.minJobs) || rulesOrInput.roles.length,
+      roles: rulesOrInput.roles.map((r) => ({
+        label: String(r.label || r.company || "").trim(),
+        min: Math.max(1, Number(r.min) || 1)
+      })).filter((r) => r.label)
+    };
+    if (!activeExperienceRules.roles.length) activeExperienceRules = null;
+    return activeExperienceRules;
+  }
+  activeExperienceRules = compileExperienceRules(rulesOrInput);
+  return activeExperienceRules;
+}
+
+export function getExperienceValidationRules() {
+  return activeExperienceRules;
+}
+
+/** Resolve rules: explicit override → active person rules. */
+export function resolveExpectedExperienceProfile(data, rulesOverride = null) {
+  if (rulesOverride?.roles?.length) return rulesOverride;
+  if (activeExperienceRules?.roles?.length) return activeExperienceRules;
+  return null;
+}
+
+/**
+ * Labels for required employers missing from experience.
+ * Empty when no rules are active or all employers are present.
+ */
+export function missingExperienceCompanies(data, rulesOverride = null) {
+  const rules = resolveExpectedExperienceProfile(data, rulesOverride);
+  return missingCompaniesForRules(data, rules);
+}
+
+export function hasRequiredExperienceCompanies(data, rulesOverride = null) {
+  const rules = resolveExpectedExperienceProfile(data, rulesOverride);
+  return hasAllRequiredCompanies(data, rules);
+}
+
+/** Retry prompt when experience dropped required employers. */
+export function buildMissingExperienceRetryPrompt(data, rulesOverride = null) {
+  const rules = resolveExpectedExperienceProfile(data, rulesOverride);
+  const missing = missingExperienceCompanies(data, rules);
+  const requiredList = formatRequiredEmployersList(rules);
+  const missingText = missing.length ? missing.join(", ") : "one or more fixed employers";
+  return `Your previous resume JSON omitted required employer(s) from FIXED COMPANY HISTORY: ${missingText}.
+
+Return ONLY one complete valid resume JSON object with REAL tailored content.
+Rules:
+- No markdown, no code fences, no commentary before or after the JSON
+- Start with { and end with }
+- experience MUST include EVERY required employer — do not drop any company
+- Required employers: ${requiredList || "all employers from FIXED COMPANY HISTORY in the original prompt"}
+- Keep full bullet counts for each role
+- Finish the entire JSON in one message
+
+Output JSON now.`;
+}
 
 export function stripMarkdownFences(text) {
   let trimmed = String(text || "").trim();
@@ -528,8 +608,12 @@ export function describeResumeGaps(data) {
   if (!String(data.name || "").trim()) gaps.push("name");
   const profile = String(data.profile || "").trim();
   if (profile.length < 80) gaps.push(`profile(${profile.length}/80)`);
+  const expected = resolveExpectedExperienceProfile(data);
   const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
-  if (jobs < 3) gaps.push(`jobs(${jobs}/3)`);
+  const minJobs = expected?.minJobs || 3;
+  if (jobs < minJobs) gaps.push(`jobs(${jobs}/${minJobs})`);
+  const missingCos = missingExperienceCompanies(data);
+  if (missingCos.length) gaps.push(`missingCompanies(${missingCos.join("; ")})`);
   const bullets = totalExperienceBullets(data);
   if (bullets < 10) gaps.push(`bullets(${bullets}/10)`);
   const skills = Array.isArray(data.skills) ? data.skills.length : 0;
@@ -541,8 +625,8 @@ export function describeResumeGaps(data) {
 
 /**
  * Minimum bar to render a real PDF. Deliberately relaxed so short/2-job resumes
- * and people without certifications still automate end to end. The poller only
- * accepts this tier once ChatGPT has stopped streaming (see isRichResumeJson).
+ * and people without certifications still automate end to end — except when the
+ * candidate has a FIXED COMPANY HISTORY (must include every required employer).
  */
 export function isUsableResumeJson(data) {
   if (!data || typeof data !== "object") return false;
@@ -555,6 +639,9 @@ export function isUsableResumeJson(data) {
 
   const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
   if (jobs < 1) return false;
+
+  // Known fixed-history candidates must not drop employers (e.g. Matthew needs 4).
+  if (!hasRequiredExperienceCompanies(data)) return false;
 
   // At least one role must carry real, non-trivial bullets.
   const hasDetailedRole = data.experience.some(
@@ -571,7 +658,7 @@ export function isUsableResumeJson(data) {
 
 /**
  * Last-chance bar when JSON is clearly on the page but strict gates failed.
- * Still rejects schema stubs / empty shells.
+ * Still rejects schema stubs / empty shells / missing fixed employers.
  */
 export function isMinimallySaveableResume(data) {
   if (!data || typeof data !== "object") return false;
@@ -579,6 +666,7 @@ export function isMinimallySaveableResume(data) {
   if (looksLikeSchemaPlaceholderResume(data)) return false;
   const jobs = Array.isArray(data.experience) ? data.experience : [];
   if (jobs.length < 1) return false;
+  if (!hasRequiredExperienceCompanies(data)) return false;
   const bullets = experienceBulletTexts(data).filter((b) => String(b).trim().length >= 25);
   if (bullets.length < 4) return false;
   const hasBody =
@@ -597,8 +685,10 @@ export function isRichResumeJson(data) {
   const profile = String(data.profile || "").trim();
   if (profile.length < 80) return false;
 
+  const expected = resolveExpectedExperienceProfile(data);
   const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
-  if (jobs < 3) return false;
+  const minJobs = expected?.minJobs || 3;
+  if (jobs < minJobs) return false;
 
   const bullets = totalExperienceBullets(data);
   if (bullets < 20) return false;
@@ -628,16 +718,18 @@ export function resumeJsonLooksComplete(data) {
   const skills = Array.isArray(data.skills) ? data.skills.filter(Boolean).length : 0;
   const certs = Array.isArray(data.certifications) ? data.certifications.filter(Boolean).length : 0;
   const edu = Array.isArray(data.education) ? data.education.length : 0;
+  const expected = resolveExpectedExperienceProfile(data);
   const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
+  const minJobs = expected?.minJobs || 3;
   const bullets = totalExperienceBullets(data);
   const profile = String(data.profile || "").trim();
   const avg = averageBulletLength(data);
 
   // Prefer finished tail sections + deep bullets over thin mid-stream repairs.
-  if ((skills >= 1 || certs >= 1 || edu >= 1) && jobs >= 3 && bullets >= 20 && avg >= 100) {
+  if ((skills >= 1 || certs >= 1 || edu >= 1) && jobs >= minJobs && bullets >= 20 && avg >= 100) {
     return true;
   }
-  return jobs >= 4 && bullets >= 28 && profile.length >= 60 && avg >= 110;
+  return jobs >= Math.max(4, minJobs) && bullets >= 28 && profile.length >= 60 && avg >= 110;
 }
 
 /** Strict completeness check used for continuation decisions. */
@@ -646,14 +738,29 @@ export function isCompleteResumeJson(data) {
   if (!String(data.profile || "").trim() || String(data.profile).length < 80) return false;
   if (!Array.isArray(data.skills) || data.skills.length < 1) return false;
   if (!Array.isArray(data.experience) || data.experience.length < 2) return false;
+  if (!hasRequiredExperienceCompanies(data)) return false;
   if (totalExperienceBullets(data) < 8) return false;
 
-  // Only enforce company-specific bullet floors when that company appears.
-  for (const rule of EXPECTED_BULLET_COUNTS) {
-    const job = data.experience.find((j) => rule.match.test(String(j?.company || "").trim()));
-    if (!job) continue;
-    if (!Array.isArray(job.bullets) || job.bullets.filter(Boolean).length < Math.min(rule.count, 4)) {
-      return false;
+  // Enforce company-specific bullet floors for every required / known employer present.
+  const expected = resolveExpectedExperienceProfile(data);
+  if (expected) {
+    for (const role of expected.roles) {
+      const matches = data.experience.filter((j) => companyMatches(j?.company, role.label));
+      for (const job of matches) {
+        const rule = EXPECTED_BULLET_COUNTS.find((r) => r.match.test(String(job?.company || "").trim()));
+        const floor = Math.min(rule?.count || 4, 4);
+        if (!Array.isArray(job.bullets) || job.bullets.filter(Boolean).length < floor) {
+          return false;
+        }
+      }
+    }
+  } else {
+    for (const rule of EXPECTED_BULLET_COUNTS) {
+      const job = data.experience.find((j) => rule.match.test(String(j?.company || "").trim()));
+      if (!job) continue;
+      if (!Array.isArray(job.bullets) || job.bullets.filter(Boolean).length < Math.min(rule.count, 4)) {
+        return false;
+      }
     }
   }
 

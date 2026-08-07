@@ -227,6 +227,22 @@
               <button type="button" id="clearMasterResume" class="secondary compact">Clear</button>
             </div>
             <p class="hint" id="masterResumeFileHint"></p>
+            <label class="field">
+              <span>Required experience employers (one per line — must all appear on every resume)</span>
+              <textarea
+                id="personRequiredExperience"
+                class="prompt-input"
+                placeholder="Accenture Federal Services&#10;Hallmark Cards&#10;TeleTech&#10;Accenture Federal Services"
+                rows="5"
+              ></textarea>
+            </label>
+            <div class="row-split">
+              <p class="hint grow">
+                List every employer GPT must keep. Repeat a company if they held two roles there. Optional:
+                <code>Company | 2</code>. Blank = auto-detect from FIXED COMPANY HISTORY in the prompt.
+              </p>
+              <button type="button" id="detectRequiredExperience" class="secondary compact">Detect from prompt</button>
+            </div>
           </div>
 
           <div class="subblock">
