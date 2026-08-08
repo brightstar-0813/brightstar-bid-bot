@@ -181,8 +181,28 @@ function textLooksNonUsCountry(text) {
 }
 
 /**
- * Conservative US filter using location + remote_restricted_to.
- * @param {{ location?: string, remoteRestrictedTo?: string }} fields
+ * Job boards whose postings are US-only. A row from these sources is treated as
+ * US even when the location is a bare city (e.g. Dice "Boston"), empty, or
+ * "Remote" — unless the location/remote explicitly names a foreign country.
+ */
+const US_ONLY_SOURCES = new Set(["dice"]);
+
+export function isUsOnlySource(source) {
+  const src = String(source || "").toLowerCase().trim();
+  if (!src) return false;
+  if (US_ONLY_SOURCES.has(src)) return true;
+  // Some exports prefix/suffix the board name (e.g. "dice.com", "dice_run3").
+  for (const board of US_ONLY_SOURCES) {
+    if (src.includes(board)) return true;
+  }
+  return false;
+}
+
+/**
+ * Conservative US filter using location + remote_restricted_to. When the row
+ * comes from a US-only board (e.g. Dice), trust the source and only drop it if
+ * the location clearly names a foreign country.
+ * @param {{ location?: string, remoteRestrictedTo?: string, source?: string }} fields
  */
 export function isUnitedStatesJob(fields) {
   const location = String(fields.location || "").trim();
@@ -200,6 +220,11 @@ export function isUnitedStatesJob(fields) {
 
   if (textLooksNonUsCountry(location) || textLooksNonUsCountry(remote)) {
     return false;
+  }
+
+  // US-only board (Dice etc.): city-only, empty, or "Remote" locations are US.
+  if (isUsOnlySource(fields.source)) {
+    return true;
   }
 
   // Bare "Remote" with empty location — do not treat as US
@@ -279,7 +304,7 @@ export function parseJobsCsv(csvText) {
       continue;
     }
 
-    if (!isUnitedStatesJob({ location, remoteRestrictedTo })) {
+    if (!isUnitedStatesJob({ location, remoteRestrictedTo, source: source || id })) {
       droppedNonUs += 1;
       continue;
     }
