@@ -136,11 +136,53 @@ export function underfilledExperienceEntries(data) {
   return out;
 }
 
-/** True when no role is missing OR short on bullets (i.e. nothing looks truncated). */
+const BULLET_TERMINAL_RE = /[.!?)\]"'%]$/;
+const BULLET_MIDPHRASE_RE =
+  /(?:,|;|:|\/|-|\b(?:and|or|but|with|to|of|the|an?|in|for|on|at|by|as|that|which|while|so|including|such)\b)$/i;
+
+/**
+ * Detect a bullet that was cut off mid-sentence — the tell-tale sign of a
+ * truncated reply (or a mid-stream snapshot the auto-repair closed early).
+ * @param {string} text - bullet text
+ * @param {boolean} expectTerminal - most bullets in this resume end with punctuation
+ */
+function bulletLooksTruncated(text, expectTerminal) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  if (/,$/.test(t)) return true; // no real bullet ends with a comma
+  if (BULLET_MIDPHRASE_RE.test(t) && !BULLET_TERMINAL_RE.test(t)) return true;
+  if (expectTerminal && !BULLET_TERMINAL_RE.test(t)) return true;
+  return false;
+}
+
+/**
+ * Role(s) whose final bullet appears cut off mid-sentence. Only the last bullet
+ * of the last role is checked (that is where a truncated reply always ends), so
+ * legitimately punctuation-free interior bullets are never flagged.
+ */
+export function truncatedBulletRoles(data) {
+  if (!Array.isArray(data?.experience) || !data.experience.length) return [];
+  const all = experienceBulletTexts(data);
+  if (!all.length) return [];
+  const withTerminal = all.filter((b) => BULLET_TERMINAL_RE.test(String(b).trim())).length;
+  const expectTerminal = withTerminal / all.length >= 0.7;
+  const lastJob = data.experience[data.experience.length - 1];
+  const bullets = Array.isArray(lastJob?.bullets)
+    ? lastJob.bullets.filter((b) => String(b || "").trim())
+    : [];
+  if (!bullets.length) return [];
+  if (bulletLooksTruncated(bullets[bullets.length - 1], expectTerminal)) {
+    return [String(lastJob?.company || lastJob?.title || "").trim() || "last role"];
+  }
+  return [];
+}
+
+/** True when no role is missing, short on bullets, or cut off mid-sentence. */
 export function hasFullExperienceEntries(data) {
   return (
     incompleteExperienceEntries(data).length === 0 &&
-    underfilledExperienceEntries(data).length === 0
+    underfilledExperienceEntries(data).length === 0 &&
+    truncatedBulletRoles(data).length === 0
   );
 }
 
@@ -148,12 +190,14 @@ export function hasFullExperienceEntries(data) {
 export function buildIncompleteExperienceRetryPrompt(data, rulesOverride = null) {
   const incomplete = incompleteExperienceEntries(data);
   const underfilled = underfilledExperienceEntries(data);
+  const truncated = truncatedBulletRoles(data);
   const missing = missingExperienceCompanies(data, rulesOverride);
   const rules = resolveExpectedExperienceProfile(data, rulesOverride);
   const requiredList = formatRequiredEmployersList(rules);
   const problems = [];
   if (incomplete.length) problems.push(`no bullet points: ${incomplete.join(", ")}`);
   if (underfilled.length) problems.push(`too few bullet points: ${underfilled.join(", ")}`);
+  if (truncated.length) problems.push(`a bullet cut off mid-sentence: ${truncated.join(", ")}`);
   const problemText = problems.length ? problems.join("; ") : "one or more roles were cut off";
   const missingLine = missing.length
     ? `\n- Also add missing employer(s): ${missing.join(", ")}`
@@ -719,6 +763,8 @@ export function describeResumeGaps(data) {
   if (cutRoles.length) gaps.push(`emptyRoles(${cutRoles.join("; ")})`);
   const thinRoles = underfilledExperienceEntries(data);
   if (thinRoles.length) gaps.push(`thinRoles(${thinRoles.join("; ")})`);
+  const cutBullets = truncatedBulletRoles(data);
+  if (cutBullets.length) gaps.push(`truncatedBullet(${cutBullets.join("; ")})`);
   const bullets = totalExperienceBullets(data);
   if (bullets < 10) gaps.push(`bullets(${bullets}/10)`);
   const skills = Array.isArray(data.skills) ? data.skills.length : 0;

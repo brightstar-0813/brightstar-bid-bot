@@ -27,6 +27,7 @@ import {
   buildMissingExperienceRetryPrompt,
   incompleteExperienceEntries,
   underfilledExperienceEntries,
+  truncatedBulletRoles,
   buildIncompleteExperienceRetryPrompt,
   setExperienceValidationRules
 } from "./resume-json.js";
@@ -58,7 +59,8 @@ Output JSON now.`;
 function buildJsonRetryPrompt(partialData) {
   const incomplete = incompleteExperienceEntries(partialData);
   const underfilled = underfilledExperienceEntries(partialData);
-  if (incomplete.length || underfilled.length) {
+  const truncated = truncatedBulletRoles(partialData);
+  if (incomplete.length || underfilled.length || truncated.length) {
     return buildIncompleteExperienceRetryPrompt(partialData);
   }
   const missing = missingExperienceCompanies(partialData);
@@ -387,6 +389,8 @@ function describeUnusableResume(rawText, data) {
   if (cutRoles.length) missing.push(`emptyRoles(${cutRoles.join("; ")})`);
   const thinRoles = underfilledExperienceEntries(data);
   if (thinRoles.length) missing.push(`thinRoles(${thinRoles.join("; ")})`);
+  const cutBullets = truncatedBulletRoles(data);
+  if (cutBullets.length) missing.push(`truncatedBullet(${cutBullets.join("; ")})`);
   const bullets = Array.isArray(data.experience)
     ? data.experience.reduce(
         (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
@@ -2714,8 +2718,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   // Consecutive no-growth polls (≈1s each) after streaming stops before we give
   // up on the current answer and let the caller re-prompt.
   const SETTLE_HITS = 4;
-  /** Extra pause after stream ends so the full JSON paints into the DOM. */
-  const POST_STREAM_DELAY_MS = 1200;
+  /** Extra pause after stream ends so the full JSON finishes painting into the
+   * DOM before we harvest — guards against grabbing a truncated mid-stream tail. */
+  const POST_STREAM_DELAY_MS = 2500;
   const start = Date.now();
   let pausedMs = 0;
   let lastText = "";

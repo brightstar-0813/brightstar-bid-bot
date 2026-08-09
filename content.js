@@ -762,6 +762,28 @@
       const b = roleBullets(j);
       return header && (b === 0 || (richResume && b < 2));
     });
+    // Last bullet of the last role cut off mid-sentence ⇒ truncated / mid-stream.
+    const allBulletTexts = data.experience
+      .flatMap((j) => (Array.isArray(j?.bullets) ? j.bullets : []))
+      .map((b) => String(b || "").trim())
+      .filter(Boolean);
+    const expectTerminal =
+      allBulletTexts.length > 0 &&
+      allBulletTexts.filter((b) => /[.!?)\]"'%]$/.test(b)).length / allBulletTexts.length >= 0.7;
+    const lastJobBullets = Array.isArray(data.experience[data.experience.length - 1]?.bullets)
+      ? data.experience[data.experience.length - 1].bullets
+          .map((b) => String(b || "").trim())
+          .filter(Boolean)
+      : [];
+    const lastBullet = lastJobBullets[lastJobBullets.length - 1] || "";
+    const lastBulletTruncated =
+      Boolean(lastBullet) &&
+      (/,$/.test(lastBullet) ||
+        (/(?:,|;|:|\/|-|\b(?:and|or|but|with|to|of|the|an?|in|for|on|at|by|as|that|which|while|so|including|such)\b)$/i.test(
+          lastBullet
+        ) &&
+          !/[.!?)\]"'%]$/.test(lastBullet)) ||
+        (expectTerminal && !/[.!?)\]"'%]$/.test(lastBullet)));
     const stub = /One summary paragraph|One sentence bullet|One realistic project name|tailored to the JD/i.test(
       JSON.stringify(data)
     );
@@ -802,6 +824,7 @@
       !stub &&
       !missingEmployers &&
       !hasEmptyRole &&
+      !lastBulletTruncated &&
       data.experience.length >= minJobs &&
       bullets >= 4 &&
       (profile.length >= 40 || summary >= 3) &&
@@ -868,7 +891,7 @@
       settleTimer = setTimeout(() => {
         settleTimer = null;
         persistHarvest().catch(() => {});
-      }, 1200);
+      }, 2500);
     }
   };
 
