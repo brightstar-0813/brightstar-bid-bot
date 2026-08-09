@@ -12,9 +12,9 @@
  *
  * POST body (text/plain JSON):
  *   action: "append" (default) | "listLinks"
- *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink
+ *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary
  *
- * Sheet columns: A No | B Date | C Title | D Company | E Link
+ * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary
  */
 function doPost(e) {
   try {
@@ -42,7 +42,8 @@ function doPost(e) {
       data.applicationDate || "",
       data.jobTitle || "",
       data.companyName || "",
-      jobLink
+      jobLink,
+      data.salary || ""
     ]);
 
     return json_({ ok: true, duplicate: false });

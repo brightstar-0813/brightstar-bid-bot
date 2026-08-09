@@ -49,8 +49,8 @@ export function normalizeJobLink(url) {
 }
 
 /**
- * Tab-separated row matching sheet columns A–E:
- * No | Date | Title | Company | Link
+ * Tab-separated row matching sheet columns A–F:
+ * No | Date | Title | Company | Link | Salary
  * Paste into the first cell of an empty row in Google Sheets.
  */
 export function buildSheetRowTsv({
@@ -58,6 +58,7 @@ export function buildSheetRowTsv({
   jobTitle,
   companyName,
   jdLink,
+  salary = "",
   includeDate = true
 }) {
   const cells = [
@@ -65,7 +66,8 @@ export function buildSheetRowTsv({
     includeDate ? formatApplicationDate() : "",
     jobTitle || "",
     companyName || "",
-    jdLink || ""
+    jdLink || "",
+    salary || ""
   ];
   return cells.join("\t");
 }
@@ -116,7 +118,8 @@ export async function appendJobToSpreadsheet({
   jobNo,
   jobTitle,
   companyName,
-  jdLink
+  jdLink,
+  salary
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
@@ -130,7 +133,8 @@ export async function appendJobToSpreadsheet({
     applicationDate: formatApplicationDate(),
     jobTitle: jobTitle || "",
     companyName: companyName || "",
-    jobLink: jdLink || ""
+    jobLink: jdLink || "",
+    salary: salary || ""
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);

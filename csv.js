@@ -120,6 +120,49 @@ export function parseCsv(text) {
   return { headers, rows: dataRows };
 }
 
+function formatNumberWithCommas(value) {
+  const n = Number(String(value).replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function currencySymbol(code) {
+  const c = String(code || "").trim().toUpperCase();
+  const map = { USD: "$", CAD: "$", AUD: "$", GBP: "£", EUR: "€", INR: "₹" };
+  if (map[c]) return map[c];
+  return c ? `${c} ` : "$";
+}
+
+function salaryUnitSuffix(unit) {
+  const u = String(unit || "").trim().toLowerCase();
+  if (!u) return "";
+  if (/year|yr|annual|annum/.test(u)) return "/yr";
+  if (/month|mo\b/.test(u)) return "/mo";
+  if (/week|wk/.test(u)) return "/wk";
+  if (/day|daily/.test(u)) return "/day";
+  if (/hour|hr/.test(u)) return "/hr";
+  return "";
+}
+
+/**
+ * Build a human-readable salary range string from CSV salary fields.
+ * Returns "" when no usable min/max is present.
+ */
+export function formatSalaryRange({ min, max, currency, unit, raw } = {}) {
+  const sym = currencySymbol(currency);
+  const suffix = salaryUnitSuffix(unit);
+  const lo = formatNumberWithCommas(min);
+  const hi = formatNumberWithCommas(max);
+
+  if (lo && hi) return `${sym}${lo}–${sym}${hi}${suffix}`;
+  if (lo) return `${sym}${lo}+${suffix}`;
+  if (hi) return `Up to ${sym}${hi}${suffix}`;
+
+  // Fall back to a raw salary string (e.g. Fantastic Jobs "salary_raw") if given.
+  const rawStr = String(raw || "").trim();
+  return rawStr;
+}
+
 function getField(row, names) {
   for (const name of names) {
     if (row[name] != null && String(row[name]).trim() !== "") {
@@ -299,6 +342,13 @@ export function parseJobsCsv(csvText) {
     const jdText = getField(row, ["description", "job_description", "jd", "Description"]);
     const source = getField(row, ["source", "Source", "id"]);
     const id = getField(row, ["id", "Id"]);
+    const salary = formatSalaryRange({
+      min: getField(row, ["salary_min", "salaryMin", "min_salary", "Salary Min"]),
+      max: getField(row, ["salary_max", "salaryMax", "max_salary", "Salary Max"]),
+      currency: getField(row, ["salary_currency", "salaryCurrency", "currency", "Salary Currency"]),
+      unit: getField(row, ["salary_unit", "salaryUnit", "salary_period", "Salary Unit"]),
+      raw: getField(row, ["salary_raw", "salaryRaw", "salary", "compensation", "Salary"])
+    });
 
     if (!title && !company && !jdText) {
       continue;
@@ -319,6 +369,7 @@ export function parseJobsCsv(csvText) {
       jdText,
       location,
       remoteRestrictedTo,
+      salary,
       source: source || (linkedIn ? "linkedin" : "general"),
       isLinkedIn: linkedIn,
       status: "pending"

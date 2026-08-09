@@ -3244,7 +3244,8 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
         jobTitle: jobMeta.jobTitle,
         companyName: jobMeta.companyName,
-        jdLink: jobMeta.jdLink
+        jdLink: jobMeta.jdLink,
+        salary: jobMeta.salary || ""
       });
       status = sheetResult.duplicate
         ? `${status} (already on Google Sheet — not re-appended)`
@@ -3647,6 +3648,7 @@ async function runBatchLoop(outputDir) {
         companyName: next.company,
         jdLink: next.jdLink || "",
         jdText: next.jdText || "",
+        salary: next.salary || "",
         outputDir: outputDir || "Resume Applications"
       };
 
@@ -4361,6 +4363,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             companyName: job.company,
             jdLink: job.jdLink || "",
             jdText: job.jdText || "",
+            salary: job.salary || "",
             outputDir: "Resume Applications",
             templateId: person.templateId,
             resumeFilePrefix: person.resumeFilePrefix
