@@ -836,18 +836,16 @@ async function revealJobFiles(job) {
 }
 
 async function applyAssist(job) {
+  // Open only the job link — do not pop the files folder (unnecessary).
   await openJob(job);
-  if (job.jobDir || job.status === "done") {
-    await revealJobFiles(job);
-  }
   const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
   if (!res?.ok) {
     setStatus(
-      `Opened job${job.jobDir ? " + files" : ""}. Autofill: ${res?.error || "focus the application tab and click Autofill this page."}`
+      `Opened job link. Autofill: ${res?.error || "focus the application tab and click Autofill this page."}`
     );
     return;
   }
-  setStatus(`Apply assist: opened job, revealed files, autofilled ${res.filled || 0} field(s).`);
+  setStatus(`Apply assist: opened job link, autofilled ${res.filled || 0} field(s).`);
 }
 
 async function sendBatch(type) {
