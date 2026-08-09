@@ -1355,6 +1355,18 @@ function coverLetterTextToParagraphs(raw) {
       .replace(/&nbsp;/g, " ");
   }
 
+  // Strip ChatGPT message-toolbar labels that innerText captures around the
+  // reply (e.g. a leading "Edit", "Copy", "Share"). Remove them line by line
+  // from the very start so the letter opens with the real salutation.
+  let prevLabel;
+  do {
+    prevLabel = s;
+    s = s.replace(
+      /^\s*(?:edit|copy code|copy|share|regenerate(?: response)?|read aloud|good response|bad response|continue|stop generating)\s*(?:\r?\n)+/i,
+      ""
+    );
+  } while (s !== prevLabel);
+
   // Strip markdown code fences / links ChatGPT sometimes injects.
   s = s.replace(/```[a-z]*\s*/gi, "").replace(/```/g, "");
   s = s.replace(/\[([^\]]*)\]\(([^)]+)\)/g, "$1");
@@ -1374,10 +1386,13 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
   const nameLc = String(name || "").toLowerCase().trim();
   const firstNameLc = nameLc.split(/\s+/)[0] || "";
   const closingRe = /^(sincerely|regards|best regards|kind regards|warm regards|best|respectfully|thank you)\b[,.]?$/i;
+  const uiLabelRe =
+    /^(edit|copy code|copy|share|regenerate( response)?|read aloud|good response|bad response|continue|stop generating)$/i;
 
   return paragraphs.filter((p) => {
     const lc = p.toLowerCase().trim();
     if (!lc) return false;
+    if (uiLabelRe.test(lc)) return false; // ChatGPT message-toolbar button labels
     if (closingRe.test(lc)) return false; // local signature adds this
     if (nameLc && lc === nameLc) return false; // trailing full-name line
     if (firstNameLc && lc === firstNameLc) return false; // trailing first-name line
