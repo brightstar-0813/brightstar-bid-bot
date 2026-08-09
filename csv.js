@@ -163,6 +163,73 @@ export function formatSalaryRange({ min, max, currency, unit, raw } = {}) {
   return rawStr;
 }
 
+/** Tidy a salary snippet pulled from free text into a consistent form. */
+function cleanSalaryString(s) {
+  let out = String(s || "").trim().replace(/\s+/g, " ");
+  out = out.replace(/\.00\b/g, "");
+  // Unify the range separator (hyphen / en–em dash / "to") into an en dash.
+  out = out.replace(/\s*(?:-|to|\u2013|\u2014)\s*/i, "\u2013");
+  // Normalize pay-period units.
+  out = out.replace(/\s*(?:\/|per\s+)\s*(?:hour|hr)\b\.?/i, "/hr");
+  out = out.replace(/\s*(?:\/|per\s+)\s*(?:year|yr|annually|annum)\b\.?/i, "/yr");
+  out = out.replace(/\s*(?:\/|per\s+)\s*(?:month|mo)\b\.?/i, "/mo");
+  out = out.replace(/\s*(?:\/|per\s+)\s*(?:week|wk)\b\.?/i, "/wk");
+  // Uppercase the thousands "k".
+  out = out.replace(/(\d)\s?k\b/gi, "$1K");
+  return out.trim();
+}
+
+/** Leading numeric magnitude of a salary snippet ("$85,800" → 85800; "$135K" → 135000). */
+function salaryLeadingAmount(s) {
+  const m = String(s || "").match(/\$?\s?(\d[\d,]*(?:\.\d+)?)(\s?[kK])?/);
+  if (!m) return 0;
+  let n = Number(m[1].replace(/,/g, ""));
+  if (!Number.isFinite(n)) return 0;
+  if (m[2]) n *= 1000;
+  return n;
+}
+
+const SALARY_AMOUNT = "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?[kK]?";
+const SALARY_UNIT =
+  "(?:\\s*(?:/|per\\s+)\\s*(?:hour|hr|year|yr|annually|annum|month|mo|week|wk)\\b\\.?)";
+const SALARY_RANGE_RE = new RegExp(
+  `${SALARY_AMOUNT}\\s*(?:-|to|\\u2013|\\u2014)\\s*${SALARY_AMOUNT}${SALARY_UNIT}?`,
+  "i"
+);
+const SALARY_SINGLE_UNIT_RE = new RegExp(`${SALARY_AMOUNT}${SALARY_UNIT}`, "i");
+const SALARY_SINGLE_K_RE = new RegExp("\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?[kK]\\b", "i");
+
+/**
+ * Extract a salary range from free-text (job description) when structured CSV
+ * columns are empty. Conservative: only returns matches that clearly read as
+ * pay (a range, an amount with a pay-period unit, or a "$###K" figure) and
+ * ignores tiny stray "$5" style numbers that lack a unit.
+ */
+export function extractSalaryFromText(text) {
+  const t = String(text || "");
+  if (!t) return "";
+
+  const range = SALARY_RANGE_RE.exec(t);
+  if (range) {
+    const hasUnit = /(?:hour|hr|year|yr|annually|annum|month|mo|week|wk)/i.test(range[0]);
+    const hasK = /\dk\b/i.test(range[0]);
+    // Range without a unit must be salary-sized to avoid "$5 - $10" style noise.
+    if (hasUnit || hasK || salaryLeadingAmount(range[0]) >= 1000) {
+      return cleanSalaryString(range[0]);
+    }
+  }
+
+  const singleUnit = SALARY_SINGLE_UNIT_RE.exec(t);
+  if (singleUnit) return cleanSalaryString(singleUnit[0]);
+
+  const singleK = SALARY_SINGLE_K_RE.exec(t);
+  if (singleK && salaryLeadingAmount(singleK[0]) >= 10000) {
+    return cleanSalaryString(singleK[0]);
+  }
+
+  return "";
+}
+
 function getField(row, names) {
   for (const name of names) {
     if (row[name] != null && String(row[name]).trim() !== "") {
@@ -342,13 +409,15 @@ export function parseJobsCsv(csvText) {
     const jdText = getField(row, ["description", "job_description", "jd", "Description"]);
     const source = getField(row, ["source", "Source", "id"]);
     const id = getField(row, ["id", "Id"]);
-    const salary = formatSalaryRange({
+    let salary = formatSalaryRange({
       min: getField(row, ["salary_min", "salaryMin", "min_salary", "Salary Min"]),
       max: getField(row, ["salary_max", "salaryMax", "max_salary", "Salary Max"]),
       currency: getField(row, ["salary_currency", "salaryCurrency", "currency", "Salary Currency"]),
       unit: getField(row, ["salary_unit", "salaryUnit", "salary_period", "Salary Unit"]),
       raw: getField(row, ["salary_raw", "salaryRaw", "salary", "compensation", "Salary"])
     });
+    // Boards like Dice leave salary columns empty — recover it from the JD text.
+    if (!salary) salary = extractSalaryFromText(jdText);
 
     if (!title && !company && !jdText) {
       continue;
