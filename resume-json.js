@@ -70,6 +70,54 @@ export function hasRequiredExperienceCompanies(data, rulesOverride = null) {
   return hasAllRequiredCompanies(data, rules);
 }
 
+/**
+ * Experience entries that have a company/title header but no usable bullets.
+ * These are truncated / "cut" roles (e.g. a trailing employer whose content
+ * never got written), which must never render into a saved resume.
+ */
+export function incompleteExperienceEntries(data) {
+  if (!Array.isArray(data?.experience)) return [];
+  const out = [];
+  for (const job of data.experience) {
+    const company = String(job?.company || "").trim();
+    const title = String(job?.title || "").trim();
+    if (!company && !title) continue;
+    const bulletCount = Array.isArray(job?.bullets)
+      ? job.bullets.filter((b) => String(b || "").trim()).length
+      : 0;
+    if (bulletCount === 0) out.push(company || title);
+  }
+  return out;
+}
+
+/** True when every experience entry with a header also carries at least one bullet. */
+export function hasCompleteExperienceEntries(data) {
+  return incompleteExperienceEntries(data).length === 0;
+}
+
+/** Retry prompt when one or more roles were cut off with an empty header. */
+export function buildIncompleteExperienceRetryPrompt(data, rulesOverride = null) {
+  const incomplete = incompleteExperienceEntries(data);
+  const missing = missingExperienceCompanies(data, rulesOverride);
+  const rules = resolveExpectedExperienceProfile(data, rulesOverride);
+  const requiredList = formatRequiredEmployersList(rules);
+  const cutText = incomplete.length ? incomplete.join(", ") : "one or more roles";
+  const missingLine = missing.length
+    ? `\n- Also add missing employer(s): ${missing.join(", ")}`
+    : "";
+  return `Your previous resume JSON was cut off — these role(s) have a company/title but NO bullet points: ${cutText}.
+
+Return ONLY one complete valid resume JSON object with REAL tailored content.
+Rules:
+- No markdown, no code fences, no commentary before or after the JSON
+- Start with { and end with }
+- EVERY experience entry MUST include its dates and full bullet points — never leave a role with an empty header${missingLine}
+- Required employers: ${requiredList || "all employers from FIXED COMPANY HISTORY in the original prompt"}
+- Finish the entire JSON in one message — do not stop early or split into parts
+
+Output JSON now.`;
+}
+
 /** Retry prompt when experience dropped required employers. */
 export function buildMissingExperienceRetryPrompt(data, rulesOverride = null) {
   const rules = resolveExpectedExperienceProfile(data, rulesOverride);
@@ -614,6 +662,8 @@ export function describeResumeGaps(data) {
   if (jobs < minJobs) gaps.push(`jobs(${jobs}/${minJobs})`);
   const missingCos = missingExperienceCompanies(data);
   if (missingCos.length) gaps.push(`missingCompanies(${missingCos.join("; ")})`);
+  const cutRoles = incompleteExperienceEntries(data);
+  if (cutRoles.length) gaps.push(`emptyRoles(${cutRoles.join("; ")})`);
   const bullets = totalExperienceBullets(data);
   if (bullets < 10) gaps.push(`bullets(${bullets}/10)`);
   const skills = Array.isArray(data.skills) ? data.skills.length : 0;
@@ -643,6 +693,9 @@ export function isUsableResumeJson(data) {
   // Known fixed-history candidates must not drop employers (e.g. Matthew needs 4).
   if (!hasRequiredExperienceCompanies(data)) return false;
 
+  // A role with a header but zero bullets means the resume was cut off mid-stream.
+  if (!hasCompleteExperienceEntries(data)) return false;
+
   // At least one role must carry real, non-trivial bullets.
   const hasDetailedRole = data.experience.some(
     (j) => Array.isArray(j?.bullets) && j.bullets.filter((b) => String(b || "").trim().length > 25).length >= 2
@@ -667,6 +720,8 @@ export function isMinimallySaveableResume(data) {
   const jobs = Array.isArray(data.experience) ? data.experience : [];
   if (jobs.length < 1) return false;
   if (!hasRequiredExperienceCompanies(data)) return false;
+  // Never save a resume that still has a cut-off role (header with no bullets).
+  if (!hasCompleteExperienceEntries(data)) return false;
   const bullets = experienceBulletTexts(data).filter((b) => String(b).trim().length >= 25);
   if (bullets.length < 4) return false;
   const hasBody =
@@ -739,6 +794,7 @@ export function isCompleteResumeJson(data) {
   if (!Array.isArray(data.skills) || data.skills.length < 1) return false;
   if (!Array.isArray(data.experience) || data.experience.length < 2) return false;
   if (!hasRequiredExperienceCompanies(data)) return false;
+  if (!hasCompleteExperienceEntries(data)) return false;
   if (totalExperienceBullets(data) < 8) return false;
 
   // Enforce company-specific bullet floors for every required / known employer present.

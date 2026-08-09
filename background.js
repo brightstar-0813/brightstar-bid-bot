@@ -25,6 +25,8 @@ import {
   describeResumeGaps,
   missingExperienceCompanies,
   buildMissingExperienceRetryPrompt,
+  incompleteExperienceEntries,
+  buildIncompleteExperienceRetryPrompt,
   setExperienceValidationRules
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
@@ -53,6 +55,8 @@ Rules:
 Output JSON now.`;
 
 function buildJsonRetryPrompt(partialData) {
+  const incomplete = incompleteExperienceEntries(partialData);
+  if (incomplete.length) return buildIncompleteExperienceRetryPrompt(partialData);
   const missing = missingExperienceCompanies(partialData);
   if (missing.length) return buildMissingExperienceRetryPrompt(partialData);
   return JSON_RETRY_PROMPT;
@@ -375,6 +379,8 @@ function describeUnusableResume(rawText, data) {
   if (!Array.isArray(data.experience) || data.experience.length < 1) missing.push("experience");
   const missingCos = missingExperienceCompanies(data);
   if (missingCos.length) missing.push(`missingCompanies(${missingCos.join("; ")})`);
+  const cutRoles = incompleteExperienceEntries(data);
+  if (cutRoles.length) missing.push(`emptyRoles(${cutRoles.join("; ")})`);
   const bullets = Array.isArray(data.experience)
     ? data.experience.reduce(
         (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),

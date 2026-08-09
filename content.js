@@ -752,6 +752,14 @@
       (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
       0
     );
+    // A role with a company/title header but no bullets means the reply was cut off.
+    const hasEmptyRole = data.experience.some((j) => {
+      const header = String(j?.company || "").trim() || String(j?.title || "").trim();
+      const b = Array.isArray(j?.bullets)
+        ? j.bullets.filter((x) => String(x || "").trim()).length
+        : 0;
+      return header && b === 0;
+    });
     const stub = /One summary paragraph|One sentence bullet|One realistic project name|tailored to the JD/i.test(
       JSON.stringify(data)
     );
@@ -791,6 +799,7 @@
       nameOk &&
       !stub &&
       !missingEmployers &&
+      !hasEmptyRole &&
       data.experience.length >= minJobs &&
       bullets >= 4 &&
       (profile.length >= 40 || summary >= 3) &&
