@@ -95,23 +95,76 @@ export function hasCompleteExperienceEntries(data) {
   return incompleteExperienceEntries(data).length === 0;
 }
 
-/** Retry prompt when one or more roles were cut off with an empty header. */
+/** Non-empty bullet count for one experience entry. */
+function roleBulletCount(job) {
+  return Array.isArray(job?.bullets)
+    ? job.bullets.filter((b) => String(b || "").trim()).length
+    : 0;
+}
+
+/**
+ * Minimum bullets a role should carry before we trust it wasn't truncated.
+ * Known employers (fixed history) use their expected count capped at 4; other
+ * roles get a generic floor of 2 only when the resume is otherwise rich, so a
+ * legitimately short one-off role on a sparse resume is never over-rejected.
+ */
+function expectedBulletFloor(company, richResume) {
+  const rule = EXPECTED_BULLET_COUNTS.find((r) => r.match.test(String(company || "").trim()));
+  if (rule) return Math.min(rule.count, 4);
+  return richResume ? 2 : 0;
+}
+
+/**
+ * Roles that have some bullets but fewer than expected — the signature of a
+ * reply that got cut off (e.g. a trailing employer left with a single bullet).
+ * Returns labels like "Accenture Federal Services (1/4)".
+ */
+export function underfilledExperienceEntries(data) {
+  if (!Array.isArray(data?.experience)) return [];
+  const jobs = data.experience;
+  const richResume = jobs.length >= 3 && totalExperienceBullets(data) >= 12;
+  const out = [];
+  for (const job of jobs) {
+    const company = String(job?.company || "").trim();
+    const title = String(job?.title || "").trim();
+    if (!company && !title) continue;
+    const count = roleBulletCount(job);
+    if (count === 0) continue; // empty headers are handled by incompleteExperienceEntries
+    const floor = expectedBulletFloor(company, richResume);
+    if (floor > 0 && count < floor) out.push(`${company || title} (${count}/${floor})`);
+  }
+  return out;
+}
+
+/** True when no role is missing OR short on bullets (i.e. nothing looks truncated). */
+export function hasFullExperienceEntries(data) {
+  return (
+    incompleteExperienceEntries(data).length === 0 &&
+    underfilledExperienceEntries(data).length === 0
+  );
+}
+
+/** Retry prompt when one or more roles were cut off (empty or too few bullets). */
 export function buildIncompleteExperienceRetryPrompt(data, rulesOverride = null) {
   const incomplete = incompleteExperienceEntries(data);
+  const underfilled = underfilledExperienceEntries(data);
   const missing = missingExperienceCompanies(data, rulesOverride);
   const rules = resolveExpectedExperienceProfile(data, rulesOverride);
   const requiredList = formatRequiredEmployersList(rules);
-  const cutText = incomplete.length ? incomplete.join(", ") : "one or more roles";
+  const problems = [];
+  if (incomplete.length) problems.push(`no bullet points: ${incomplete.join(", ")}`);
+  if (underfilled.length) problems.push(`too few bullet points: ${underfilled.join(", ")}`);
+  const problemText = problems.length ? problems.join("; ") : "one or more roles were cut off";
   const missingLine = missing.length
     ? `\n- Also add missing employer(s): ${missing.join(", ")}`
     : "";
-  return `Your previous resume JSON was cut off — these role(s) have a company/title but NO bullet points: ${cutText}.
+  return `Your previous resume JSON was cut off — these role(s) are incomplete (${problemText}).
 
 Return ONLY one complete valid resume JSON object with REAL tailored content.
 Rules:
 - No markdown, no code fences, no commentary before or after the JSON
 - Start with { and end with }
-- EVERY experience entry MUST include its dates and full bullet points — never leave a role with an empty header${missingLine}
+- EVERY experience entry MUST include its dates and its FULL set of bullet points — never leave a role empty or with a single bullet${missingLine}
 - Required employers: ${requiredList || "all employers from FIXED COMPANY HISTORY in the original prompt"}
 - Finish the entire JSON in one message — do not stop early or split into parts
 
@@ -664,6 +717,8 @@ export function describeResumeGaps(data) {
   if (missingCos.length) gaps.push(`missingCompanies(${missingCos.join("; ")})`);
   const cutRoles = incompleteExperienceEntries(data);
   if (cutRoles.length) gaps.push(`emptyRoles(${cutRoles.join("; ")})`);
+  const thinRoles = underfilledExperienceEntries(data);
+  if (thinRoles.length) gaps.push(`thinRoles(${thinRoles.join("; ")})`);
   const bullets = totalExperienceBullets(data);
   if (bullets < 10) gaps.push(`bullets(${bullets}/10)`);
   const skills = Array.isArray(data.skills) ? data.skills.length : 0;
@@ -693,8 +748,8 @@ export function isUsableResumeJson(data) {
   // Known fixed-history candidates must not drop employers (e.g. Matthew needs 4).
   if (!hasRequiredExperienceCompanies(data)) return false;
 
-  // A role with a header but zero bullets means the resume was cut off mid-stream.
-  if (!hasCompleteExperienceEntries(data)) return false;
+  // A role with no bullets (or far too few) means the resume was cut off mid-stream.
+  if (!hasFullExperienceEntries(data)) return false;
 
   // At least one role must carry real, non-trivial bullets.
   const hasDetailedRole = data.experience.some(
@@ -720,8 +775,8 @@ export function isMinimallySaveableResume(data) {
   const jobs = Array.isArray(data.experience) ? data.experience : [];
   if (jobs.length < 1) return false;
   if (!hasRequiredExperienceCompanies(data)) return false;
-  // Never save a resume that still has a cut-off role (header with no bullets).
-  if (!hasCompleteExperienceEntries(data)) return false;
+  // Never save a resume that still has a cut-off role (empty or single-bullet).
+  if (!hasFullExperienceEntries(data)) return false;
   const bullets = experienceBulletTexts(data).filter((b) => String(b).trim().length >= 25);
   if (bullets.length < 4) return false;
   const hasBody =
@@ -794,7 +849,7 @@ export function isCompleteResumeJson(data) {
   if (!Array.isArray(data.skills) || data.skills.length < 1) return false;
   if (!Array.isArray(data.experience) || data.experience.length < 2) return false;
   if (!hasRequiredExperienceCompanies(data)) return false;
-  if (!hasCompleteExperienceEntries(data)) return false;
+  if (!hasFullExperienceEntries(data)) return false;
   if (totalExperienceBullets(data) < 8) return false;
 
   // Enforce company-specific bullet floors for every required / known employer present.

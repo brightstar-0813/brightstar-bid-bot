@@ -26,6 +26,7 @@ import {
   missingExperienceCompanies,
   buildMissingExperienceRetryPrompt,
   incompleteExperienceEntries,
+  underfilledExperienceEntries,
   buildIncompleteExperienceRetryPrompt,
   setExperienceValidationRules
 } from "./resume-json.js";
@@ -56,7 +57,10 @@ Output JSON now.`;
 
 function buildJsonRetryPrompt(partialData) {
   const incomplete = incompleteExperienceEntries(partialData);
-  if (incomplete.length) return buildIncompleteExperienceRetryPrompt(partialData);
+  const underfilled = underfilledExperienceEntries(partialData);
+  if (incomplete.length || underfilled.length) {
+    return buildIncompleteExperienceRetryPrompt(partialData);
+  }
   const missing = missingExperienceCompanies(partialData);
   if (missing.length) return buildMissingExperienceRetryPrompt(partialData);
   return JSON_RETRY_PROMPT;
@@ -381,6 +385,8 @@ function describeUnusableResume(rawText, data) {
   if (missingCos.length) missing.push(`missingCompanies(${missingCos.join("; ")})`);
   const cutRoles = incompleteExperienceEntries(data);
   if (cutRoles.length) missing.push(`emptyRoles(${cutRoles.join("; ")})`);
+  const thinRoles = underfilledExperienceEntries(data);
+  if (thinRoles.length) missing.push(`thinRoles(${thinRoles.join("; ")})`);
   const bullets = Array.isArray(data.experience)
     ? data.experience.reduce(
         (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.filter(Boolean).length : 0),
