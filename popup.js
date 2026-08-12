@@ -21,6 +21,12 @@ import { extractSpreadsheetId, buildSheetRowTsv } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { parseJobsCsv, filterJobsByChannel, isLinkedInJob } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
+import {
+  saveCsvFileHandle,
+  clearCsvFileHandle,
+  readPinnedCsvText
+} from "./file-handle-db.js";
+import { getCsvSourceSettings, fingerprintText, saveCsvSourceSettings } from "./csv-source.js";
 
 const DEFAULT_OUTPUT_DIR = "Resume Applications";
 const QUEUE_KEY = "job_queue";
@@ -214,6 +220,21 @@ const personSaveHintEl = document.getElementById("personSaveHint");
 
 const csvFileEl = document.getElementById("csvFile");
 const csvSummaryEl = document.getElementById("csvSummary");
+const csvRefreshBtn = document.getElementById("csvRefresh");
+const csvPinFileBtn = document.getElementById("csvPinFile");
+const toggleCsvSourcePanelBtn = document.getElementById("toggleCsvSourcePanel");
+const csvSourcePanelBody = document.getElementById("csvSourcePanelBody");
+const csvPollMinutesEl = document.getElementById("csvPollMinutes");
+const csvUrlEnabledEl = document.getElementById("csvUrlEnabled");
+const csvUrlEl = document.getElementById("csvUrl");
+const csvPinEnabledEl = document.getElementById("csvPinEnabled");
+const csvNativeEnabledEl = document.getElementById("csvNativeEnabled");
+const csvNativePathEl = document.getElementById("csvNativePath");
+const csvPinHintEl = document.getElementById("csvPinHint");
+const csvSourceStatusEl = document.getElementById("csvSourceStatus");
+const csvExtensionIdHintEl = document.getElementById("csvExtensionIdHint");
+const csvSourceSaveBtn = document.getElementById("csvSourceSave");
+const csvClearPinBtn = document.getElementById("csvClearPin");
 const queueListEl = document.getElementById("queueList");
 const batchStartBtn = document.getElementById("batchStart");
 const batchPauseBtn = document.getElementById("batchPause");
@@ -559,6 +580,8 @@ async function loadSettings() {
 
   setBusy(Boolean(data.generation_running) || batchState === "running");
 
+  await loadCsvSourceForm().catch(() => {});
+
   // Open person editor when the active profile is still a built-in (setup not finished).
   const active = profilesCache.find((p) => p.id === profileSelectEl.value);
   if (active?.builtin) {
@@ -739,6 +762,193 @@ async function persistQueue() {
   renderQueue();
 }
 
+async function loadCsvSourceForm() {
+  const res = await chrome.runtime.sendMessage({ type: "csv_source_get" }).catch(() => null);
+  const settings = res?.settings || (await getCsvSourceSettings());
+  if (csvPollMinutesEl) csvPollMinutesEl.value = String(settings.pollMinutes || 30);
+  if (csvUrlEnabledEl) csvUrlEnabledEl.checked = Boolean(settings.urlEnabled);
+  if (csvUrlEl) csvUrlEl.value = settings.url || "";
+  if (csvPinEnabledEl) csvPinEnabledEl.checked = Boolean(settings.pinEnabled);
+  if (csvNativeEnabledEl) csvNativeEnabledEl.checked = Boolean(settings.nativeEnabled);
+  if (csvPinHintEl) {
+    csvPinHintEl.textContent = settings.pinFileName
+      ? `Pinned: ${settings.pinFileName}${settings.pinEnabled ? " (polling on)" : " (polling off)"}`
+      : "No local CSV pinned.";
+  }
+  if (csvSourceStatusEl) {
+    const when = settings.lastIngestAt
+      ? new Date(settings.lastIngestAt).toLocaleString()
+      : "";
+    csvSourceStatusEl.textContent = settings.lastStatus
+      ? `${settings.lastStatus}${when ? ` · ${when}` : ""}`
+      : "Auto-source idle.";
+  }
+  if (csvExtensionIdHintEl) {
+    const id = res?.extensionId || chrome.runtime.id;
+    csvExtensionIdHintEl.textContent = `Extension ID (for native-host install): ${id}`;
+  }
+}
+
+function setCsvSourcePanelOpen(open) {
+  if (!csvSourcePanelBody || !toggleCsvSourcePanelBtn) return;
+  csvSourcePanelBody.hidden = !open;
+  toggleCsvSourcePanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+async function saveCsvSourceForm() {
+  const res = await chrome.runtime.sendMessage({
+    type: "csv_source_save",
+    settings: {
+      pollMinutes: Number(csvPollMinutesEl?.value || 30),
+      url: csvUrlEl?.value || "",
+      urlEnabled: Boolean(csvUrlEnabledEl?.checked),
+      pinEnabled: Boolean(csvPinEnabledEl?.checked),
+      pinFileName: (await getCsvSourceSettings()).pinFileName || "",
+      nativeEnabled: Boolean(csvNativeEnabledEl?.checked)
+    },
+    nativePath: csvNativePathEl?.value || ""
+  });
+  if (!res?.ok) throw new Error(res?.error || "Save source settings failed.");
+  await loadCsvSourceForm();
+  setStatus(
+    res.alarm?.scheduled
+      ? `CSV auto-source saved — polling every ${res.alarm.minutes} min.`
+      : "CSV auto-source saved (polling off)."
+  );
+}
+
+async function pinLocalCsvFile() {
+  if (!window.showOpenFilePicker) {
+    throw new Error("File System Access API not supported in this Chrome build.");
+  }
+  const [handle] = await window.showOpenFilePicker({
+    multiple: false,
+    types: [
+      {
+        description: "Jobs CSV",
+        accept: { "text/csv": [".csv"], "text/plain": [".csv", ".txt"] }
+      }
+    ]
+  });
+  await saveCsvFileHandle(handle);
+  const file = await handle.getFile();
+  const text = await file.text();
+  await chrome.runtime.sendMessage({
+    type: "csv_source_save",
+    settings: {
+      pollMinutes: Number(csvPollMinutesEl?.value || 30),
+      url: csvUrlEl?.value || "",
+      urlEnabled: Boolean(csvUrlEnabledEl?.checked),
+      pinEnabled: true,
+      pinFileName: file.name || handle.name || "jobs.csv",
+      nativeEnabled: Boolean(csvNativeEnabledEl?.checked)
+    },
+    nativePath: csvNativePathEl?.value || ""
+  });
+  if (csvPinEnabledEl) csvPinEnabledEl.checked = true;
+  const ingest = await chrome.runtime.sendMessage({
+    type: "ingest_csv_text",
+    text,
+    fileName: file.name,
+    source: "pinned",
+    autoStart: true,
+    force: true
+  });
+  await reloadQueueFromStorage();
+  await loadCsvSourceForm();
+  if (!ingest?.ok) throw new Error(ingest?.error || "Ingest failed after pin.");
+  setStatus(
+    ingest.unchangedFile
+      ? `Pinned ${file.name} (unchanged).`
+      : `Pinned ${file.name} — +${ingest.added || 0} new · ${ingest.pending || 0} pending.`
+  );
+}
+
+async function clearPinnedCsv() {
+  await clearCsvFileHandle();
+  await chrome.runtime.sendMessage({
+    type: "csv_source_save",
+    settings: {
+      pollMinutes: Number(csvPollMinutesEl?.value || 30),
+      url: csvUrlEl?.value || "",
+      urlEnabled: Boolean(csvUrlEnabledEl?.checked),
+      pinEnabled: false,
+      pinFileName: "",
+      nativeEnabled: Boolean(csvNativeEnabledEl?.checked)
+    },
+    nativePath: csvNativePathEl?.value || ""
+  });
+  if (csvPinEnabledEl) csvPinEnabledEl.checked = false;
+  await loadCsvSourceForm();
+  setStatus("Cleared pinned CSV.");
+}
+
+async function reloadQueueFromStorage() {
+  const data = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY, BATCH_STATE_KEY]);
+  queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  allUsJobsCache = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  batchState = data[BATCH_STATE_KEY] || "idle";
+  renderQueue();
+  updateCsvSummaryFromQueue();
+}
+
+async function refreshCsvFromSources() {
+  setStatus("Refreshing CSV from configured sources…");
+
+  // Prefer interactive pin read in the UI (can re-prompt permission).
+  try {
+    const pinned = await readPinnedCsvText({ interactive: true });
+    if (pinned.ok && pinned.text) {
+      const ingest = await chrome.runtime.sendMessage({
+        type: "ingest_csv_text",
+        text: pinned.text,
+        fileName: pinned.fileName || "jobs.csv",
+        source: "pinned",
+        autoStart: true,
+        force: false
+      });
+      await reloadQueueFromStorage();
+      await loadCsvSourceForm();
+      if (ingest?.ok) {
+        setStatus(
+          ingest.unchangedFile
+            ? "Pinned CSV unchanged."
+            : `Refreshed pinned CSV — +${ingest.added || 0} new · ${ingest.pending || 0} pending${ingest.started ? " · batch started" : ""}.`
+        );
+        return;
+      }
+    }
+  } catch {
+    // fall through to background poll (URL / native)
+  }
+
+  const res = await chrome.runtime.sendMessage({ type: "csv_source_refresh", force: false });
+  await reloadQueueFromStorage();
+  await loadCsvSourceForm();
+  if (!res?.ok && res?.error) {
+    setStatus(`Refresh failed: ${res.error}`);
+    return;
+  }
+  if (res?.result) {
+    const r = res.result;
+    setStatus(
+      r.unchangedFile
+        ? `CSV unchanged (${res.via || "source"}).`
+        : `Refreshed via ${res.via || "source"} — +${r.added || 0} new · ${r.pending || 0} pending${r.started ? " · batch started" : ""}.`
+    );
+    return;
+  }
+  if (res?.unchanged) {
+    setStatus("No CSV changes detected.");
+    return;
+  }
+  if (res?.errors?.length) {
+    setStatus(`Refresh: ${res.errors.join(" · ")}. Pin a file, set a URL, or Choose File.`);
+    return;
+  }
+  setStatus("Refresh finished. Configure Auto-source settings if nothing changed.");
+}
+
 async function onCsvSelected(file) {
   if (!file) return;
   setStatus("Parsing CSV…");
@@ -786,6 +996,18 @@ async function onCsvSelected(file) {
     setStatus(
       `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (General ${result.generalCount} / LI ${result.linkedInCount}). Filter: ${channelFilter}.${dedupeNote}`
     );
+
+    try {
+      const fp = await fingerprintText(text);
+      await saveCsvSourceSettings({
+        lastFingerprint: fp,
+        lastIngestAt: Date.now(),
+        lastSource: "upload",
+        lastStatus: `Manual upload: ${file.name}`
+      });
+    } catch {
+      // best-effort fingerprint for later refresh skip
+    }
 
     // File generation is fully automatic after upload — Start is only needed to resume.
     if (queueCache.some((j) => j.status === "pending" || j.status === "error" || j.status === "failed")) {
@@ -1442,6 +1664,22 @@ csvFileEl.addEventListener("change", () => {
   onCsvSelected(file).catch((e) => setStatus(String(e.message || e)));
 });
 
+csvRefreshBtn?.addEventListener("click", () => {
+  refreshCsvFromSources().catch((e) => setStatus(String(e.message || e)));
+});
+csvPinFileBtn?.addEventListener("click", () => {
+  pinLocalCsvFile().catch((e) => setStatus(String(e.message || e)));
+});
+toggleCsvSourcePanelBtn?.addEventListener("click", () => {
+  setCsvSourcePanelOpen(Boolean(csvSourcePanelBody?.hidden));
+});
+csvSourceSaveBtn?.addEventListener("click", () => {
+  saveCsvSourceForm().catch((e) => setStatus(String(e.message || e)));
+});
+csvClearPinBtn?.addEventListener("click", () => {
+  clearPinnedCsv().catch((e) => setStatus(String(e.message || e)));
+});
+
 filterGeneralBtn?.addEventListener("click", () => {
   applyChannelFilter("general").catch((e) => setStatus(String(e.message || e)));
 });
@@ -1519,10 +1757,15 @@ setInterval(async () => {
     "generation_status",
     "generation_running",
     QUEUE_KEY,
-    BATCH_STATE_KEY
+    ALL_US_JOBS_KEY,
+    BATCH_STATE_KEY,
+    "csv_source_settings"
   ]);
   if (typeof data.generation_status === "string") {
     setStatus(data.generation_status);
+  }
+  if (Array.isArray(data[ALL_US_JOBS_KEY])) {
+    allUsJobsCache = data[ALL_US_JOBS_KEY];
   }
   if (Array.isArray(data[QUEUE_KEY])) {
     queueCache = data[QUEUE_KEY];
@@ -1531,6 +1774,13 @@ setInterval(async () => {
   }
   batchState = data[BATCH_STATE_KEY] || "idle";
   setBusy(Boolean(data.generation_running) || batchState === "running");
+  if (data.csv_source_settings && csvSourceStatusEl) {
+    const s = data.csv_source_settings;
+    const when = s.lastIngestAt ? new Date(s.lastIngestAt).toLocaleString() : "";
+    if (s.lastStatus) {
+      csvSourceStatusEl.textContent = `${s.lastStatus}${when ? ` · ${when}` : ""}`;
+    }
+  }
 }, 1200);
 
 // silence unused import warning path for extractSpreadsheetId when sheets hidden

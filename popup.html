@@ -282,12 +282,69 @@
       <section class="section">
         <header class="section-header">
           <p class="section-title">2 · CSV batch</p>
-          <p class="section-sub">US jobs only — upload, filter, generate files</p>
+          <p class="section-sub">US jobs — upload once, or auto-refresh from pin / URL / native watcher</p>
         </header>
         <label class="field">
           <span>Upload jobs CSV (LinkedIn, Fantastic Jobs, Dice, Jobright)</span>
           <input id="csvFile" type="file" accept=".csv,text/csv" />
         </label>
+        <div class="row row-2" style="margin-top: 6px">
+          <button type="button" id="csvRefresh" class="secondary" title="Re-read pinned file, URL, or native watcher">
+            Refresh CSV
+          </button>
+          <button type="button" id="csvPinFile" class="secondary" title="Remember a local CSV for auto-poll (File System Access)">
+            Pin local CSV…
+          </button>
+        </div>
+        <button type="button" class="panel-toggle secondary" id="toggleCsvSourcePanel" aria-expanded="false" style="margin-top: 6px">
+          Auto-source settings (URL · pin · native · poll)
+        </button>
+        <div class="panel-body" id="csvSourcePanelBody" hidden>
+          <p class="hint">
+            Cron updates every ~12h: pin the file, set a CSV URL, and/or install the native watcher. Refresh merges
+            <strong>new</strong> jobs (sheet duplicates skipped) and auto-starts generation.
+          </p>
+          <div class="grid-2">
+            <label class="field">
+              <span>Poll every (minutes)</span>
+              <input id="csvPollMinutes" type="number" min="5" max="720" step="5" value="30" />
+            </label>
+            <label class="field checkbox-field">
+              <span>Enable URL poll</span>
+              <input id="csvUrlEnabled" type="checkbox" />
+            </label>
+          </div>
+          <label class="field">
+            <span>CSV URL (http/https — cron publishes here)</span>
+            <input id="csvUrl" type="url" placeholder="https://example.com/jobs_latest.csv" autocomplete="off" />
+          </label>
+          <div class="grid-2">
+            <label class="field checkbox-field">
+              <span>Poll pinned local file</span>
+              <input id="csvPinEnabled" type="checkbox" />
+            </label>
+            <label class="field checkbox-field">
+              <span>Native OS watcher</span>
+              <input id="csvNativeEnabled" type="checkbox" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Native watch path (optional)</span>
+            <input
+              id="csvNativePath"
+              type="text"
+              placeholder="D:\Jobs\jobs_latest.csv"
+              autocomplete="off"
+            />
+          </label>
+          <p class="hint" id="csvPinHint">No local CSV pinned.</p>
+          <p class="hint" id="csvSourceStatus">Auto-source idle.</p>
+          <p class="hint" id="csvExtensionIdHint"></p>
+          <div class="row row-2">
+            <button type="button" id="csvSourceSave" class="primary">Save source settings</button>
+            <button type="button" id="csvClearPin" class="secondary danger">Clear pin</button>
+          </div>
+        </div>
         <div class="channel-toggle" role="group" aria-label="Job source filter">
           <span class="channel-label">Apply source</span>
           <button type="button" class="channel-btn active" id="filterGeneral" data-filter="general" title="Non-LinkedIn / ATS jobs (easier to apply)">

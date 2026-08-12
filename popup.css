@@ -536,6 +536,19 @@ input[type="file"] {
   background: #1e40af;
 }
 
+.checkbox-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: #2563eb;
+}
+
 .badge-li {
   background: #0c4a6e;
   color: #7dd3fc;

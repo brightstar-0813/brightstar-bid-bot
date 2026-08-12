@@ -86,6 +86,26 @@ flowchart TD
 5. Use **Pause** / **Skip** / **Stop** as needed
 6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill)
 
+### CSV auto-source (cron / 12h updates)
+
+Use these when `jobs_latest.csv` is rewritten on a schedule:
+
+| Approach | How |
+|----------|-----|
+| **Refresh CSV** | One click — re-reads pinned file, then URL, then asks the native host |
+| **Pin local CSV** | File System Access: pick the file once, enable poll, bot re-reads on a timer |
+| **CSV URL** | Publish the file over http(s); enable URL poll + interval |
+| **Native watcher** | Instant OS file-watch via `native-host/` (Windows installer included) |
+
+**Native host (Windows):**
+
+```powershell
+cd native-host
+.\install-windows.ps1 -ExtensionId <id-from-chrome-extensions> -CsvPath "D:\path\jobs_latest.csv"
+```
+
+Then enable **Native OS watcher** in Auto-source settings and **Save**. Refreshes **merge** by job link (keep done/skipped; add new pending), sheet-dedupe, and auto-start generation when new jobs appear.
+
 ## Keep the bot open while you bid
 
 Chrome always closes an extension popup when you click outside it, so copying a JD or link dismisses it. Click **Keep open** (top-right of the popup) to move the same UI into Chrome's **side panel**, which stays docked while you browse and copy. On Chrome builds without the side panel it opens a detached window instead.

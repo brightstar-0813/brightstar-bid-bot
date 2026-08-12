@@ -33,10 +33,23 @@ import {
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import { parseJobsCsv, filterJobsByChannel } from "./csv.js";
+import {
+  CSV_SOURCE_ALARM,
+  NATIVE_HOST_NAME,
+  clampPollMinutes,
+  fingerprintText,
+  getCsvSourceSettings,
+  mergeParsedJobs,
+  saveCsvSourceSettings
+} from "./csv-source.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
 const APPLY_HISTORY_KEY = "apply_history";
+const ALL_US_JOBS_KEY = "all_us_jobs";
+const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
+const DEFAULT_CHANNEL_FILTER = "general";
 
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
@@ -456,6 +469,14 @@ function stopKeepAlive() {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === CSV_SOURCE_ALARM) {
+    pollCsvSources({ reason: "alarm" }).catch(async (err) => {
+      await saveCsvSourceSettings({
+        lastStatus: `Poll failed: ${String(err?.message || err)}`
+      }).catch(() => {});
+    });
+    return;
+  }
   if (alarm?.name !== "brightstar-tick") return;
   (async () => {
     const data = await chrome.storage.local.get([
@@ -4153,9 +4174,427 @@ async function autofillActiveTab() {
   return result;
 }
 
+/** Ensure the CSV poll alarm matches current settings. */
+async function syncCsvSourceAlarm() {
+  const settings = await getCsvSourceSettings();
+  const need =
+    settings.urlEnabled ||
+    settings.pinEnabled ||
+    settings.nativeEnabled;
+  try {
+    await chrome.alarms.clear(CSV_SOURCE_ALARM);
+  } catch {
+    // ignore
+  }
+  if (!need) return { scheduled: false };
+  const minutes = clampPollMinutes(settings.pollMinutes);
+  await chrome.alarms.create(CSV_SOURCE_ALARM, { periodInMinutes: minutes });
+  return { scheduled: true, minutes };
+}
+
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen?.createDocument) {
+    throw new Error("Offscreen API unavailable in this Chrome build.");
+  }
+  try {
+    const contexts = await chrome.runtime.getContexts?.({
+      contextTypes: ["OFFSCREEN_DOCUMENT"]
+    });
+    if (Array.isArray(contexts) && contexts.length) return;
+  } catch {
+    // getContexts may be missing — try create and ignore "already exists"
+  }
+  try {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["DOM_SCRAPING"],
+      justification: "Read pinned jobs CSV via File System Access API"
+    });
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (!/already|exists/i.test(msg)) throw err;
+  }
+}
+
+async function readPinnedCsvViaOffscreen() {
+  await ensureOffscreenDocument();
+  // Brief settle so the offscreen listener is registered.
+  await new Promise((r) => setTimeout(r, 50));
+  const result = await chrome.runtime.sendMessage({ type: "offscreen_read_pinned_csv" });
+  if (result == null) {
+    throw new Error("Offscreen CSV reader did not respond.");
+  }
+  return result;
+}
+
+async function fetchCsvFromUrl(url) {
+  const target = String(url || "").trim();
+  if (!target) throw new Error("CSV URL is empty.");
+  const res = await fetch(target, { cache: "no-store" });
+  if (!res.ok) throw new Error(`CSV URL HTTP ${res.status}`);
+  const text = await res.text();
+  if (!String(text || "").trim()) throw new Error("CSV URL returned empty body.");
+  let fileName = "jobs_url.csv";
+  try {
+    fileName = decodeURIComponent(target.split("?")[0].split("/").pop() || fileName);
+  } catch {
+    // keep default
+  }
+  return { text, fileName };
+}
+
+let nativePort = null;
+let nativeWatchPath = "";
+
+function disconnectNativePort() {
+  try {
+    nativePort?.disconnect();
+  } catch {
+    // ignore
+  }
+  nativePort = null;
+}
+
+function connectNativeHost({ path = "" } = {}) {
+  if (!chrome.runtime.connectNative) {
+    throw new Error("Native Messaging not available.");
+  }
+  disconnectNativePort();
+  nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+  nativePort.onMessage.addListener((msg) => {
+    handleNativeCsvMessage(msg).catch(async (err) => {
+      await saveCsvSourceSettings({
+        lastStatus: `Native message error: ${String(err?.message || err)}`
+      }).catch(() => {});
+    });
+  });
+  nativePort.onDisconnect.addListener(() => {
+    const err = chrome.runtime.lastError?.message || "disconnected";
+    nativePort = null;
+    saveCsvSourceSettings({ lastStatus: `Native host: ${err}` }).catch(() => {});
+  });
+  if (path) {
+    nativeWatchPath = path;
+    nativePort.postMessage({ type: "watch", path });
+  } else {
+    nativePort.postMessage({ type: "ping" });
+  }
+  return nativePort;
+}
+
+async function handleNativeCsvMessage(msg) {
+  if (!msg || typeof msg !== "object") return;
+  const type = String(msg.type || "");
+  if (type === "csv_update" && msg.text) {
+    await ingestCsvText({
+      text: msg.text,
+      fileName: msg.fileName || "jobs_native.csv",
+      source: "native",
+      autoStart: true,
+      force: false
+    });
+    return;
+  }
+  if (type === "status" || type === "pong") {
+    await saveCsvSourceSettings({
+      lastStatus: msg.watching
+        ? `Native watching ${msg.watching}`
+        : msg.error
+          ? `Native: ${msg.error}`
+          : "Native host connected"
+    });
+    return;
+  }
+  if (type === "error") {
+    await saveCsvSourceSettings({ lastStatus: `Native: ${msg.error || "error"}` });
+  }
+}
+
+/**
+ * Parse CSV text, merge with existing queue by job identity, sheet-dedupe, optionally auto-start.
+ */
+async function ingestCsvText({
+  text,
+  fileName = "jobs.csv",
+  source = "manual",
+  autoStart = true,
+  force = false
+} = {}) {
+  const body = String(text || "");
+  if (!body.trim()) throw new Error("CSV text is empty.");
+
+  const fp = await fingerprintText(body);
+  const settings = await getCsvSourceSettings();
+  if (!force && settings.lastFingerprint && settings.lastFingerprint === fp) {
+    await saveCsvSourceSettings({
+      lastStatus: `Unchanged (${source}) — fingerprint match`,
+      lastIngestAt: Date.now(),
+      lastSource: source
+    });
+    return {
+      ok: true,
+      unchangedFile: true,
+      added: 0,
+      pending: 0,
+      fileName,
+      source
+    };
+  }
+
+  const parsed = parseJobsCsv(body);
+  const data = await chrome.storage.local.get([
+    ALL_US_JOBS_KEY,
+    QUEUE_KEY,
+    JOB_CHANNEL_FILTER_KEY,
+    "batch_output_dir"
+  ]);
+  const previousAll = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  const previousQueue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  const merged = mergeParsedJobs(previousAll, previousQueue, parsed.usJobs);
+  const channel = data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER;
+  const filtered = filterJobsByChannel(merged.allUsJobs, channel);
+
+  await chrome.storage.local.set({
+    [ALL_US_JOBS_KEY]: merged.allUsJobs,
+    [QUEUE_KEY]: filtered,
+    csv_file_name: fileName,
+    csv_total_rows: parsed.totalRows,
+    csv_dropped_non_us: parsed.droppedNonUs
+  });
+
+  let dedupe = { checked: false, skipped: 0 };
+  try {
+    dedupe = await dedupeQueueAgainstSheet({ notifySlack: merged.added > 0 });
+  } catch (err) {
+    dedupe = { checked: false, skipped: 0, error: String(err?.message || err) };
+  }
+
+  const queue = await getQueue();
+  const pending = queue.filter(
+    (j) => j.status === "pending" || j.status === "error" || j.status === "failed"
+  ).length;
+
+  const status = `CSV (${source}): +${merged.added} new · ${pending} pending · sheet skipped ${dedupe.skipped || 0}`;
+  await saveCsvSourceSettings({
+    lastFingerprint: fp,
+    lastIngestAt: Date.now(),
+    lastSource: source,
+    lastStatus: status
+  });
+  await setStatus(status);
+
+  let started = false;
+  if (autoStart && pending > 0 && !isRunning) {
+    const person = await getActivePerson().catch(() => null);
+    if (person?.promptTemplate?.includes("{JD}")) {
+      isRunning = true;
+      started = true;
+      const outputDir = data.batch_output_dir || "Resume Applications";
+      (async () => {
+        await recoverInterruptedBatch("CSV auto-source starting batch…", {
+          retryFailed: true
+        }).catch(() => {});
+        isRunning = true;
+        await runBatchLoop(outputDir);
+      })().catch(async (err) => {
+        isRunning = false;
+        stopKeepAlive();
+        await setBatchState("idle");
+        await chrome.storage.local.set({ generation_running: false });
+        await setStatus(`Batch failed after CSV ingest: ${String(err?.message || err)}`);
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    unchangedFile: false,
+    added: merged.added,
+    updated: merged.updated,
+    unchanged: merged.unchanged,
+    pending,
+    skippedSheet: dedupe.skipped || 0,
+    totalUs: merged.allUsJobs.length,
+    fileName,
+    source,
+    started,
+    dedupeError: dedupe.error || ""
+  };
+}
+
+async function pollCsvSources({ reason = "poll", force = false } = {}) {
+  const settings = await getCsvSourceSettings();
+  const errors = [];
+
+  if (settings.urlEnabled && settings.url) {
+    try {
+      const { text, fileName } = await fetchCsvFromUrl(settings.url);
+      const result = await ingestCsvText({
+        text,
+        fileName,
+        source: "url",
+        autoStart: true,
+        force
+      });
+      if (!result.unchangedFile) return { ok: true, via: "url", result, reason };
+    } catch (err) {
+      errors.push(`url: ${String(err?.message || err)}`);
+    }
+  }
+
+  if (settings.pinEnabled) {
+    try {
+      const pinned = await readPinnedCsvViaOffscreen();
+      if (pinned?.ok && pinned.text) {
+        const result = await ingestCsvText({
+          text: pinned.text,
+          fileName: pinned.fileName || settings.pinFileName || "jobs.csv",
+          source: "pinned",
+          autoStart: true,
+          force
+        });
+        if (!result.unchangedFile) return { ok: true, via: "pinned", result, reason };
+      } else if (pinned?.reason === "permission") {
+        errors.push("pinned: permission needed — open the bot and click Refresh CSV");
+      } else if (pinned?.reason === "no_handle") {
+        errors.push("pinned: no file pinned");
+      } else if (pinned?.error) {
+        errors.push(`pinned: ${pinned.error}`);
+      }
+    } catch (err) {
+      errors.push(`pinned: ${String(err?.message || err)}`);
+    }
+  }
+
+  if (settings.nativeEnabled) {
+    try {
+      if (!nativePort) connectNativeHost({ path: nativeWatchPath || "" });
+      nativePort?.postMessage({
+        type: "read",
+        path: nativeWatchPath || undefined
+      });
+      await saveCsvSourceSettings({
+        lastStatus: `Native read requested (${reason})`
+      });
+      return { ok: true, via: "native", reason };
+    } catch (err) {
+      errors.push(`native: ${String(err?.message || err)}`);
+    }
+  }
+
+  if (errors.length) {
+    await saveCsvSourceSettings({ lastStatus: errors.join(" · ") });
+    return { ok: false, errors, reason };
+  }
+  await saveCsvSourceSettings({
+    lastStatus: `No CSV changes (${reason})`
+  });
+  return { ok: true, unchanged: true, reason };
+}
+
+// Kick native host / alarm on SW start when enabled.
+(async () => {
+  try {
+    await syncCsvSourceAlarm();
+    const settings = await getCsvSourceSettings();
+    if (settings.nativeEnabled) {
+      connectNativeHost({});
+    }
+  } catch {
+    // best-effort
+  }
+})();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
+
+  if (type === "offscreen_read_pinned_csv") {
+    // Handled by offscreen.js when that document is the receiver.
+    // If this SW somehow gets it (no offscreen), fall through as not handled.
+    return false;
+  }
+
+  if (type === "ingest_csv_text") {
+    (async () => {
+      try {
+        const result = await ingestCsvText({
+          text: message.text,
+          fileName: message.fileName || "jobs.csv",
+          source: message.source || "manual",
+          autoStart: message.autoStart !== false,
+          force: Boolean(message.force)
+        });
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "csv_source_refresh") {
+    (async () => {
+      try {
+        const result = await pollCsvSources({
+          reason: "refresh",
+          force: Boolean(message.force)
+        });
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "csv_source_save") {
+    (async () => {
+      try {
+        const patch = message.settings || {};
+        const next = await saveCsvSourceSettings({
+          pollMinutes: clampPollMinutes(patch.pollMinutes),
+          url: String(patch.url || "").trim(),
+          urlEnabled: Boolean(patch.urlEnabled),
+          pinEnabled: Boolean(patch.pinEnabled),
+          pinFileName: String(patch.pinFileName || "").trim(),
+          nativeEnabled: Boolean(patch.nativeEnabled),
+          lastStatus: "Settings saved"
+        });
+        const alarm = await syncCsvSourceAlarm();
+        if (next.nativeEnabled) {
+          try {
+            connectNativeHost({ path: String(message.nativePath || "").trim() });
+          } catch (err) {
+            next.lastStatus = `Native connect failed: ${String(err?.message || err)}`;
+            await saveCsvSourceSettings({ lastStatus: next.lastStatus });
+          }
+        } else {
+          disconnectNativePort();
+        }
+        safeSendResponse(sendResponse, { ok: true, settings: next, alarm });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "csv_source_get") {
+    (async () => {
+      try {
+        const settings = await getCsvSourceSettings();
+        safeSendResponse(sendResponse, {
+          ok: true,
+          settings,
+          nativeConnected: Boolean(nativePort),
+          extensionId: chrome.runtime.id
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
 
   if (type === "dedupe_queue_against_sheet") {
     (async () => {
