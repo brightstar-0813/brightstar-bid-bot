@@ -1,4 +1,5 @@
 import { PROMPT as matthewDaleHoffmanPrompt } from "./prompts/matthew-dale-hoffman.js";
+import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import {
   normalizeRequiredExperienceInput,
@@ -43,6 +44,44 @@ export const BUILTIN_PROFILES = [
       "Hallmark Cards",
       "TeleTech",
       "Accenture Federal Services"
+    ]
+  },
+  {
+    id: "sandeep-mahankali",
+    label: "Sandeep Mahankali (Salesforce)",
+    promptTemplate: sandeepMahankaliPrompt,
+    templateId: "sandeep-classic",
+    resumeFilePrefix: "Sandeep_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "Sandeep Mahankali",
+    email: "msandeep129@outlook.com",
+    phone: "+1 (669) 223-1191",
+    linkedin: "https://www.linkedin.com/in/sandeep-mahankali-7b8652129/",
+    location: "Round Rock, Texas, United States",
+    address: "1462 Sawmill Xing",
+    zip: "78665",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
+    signatureTitle: "Salesforce Technical Architect",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Taproot Solutions Inc",
+      "Deloitte",
+      "Avco Consulting, Inc.",
+      "Salesforce",
+      "Altice USA",
+      "Suddenlink Communications",
+      "Allstate",
+      "Visions Healthcare"
     ]
   },
   {

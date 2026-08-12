@@ -219,13 +219,29 @@ const CSS = `
 
 export const timesClassicTemplate = {
   id: "times-classic",
-  label: "Times Classic (Serif)",
+  label: "Matthew · Times Classic (Serif)",
   description:
-    "Centered name/headline, contact + cert badges header, company/title/meta experience layout.",
+    "Matthew-style layout: centered name/headline, contact + cert badges header, company/title/meta experience.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");
-    const edu = data.education || {};
+    const eduList = Array.isArray(data.education)
+      ? data.education
+      : data.education
+        ? [data.education]
+        : [];
+    const eduHtml = eduList
+      .map((edu) => {
+        const school = escapeHtml(edu?.school || "");
+        const degree = escapeHtml(edu?.degree || "");
+        const year = escapeHtml(edu?.year || "");
+        const details = escapeHtml(edu?.details || "");
+        if (!school && !degree) return "";
+        return `<p><strong>${school}</strong><br>
+      ${degree}${year ? `<br>${year}` : ""}${details ? `<br>${details}` : ""}</p>`;
+      })
+      .filter(Boolean)
+      .join("\n");
     const badges = renderCertBadges(data.certifications, { limit: 5 });
     const contact = renderContactBlock(data, { linkColor: "#000" });
     const techSummaryHtml = renderTechnicalSummary(data.technicalSummary);
@@ -259,9 +275,7 @@ export const timesClassicTemplate = {
 
     <section>
       <h2>Education</h2>
-      <p><strong>${escapeHtml(edu.school || "")}</strong><br>
-      ${escapeHtml(edu.degree || "")}<br>
-      ${escapeHtml(edu.year || "")}</p>
+      ${eduHtml || "<p></p>"}
     </section>
 
     <section>

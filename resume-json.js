@@ -15,7 +15,16 @@ const EXPECTED_BULLET_COUNTS = [
   { match: /bhg\s*financial/i, count: 5 },
   { match: /scholastic/i, count: 4 },
   { match: /vonage/i, count: 4 },
-  { match: /forefront/i, count: 4 }
+  { match: /forefront/i, count: 4 },
+  // Sandeep — deep on last 3; shorter floors on earlier roles
+  { match: /taproot\s*solutions/i, count: 10 },
+  { match: /^deloitte$/i, count: 10 },
+  { match: /avco\s*consulting/i, count: 10 },
+  { match: /^salesforce$/i, count: 3 },
+  { match: /^altice(\s*usa)?$/i, count: 3 },
+  { match: /suddenlink/i, count: 3 },
+  { match: /^allstate$/i, count: 3 },
+  { match: /visions\s*healthcare/i, count: 3 }
 ];
 
 /** Active per-person experience rules (set by background for the current job). */

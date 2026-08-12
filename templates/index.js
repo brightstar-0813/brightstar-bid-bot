@@ -1,8 +1,13 @@
 import { classicBlueTemplate } from "./classic-blue.js";
+import { sandeepClassicTemplate } from "./sandeep-classic.js";
 import { timesClassicTemplate } from "./times-classic.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
-export const BUILTIN_TEMPLATES = [classicBlueTemplate, timesClassicTemplate];
+export const BUILTIN_TEMPLATES = [
+  timesClassicTemplate,
+  sandeepClassicTemplate,
+  classicBlueTemplate
+];
 
 export const DEFAULT_TEMPLATE_ID = timesClassicTemplate.id;
 

@@ -163,7 +163,23 @@ export const classicBlueTemplate = {
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");
-    const edu = data.education || {};
+    const eduList = Array.isArray(data.education)
+      ? data.education
+      : data.education
+        ? [data.education]
+        : [];
+    const eduHtml = eduList
+      .map((edu) => {
+        const school = escapeHtml(edu?.school || "");
+        const degree = escapeHtml(edu?.degree || "");
+        const year = escapeHtml(edu?.year || "");
+        const details = escapeHtml(edu?.details || "");
+        if (!school && !degree) return "";
+        return `<p><strong>${school}</strong><br>
+      ${degree}${year ? `<br>${year}` : ""}${details ? `<br>${details}` : ""}</p>`;
+      })
+      .filter(Boolean)
+      .join("\n");
 
     return wrapHtmlDocument({
       title: `${name} - Resume`,
@@ -182,9 +198,7 @@ export const classicBlueTemplate = {
 
     <section>
       <h2>Education</h2>
-      <p><strong>${escapeHtml(edu.school || "")}</strong><br>
-      ${escapeHtml(edu.degree || "")}<br>
-      ${escapeHtml(edu.year || "")}</p>
+      ${eduHtml || "<p></p>"}
     </section>
 
     <section>
