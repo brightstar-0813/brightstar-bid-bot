@@ -237,8 +237,10 @@ export const timesClassicTemplate = {
         const year = escapeHtml(edu?.year || "");
         const details = escapeHtml(edu?.details || "");
         if (!school && !degree) return "";
-        return `<p><strong>${school}</strong><br>
-      ${degree}${year ? `<br>${year}` : ""}${details ? `<br>${details}` : ""}</p>`;
+        // Keep this on one line: p uses white-space: pre-wrap, so any source
+        // indentation would render as leading blank space.
+        const rest = [degree, year, details].filter(Boolean).join("<br>");
+        return `<p><strong>${school}</strong>${rest ? `<br>${rest}` : ""}</p>`;
       })
       .filter(Boolean)
       .join("\n");

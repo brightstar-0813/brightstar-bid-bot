@@ -1,19 +1,13 @@
-import {
-  contactLine,
-  escapeHtml,
-  renderCerts,
-  renderSkills,
-  wrapHtmlDocument
-} from "./shared.js";
+import { escapeHtml, renderSkills, wrapHtmlDocument } from "./shared.js";
 
 /**
- * Sandeep master-PDF layout:
- * centered name → Personal Details → Profile → Education → Experience
- * (title + dates row, company/location row) → Skills → Certificates.
- * Fonts approximate the Word/PDF source (Lucida Sans + Times).
+ * Sandeep layout: keeps the master PDF's black-and-white serif/sans mix,
+ * uppercase ruled headings, single column and right-aligned dates, but uses a
+ * recruiter/ATS-first order — contact, summary, skills, experience, education,
+ * certifications — and tighter spacing so a 10-role history stays readable.
  */
 const CSS = `
-    @page { size: A4; margin: 12mm; }
+    @page { size: A4; margin: 11mm 12mm; }
 
     * { box-sizing: border-box; }
 
@@ -24,112 +18,137 @@ const CSS = `
       font-family: "Lucida Sans Unicode", "Lucida Grande", Arial, Helvetica, sans-serif;
       color: #111;
       background: #fff;
-      font-size: 10pt;
-      line-height: 1.32;
+      font-size: 9.8pt;
+      line-height: 1.3;
     }
 
-    .resume {
-      width: 100%;
-      margin: 0 auto;
-    }
+    .resume { width: 100%; margin: 0 auto; }
 
     header.top {
       text-align: center;
-      margin-bottom: 10px;
-      padding-bottom: 4px;
+      margin: 0 0 8px;
+      padding-bottom: 5px;
+      border-bottom: 1.5px solid #111;
     }
 
     h1 {
-      margin: 0 0 2px;
+      margin: 0 0 1px;
       font-family: "Times New Roman", Times, serif;
-      font-size: 22pt;
+      font-size: 21pt;
       font-weight: 700;
       letter-spacing: 0.6px;
       text-transform: uppercase;
       color: #000;
+      line-height: 1.1;
     }
 
     .headline {
-      margin: 0;
+      margin: 0 0 3px;
       font-size: 10.5pt;
       font-weight: 700;
-      color: #222;
+      letter-spacing: 0.3px;
+      color: #111;
     }
 
-    a, a:visited {
+    .contact {
+      margin: 0;
+      font-size: 9.2pt;
+      line-height: 1.35;
       color: #111;
-      text-decoration: underline;
+      text-align: center;
     }
+
+    .contact span.item { white-space: nowrap; }
+
+    .contact .sep {
+      padding: 0 5px;
+      color: #555;
+    }
+
+    a, a:visited { color: #111; text-decoration: none; }
 
     section {
-      margin: 8px 0 6px;
+      margin: 0 0 7px;
+      break-inside: auto;
+      page-break-inside: auto;
     }
 
     h2 {
-      margin: 0 0 5px;
+      margin: 0 0 4px;
       padding-bottom: 2px;
-      font-size: 10.5pt;
+      font-size: 10.2pt;
       font-weight: 700;
-      letter-spacing: 0.8px;
+      letter-spacing: 0.9px;
       text-transform: uppercase;
       border-bottom: 1px solid #222;
       color: #000;
-    }
-
-    .personal-details {
-      margin: 0;
-      font-size: 9.5pt;
-      line-height: 1.4;
-      text-align: left;
-    }
-
-    .personal-details div {
-      margin: 0 0 1px;
+      break-after: avoid;
+      page-break-after: avoid;
     }
 
     p {
       margin: 0 0 4px;
       text-align: justify;
+      hyphens: auto;
+      orphans: 2;
+      widows: 2;
     }
 
-    .edu-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      margin: 0 0 6px;
-      align-items: flex-start;
-    }
+    /* ---- Skills ---- */
 
-    .edu-main {
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-
-    .edu-year {
-      flex: 0 0 auto;
-      white-space: nowrap;
-      font-size: 9.5pt;
-      font-weight: 700;
-    }
-
-    .edu-school {
-      font-weight: 700;
-    }
-
-    .edu-degree {
-      margin: 1px 0 0;
-    }
-
-    .edu-details {
-      margin: 1px 0 0;
+    .skills-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1px 0 2px;
+      table-layout: fixed;
       font-size: 9pt;
-      color: #333;
     }
+
+    .skills-table thead {
+      display: table-header-group;
+    }
+
+    .skills-table tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .skills-table th,
+    .skills-table td {
+      border: 1px solid #555;
+      padding: 2.5px 6px;
+      vertical-align: top;
+      text-align: left;
+      line-height: 1.28;
+    }
+
+    .skills-table th {
+      font-weight: 700;
+      background: #ececec;
+      font-size: 8.6pt;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+
+    .skills-table .skill-cat { width: 26%; font-weight: 700; }
+    .skills-table .skill-items { width: 74%; }
+
+    /* ---- Experience ---- */
 
     .job {
-      margin: 0 0 8px;
+      margin: 0 0 7px;
       break-inside: auto;
       page-break-inside: auto;
+    }
+
+    .job:last-child { margin-bottom: 2px; }
+
+    /* Keep title + company + project together so a role never starts alone. */
+    .job-head {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      break-after: avoid;
+      page-break-after: avoid;
     }
 
     .job-title-row {
@@ -137,91 +156,129 @@ const CSS = `
       justify-content: space-between;
       gap: 10px;
       align-items: baseline;
-      font-weight: 700;
       font-size: 10pt;
+      font-weight: 700;
     }
 
-    .job-title {
-      flex: 1 1 auto;
-      min-width: 0;
-    }
+    .job-title { flex: 1 1 auto; min-width: 0; }
 
     .job-dates {
       flex: 0 0 auto;
       white-space: nowrap;
-      font-size: 9.5pt;
+      font-size: 9.2pt;
       font-weight: 700;
     }
 
     .job-company {
-      margin: 1px 0 3px;
-      font-size: 9.5pt;
+      margin: 1px 0 0;
+      font-size: 9.2pt;
+      line-height: 1.3;
+    }
+
+    .company-name {
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.2px;
     }
 
+    .job-location { font-weight: 400; color: #222; }
+
     .project {
-      margin: 0 0 2px;
+      margin: 1px 0 0;
       font-style: italic;
-      font-size: 9.2pt;
-      font-weight: 400;
-      text-transform: none;
+      font-size: 9pt;
+      color: #222;
     }
 
     ul {
       margin: 2px 0 0;
-      padding-left: 16px;
+      padding-left: 15px;
     }
 
     li {
-      margin: 0 0 2.5px;
+      margin: 0 0 2px;
       text-align: justify;
+      hyphens: auto;
       line-height: 1.28;
+      orphans: 2;
+      widows: 2;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
 
-    .skills-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 2px 0 4px;
-      table-layout: fixed;
+    /* ---- Education ---- */
+
+    .edu-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 0 4px;
+      align-items: baseline;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .edu-row:last-child { margin-bottom: 1px; }
+
+    .edu-main { flex: 1 1 auto; min-width: 0; }
+
+    .edu-degree { font-weight: 700; }
+
+    .edu-school { margin: 1px 0 0; }
+
+    .edu-details {
+      margin: 1px 0 0;
+      font-size: 9pt;
+      color: #333;
+    }
+
+    .edu-year {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      font-size: 9.2pt;
+      font-weight: 700;
+    }
+
+    /* ---- Certifications ---- */
+
+    .certifications {
+      columns: 2;
+      column-gap: 20px;
+      margin: 2px 0 0;
+      padding-left: 15px;
       font-size: 9.2pt;
     }
 
-    .skills-table th,
-    .skills-table td {
-      border: 1px solid #444;
-      padding: 3px 6px;
-      vertical-align: top;
-      text-align: left;
-    }
-
-    .skills-table th {
-      font-weight: 700;
-      background: #efefef;
-      font-size: 9pt;
-    }
-
-    .skills-table .skill-cat {
-      width: 30%;
-      font-weight: 700;
-    }
-
-    .skills-table .skill-items {
-      width: 70%;
-    }
-
-    .certifications {
-      columns: 1;
-      margin: 2px 0 0;
-      padding-left: 16px;
-    }
-
     .certifications li {
-      margin: 0 0 2px;
+      margin: 0 0 1.5px;
+      text-align: left;
       break-inside: avoid;
+      page-break-inside: avoid;
     }
 `;
+
+function renderContact(data) {
+  const parts = [];
+  const location = String(data.location || "").trim();
+  const phone = String(data.phone || "").trim();
+  const email = String(data.email || "").trim();
+  const linkedin = String(data.linkedin || "").trim();
+
+  if (location) parts.push(escapeHtml(location));
+  if (phone) parts.push(escapeHtml(phone));
+  if (email) {
+    parts.push(`<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`);
+  }
+  if (linkedin) {
+    const href = /^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`;
+    const label = href.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "");
+    parts.push(`<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`);
+  }
+
+  if (!parts.length) return "";
+  const items = parts.map((part) => `<span class="item">${part}</span>`);
+  return `<p class="contact">${items.join('<span class="sep">|</span>')}</p>`;
+}
 
 function renderEducation(education) {
   const list = Array.isArray(education)
@@ -230,7 +287,7 @@ function renderEducation(education) {
       ? [education]
       : [];
 
-  const rows = list
+  return list
     .map((edu) => {
       const school = String(edu?.school || "").trim();
       const degree = String(edu?.degree || "").trim();
@@ -246,70 +303,68 @@ function renderEducation(education) {
   ${year ? `<div class="edu-year">${escapeHtml(year)}</div>` : ""}
 </div>`;
     })
-    .filter(Boolean);
-
-  return rows.join("\n");
+    .filter(Boolean)
+    .join("\n");
 }
 
-/** Title + dates on one row; COMPANY, location under it (matches master PDF). */
-function renderJobsSandeep(jobs) {
+/** Title + dates on one row; COMPANY — location beneath; optional project label. */
+function renderJobs(jobs) {
   return (jobs || [])
     .map((job) => {
-      const company = escapeHtml(job.company || "");
-      const location = String(job.location || "").trim();
-      const title = escapeHtml(job.title || "");
-      const dates = escapeHtml(job.dates || "");
-      const project = escapeHtml(job.project || "");
-      const companyLine = [company, location].filter(Boolean).join(", ");
-      const bullets = (job.bullets || [])
+      const company = escapeHtml(String(job?.company || "").trim());
+      const location = escapeHtml(String(job?.location || "").trim());
+      const title = escapeHtml(String(job?.title || "").trim());
+      const dates = escapeHtml(String(job?.dates || "").trim());
+      const project = escapeHtml(String(job?.project || "").trim());
+      const bullets = (job?.bullets || [])
+        .map((b) => String(b || "").trim())
         .filter(Boolean)
         .map((b) => `<li>${escapeHtml(b)}</li>`)
         .join("\n");
 
+      const companyLine = company || location
+        ? `<div class="job-company"><span class="company-name">${company}</span>${
+            location ? `<span class="job-location"> — ${location}</span>` : ""
+          }</div>`
+        : "";
+
       return `<article class="job">
-  <div class="job-title-row">
-    <span class="job-title">${title}</span>
-    ${dates ? `<span class="job-dates">${dates}</span>` : ""}
+  <div class="job-head">
+    <div class="job-title-row">
+      <span class="job-title">${title}</span>
+      ${dates ? `<span class="job-dates">${dates}</span>` : ""}
+    </div>
+    ${companyLine}
+    ${project ? `<div class="project">Project: ${project}</div>` : ""}
   </div>
-  <div class="job-company">${companyLine}${project ? `<div class="project">${project}</div>` : ""}</div>
-  <ul>
-${bullets}
-  </ul>
+  ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
 </article>`;
     })
     .join("\n");
 }
 
-function renderPersonalDetails(data) {
-  const lines = [];
-  if (data.location) lines.push(`<div>${escapeHtml(data.location)}</div>`);
-  const contactBits = [];
-  if (data.email) {
-    const email = String(data.email || "").trim();
-    contactBits.push(`<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`);
-  }
-  if (data.phone) contactBits.push(escapeHtml(data.phone));
-  if (contactBits.length) lines.push(`<div>${contactBits.join(", ")}</div>`);
-  if (data.linkedin) {
-    const raw = String(data.linkedin || "").trim();
-    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-    const label = href.replace(/^https?:\/\/(www\.)?/i, "");
-    lines.push(
-      `<div>LinkedIn: <a href="${escapeHtml(href)}">${escapeHtml(label)}</a></div>`
-    );
-  }
-  return lines.length ? `<div class="personal-details">${lines.join("\n")}</div>` : "";
+function renderCertifications(certs) {
+  const items = (certs || [])
+    .map((c) => String(c || "").trim())
+    .filter(Boolean)
+    .map((c) => `<li>${escapeHtml(c)}</li>`);
+  if (!items.length) return "";
+  return `<ul class="certifications">\n${items.join("\n")}\n</ul>`;
 }
 
 export const sandeepClassicTemplate = {
   id: "sandeep-classic",
   label: "Sandeep Classic (PDF)",
   description:
-    "Matches Sandeep master PDF: Personal Details, Profile, Education, title/date experience rows, Skills, Certificates.",
+    "Sandeep master-PDF styling with ATS-first order: contact, summary, skills, experience, education, certifications.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");
+    const profile = String(data.profile || "").trim();
+    const skillsHtml = renderSkills(data.skills);
+    const experienceHtml = renderJobs(data.experience);
     const eduHtml = renderEducation(data.education);
+    const certsHtml = renderCertifications(data.certifications);
 
     return wrapHtmlDocument({
       title: `${name} - Resume`,
@@ -318,17 +373,35 @@ export const sandeepClassicTemplate = {
     <header class="top">
       <h1>${name}</h1>
       ${headline ? `<p class="headline">${headline}</p>` : ""}
+      ${renderContact(data)}
     </header>
 
-    <section>
-      <h2>Personal Details</h2>
-      ${renderPersonalDetails(data) || `<p class="personal-details">${contactLine(data)}</p>`}
-    </section>
+    ${
+      profile
+        ? `<section>
+      <h2>Professional Summary</h2>
+      <p>${escapeHtml(profile)}</p>
+    </section>`
+        : ""
+    }
 
-    <section>
-      <h2>Profile</h2>
-      <p>${escapeHtml(data.profile || "")}</p>
-    </section>
+    ${
+      skillsHtml
+        ? `<section class="skills">
+      <h2>Technical Skills</h2>
+      ${skillsHtml}
+    </section>`
+        : ""
+    }
+
+    ${
+      experienceHtml
+        ? `<section>
+      <h2>Professional Experience</h2>
+      ${experienceHtml}
+    </section>`
+        : ""
+    }
 
     ${
       eduHtml
@@ -339,20 +412,14 @@ export const sandeepClassicTemplate = {
         : ""
     }
 
-    <section>
-      <h2>Professional Experience</h2>
-      ${renderJobsSandeep(data.experience)}
-    </section>
-
-    <section class="skills">
-      <h2>Skills</h2>
-      ${renderSkills(data.skills)}
-    </section>
-
-    <section>
-      <h2>Certificates</h2>
-      ${renderCerts(data.certifications)}
-    </section>
+    ${
+      certsHtml
+        ? `<section>
+      <h2>Certifications</h2>
+      ${certsHtml}
+    </section>`
+        : ""
+    }
   </main>`
     });
   }

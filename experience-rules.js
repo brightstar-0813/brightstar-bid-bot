@@ -140,11 +140,12 @@ export function parseRequiredExperienceFromPrompt(promptText) {
         continue;
       }
       // "Company Name (Location…) — …"  (require location-ish paren + dash/pipe after)
+      // The comma is allowed so suffixed names ("Avco Consulting, Inc.") parse.
       const withParen = line.match(
-        /^([A-Z0-9][A-Za-z0-9&.'''/\- ]{1,90}?)\s*\(([^)]{2,140})\)\s*[—–\-|:]/
+        /^([A-Z0-9][A-Za-z0-9&.,'''/\- ]{1,90}?)\s*\(([^)]{2,140})\)\s*[—–\-|:]/
       );
       if (!withParen) continue;
-      const label = withParen[1].trim();
+      const label = withParen[1].replace(/[,\s]+$/, "").trim();
       const loc = withParen[2];
       // Skip ALL-CAPS rule headings accidentally caught
       if (label === label.toUpperCase() && label.length > 12) continue;

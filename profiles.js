@@ -25,7 +25,7 @@ export const BUILTIN_PROFILES = [
     linkedin: "https://www.linkedin.com/in/hoffmantxstate/",
     location: "Georgetown, Texas, United States",
     address: "129 Cherry Ridge Rd",
-    zip: "",
+    zip: "78628",
     gender: "",
     ethnicity: "",
     disability: "No, I do not have a disability",
@@ -34,7 +34,7 @@ export const BUILTIN_PROFILES = [
     workAuthorized: "Yes",
     sponsorship: "No",
     hispanicLatino: "",
-    signatureTitle: "Salesforce Developer",
+    signatureTitle: "Senior Salesforce Engineer",
     masterResume: "",
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
@@ -81,7 +81,9 @@ export const BUILTIN_PROFILES = [
       "Altice USA",
       "Suddenlink Communications",
       "Allstate",
-      "Visions Healthcare"
+      "Visions Healthcare",
+      "NovoTech Solutions",
+      "Sejal Technologies"
     ]
   },
   {
