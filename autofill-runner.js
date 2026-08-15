@@ -13,11 +13,16 @@ import { DEFAULT_OPENAI_MODEL } from "./openai.js";
 import {
   generateHumanizedApplicationAnswers,
   generateConstrainedChoiceAnswers,
-  shouldBankAnswer
+  shouldBankAnswer,
+  isCertificationQuestion,
+  answerCertificationQuestion,
+  parseCertificationList,
+  certificationsFromText,
+  bankAnswerFitsQuestion
 } from "./ai-answers.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
-const AUTOFILL_SCRIPT_BUILD = "2026-08-16.11";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-16.13";
 const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;
@@ -309,17 +314,81 @@ function essayBankMatchIsSpecific(questionLabel, recordQuestion) {
   const a = clientPromptBody(questionLabel);
   const b = clientPromptBody(recordQuestion || "");
   if (!a || !b) return false;
+  if (isCertificationQuestion(a) !== isCertificationQuestion(b)) return false;
   if (a === b) return true;
-  return questionSimilarity(a, b) >= 0.78;
+  return questionSimilarity(a, b) >= (isCertificationQuestion(a) ? 0.9 : 0.78);
 }
 
-async function resolveQuestionAnswers(questions, extras, profileId, site, { choice = false } = {}) {
+async function loadAutofillCertifications(applicantInfo = {}) {
+  const chunks = [applicantInfo.certifications];
+  try {
+    const resume = await getStoredResumeJson();
+    chunks.push(resume?.certifications);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const person = await getActivePerson();
+    chunks.push(person?.autofillExtras?.certifications);
+    chunks.push(person?.masterResume);
+    chunks.push(person?.promptTemplate);
+  } catch {
+    /* ignore */
+  }
+  const seen = new Set();
+  const out = [];
+  for (const chunk of chunks) {
+    const list =
+      typeof chunk === "string" && chunk.length > 400
+        ? certificationsFromText(chunk)
+        : parseCertificationList(chunk);
+    for (const row of list) {
+      const key = row.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+async function withResumeCertifications(applicantInfo = {}) {
+  const certifications = await loadAutofillCertifications(applicantInfo);
+  return { ...applicantInfo, certifications };
+}
+
+async function resolveQuestionAnswers(
+  questions,
+  extras,
+  profileId,
+  site,
+  { choice = false, applicantInfo = {} } = {}
+) {
   const list = (questions || []).filter((q) => q?.id && q?.label);
   const resolved = [];
   let bankHits = 0;
   let extraHits = 0;
+  const certs = parseCertificationList(applicantInfo.certifications);
 
   for (const q of list) {
+    const certAnswer =
+      !choice && isCertificationQuestion(q.label)
+        ? answerCertificationQuestion(q.label, certs)
+        : "";
+    if (certAnswer) {
+      resolved.push({ id: q.id, answer: certAnswer, source: "profile" });
+      saveQa({
+        profileId: profileId || "",
+        question: q.label,
+        answer: certAnswer,
+        fieldType: q.fieldType || "textarea",
+        source: "profile",
+        site
+      }).catch(() => {});
+      extraHits += 1;
+      continue;
+    }
+
     let match = null;
     try {
       match = await findQaMatch(profileId, q.label);
@@ -331,6 +400,7 @@ async function resolveQuestionAnswers(questions, extras, profileId, site, { choi
     const bankOk =
       bankAnswer &&
       !isJunkAutofillAnswer(bankAnswer) &&
+      bankAnswerFitsQuestion(q.label, bankAnswer) &&
       (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question));
     if (bankOk) {
       resolved.push({ id: q.id, answer: bankAnswer, source: "bank" });
@@ -340,7 +410,11 @@ async function resolveQuestionAnswers(questions, extras, profileId, site, { choi
     }
 
     const extra = matchExtraAnswer(q.label, extras, choice ? q.options || [] : []);
-    if (extra?.answer && !isJunkAutofillAnswer(extra.answer)) {
+    if (
+      extra?.answer &&
+      !isJunkAutofillAnswer(extra.answer) &&
+      bankAnswerFitsQuestion(q.label, extra.answer)
+    ) {
       resolved.push({ id: q.id, answer: extra.answer, source: "extra" });
       extraHits += 1;
       saveQa({
@@ -472,6 +546,10 @@ async function getAutofillAiContext() {
     "last_jd_link"
   ]);
   const person = await getActivePerson();
+  const resume = (await getStoredResumeJson()) || {};
+  const certifications = await loadAutofillCertifications({
+    certifications: resume.certifications
+  });
   return {
     jobMeta: {
       jobTitle: data.last_job_title || "",
@@ -479,7 +557,8 @@ async function getAutofillAiContext() {
       jdText: data.last_jd_text || "",
       jdLink: data.last_jd_link || ""
     },
-    resumeText: String(person?.masterResume || "").trim()
+    resumeText: String(person?.masterResume || "").trim(),
+    certifications
   };
 }
 
@@ -503,6 +582,12 @@ async function enrichAnswersWithAi(questions, answers, {
     ...ctx.jobMeta,
     ...(jobMeta && typeof jobMeta === "object" ? jobMeta : {})
   };
+  const info = {
+    ...applicantInfo,
+    certifications: parseCertificationList(applicantInfo.certifications).length
+      ? applicantInfo.certifications
+      : ctx.certifications
+  };
   let aiHits = 0;
   try {
     const aiResult = choice
@@ -510,7 +595,7 @@ async function enrichAnswersWithAi(questions, answers, {
           apiKey,
           model,
           questions: stillNeed,
-          applicantInfo,
+          applicantInfo: info,
           jobMeta: meta,
           resumeText: ctx.resumeText
         })
@@ -518,17 +603,21 @@ async function enrichAnswersWithAi(questions, answers, {
           apiKey,
           model,
           questions: stillNeed,
-          applicantInfo,
+          applicantInfo: info,
           jobMeta: meta,
           resumeText: ctx.resumeText
         });
     for (const row of aiResult.answers || []) {
       if (!row?.id || !row?.answer) continue;
+      const q = stillNeed.find((item) => item.id === row.id);
+      if (q?.label && !bankAnswerFitsQuestion(q.label, row.answer)) continue;
       answers.push({ id: row.id, answer: row.answer, source: "ai" });
       aiHits += 1;
-      const q = stillNeed.find((item) => item.id === row.id);
       if (!q?.label) continue;
-      if (choice || shouldBankAnswer(q, row.answer, q.fieldType || "text")) {
+      if (
+        (choice || shouldBankAnswer(q, row.answer, q.fieldType || "text")) &&
+        bankAnswerFitsQuestion(q.label, row.answer)
+      ) {
         saveQa({
           profileId: profileId || "",
           question: q.label,
@@ -549,6 +638,7 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
   let extraFilled = 0;
   let bankHits = 0;
   let aiHits = 0;
+  const info = await withResumeCertifications(applicantInfo);
   const unmatched = Array.isArray(result?.unmatchedQuestions) ? result.unmatchedQuestions : [];
   const unmatchedChoice = Array.isArray(result?.unmatchedChoiceQuestions)
     ? result.unmatchedChoiceQuestions
@@ -562,13 +652,16 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
       byFrame.get(fid).push(q);
     }
     for (const [frameId, questions] of byFrame) {
-      const answers = await resolveQuestionAnswers(questions, extras, profileId, site, { choice: true });
+      const answers = await resolveQuestionAnswers(questions, extras, profileId, site, {
+        choice: true,
+        applicantInfo: info
+      });
       bankHits += Number(answers.bankHits || 0);
       const ai = await enrichAnswersWithAi(questions, answers, {
         choice: true,
         profileId,
         site,
-        applicantInfo
+        applicantInfo: info
       });
       aiHits += Number(ai.aiHits || 0);
       if (!answers.length) continue;
@@ -589,13 +682,16 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
       byFrame.get(fid).push(q);
     }
     for (const [frameId, questions] of byFrame) {
-      const answers = await resolveQuestionAnswers(questions, extras, profileId, site, { choice: false });
+      const answers = await resolveQuestionAnswers(questions, extras, profileId, site, {
+        choice: false,
+        applicantInfo: info
+      });
       bankHits += Number(answers.bankHits || 0);
       const ai = await enrichAnswersWithAi(questions, answers, {
         choice: false,
         profileId,
         site,
-        applicantInfo
+        applicantInfo: info
       });
       aiHits += Number(ai.aiHits || 0);
       if (!answers.length) continue;
@@ -909,18 +1005,19 @@ export async function answerQuestionsFromBank(
   { choice = false, site = "", jobMeta = null } = {}
 ) {
   const { person, extras, applicantInfo } = await getApplicantInfoForAutofill();
+  const info = await withResumeCertifications(applicantInfo);
   const answers = await resolveQuestionAnswers(
     questions,
     extras,
     person?.id || "",
     site,
-    { choice }
+    { choice, applicantInfo: info }
   );
   await enrichAnswersWithAi(questions, answers, {
     choice,
     profileId: person?.id || "",
     site,
-    applicantInfo,
+    applicantInfo: info,
     jobMeta
   });
   return answers;

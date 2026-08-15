@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.11";
+  const SCRIPT_BUILD = "2026-08-16.13";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1436,7 +1436,7 @@
 
   function essayQuestionForEditor(el) {
     const promptRe =
-      /[?]|\b(please (describe|share|answer|explain)|share an example|describe your|tell us about|what did you)\b/i;
+      /[?]|\b(please (describe|share|answer|explain|confirm)|share an example|describe your|tell us about|what did you|which .+ (do you|you currently) hold|certif(?:ied|ication|ications)? you currently hold)\b/i;
     let node = el;
     for (let up = 0; up < 6 && node; up += 1) {
       let sib = node.previousElementSibling;
@@ -1445,7 +1445,10 @@
         const t = stripEmoji(cleanLabelText(sib.innerText || sib.textContent || ""));
         if (t.length >= 24 && promptRe.test(t) && !looksLikeEditorChromeValue(t)) {
           const parts = t.split(/(?=please answer this question from the client)/i).filter((p) => p.trim());
-          const chunk = (parts.length ? parts[parts.length - 1] : t).replace(/\s+/g, " ").trim();
+          const chunk = (parts.length ? parts[parts.length - 1] : t)
+            .replace(/please answer this question from the client\s*(required)?/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
           if (chunk.length >= 24 && !looksLikeEditorChromeValue(chunk)) return chunk.slice(0, 1000);
         }
         sib = sib.previousElementSibling;
@@ -2100,23 +2103,56 @@
     });
   }
 
+  function localUploadText(el) {
+    const parts = [
+      labelTextForControl(el),
+      el?.getAttribute?.("name"),
+      el?.getAttribute?.("id"),
+      el?.getAttribute?.("aria-label"),
+      el?.getAttribute?.("accept")
+    ];
+    const zone =
+      el.closest?.(
+        "[class*='dropzone' i], [class*='Dropzone'], [class*='file-upload' i], [class*='FileUpload'], [data-testid*='upload'], label"
+      ) || el.parentElement;
+    if (zone && zone !== document.body) {
+      const t = cleanLabelText(zone.innerText || zone.textContent || "");
+      if (t && t.length <= 420) parts.push(t);
+      const heading = zone.previousElementSibling;
+      if (heading) {
+        const ht = cleanLabelText(heading.innerText || heading.textContent || "");
+        if (ht && ht.length <= 160) parts.push(ht);
+      }
+    }
+    return cleanLabelText(parts.filter(Boolean).join(" "));
+  }
+
+  function isOptionalExtraAttachmentText(text) {
+    const n = normalize(text);
+    if (!n) return false;
+    if (/cover letter (is )?not required/.test(n)) return true;
+    if (/attach up to \d+\s+files/.test(n) && !/\b(resume|cv|curriculum vitae)\b/.test(n)) {
+      return true;
+    }
+    if (
+      /\b(additional|optional|supporting)\b/.test(n) &&
+      /\b(files?|documents?|attachments?)\b/.test(n) &&
+      !/\b(resume|cv|curriculum vitae|cover letter)\b/.test(n)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   function classifyFileInput(el) {
-    const nearby = cleanLabelText(
-      [
-        labelTextForControl(el),
-        el.getAttribute("name"),
-        el.getAttribute("id"),
-        el.getAttribute("accept"),
-        el.closest("div, section, label, form")?.innerText
-      ]
-        .filter(Boolean)
-        .join(" ")
-    );
+    const nearby = localUploadText(el).replace(/a cover letter is not required/gi, " ");
     const name = normalize(nearby);
-    if (/cover\s*letter|covering\s*letter|coverletter/.test(name)) return "coverLetter";
+    if (isOptionalExtraAttachmentText(nearby)) return "";
+    if (/cover\s*letter|covering\s*letter|coverletter/.test(name) && !/not required/.test(name)) {
+      return "coverLetter";
+    }
     if (/\b(resume|cv|curriculum|vitae)\b/.test(name)) return "resume";
-    if (/\bcover\b/.test(name) && !/\b(resume|cv)\b/.test(name)) return "coverLetter";
-    return "resume";
+    return "";
   }
 
   function setFileOnInput(input, file) {
@@ -2139,16 +2175,52 @@
   function collectFileInputs() {
     return [...document.querySelectorAll('input[type="file"]')].filter((el) => {
       if (el.disabled) return false;
+      if (el.getAttribute("data-brightstar-uploaded") === "1") return false;
+      if (el.files && el.files.length) return false;
+      if (isOptionalExtraAttachmentText(localUploadText(el))) return false;
       return true;
     });
   }
 
   function looksLikeUploadDropzone(el) {
-    const t = normalize(el.innerText || el.textContent || "");
+    const raw = el.innerText || el.textContent || "";
+    const t = normalize(raw);
     if (!t || t.length > 500) return false;
+    if (isOptionalExtraAttachmentText(raw)) return false;
     return /\b(drag|drop file|drop your|browse|upload (a |your )?(resume|cv|cover)|include your resume|attach (a |your )?(resume|cv|file))\b/.test(
       t
     );
+  }
+
+  function zoneIsBusy(el) {
+    if (!el?.querySelector) return false;
+    if (el.getAttribute("aria-busy") === "true") return true;
+    if (el.querySelector("[aria-busy='true'], [role='progressbar']")) return true;
+    if (
+      el.querySelector(
+        "[class*='CircularProgress'], [class*='circular-progress'], [class*='MuiCircularProgress'], [class*='animate-spin']"
+      )
+    ) {
+      return true;
+    }
+    return /\b(uploading|processing|please wait)\b/i.test(el.innerText || "");
+  }
+
+  function zoneAlreadyHasFile(el) {
+    if (!el) return false;
+    if (el.getAttribute?.("data-brightstar-uploaded") === "1") return true;
+    const input = el.matches?.('input[type="file"]') ? el : el.querySelector?.('input[type="file"]');
+    if (input?.files?.length) return true;
+    const t = el.innerText || "";
+    return /\.(pdf|docx?|txt)\b/i.test(t) && /remove|replace|uploaded|attached|delete/i.test(t);
+  }
+
+  function markUploaded(el) {
+    try {
+      el?.setAttribute?.("data-brightstar-uploaded", "1");
+    } catch {
+      /* ignore */
+    }
   }
 
   function findUploadDropzones() {
@@ -2221,18 +2293,22 @@
     for (const input of inputs) {
       const kind = classifyFileInput(input);
       let file = null;
+      if (!kind) continue;
       if (kind === "coverLetter" && coverFile) file = coverFile;
       else if (kind === "resume" && resumeFile) file = resumeFile;
       else if (kind === "coverLetter" && !coverFile && resumeFile) {
         skipped.push({ reason: "no-cover-letter-doc", label: labelTextForControl(input) });
         continue;
-      } else if (resumeFile) file = resumeFile;
+      }
 
       if (!file || used.has(input)) continue;
+      const zone = input.closest("div, section, label, form") || input.parentElement;
+      if (zoneIsBusy(zone) || zoneAlreadyHasFile(zone) || zoneAlreadyHasFile(input)) continue;
       const ok = setFileOnInput(input, file);
       if (ok) {
         used.add(input);
-        dispatchFileDrop(input.closest("div, section, label, form") || input.parentElement, file);
+        markUploaded(input);
+        markUploaded(zone);
         uploaded.push({
           kind,
           fileName: file.name,
@@ -2249,25 +2325,32 @@
 
     if (!uploaded.length) {
       for (const zone of findUploadDropzones()) {
-        const kind = /cover/.test(normalize(zone.innerText || "")) ? "coverLetter" : "resume";
-        const file = kind === "coverLetter" && coverFile ? coverFile : resumeFile;
+        if (isOptionalExtraAttachmentText(zone.innerText || "")) continue;
+        if (zoneIsBusy(zone) || zoneAlreadyHasFile(zone)) continue;
+        const n = normalize(zone.innerText || "");
+        let kind = classifyFileInput(zone);
+        if (!kind) {
+          kind = /cover/.test(n) && !/not required/.test(n) ? "coverLetter" : "resume";
+        }
+        const file = kind === "coverLetter" && coverFile ? coverFile : kind === "resume" ? resumeFile : null;
         if (!file) continue;
         const zoneText = zone.innerText || "";
-        if (/\.pdf\b/i.test(zoneText) && /remove|replace|uploaded|attached/i.test(zoneText)) {
-          continue;
-        }
         const input = zone.querySelector('input[type="file"]');
         if (input && setFileOnInput(input, file)) {
+          markUploaded(input);
+          markUploaded(zone);
           uploaded.push({ kind, fileName: file.name, label: cleanLabelText(zoneText).slice(0, 80) });
           continue;
         }
-        dispatchFileDrop(zone, file);
-        uploaded.push({
-          kind,
-          fileName: file.name,
-          label: cleanLabelText(zoneText).slice(0, 80),
-          via: "drop"
-        });
+        if (dispatchFileDrop(zone, file)) {
+          markUploaded(zone);
+          uploaded.push({
+            kind,
+            fileName: file.name,
+            label: cleanLabelText(zoneText).slice(0, 80),
+            via: "drop"
+          });
+        }
       }
     }
 
@@ -2366,6 +2449,31 @@
     "drugTestConsent"
   ]);
 
+  function isCertificationQuestion(label) {
+    return /\b(certif(?:ied|ication|ications)?|credentials you (currently )?hold)\b/i.test(
+      String(label || "")
+    );
+  }
+
+  function essayNeedsRewrite(el, questionLabel) {
+    const current = editorVisibleText(el);
+    if (!current) return false;
+    if (!isCertificationQuestion(questionLabel)) return false;
+    if (/stakeholder|business objectives|adaptable for future/i.test(current) && !/\bcertified\b/i.test(current)) {
+      return true;
+    }
+    if (!/\b(certif|credential|administrator|architect|platform developer|app builder|consultant)\b/i.test(current)) {
+      return true;
+    }
+    if (/application architect/i.test(questionLabel) && /\badministrator\b/i.test(questionLabel)) {
+      const mentionsArch = /application architect/i.test(current);
+      const mentionsAdmin = /\badministrator\b/i.test(current);
+      const mentionsBoth = /\bboth\b/i.test(current);
+      if (!(mentionsBoth || (mentionsArch && mentionsAdmin))) return true;
+    }
+    return false;
+  }
+
   function collectUnmatchedQuestions(applicantInfo = {}) {
     const questions = [];
     const nodes = [...document.querySelectorAll("input, textarea")].filter((el) => {
@@ -2431,14 +2539,14 @@
 
     for (const el of collectRichTextEditors()) {
       if (questions.length >= 25) break;
-      if (!isRichTextEmpty(el)) continue;
-      if (el.getAttribute("data-resume-bot-qid")) continue;
       const near = essayQuestionForEditor(el);
       const fromAi = questionTextForAi(el);
       let questionLabel = near || fromAi;
       if (looksLikeEditorChromeValue(questionLabel)) {
         questionLabel = looksLikeEditorChromeValue(near) ? fromAi : near;
       }
+      if (!isRichTextEmpty(el) && !essayNeedsRewrite(el, questionLabel)) continue;
+      if (el.getAttribute("data-resume-bot-qid") && !essayNeedsRewrite(el, questionLabel)) continue;
       if (!questionLabel || looksLikeEditorChromeValue(questionLabel)) continue;
       if (shouldSkipAiField(el, questionLabel)) continue;
       if (matchApplicantKeyFromControl(el) && SKIP_AI_KNOWN_KEYS.has(matchApplicantKeyFromControl(el))) {

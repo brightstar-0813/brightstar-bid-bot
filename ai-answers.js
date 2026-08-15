@@ -24,6 +24,112 @@ function parseJsonObject(text) {
   }
 }
 
+export function parseCertificationList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (item == null) return "";
+        if (typeof item === "string") return item.trim();
+        if (typeof item === "object") {
+          return String(item.name || item.title || item.certification || "").trim();
+        }
+        return String(item).trim();
+      })
+      .filter(Boolean);
+  }
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  if (raw.length > 400) return certificationsFromText(raw);
+  return raw
+    .split(/\n|;/)
+    .map((row) => row.replace(/^[-•*\d.)\s]+/, "").trim())
+    .filter((row) => row.length >= 8);
+}
+
+/** Pull credential names out of a master resume or prompt blob. */
+export function certificationsFromText(text) {
+  const raw = String(text || "");
+  if (!raw) return [];
+  const jsonBlock = raw.match(/"certifications"\s*:\s*\[([\s\S]*?)\]/);
+  if (jsonBlock) {
+    const fromJson = [...jsonBlock[1].matchAll(/"([^"]+)"/g)]
+      .map((m) => m[1].trim())
+      .filter((row) => /\b(certified|architect|administrator|developer|consultant|builder)\b/i.test(row));
+    if (fromJson.length) return fromJson;
+  }
+  const found = [];
+  const re =
+    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft)[^\n]{6,140}?(?:Certified|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional)[^\n]{0,60})/gi;
+  let match;
+  while ((match = re.exec(raw))) {
+    const row = String(match[1] || "")
+      .replace(/[",]+$/g, "")
+      .trim();
+    if (row) found.push(row);
+  }
+  return found;
+}
+
+export function isCertificationQuestion(label) {
+  return /\b(certif(?:ied|ication|ications)?|credentials you (currently )?hold)\b/i.test(
+    String(label || "")
+  );
+}
+
+function certListHas(certs, pattern) {
+  return (certs || []).some((row) => pattern.test(String(row || "")));
+}
+
+/**
+ * Factual leftover answers for "which certs do you hold?" prompts.
+ * Never invents credentials that are not in the supplied list.
+ */
+export function answerCertificationQuestion(label, certifications = []) {
+  const certs = parseCertificationList(certifications);
+  if (!certs.length) return "";
+  const q = String(label || "");
+  const asksAppArch = /application architect/i.test(q);
+  const asksAdmin = /\badministrator\b/i.test(q);
+  const hasAppArch = certListHas(certs, /application architect/i);
+  const hasAdmin = certListHas(certs, /certified administrator\b|\badministrator\b/i);
+
+  if (asksAppArch && asksAdmin) {
+    if (hasAppArch && hasAdmin) {
+      return "I currently hold both: Salesforce Certified Application Architect and Salesforce Certified Administrator.";
+    }
+    if (hasAppArch) return "I currently hold Salesforce Certified Application Architect.";
+    if (hasAdmin) return "I currently hold Salesforce Certified Administrator.";
+    return "";
+  }
+
+  const relevant = /salesforce/i.test(q) ? certs.filter((row) => /salesforce/i.test(row)) : certs;
+  const list = (relevant.length ? relevant : certs).slice(0, 12);
+  if (!list.length) return "";
+  if (list.length === 1) return `I currently hold ${list[0]}.`;
+  return `I currently hold: ${list.join("; ")}.`;
+}
+
+/** Reject bank/AI leftovers that do not actually answer the prompt (e.g. architecture blurbs on cert questions). */
+export function bankAnswerFitsQuestion(questionLabel, answer) {
+  const q = String(questionLabel || "");
+  const a = String(answer || "").trim();
+  if (!a) return false;
+  if (!isCertificationQuestion(q)) return true;
+  if (!/\b(certif|credential|administrator|architect|platform developer|app builder|consultant)\b/i.test(a)) {
+    return false;
+  }
+  if (/stakeholder|business objectives|adaptable for future/i.test(a) && !/\bcertified\b/i.test(a)) {
+    return false;
+  }
+  if (/application architect/i.test(q) && /\badministrator\b/i.test(q)) {
+    const mentionsArch = /application architect/i.test(a);
+    const mentionsAdmin = /\badministrator\b/i.test(a);
+    const mentionsBoth = /\bboth\b/i.test(a);
+    if (!(mentionsBoth || (mentionsArch && mentionsAdmin))) return false;
+  }
+  return true;
+}
+
 export function compactApplicantContext(applicantInfo = {}) {
   const keys = [
     "firstName",
@@ -59,6 +165,8 @@ export function compactApplicantContext(applicantInfo = {}) {
     const value = applicantInfo[key];
     if (value != null && String(value).trim()) out[key] = String(value).trim();
   }
+  const certs = parseCertificationList(applicantInfo.certifications);
+  if (certs.length) out.certifications = certs;
   return out;
 }
 
@@ -85,11 +193,18 @@ export function shouldBankAnswer(q, answer, fieldType = "") {
   return true;
 }
 
-function buildAutofillContext({ jobMeta = {}, resumeText = "", applicationBrief = null }) {
+function buildAutofillContext({
+  jobMeta = {},
+  resumeText = "",
+  applicationBrief = null,
+  certifications = []
+} = {}) {
+  const certs = parseCertificationList(certifications);
   if (applicationBrief && typeof applicationBrief === "object") {
     return {
       jobTitle: jobMeta.jobTitle || applicationBrief.jobTitle || "",
       companyName: jobMeta.companyName || applicationBrief.companyName || "",
+      certifications: certs,
       applicationBrief: {
         roleSummary: applicationBrief.roleSummary || "",
         topSkills: applicationBrief.topSkills || [],
@@ -102,6 +217,7 @@ function buildAutofillContext({ jobMeta = {}, resumeText = "", applicationBrief 
   return {
     jobTitle: jobMeta.jobTitle || "",
     companyName: jobMeta.companyName || "",
+    certifications: certs,
     jobDescriptionExcerpt: String(jobMeta.jdText || "").trim().slice(0, 3500),
     resumeExcerpt: String(resumeText || "").trim().slice(0, 4000)
   };
@@ -139,11 +255,13 @@ export async function generateHumanizedApplicationAnswers({
   if (!list.length) return { answers: [], usage: null };
 
   const profile = compactApplicantContext(applicantInfo);
+  const certs = parseCertificationList(applicantInfo?.certifications);
+  const hasCertQuestion = list.some((q) => isCertificationQuestion(q.label));
   const result = await chatCompletion({
     apiKey,
     model,
     jsonMode: true,
-    temperature: 0.65,
+    temperature: hasCertQuestion ? 0.2 : 0.65,
     maxTokens: 1800,
     messages: [
       {
@@ -155,14 +273,21 @@ export async function generateHumanizedApplicationAnswers({
           "For yes/no style answers use Title Case exactly: \"Yes\" or \"No\" (never lowercase). " +
           "If the question requires a specific opening phrase, begin the answer with that phrase exactly. " +
           "Ground answers in the candidate resume/profile/brief; prefer real roles, employers, tools, and skills. " +
-          "Do not invent employers, degrees, visas, or tools that contradict the resume/profile. " +
+          "Do not invent employers, degrees, visas, certifications, or tools that contradict the resume/profile. " +
+          "Certification/credential questions must name only credentials listed in candidateProfile.certifications (or the resume excerpt). " +
+          "If the prompt offers options such as \"Application Architect, Administrator, or both\", answer with those options from the listed credentials — never a generic architecture, stakeholder, or collaboration paragraph. " +
           "If the resume lacks a specific story the question asks for, give a cautious brief answer based on transferable experience — do not fabricate a detailed false project."
       },
       {
         role: "user",
         content: JSON.stringify(
           {
-            ...buildAutofillContext({ jobMeta, resumeText, applicationBrief }),
+            ...buildAutofillContext({
+              jobMeta,
+              resumeText,
+              applicationBrief,
+              certifications: certs
+            }),
             candidateProfile: profile,
             questions: list.map((q) => ({
               id: q.id,
@@ -177,8 +302,13 @@ export async function generateHumanizedApplicationAnswers({
     ]
   });
 
+  const drafted = answersFromJson(result.content, list).filter((row) => {
+    const q = list.find((item) => item.id === row.id);
+    return bankAnswerFitsQuestion(q?.label || "", row.answer);
+  });
+
   return {
-    answers: answersFromJson(result.content, list),
+    answers: drafted,
     usage: result.usage
   };
 }
@@ -245,7 +375,12 @@ export async function generateConstrainedChoiceAnswers({
         role: "user",
         content: JSON.stringify(
           {
-            ...buildAutofillContext({ jobMeta, resumeText, applicationBrief }),
+            ...buildAutofillContext({
+              jobMeta,
+              resumeText,
+              applicationBrief,
+              certifications: parseCertificationList(applicantInfo?.certifications)
+            }),
             candidateProfile: profile,
             questions: list.map((q) => ({
               id: q.id,
