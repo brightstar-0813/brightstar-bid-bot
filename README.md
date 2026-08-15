@@ -66,13 +66,10 @@ flowchart TD
 
 ## First-time person setup
 
-1. Open the extension → **Edit person / master resume / prompts**
-2. Optionally **Load** a built-in preset (Sandeep)
-3. Paste your **master resume as text**, or upload **.txt / .pdf / .docx** (not JSON)
-4. Set the **resume tailor prompt** — ChatGPT instructions to rewrite the resume. Put `{JD}` where each job’s description should go; the batch **fills it from the CSV automatically** (do not paste JDs into the prompt). Also: `{MASTER_RESUME}`, `{JOB_TITLE}`, `{COMPANY}`, `{NAME}`, `{EMAIL}`, `{PHONE}`, `{LINKEDIN}`, `{LOCATION}`
-5. Optionally set a **cover letter prompt** (same rule: `{JD}` = auto from CSV)
-6. Fill contact fields (used for cover letter signature + apply autofill)
-7. Click **Save as my person** / **Save changes** (green confirmation appears above the button). Built-in presets are read-only — saving creates your own copy and selects it as Active person.
+1. Open the extension → **Person**
+2. Upload a **.txt / .pdf / .docx** resume (or paste the text). Contact, tailor prompt, cover-letter prompt, and employers fill automatically and the person is saved as Active
+3. Review the gold notice, then generate from CSV. Edit person only if you need to tweak a field
+4. Built-in presets are optional. Saving a built-in creates your own copy.
 
 ## CSV batch
 

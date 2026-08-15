@@ -9,6 +9,8 @@ import {
   deleteCustomProfile,
   BUILTIN_PROFILES,
   COVER_LETTER_PROFILE_ID,
+  GENERIC_SENIOR_PROMPT,
+  GENERIC_COVER_LETTER_PROMPT,
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
   resolveExperienceRulesForPerson
@@ -21,6 +23,12 @@ import { extractSpreadsheetId, buildSheetRowTsv } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { parseJobsCsv, filterJobsByChannel, isLinkedInJob } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
+import {
+  extractProfileFromResumeText,
+  parseEmployersFromResume,
+  resumeFilePrefixFromName,
+  namesLikelyDifferent
+} from "./resume-profile.js";
 import {
   saveCsvFileHandle,
   clearCsvFileHandle,
@@ -210,8 +218,10 @@ const personRequiredExperienceEl = document.getElementById("personRequiredExperi
 const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
 const personResumePromptEl = document.getElementById("personResumePrompt");
 const personCoverPromptEl = document.getElementById("personCoverPrompt");
-const masterResumeFileEl = document.getElementById("masterResumeFile");
+const personResumeFileEl = document.getElementById("personResumeFile");
+const replaceResumeFromFileBtn = document.getElementById("replaceResumeFromFile");
 const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
+const personImportNoticeEl = document.getElementById("personImportNotice");
 const clearMasterResumeBtn = document.getElementById("clearMasterResume");
 const loadPresetBtn = document.getElementById("loadPreset");
 const savePersonBtn = document.getElementById("savePerson");
@@ -277,8 +287,8 @@ let channelFilter = DEFAULT_CHANNEL_FILTER;
 let batchState = "idle";
 let editingPersonId = null;
 
-if (masterResumeFileEl) {
-  masterResumeFileEl.setAttribute("accept", MASTER_RESUME_ACCEPT);
+if (personResumeFileEl) {
+  personResumeFileEl.setAttribute("accept", MASTER_RESUME_ACCEPT);
 }
 
 function setStatus(message) {
@@ -294,7 +304,7 @@ function setStatus(message) {
     statusEl.classList.add("is-err");
   } else if (/\b(skip|skipped|pause|paused|unchanged|idle)\b/.test(lower)) {
     statusEl.classList.add("is-warn");
-  } else if (/\b(saved|done|complete|loaded|started|sent|ok|ready|pinned|refreshed)\b/.test(lower)) {
+  } else if (/\b(saved|done|complete|loaded|started|sent|ok|ready|pinned|refreshed|imported|filled|applied)\b/.test(lower)) {
     statusEl.classList.add("is-ok");
   }
 }
@@ -319,6 +329,133 @@ function syncBatchPill() {
   if (!el) return;
   el.textContent = batchState || "idle";
   el.dataset.state = batchState || "idle";
+}
+
+function setPersonImportNotice(message, { ok = true } = {}) {
+  if (!personImportNoticeEl) return;
+  if (!message) {
+    personImportNoticeEl.hidden = true;
+    personImportNoticeEl.textContent = "";
+    personImportNoticeEl.className = "person-import-notice";
+    return;
+  }
+  personImportNoticeEl.hidden = false;
+  personImportNoticeEl.textContent = message;
+  personImportNoticeEl.className = `person-import-notice ${ok ? "ok" : "err"}`;
+  try {
+    personImportNoticeEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  } catch {
+    // ignore
+  }
+}
+
+function clearPersonContactFields() {
+  personLabelEl.value = "";
+  personNameEl.value = "";
+  personEmailEl.value = "";
+  personPhoneEl.value = "";
+  personLinkedinEl.value = "";
+  personLocationEl.value = "";
+  personAddressEl.value = "";
+  personZipEl.value = "";
+  personResumePrefixEl.value = "";
+  personSignatureTitleEl.value = "";
+  personRequiredExperienceEl.value = "";
+}
+
+function clearPersonEeoFields() {
+  setSelectValue(personGenderEl, "");
+  setSelectValue(personEthnicityEl, "");
+  setSelectValue(personDisabilityEl, "");
+  setSelectValue(personVeteranEl, "");
+  setSelectValue(personCitizenshipEl, "");
+  setSelectValue(personWorkAuthorizedEl, "");
+  setSelectValue(personSponsorshipEl, "");
+  setSelectValue(personHispanicLatinoEl, "");
+  personAutofillExtrasEl.value = "";
+}
+
+function promptNeedsPersonTemplate(prompt) {
+  const p = String(prompt || "");
+  if (!p.trim()) return true;
+  if (!p.includes("{MASTER_RESUME}") || !p.includes("{NAME}") || !p.includes("{JD}")) return true;
+  if (/sandeep\s+mahankali/i.test(p)) return true;
+  return false;
+}
+
+function applyExtractedProfileToForm(parsed, resumeText, { resetEeo = true } = {}) {
+  clearPersonContactFields();
+  if (resetEeo) clearPersonEeoFields();
+  personMasterResumeEl.value = resumeText;
+
+  if (parsed.name) {
+    personNameEl.value = parsed.name;
+    personLabelEl.value = parsed.name;
+    personResumePrefixEl.value = resumeFilePrefixFromName(parsed.name);
+  }
+  if (parsed.email) personEmailEl.value = parsed.email;
+  if (parsed.phone) personPhoneEl.value = parsed.phone;
+  if (parsed.linkedin) personLinkedinEl.value = parsed.linkedin;
+  if (parsed.location) personLocationEl.value = parsed.location;
+  if (parsed.address) personAddressEl.value = parsed.address;
+  if (parsed.zip) personZipEl.value = parsed.zip;
+  if (parsed.headline) personSignatureTitleEl.value = parsed.headline;
+  if (parsed.employers?.length) {
+    personRequiredExperienceEl.value = requiredExperienceToText(parsed.employers);
+  }
+  if (resetEeo || promptNeedsPersonTemplate(personResumePromptEl.value)) {
+    personResumePromptEl.value = GENERIC_SENIOR_PROMPT;
+  }
+  const cover = String(personCoverPromptEl.value || "");
+  if (resetEeo || !cover.trim() || !cover.includes("{JD}") || /sandeep\s+mahankali|matthew\s+dale/i.test(cover)) {
+    personCoverPromptEl.value = GENERIC_COVER_LETTER_PROMPT;
+  }
+}
+
+async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {}) {
+  const resumeText = String(text || "").trim();
+  if (resumeText.length < 40) {
+    throw new Error("Not enough text to build a person. Upload a text-based PDF / DOCX, or paste the resume.");
+  }
+  const parsed = extractProfileFromResumeText(resumeText);
+  const current = profilesCache.find((p) => p.id === editingPersonId);
+  const asNew =
+    isEditingBuiltin() ||
+    Boolean(parsed.name && current?.name && namesLikelyDifferent(current.name, parsed.name));
+  applyExtractedProfileToForm(parsed, resumeText, { resetEeo: asNew });
+
+  personPanelBody.hidden = false;
+  togglePersonPanelBtn.setAttribute("aria-expanded", "true");
+  syncSaveButtonLabels();
+
+  const filled = parsed.filled.length ? parsed.filled.join(", ") : "master resume text only";
+  let notice = `Used only values found in ${sourceLabel}: ${filled}. Other fields left blank.`;
+  if (!parsed.name) {
+    notice += " Add a display name from the resume, then Save person.";
+    setPersonImportNotice(notice, { ok: true });
+    setPersonSaveStatus(notice, { ok: true });
+    setStatus(`Resume imported — name not found in file. Detected: ${filled}.`);
+    return parsed;
+  }
+
+  setPersonImportNotice(`${notice} Saving as Active person…`, { ok: true });
+  setStatus(`Imported ${parsed.name} from ${sourceLabel}. Saving…`);
+  const saved = await savePerson({
+    asNew,
+    successMessage: `Ready to bid as ${parsed.name}. Filled from file: ${filled}. Nothing else was invented.`
+  });
+  if (saved) {
+    setPersonImportNotice(
+      `Ready to bid as ${saved.label || parsed.name}. From file: ${filled}. Blank fields were not in the upload.`,
+      { ok: true }
+    );
+  } else {
+    setPersonImportNotice(
+      `${notice} Review the fields and click Save person.`,
+      { ok: false }
+    );
+  }
+  return parsed;
 }
 
 function setPersonSaveStatus(message, { ok = true } = {}) {
@@ -1202,7 +1339,7 @@ async function retryErrorJobs() {
   }
 }
 
-async function savePerson({ asNew = false } = {}) {
+async function savePerson({ asNew = false, successMessage = "" } = {}) {
   // Keep the editor open so the user can see success/error next to the button.
   personPanelBody.hidden = false;
   togglePersonPanelBtn.setAttribute("aria-expanded", "true");
@@ -1213,7 +1350,7 @@ async function savePerson({ asNew = false } = {}) {
     setPersonSaveStatus("Enter a display name (or full name) before saving.", { ok: false });
     personLabelEl.focus();
     setStatus("Display name required to save person.");
-    return;
+    return null;
   }
   if (!person.promptTemplate?.trim()) {
     setPersonSaveStatus(
@@ -1222,7 +1359,7 @@ async function savePerson({ asNew = false } = {}) {
     );
     personResumePromptEl.focus();
     setStatus("Resume tailor prompt is required.");
-    return;
+    return null;
   }
   if (!person.promptTemplate.includes("{JD}")) {
     setPersonSaveStatus(
@@ -1231,7 +1368,7 @@ async function savePerson({ asNew = false } = {}) {
     );
     personResumePromptEl.focus();
     setStatus("Add {JD} placeholder for auto CSV job descriptions.");
-    return;
+    return null;
   }
   if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
     setPersonSaveStatus(
@@ -1240,7 +1377,7 @@ async function savePerson({ asNew = false } = {}) {
     );
     personMasterResumeEl.focus();
     setStatus("Master resume required for {MASTER_RESUME}.");
-    return;
+    return null;
   }
 
   // Auto-fill required employers from FIXED COMPANY HISTORY when the field is blank.
@@ -1251,14 +1388,14 @@ async function savePerson({ asNew = false } = {}) {
       personRequiredExperienceEl.value = requiredExperienceToText(detected);
     }
   }
-  if ((person.requiredExperience || []).length < 2) {
+  if ((person.requiredExperience || []).length < 1 && !person.masterResume?.trim()) {
     setPersonSaveStatus(
-      "List required experience employers (one per line, at least 2). Repeat a company for two roles there — or click Detect from prompt.",
+      "List required experience employers (one per line), or upload a master resume so they can be detected.",
       { ok: false }
     );
     personRequiredExperienceEl.focus();
     setStatus("Required experience employers needed.");
-    return;
+    return null;
   }
 
   savePersonBtn.disabled = true;
@@ -1320,20 +1457,24 @@ async function savePerson({ asNew = false } = {}) {
     await refreshProfiles(saved.id);
     fillPersonForm({ ...saved, builtin: false });
 
-    let msg;
-    if (asNew || created) {
-      msg = fromBuiltin
-        ? `Saved as your person “${saved.label}” (custom). It is now the Active person.`
-        : `Created “${saved.label}” and set it as Active person.`;
-    } else {
-      msg = `Saved changes for “${saved.label}”. Ready to run CSV batch.`;
+    let msg = successMessage;
+    if (!msg) {
+      if (asNew || created) {
+        msg = fromBuiltin
+          ? `Saved as your person “${saved.label}” (custom). It is now the Active person.`
+          : `Created “${saved.label}” and set it as Active person.`;
+      } else {
+        msg = `Saved changes for “${saved.label}”. Ready to run CSV batch.`;
+      }
     }
     setPersonSaveStatus(msg, { ok: true });
     setStatus(msg);
+    return saved;
   } catch (err) {
     const message = String(err.message || err);
     setPersonSaveStatus(message, { ok: false });
     setStatus(message);
+    return null;
   } finally {
     savePersonBtn.disabled = false;
     savePersonAsNewBtn.disabled = false;
@@ -1344,14 +1485,17 @@ async function savePerson({ asNew = false } = {}) {
 async function onMasterResumeFile(file) {
   if (!file) return;
   masterResumeFileHintEl.textContent = `Reading ${file.name}…`;
+  setPersonImportNotice(`Reading ${file.name}…`);
   try {
     const { text, fileName } = await extractMasterResumeFromFile(file);
-    personMasterResumeEl.value = text;
-    masterResumeFileHintEl.textContent = `Loaded ${fileName} (${text.length} chars). Save person to keep it.`;
-    setStatus(`Master resume loaded from ${fileName}.`);
+    await importPersonFromResumeText(text, { sourceLabel: fileName });
+    masterResumeFileHintEl.textContent = `Loaded ${fileName} (${text.length} chars) and applied to this person.`;
+    if (personResumeFileEl) personResumeFileEl.value = "";
   } catch (err) {
-    masterResumeFileHintEl.textContent = String(err.message || err);
-    setStatus(String(err.message || err));
+    const message = String(err.message || err);
+    masterResumeFileHintEl.textContent = message;
+    setPersonImportNotice(message, { ok: false });
+    setStatus(message);
   }
 }
 
@@ -1743,29 +1887,44 @@ savePersonAsNewBtn.addEventListener("click", () => savePerson({ asNew: true }));
 deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
 
 detectRequiredExperienceBtn?.addEventListener("click", () => {
-  const detected = parseRequiredExperienceFromPrompt(personResumePromptEl.value);
+  const fromPrompt = parseRequiredExperienceFromPrompt(personResumePromptEl.value);
+  const fromResume = parseEmployersFromResume(personMasterResumeEl.value);
+  const detected = fromPrompt.length ? fromPrompt : fromResume;
   if (!detected.length) {
     setPersonSaveStatus(
-      "No employers found. Add a FIXED COMPANY HISTORY section in the prompt, or type companies manually (one per line).",
+      "No employers found. Upload a resume, or type companies manually (one per line).",
       { ok: false }
     );
     return;
   }
   personRequiredExperienceEl.value = requiredExperienceToText(detected);
   setPersonSaveStatus(
-    `Detected ${detected.length} employer entr${detected.length === 1 ? "y" : "ies"} from the prompt.`,
+    `Detected ${detected.length} employer entr${detected.length === 1 ? "y" : "ies"} from the ${fromPrompt.length ? "prompt" : "resume"}.`,
     { ok: true }
   );
 });
 
 clearMasterResumeBtn.addEventListener("click", () => {
   personMasterResumeEl.value = "";
-  masterResumeFileEl.value = "";
-  masterResumeFileHintEl.textContent = "";
+  if (personResumeFileEl) personResumeFileEl.value = "";
+  if (masterResumeFileHintEl) masterResumeFileHintEl.textContent = "";
 });
-masterResumeFileEl.addEventListener("change", () => {
-  const file = masterResumeFileEl.files?.[0];
+replaceResumeFromFileBtn?.addEventListener("click", () => {
+  personResumeFileEl?.click();
+});
+personResumeFileEl?.addEventListener("change", () => {
+  const file = personResumeFileEl.files?.[0];
   onMasterResumeFile(file).catch((e) => setStatus(String(e.message || e)));
+});
+personMasterResumeEl?.addEventListener("paste", () => {
+  window.setTimeout(() => {
+    const text = String(personMasterResumeEl.value || "").trim();
+    if (text.length < 80) return;
+    importPersonFromResumeText(text, { sourceLabel: "pasted resume" }).catch((e) => {
+      setPersonImportNotice(String(e.message || e), { ok: false });
+      setStatus(String(e.message || e));
+    });
+  }, 0);
 });
 
 csvFileEl.addEventListener("change", () => {

@@ -785,6 +785,30 @@ input[type="file"]::file-selector-button {
   border: 1px solid #991b1b;
 }
 
+.person-import-notice {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  background: rgba(245, 197, 66, 0.14);
+  color: var(--gold-bright);
+  border: 1px solid rgba(245, 197, 66, 0.45);
+}
+
+.person-import-notice.ok {
+  background: var(--ok-bg);
+  color: #bbf7d0;
+  border: 1px solid #166534;
+}
+
+.person-import-notice.err {
+  background: var(--err-bg);
+  color: #fecaca;
+  border: 1px solid #991b1b;
+}
+
 .person-save-row {
   position: sticky;
   bottom: 0;

@@ -1,5 +1,6 @@
 import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
+import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
@@ -7,6 +8,8 @@ import {
 } from "./experience-rules.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
+export const GENERIC_SENIOR_PROMPT = genericSeniorPrompt;
+export const GENERIC_COVER_LETTER_PROMPT = coverLetterPrompt;
 
 /** Built-in prompts shipped as separate files under /prompts. */
 export const BUILTIN_PROFILES = [
@@ -90,7 +93,8 @@ export function applyPlaceholders(
     phone = "",
     linkedin = "",
     location = "",
-    address = ""
+    address = "",
+    headline = ""
   } = {}
 ) {
   return String(template || "")
@@ -103,7 +107,8 @@ export function applyPlaceholders(
     .replaceAll("{PHONE}", phone)
     .replaceAll("{LINKEDIN}", linkedin)
     .replaceAll("{LOCATION}", location)
-    .replaceAll("{ADDRESS}", address);
+    .replaceAll("{ADDRESS}", address)
+    .replaceAll("{HEADLINE}", headline);
 }
 
 const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman"]);
@@ -303,7 +308,8 @@ function personPlaceholderExtras(person, extras = {}) {
     phone: person.phone || "",
     linkedin: person.linkedin || "",
     location: person.location || "",
-    address: person.address || ""
+    address: person.address || "",
+    headline: extras.headline || person.signatureTitle || person.headline || ""
   };
 }
 
@@ -402,9 +408,9 @@ export async function addCustomProfile({
   if (!employers.length && profileKind === "resume") {
     employers = parseRequiredExperienceFromPrompt(prompt);
   }
-  if (profileKind === "resume" && employers.length < 2) {
+  if (profileKind === "resume" && employers.length < 1 && !String(masterResume || "").trim()) {
     throw new Error(
-      "Add Required experience employers (one company per line, at least 2). Repeat a company if they had two roles there. Or include a FIXED COMPANY HISTORY section in the tailor prompt so employers can be detected."
+      "Add Required experience employers (one company per line), or upload a master resume so employers can be detected."
     );
   }
 
@@ -489,9 +495,9 @@ export async function savePersonProfile(person) {
     requiredExperience: (() => {
       let employers = normalizeRequiredExperienceInput(person?.requiredExperience);
       if (!employers.length) employers = parseRequiredExperienceFromPrompt(prompt);
-      if (employers.length < 2) {
+      if (employers.length < 1 && !String(person?.masterResume || "").trim()) {
         throw new Error(
-          "Add Required experience employers (one company per line, at least 2). Repeat a company for two roles at the same employer. Or include FIXED COMPANY HISTORY in the tailor prompt."
+          "Add Required experience employers (one company per line), or upload a master resume so employers can be detected."
         );
       }
       return employers;
