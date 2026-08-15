@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.10";
+  const SCRIPT_BUILD = "2026-08-16.11";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1018,7 +1018,7 @@
     }
     try {
       const rect = el.getBoundingClientRect();
-      return rect.width >= 120 && rect.height >= 64;
+      return rect.width >= 120 && rect.height >= 48;
     } catch {
       return false;
     }
@@ -1425,6 +1425,35 @@
       if (t.length >= 12) return t.slice(0, 1000);
     }
     return "";
+  }
+
+  function siblingContainsOtherEssay(sib, self) {
+    if (!sib?.querySelector) return false;
+    return [...sib.querySelectorAll("[contenteditable='true'], .ProseMirror, .ql-editor")].some(
+      (ed) => ed !== self && isLikelyEssayEditor(ed)
+    );
+  }
+
+  function essayQuestionForEditor(el) {
+    const promptRe =
+      /[?]|\b(please (describe|share|answer|explain)|share an example|describe your|tell us about|what did you)\b/i;
+    let node = el;
+    for (let up = 0; up < 6 && node; up += 1) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        if (siblingContainsOtherEssay(sib, el)) break;
+        const t = stripEmoji(cleanLabelText(sib.innerText || sib.textContent || ""));
+        if (t.length >= 24 && promptRe.test(t) && !looksLikeEditorChromeValue(t)) {
+          const parts = t.split(/(?=please answer this question from the client)/i).filter((p) => p.trim());
+          const chunk = (parts.length ? parts[parts.length - 1] : t).replace(/\s+/g, " ").trim();
+          if (chunk.length >= 24 && !looksLikeEditorChromeValue(chunk)) return chunk.slice(0, 1000);
+        }
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    const near = questionTextNearNode(el);
+    return looksLikeEditorChromeValue(near) ? "" : near;
   }
 
   function collectChipCandidates() {
@@ -2404,9 +2433,9 @@
       if (questions.length >= 25) break;
       if (!isRichTextEmpty(el)) continue;
       if (el.getAttribute("data-resume-bot-qid")) continue;
-      const near = questionTextNearNode(el);
+      const near = essayQuestionForEditor(el);
       const fromAi = questionTextForAi(el);
-      let questionLabel = (near && near.length >= (fromAi || "").length ? near : fromAi) || near || fromAi;
+      let questionLabel = near || fromAi;
       if (looksLikeEditorChromeValue(questionLabel)) {
         questionLabel = looksLikeEditorChromeValue(near) ? fromAi : near;
       }

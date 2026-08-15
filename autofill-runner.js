@@ -17,7 +17,7 @@ import {
 } from "./ai-answers.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
-const AUTOFILL_SCRIPT_BUILD = "2026-08-16.10";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-16.11";
 const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;
@@ -290,6 +290,29 @@ function matchExtraAnswer(questionLabel, extras = {}, options = []) {
   return best;
 }
 
+function isJunkAutofillAnswer(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (!t) return true;
+  return /format paragraph|heading dropdown|we want to hear from you/.test(t);
+}
+
+/** Shared Braintrust wrapper text should not make two client essays look like the same question. */
+function clientPromptBody(label) {
+  return normalizeQuestion(label)
+    .replace(/please answer this question from the client/g, " ")
+    .replace(/\brequired\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function essayBankMatchIsSpecific(questionLabel, recordQuestion) {
+  const a = clientPromptBody(questionLabel);
+  const b = clientPromptBody(recordQuestion || "");
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return questionSimilarity(a, b) >= 0.78;
+}
+
 async function resolveQuestionAnswers(questions, extras, profileId, site, { choice = false } = {}) {
   const list = (questions || []).filter((q) => q?.id && q?.label);
   const resolved = [];
@@ -303,15 +326,21 @@ async function resolveQuestionAnswers(questions, extras, profileId, site, { choi
     } catch {
       match = null;
     }
-    if (match?.record?.answer) {
-      resolved.push({ id: q.id, answer: match.record.answer, source: "bank" });
+    const bankAnswer = String(match?.record?.answer || "").trim();
+    const essayLike = Boolean(q.multiline) || q.fieldType === "textarea";
+    const bankOk =
+      bankAnswer &&
+      !isJunkAutofillAnswer(bankAnswer) &&
+      (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question));
+    if (bankOk) {
+      resolved.push({ id: q.id, answer: bankAnswer, source: "bank" });
       recordQaUsage(match.record.id).catch(() => {});
       bankHits += 1;
       continue;
     }
 
     const extra = matchExtraAnswer(q.label, extras, choice ? q.options || [] : []);
-    if (extra?.answer) {
+    if (extra?.answer && !isJunkAutofillAnswer(extra.answer)) {
       resolved.push({ id: q.id, answer: extra.answer, source: "extra" });
       extraHits += 1;
       saveQa({
