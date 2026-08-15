@@ -90,9 +90,17 @@ function looksLikePersonName(line) {
     return false;
   }
   if (/\d/.test(s)) return false;
+  if (
+    /\b(inc\.?|llc|ltd|corp|co\.|technologies|solutions|consulting|communications|partners|labs|systems|group)\b/i.test(
+      s
+    )
+  ) {
+    return false;
+  }
   const words = s.split(/\s+/).filter(Boolean);
   if (words.length < 2 || words.length > 4) return false;
   if (words.some((w) => TITLE_WORD.test(w))) return false;
+  if (words.some((w) => /^(USA|UK|UAE|Inc|LLC|Ltd)$/i.test(w))) return false;
   return words.every((w) => /^[A-Z][a-zA-Z'’.\-]*$/.test(w) || /^[A-Z]{2,}$/.test(w));
 }
 
@@ -131,9 +139,38 @@ function extractZip(header, address) {
   return m ? m[1] : "";
 }
 
+const JOB_META =
+  /^(contract|full[-\s]?time|part[-\s]?time|intern(ship)?|freelance|contractor|remote|hybrid|on[-\s]?site|permanent|temporary|seasonal|w-?2|c2c|1099|consultant|admin)$/i;
+
+const TITLE_TAIL =
+  /^(intern(ship)?|senior|staff|lead|principal|junior|associate|software|engineer|developer|architect|consultant|administrator|admin|manager|director|analyst|specialist)\b/i;
+
+function isJobMeta(value) {
+  return JOB_META.test(String(value || "").trim());
+}
+
+function isLocationish(value) {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (/\b(inc|llc|ltd|corp|co\.|technologies|solutions|consulting|communications)\b/i.test(s)) return false;
+  return (
+    /\b(united states|philippines|india|remote|hybrid|on-?site|greater\s+\w+\s+area)\b/i.test(s) ||
+    /,\s*([A-Z]{2}|[A-Z][a-z]+)\s*$/.test(s)
+  );
+}
+
+function looksLikeJobTitle(value) {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (isJobMeta(s)) return true;
+  if (looksLikeHeadline(s)) return true;
+  return TITLE_TAIL.test(s) && !/\b(inc|llc|ltd|corp|technologies|solutions|consulting)\b/i.test(s);
+}
+
 function isNoiseCompany(label) {
   const s = String(label || "").trim();
   if (s.length < 2 || s.length > 70) return true;
+  if (isJobMeta(s) || looksLikeJobTitle(s)) return true;
   if (
     /^(experience|education|skills|certifications?|summary|profile|technical|projects|awards|languages|contact|references|present|current)$/i.test(
       s
@@ -142,32 +179,60 @@ function isNoiseCompany(label) {
     return true;
   }
   if (/\b(university|college|institute|bachelor|master|gpa|certified|resume)\b/i.test(s)) return true;
-  if (TITLE_WORD.test(s.split(/\s+/)[0]) && looksLikeHeadline(s)) return true;
   if (DATE_RANGE.test(s) && s.length < 28) return true;
   return false;
 }
 
-function companyFromDatedLine(line) {
-  const range = line.match(DATE_RANGE);
-  if (!range) return "";
-  let left = line.slice(0, range.index).replace(/[|•·\-–—]+$/g, "").trim();
-  left = left.replace(/\s{2,}.*/, "").trim();
-  const at = left.match(/\b(?:at|@)\s+(.+)$/i);
-  if (at) left = at[1].trim();
-  const piped = left.split(/\s*[|•·]\s*/).map((p) => p.trim()).filter(Boolean);
-  if (piped.length >= 2) {
-    const last = piped[piped.length - 1];
-    left = looksLikeHeadline(last) ? piped[0] : last;
+function stripTitleFromCompany(value) {
+  const parts = String(value || "")
+    .split(/\s+[-–—]\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return String(value || "").trim();
+  const right = parts.slice(1).join(" - ");
+  if (looksLikeJobTitle(right) || isJobMeta(right)) return parts[0];
+  return String(value || "").trim();
+}
+
+/** Keep the employer name only — drop titles, dates, location, Full-time/Contract. */
+export function cleanCompanyLabel(raw) {
+  let s = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  const at = s.match(/\b(?:at|@)\s+(.+)$/i);
+  if (at) s = at[1].trim();
+  const segments = s.split(/\s*[|•·]\s*/).map((p) => p.trim()).filter(Boolean);
+  const kept = segments.filter(
+    (seg) => !isJobMeta(seg) && !DATE_RANGE.test(seg) && !isLocationish(seg)
+  );
+  for (const seg of kept) {
+    const name = stripTitleFromCompany(seg).replace(/[.,;:]+$/, "").trim();
+    if (name && !isNoiseCompany(name) && !looksLikeJobTitle(name)) return name;
   }
-  left = left.replace(/\s+[-–—]\s+(Senior|Staff|Lead|Principal|Software|Salesforce).*$/i, "").trim();
-  if (looksLikeHeadline(left) || looksLikePersonName(left)) return "";
-  return isNoiseCompany(left) ? "" : left;
+  return "";
+}
+
+function companyFromDatedLine(line) {
+  const range = String(line || "").match(DATE_RANGE);
+  if (!range) return cleanCompanyLabel(line);
+  return cleanCompanyLabel(line.slice(0, range.index));
+}
+
+function companyNearDate(slice, dateIndex) {
+  const same = companyFromDatedLine(slice[dateIndex] || "");
+  if (same) return same;
+  for (let back = 1; back <= 3; back += 1) {
+    const prev = slice[dateIndex - back] || "";
+    if (!prev || DATE_RANGE.test(prev)) continue;
+    const cleaned = cleanCompanyLabel(prev) || companyFromDatedLine(`${prev}  ${slice[dateIndex]}`);
+    if (cleaned) return cleaned;
+  }
+  return "";
 }
 
 export function parseEmployersFromResume(text) {
   const lines = linesOf(text);
   const start = lines.findIndex(
-    (l) => /^(professional\s+)?(experience|work history|employment history)\b/i.test(l) && l.length < 48
+    (l) => /^(professional\s+)?(experience|work history|employment history)\b/i.test(l) && l.length < 60
   );
   const end = lines.findIndex(
     (l, i) =>
@@ -180,7 +245,7 @@ export function parseEmployersFromResume(text) {
   const found = [];
   const seen = new Set();
   const push = (label) => {
-    const name = String(label || "").replace(/[.,;:]+$/, "").trim();
+    const name = cleanCompanyLabel(label);
     if (!name || isNoiseCompany(name)) return;
     if (!valueAppearsInResume(name, text)) return;
     const key = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -190,24 +255,15 @@ export function parseEmployersFromResume(text) {
   };
 
   for (let i = 0; i < slice.length; i += 1) {
-    const line = slice[i];
-    if (DATE_RANGE.test(line)) {
-      const same = companyFromDatedLine(line);
-      if (same) {
-        push(same);
-        continue;
-      }
-      const prev = slice[i - 1] || "";
-      if (prev && !DATE_RANGE.test(prev)) {
-        const fromPrev = companyFromDatedLine(`${prev}  ${line}`);
-        if (fromPrev) push(fromPrev);
-      }
+    if (DATE_RANGE.test(slice[i])) {
+      push(companyNearDate(slice, i));
       continue;
     }
     const next = slice[i + 1] || "";
-    if (next && DATE_RANGE.test(next) && !DATE_RANGE.test(line)) {
-      const fromPair = companyFromDatedLine(`${line}  ${next}`);
-      if (fromPair) push(fromPair);
+    if (next && DATE_RANGE.test(next)) continue;
+    if (/\s[-–—]\s/.test(slice[i])) {
+      const stripped = stripTitleFromCompany(slice[i]);
+      if (stripped && stripped !== slice[i].trim()) push(slice[i]);
     }
   }
   return found.slice(0, 14);
