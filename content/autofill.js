@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.8";
+  const SCRIPT_BUILD = "2026-08-16.9";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1007,26 +1007,38 @@
     if (el.closest("[contenteditable='true'], .ProseMirror, .ql-editor") && !isRichTextEditor(el)) {
       return true;
     }
-    return isBesideRichTextEditor(el);
+    return Boolean(nearestEssayEditor(el));
   }
 
-  function isBesideRichTextEditor(el) {
-    let node = el;
-    for (let i = 0; i < 5 && node; i += 1) {
-      for (const sib of [node.nextElementSibling, node.previousElementSibling]) {
-        if (!sib) continue;
-        if (sib.matches?.("[contenteditable='true'], .ProseMirror, .ql-editor")) return true;
-        if (
-          sib.querySelector?.(
-            ":scope > [contenteditable='true'], :scope > .ProseMirror, :scope > .ql-editor"
-          )
-        ) {
-          return true;
-        }
+  function isLikelyEssayEditor(el) {
+    if (!el) return false;
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (role === "combobox" || role === "listbox" || el.getAttribute("aria-haspopup") === "listbox") {
+      return false;
+    }
+    try {
+      const rect = el.getBoundingClientRect();
+      return rect.width >= 120 && rect.height >= 64;
+    } catch {
+      return false;
+    }
+  }
+
+  function nearestEssayEditor(el) {
+    if (!el?.closest) return null;
+    let node = el.parentElement;
+    for (let i = 0; i < 6 && node && node !== document.body; i += 1) {
+      const editors = [
+        ...node.querySelectorAll("[contenteditable='true'], .ProseMirror, .ql-editor")
+      ].filter(isLikelyEssayEditor);
+      if (editors.length > 1) return null;
+      if (editors.length === 1 && editors[0] !== el && !editors[0].contains(el)) {
+        const rect = node.getBoundingClientRect();
+        if (rect.height > 0 && rect.height < 520) return editors[0];
       }
       node = node.parentElement;
     }
-    return false;
+    return null;
   }
 
   function looksLikeCombobox(el) {
@@ -1108,6 +1120,7 @@
   }
 
   function openReactSelect(el) {
+    if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) return el;
     const control =
       getReactSelectRoot(el) ||
       el.closest?.("[class*='select__control']") ||
@@ -1166,7 +1179,7 @@
 
   async function fillCustomDropdown(el, value, key = null) {
     if (value == null || String(value).trim() === "") return false;
-    if (isEditorChrome(el) || isRichTextEditor(el)) return false;
+    if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) return false;
     const candidates = key ? expandValueCandidates(key, value) : [String(value).trim()];
     const reactSelect = isReactSelectInput(el);
 
@@ -1178,7 +1191,7 @@
     const input = openReactSelect(el);
     options = await waitForOptions(reactSelect ? 10 : 6, reactSelect ? 100 : 80);
     if (
-      isBesideRichTextEditor(el) ||
+      nearestEssayEditor(el) ||
       (options.length > 0 &&
         options.every((n) => EDITOR_STYLE_OPTION_RE.test(cleanLabelText(n.textContent))))
     ) {
@@ -1774,6 +1787,10 @@
   function isRichTextEditor(el) {
     if (!el) return false;
     if (el.getAttribute("contenteditable") === "false") return false;
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (role === "combobox" || role === "listbox" || el.getAttribute("aria-haspopup") === "listbox") {
+      return false;
+    }
     if (el.closest("nav, header, [role='toolbar'], .ql-toolbar, [class*='toolbar']")) return false;
     if (el.getAttribute("contenteditable") === "true") return true;
     if (el.classList?.contains("ProseMirror") || el.classList?.contains("ql-editor")) return true;
@@ -1788,13 +1805,11 @@
       )
     ];
     return nodes.filter((el) => {
-      if (!isRichTextEditor(el)) return false;
+      if (!isRichTextEditor(el) || !isLikelyEssayEditor(el)) return false;
       const nested = el.parentElement?.closest("[contenteditable='true']");
       if (nested && nested !== el) return false;
       const style = window.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 80 || rect.height < 36) return false;
       return true;
     });
   }
@@ -1805,6 +1820,11 @@
       !t ||
       /format paragraph/.test(t) ||
       /heading dropdown/.test(t) ||
+      /we want to hear from/.test(t) ||
+      /authentic answer/.test(t) ||
+      /communication style/.test(t) ||
+      /fit for the role/.test(t) ||
+      /on your own experience/.test(t) ||
       /^type (here|your answer|something)/.test(t) ||
       /^enter (text|your answer|a response)/.test(t) ||
       /^start typing/.test(t) ||
@@ -1850,16 +1870,20 @@
     if (!el || !text || looksLikeEditorChromeValue(text)) return false;
 
     try {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
-      );
-    } catch {
-      /* ignore */
-    }
-    try {
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + Math.min(48, Math.max(12, rect.width / 2));
+      const y = rect.top + Math.min(rect.height - 10, Math.max(56, rect.height * 0.4));
+      const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+      el.dispatchEvent(new MouseEvent("mousedown", opts));
+      el.dispatchEvent(new MouseEvent("mouseup", opts));
+      el.dispatchEvent(new MouseEvent("click", opts));
       el.focus();
     } catch {
-      /* ignore */
+      try {
+        el.focus();
+      } catch {
+        /* ignore */
+      }
     }
 
     const selectAll = () => {
@@ -1996,6 +2020,7 @@
     }
 
     // Non-input combobox buttons / divs / react-select controls
+    if (nearestEssayEditor(el)) return false;
     if (looksLikeCombobox(el) || isReactSelectInput(el) || el.getAttribute("role") === "combobox") {
       return fillCustomDropdown(el, value, key);
     }
@@ -2488,7 +2513,7 @@
     ];
     for (const el of comboNodes) {
       if (out.length >= 40) break;
-      if (isEditorChrome(el) || isRichTextEditor(el)) continue;
+      if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) continue;
       if (!looksLikeCombobox(el) && !isReactSelectInput(el)) continue;
       const style = window.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") continue;
@@ -2539,6 +2564,7 @@
       if (!els.length) continue;
       let ok = false;
       for (const el of els) {
+        if (isEditorChrome(el) || nearestEssayEditor(el)) continue;
         if (await fillControl(el, answer, null)) {
           ok = true;
           if (el.tagName === "SELECT") break; // one select is enough
@@ -2556,7 +2582,7 @@
       )
     ];
     return nodes.filter((el) => {
-      if (isEditorChrome(el) || isRichTextEditor(el)) return false;
+      if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) return false;
       const type = (el.type || "").toLowerCase();
       if (type === "file") return false;
       if (type === "hidden" || type === "submit" || type === "button") return false;
