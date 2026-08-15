@@ -207,7 +207,7 @@
                   rows="3"
                 ></textarea>
               </label>
-              <p class="hint">Extras match leftover questions by label. Answers you type on forms are remembered for the next apply (custom persons only).</p>
+              <p class="hint">Extras match leftover questions by label. The Q&amp;A bank (Apply section) stores reusable answers per person. Learn mode saves what you type on forms.</p>
             </div>
 
             <div class="subblock">
@@ -486,7 +486,29 @@
               <kbd>Ctrl+Shift+U</kbd>
             </button>
           </div>
-          <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads the last resume/cover PDFs, and stops before Submit.</p>
+          <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads the last resume/cover PDFs, and stops before Submit. Leftover questions use extras + the Q&amp;A bank, then OpenAI if the extension <code>.env</code> has <code>OPENAI_API_KEY</code>.</p>
+
+          <div class="qa-bank-block">
+            <div class="qa-bank-head">
+              <p class="subsection-title">Q&amp;A bank</p>
+              <span class="qa-bank-note" id="qaBankNote">0 saved</span>
+            </div>
+            <p class="hint">
+              Reusable form answers for the active person (used before OpenAI). Import
+              <code>qa-bank-custom-steven-avon.json</code> or any exported bank JSON.
+            </p>
+            <label class="checkbox-field">
+              <span>Learn mode — save answers you type or pick on forms</span>
+              <input type="checkbox" id="qaLearnToggle" checked />
+            </label>
+            <div class="qa-toolbar">
+              <button type="button" id="qaOpenEditorBtn" class="ghost compact">Open editor</button>
+              <button type="button" id="qaImportBundledBtn" class="ghost compact">Load bundled bank</button>
+              <button type="button" id="qaImportBtn" class="ghost compact">Import JSON</button>
+              <button type="button" id="qaExportBtn" class="ghost compact">Export</button>
+              <input type="file" id="qaImportInput" accept="application/json,.json" hidden />
+            </div>
+          </div>
         </section>
 
         <!-- Google Sheet -->

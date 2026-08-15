@@ -1021,6 +1021,41 @@ input[type="file"]::file-selector-button {
   opacity: 0.78;
 }
 
+.qa-bank-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.qa-bank-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.qa-bank-head .subsection-title {
+  margin: 0;
+}
+
+.qa-bank-note {
+  color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.qa-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.qa-toolbar button {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 body.ctx-panel .queue-item .actions,
 body.ctx-window .queue-item .actions {
   flex-direction: row;

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Q&amp;A bank — Brightstar Bid bot</title>
+    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="qa-editor.css" />
+  </head>
+  <body class="ctx-window editor-page">
+    <main class="editor qa-editor">
+      <header class="editor-header">
+        <div class="brand">
+          <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
+          <div class="brand-copy">
+            <h1>Q&amp;A bank</h1>
+            <p class="hype">Reusable answers per person — used before OpenAI</p>
+          </div>
+        </div>
+        <button type="button" id="closeBtn" class="ghost compact">Close</button>
+      </header>
+
+      <p id="status" class="editor-status" role="status"></p>
+
+      <section class="section">
+        <p class="section-title">Browse</p>
+        <div class="grid-2">
+          <label class="field">
+            <span>Show answers for</span>
+            <select id="filterProfile"></select>
+          </label>
+          <label class="field">
+            <span>Field type</span>
+            <select id="filterType">
+              <option value="">All types</option>
+            </select>
+          </label>
+          <label class="field span-2">
+            <span>Search</span>
+            <input id="searchInput" type="search" placeholder="Filter by question or answer" />
+          </label>
+        </div>
+        <p class="hint" id="countHint">0 saved</p>
+      </section>
+
+      <section class="section">
+        <p class="section-title" id="formTitle">Add Q&amp;A</p>
+        <p class="hint">
+          Store the question text as it appears on the form. For dropdowns, save the option text to
+          pick. For checkboxes, save Yes or No.
+        </p>
+        <div class="grid-2">
+          <label class="field span-2">
+            <span>Question</span>
+            <textarea id="formQuestion" rows="2" placeholder="e.g. Are you legally authorized to work in the United States?"></textarea>
+          </label>
+          <label class="field span-2">
+            <span>Answer</span>
+            <textarea
+              id="formAnswer"
+              rows="3"
+              placeholder="For dropdowns, the option text to pick. For checkboxes, Yes or No."
+            ></textarea>
+          </label>
+          <label class="field">
+            <span>Field type</span>
+            <select id="formFieldType"></select>
+          </label>
+          <label class="field">
+            <span>Save to</span>
+            <select id="formScope"></select>
+          </label>
+        </div>
+        <div class="qa-toolbar">
+          <button type="button" id="saveBtn" class="primary compact">Save Q&amp;A</button>
+          <button type="button" id="cancelEditBtn" class="ghost compact" hidden>Cancel edit</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="qa-list-header">
+          <p class="section-title">Saved answers</p>
+          <div class="qa-toolbar">
+            <button type="button" id="importBundledBtn" class="ghost compact">Load bundled bank</button>
+            <button type="button" id="exportBtn" class="ghost compact">Export</button>
+            <button type="button" id="importBtn" class="ghost compact">Import JSON</button>
+            <button type="button" id="clearBtn" class="ghost danger compact">Clear this bank</button>
+            <input type="file" id="importInput" accept="application/json,.json" hidden />
+          </div>
+        </div>
+        <label class="checkbox-field" title="When off, imported rows keep the profileId from the file (e.g. custom-steven-avon)">
+          <span>Assign imports to the person in Save to</span>
+          <input type="checkbox" id="remapImportToggle" checked />
+        </label>
+        <div class="qa-list qa-editor-list" id="qaList" aria-label="Saved questions and answers"></div>
+      </section>
+    </main>
+    <script type="module" src="qa-editor.js"></script>
+  </body>
+</html>

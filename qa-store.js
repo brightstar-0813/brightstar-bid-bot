@@ -302,12 +302,39 @@ export async function exportQa(profileId = null) {
   }));
 }
 
-export async function importQa(records) {
-  const list = Array.isArray(records) ? records : [];
+export const BUNDLED_QA_BANK_PATH = "qa-bank-custom-steven-avon.json";
+
+/** Accept a raw array or `{ records: [...] }`. */
+export function parseQaBankPayload(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.records)) return parsed.records;
+  if (parsed && Array.isArray(parsed.entries)) return parsed.entries;
+  throw new Error("Q&A bank JSON must be an array of { question, answer } records.");
+}
+
+export async function loadBundledQaBank() {
+  const url = chrome.runtime.getURL(BUNDLED_QA_BANK_PATH);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Bundled Q&A file not found (${BUNDLED_QA_BANK_PATH}). Reload the unpacked extension.`
+    );
+  }
+  return parseQaBankPayload(await response.json());
+}
+
+/**
+ * @param {unknown} records
+ * @param {{ remapProfileId?: string | null }} [options]
+ *   When `remapProfileId` is a string (including ""), every row is saved under
+ *   that person. Omit it to keep each record's original profileId.
+ */
+export async function importQa(records, { remapProfileId } = {}) {
+  const list = parseQaBankPayload(records);
   let imported = 0;
   for (const rec of list) {
     const saved = await saveQa({
-      profileId: rec.profileId || "",
+      profileId: remapProfileId != null ? String(remapProfileId) : rec.profileId || "",
       question: rec.question,
       answer: rec.answer,
       fieldType: rec.fieldType || "text",

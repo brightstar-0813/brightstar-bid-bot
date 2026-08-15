@@ -111,9 +111,10 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 
 ## Apply autofill
 
-- Button: **Autofill this page** (focus the application tab first)
-- Hotkey: **Ctrl+Shift+Y** (Mac: Command+Shift+Y)
-- Best-effort on common name/email/phone/LinkedIn fields — attach the PDF from the saved folder yourself
+- Queue **Apply** / **Autofill this page** / **Auto Apply** (`Ctrl+Shift+Y` / `Ctrl+Shift+U`)
+- Fills name/email/phone/LinkedIn from the active person, then extras + saved Q&A
+- Leftover questions go to **OpenAI** if `.env` has `OPENAI_API_KEY` (copy `.env.example` → `.env`, then reload the extension). Do not commit `.env`.
+- **Q&A bank** (Apply section): Open editor, **Load bundled bank** (`qa-bank-custom-steven-avon.json`), or Import JSON. Imports are assigned to the **active person** so autofill can match them. Learn mode saves answers you type on forms.
 
 ## Output folder naming
 

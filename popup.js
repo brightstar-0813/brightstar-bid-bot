@@ -35,6 +35,13 @@ import {
   readPinnedCsvText
 } from "./file-handle-db.js";
 import { getCsvSourceSettings, fingerprintText, saveCsvSourceSettings } from "./csv-source.js";
+import {
+  getQaCount,
+  exportQa,
+  importQa,
+  parseQaBankPayload,
+  loadBundledQaBank
+} from "./qa-store.js";
 
 const DEFAULT_OUTPUT_DIR = "Resume Applications";
 const QUEUE_KEY = "job_queue";
@@ -96,9 +103,8 @@ function doPost(e) {
       const status =
         String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
       const row = findRowByLink_(sheet, jobLink);
-      const statusCol = statusColumnIndex_(headerRow_(sheet)) + 1;
       if (row > 0) {
-        sheet.getRange(row, statusCol).setValue(status);
+        sheet.getRange(row, statusColumnForRow_(sheet, row)).setValue(status);
         return json_({ ok: true, updated: true, appended: false, row: row });
       }
       sheet.appendRow([
@@ -182,6 +188,22 @@ function headerRow_(sheet) {
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
 }
 
+function rowLooksLikeHeader_(row) {
+  var joined = (row || [])
+    .map(function (h) {
+      return String(h || "").trim().toLowerCase();
+    })
+    .join(" ");
+  if (!joined) return false;
+  if (/https?:\\/\\//i.test(joined)) return false;
+  return /\\b(link|title|company|status|date|salary)\\b/.test(joined);
+}
+
+function cellLooksLikeUrl_(value) {
+  var s = String(value || "").trim();
+  return /^https?:\\/\\//i.test(s) || /hyperlink\\s*\\(/i.test(s);
+}
+
 function linkColumnIndex_(headerRow) {
   var headers = (headerRow || []).map(function (h) {
     return String(h || "")
@@ -212,20 +234,36 @@ function statusColumnIndex_(headerRow) {
 
 function ensureStatusHeader_(sheet) {
   var headers = headerRow_(sheet);
+  if (!rowLooksLikeHeader_(headers)) return;
   var idx = statusColumnIndex_(headers);
   if (!String(headers[idx] || "").trim()) {
     sheet.getRange(1, idx + 1).setValue("Status");
   }
 }
 
+function statusColumnForRow_(sheet, row) {
+  var headers = headerRow_(sheet);
+  if (rowLooksLikeHeader_(headers)) return statusColumnIndex_(headers) + 1;
+  var width = Math.max(sheet.getLastColumn(), 7);
+  var values = sheet.getRange(row, 1, 1, width).getValues()[0] || [];
+  var last = 0;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i] || "").trim()) last = i + 1;
+  }
+  return Math.max(7, last + 1);
+}
+
 function collectJobLinks_(sheet) {
   var values = sheet.getDataRange().getValues();
   if (!values || !values.length) return [];
-  var linkCol = linkColumnIndex_(values[0]);
+  var start = rowLooksLikeHeader_(values[0]) ? 1 : 0;
   var links = [];
-  for (var r = 1; r < values.length; r++) {
-    var v = String((values[r] && values[r][linkCol]) || "").trim();
-    if (v) links.push(v);
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    for (var c = 0; c < row.length; c++) {
+      var v = String(row[c] || "").trim();
+      if (cellLooksLikeUrl_(v)) links.push(v);
+    }
   }
   return links;
 }
@@ -235,10 +273,17 @@ function findRowByLink_(sheet, jobLink) {
   if (!target) return -1;
   var values = sheet.getDataRange().getValues();
   if (!values || !values.length) return -1;
-  var linkCol = linkColumnIndex_(values[0]);
-  for (var r = 1; r < values.length; r++) {
-    if (normalizeLink_((values[r] && values[r][linkCol]) || "") === target) {
-      return r + 1;
+  var start = rowLooksLikeHeader_(values[0]) ? 1 : 0;
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    for (var c = 0; c < row.length; c++) {
+      var cell = String(row[c] || "").trim();
+      if (!cell) continue;
+      var n = normalizeLink_(cell);
+      if (n === target) return r + 1;
+      if (target.length >= 12 && (n.indexOf(target) >= 0 || cell.toLowerCase().indexOf(target) >= 0)) {
+        return r + 1;
+      }
     }
   }
   return -1;
@@ -340,6 +385,13 @@ const runOneOffBtn = document.getElementById("runOneOff");
 const autofillPageBtn = document.getElementById("autofillPage");
 const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const resetBtn = document.getElementById("reset");
+const qaBankNoteEl = document.getElementById("qaBankNote");
+const qaLearnToggleEl = document.getElementById("qaLearnToggle");
+const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
+const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
+const qaImportBtn = document.getElementById("qaImportBtn");
+const qaExportBtn = document.getElementById("qaExportBtn");
+const qaImportInput = document.getElementById("qaImportInput");
 
 let profilesCache = [];
 let templatesCache = [];
@@ -776,7 +828,8 @@ async function loadSettings() {
     QUEUE_KEY,
     ALL_US_JOBS_KEY,
     JOB_CHANNEL_FILTER_KEY,
-    BATCH_STATE_KEY
+    BATCH_STATE_KEY,
+    "qa_learn_enabled"
   ]);
 
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
@@ -816,6 +869,8 @@ async function loadSettings() {
   setBusy(Boolean(data.generation_running) || batchState === "running");
 
   await loadCsvSourceForm().catch(() => {});
+  if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
+  await refreshQaBank().catch(() => {});
 }
 
 function updateCsvSummaryFromQueue() {
@@ -1326,10 +1381,11 @@ async function applyAssist(job) {
       companyName: job.company || job.companyName || "",
       company: job.company || "",
       jdLink: job.jdLink,
+      jdText: job.jdText || "",
       salary: job.salary || ""
     }
   });
-  if (res?.applied) {
+  if (res?.applied || res?.started) {
     job.applied = true;
     job.appliedDate = res.appliedDate || formatApplicationDate();
     await persistQueue();
@@ -1340,14 +1396,7 @@ async function applyAssist(job) {
     );
     return;
   }
-  const filled = res.filled || res.filledCount || 0;
-  const uploaded = res.uploaded || res.uploadedCount || 0;
-  setStatus(
-    res.status ||
-      `Apply assist: filled ${filled} field(s)` +
-        (uploaded ? `, uploaded ${uploaded} file(s)` : "") +
-        `. Review and submit.`
-  );
+  setStatus(res.status || "Apply started — sheet marked, filling the form in the job tab.");
 }
 
 async function sendBatch(type) {
@@ -1856,6 +1905,91 @@ async function runOneOff() {
   setManualPanelOpen(false);
 }
 
+async function refreshQaBank() {
+  if (!qaBankNoteEl) return;
+  try {
+    const profileId = profileSelectEl?.value || "";
+    const [profileCount, sharedCount] = await Promise.all([
+      getQaCount(profileId),
+      getQaCount("")
+    ]);
+    const parts = [];
+    if (profileCount) parts.push(`${profileCount} this person`);
+    if (sharedCount) parts.push(`${sharedCount} shared`);
+    qaBankNoteEl.textContent = parts.length ? parts.join(" · ") : "0 saved";
+  } catch {
+    qaBankNoteEl.textContent = "Q&A";
+  }
+}
+
+function activePersonLabel() {
+  return profilesCache.find((p) => p.id === profileSelectEl.value)?.label || "active person";
+}
+
+async function openQaEditor() {
+  const url = new URL(chrome.runtime.getURL("qa-editor.html"));
+  const profileId = profileSelectEl?.value || "";
+  if (profileId) url.searchParams.set("profileId", profileId);
+  const href = url.toString();
+  try {
+    const win = await chrome.windows.create({
+      url: href,
+      type: "popup",
+      width: 980,
+      height: 860,
+      focused: true
+    });
+    if (win?.id != null) await chrome.windows.update(win.id, { focused: true });
+    setStatus("Opened Q&A editor.");
+  } catch {
+    await chrome.tabs.create({ url: href, active: true });
+    setStatus("Opened Q&A editor in a tab.");
+  }
+}
+
+function downloadQaJson(rows, suffix) {
+  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `qa-bank-${suffix || "export"}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportActiveQaBank() {
+  const profileId = profileSelectEl?.value || "";
+  const rows = await exportQa(profileId);
+  downloadQaJson(rows, profileId || "shared");
+  setStatus(`Exported ${rows.length} Q&A ${rows.length === 1 ? "entry" : "entries"} for ${activePersonLabel()}.`);
+}
+
+async function importQaRecords(records, sourceLabel) {
+  const list = parseQaBankPayload(records);
+  const profileId = profileSelectEl?.value || "";
+  const target = activePersonLabel();
+  const ok = window.confirm(
+    `Import ${list.length} answer${list.length === 1 ? "" : "s"} from ${sourceLabel} into ${target}?\n\n` +
+      "Leftover form questions will reuse these answers before calling OpenAI. " +
+      "Identity answers in the file (name, phone, LinkedIn) will apply to this person."
+  );
+  if (!ok) return;
+  const count = await importQa(list, { remapProfileId: profileId });
+  await refreshQaBank();
+  setStatus(`Imported ${count} Q&A ${count === 1 ? "entry" : "entries"} into ${target}.`);
+}
+
+async function importQaFromFile(file) {
+  if (!file) return;
+  const parsed = JSON.parse(await file.text());
+  await importQaRecords(parsed, file.name || "JSON file");
+}
+
+async function importBundledQaBank() {
+  const records = await loadBundledQaBank();
+  await importQaRecords(records, "the bundled Steven Avon bank");
+}
+
 async function autofillThisPage() {
   setStatus("Autofilling the current page…");
   const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
@@ -1941,6 +2075,7 @@ async function resetWorkflow() {
 profileSelectEl.addEventListener("change", () => {
   syncActivePersonChip();
   onProfileChange().catch((e) => setStatus(String(e.message || e)));
+  refreshQaBank().catch(() => {});
 });
 
 templateSelectEl.addEventListener("change", () => {
@@ -2084,6 +2219,27 @@ runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
 autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
 resetBtn.addEventListener("click", resetWorkflow);
+qaOpenEditorBtn?.addEventListener("click", () => {
+  openQaEditor().catch((e) => setStatus(String(e.message || e)));
+});
+qaImportBundledBtn?.addEventListener("click", () => {
+  importBundledQaBank().catch((e) => setStatus(`Bundled import failed: ${String(e.message || e)}`));
+});
+qaImportBtn?.addEventListener("click", () => qaImportInput?.click());
+qaImportInput?.addEventListener("change", () => {
+  const file = qaImportInput.files?.[0];
+  importQaFromFile(file)
+    .catch((e) => setStatus(`Import failed: ${String(e.message || e)}`))
+    .finally(() => {
+      if (qaImportInput) qaImportInput.value = "";
+    });
+});
+qaExportBtn?.addEventListener("click", () => {
+  exportActiveQaBank().catch((e) => setStatus(String(e.message || e)));
+});
+qaLearnToggleEl?.addEventListener("change", () => {
+  chrome.storage.local.set({ qa_learn_enabled: Boolean(qaLearnToggleEl.checked) }).catch(() => {});
+});
 
 for (const el of [
   jobTitleEl,
@@ -2114,10 +2270,16 @@ if (UI_CONTEXT === "popup") {
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.selected_template_id || !templateSelectEl) return;
-  const next = changes.selected_template_id.newValue;
-  if (next && templateSelectEl.value !== next) {
-    templateSelectEl.value = next;
+  if (area !== "local") return;
+  if (changes.qa_bank_version) refreshQaBank().catch(() => {});
+  if (changes.qa_learn_enabled && qaLearnToggleEl && changes.qa_learn_enabled.newValue !== undefined) {
+    qaLearnToggleEl.checked = changes.qa_learn_enabled.newValue !== false;
+  }
+  if (changes.selected_template_id && templateSelectEl) {
+    const next = changes.selected_template_id.newValue;
+    if (next && templateSelectEl.value !== next) {
+      templateSelectEl.value = next;
+    }
   }
 });
 

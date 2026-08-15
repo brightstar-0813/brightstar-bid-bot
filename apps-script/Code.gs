@@ -41,9 +41,8 @@ function doPost(e) {
       const status =
         String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
       const row = findRowByLink_(sheet, jobLink);
-      const statusCol = statusColumnIndex_(headerRow_(sheet)) + 1;
       if (row > 0) {
-        sheet.getRange(row, statusCol).setValue(status);
+        sheet.getRange(row, statusColumnForRow_(sheet, row)).setValue(status);
         return json_({ ok: true, updated: true, appended: false, row: row });
       }
       sheet.appendRow([
@@ -127,6 +126,22 @@ function headerRow_(sheet) {
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
 }
 
+function rowLooksLikeHeader_(row) {
+  var joined = (row || [])
+    .map(function (h) {
+      return String(h || "").trim().toLowerCase();
+    })
+    .join(" ");
+  if (!joined) return false;
+  if (/https?:\/\//i.test(joined)) return false;
+  return /\b(link|title|company|status|date|salary)\b/.test(joined);
+}
+
+function cellLooksLikeUrl_(value) {
+  var s = String(value || "").trim();
+  return /^https?:\/\//i.test(s) || /hyperlink\s*\(/i.test(s);
+}
+
 function linkColumnIndex_(headerRow) {
   var headers = (headerRow || []).map(function (h) {
     return String(h || "")
@@ -157,20 +172,36 @@ function statusColumnIndex_(headerRow) {
 
 function ensureStatusHeader_(sheet) {
   var headers = headerRow_(sheet);
+  if (!rowLooksLikeHeader_(headers)) return;
   var idx = statusColumnIndex_(headers);
   if (!String(headers[idx] || "").trim()) {
     sheet.getRange(1, idx + 1).setValue("Status");
   }
 }
 
+function statusColumnForRow_(sheet, row) {
+  var headers = headerRow_(sheet);
+  if (rowLooksLikeHeader_(headers)) return statusColumnIndex_(headers) + 1;
+  var width = Math.max(sheet.getLastColumn(), 7);
+  var values = sheet.getRange(row, 1, 1, width).getValues()[0] || [];
+  var last = 0;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i] || "").trim()) last = i + 1;
+  }
+  return Math.max(7, last + 1);
+}
+
 function collectJobLinks_(sheet) {
   var values = sheet.getDataRange().getValues();
   if (!values || !values.length) return [];
-  var linkCol = linkColumnIndex_(values[0]);
+  var start = rowLooksLikeHeader_(values[0]) ? 1 : 0;
   var links = [];
-  for (var r = 1; r < values.length; r++) {
-    var v = String((values[r] && values[r][linkCol]) || "").trim();
-    if (v) links.push(v);
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    for (var c = 0; c < row.length; c++) {
+      var v = String(row[c] || "").trim();
+      if (cellLooksLikeUrl_(v)) links.push(v);
+    }
   }
   return links;
 }
@@ -180,10 +211,17 @@ function findRowByLink_(sheet, jobLink) {
   if (!target) return -1;
   var values = sheet.getDataRange().getValues();
   if (!values || !values.length) return -1;
-  var linkCol = linkColumnIndex_(values[0]);
-  for (var r = 1; r < values.length; r++) {
-    if (normalizeLink_((values[r] && values[r][linkCol]) || "") === target) {
-      return r + 1;
+  var start = rowLooksLikeHeader_(values[0]) ? 1 : 0;
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    for (var c = 0; c < row.length; c++) {
+      var cell = String(row[c] || "").trim();
+      if (!cell) continue;
+      var n = normalizeLink_(cell);
+      if (n === target) return r + 1;
+      if (target.length >= 12 && (n.indexOf(target) >= 0 || cell.toLowerCase().indexOf(target) >= 0)) {
+        return r + 1;
+      }
     }
   }
   return -1;

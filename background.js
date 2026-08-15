@@ -765,6 +765,16 @@ async function getSheetConfig() {
   };
 }
 
+/** Remember the current job so leftover-question OpenAI calls have JD context. */
+async function persistJobContextForAutofill(job = {}) {
+  await chrome.storage.local.set({
+    last_job_title: String(job.jobTitle || job.title || "").trim(),
+    last_company_name: String(job.companyName || job.company || "").trim(),
+    last_jd_link: String(job.jdLink || job.url || "").trim(),
+    last_jd_text: String(job.jdText || "").trim()
+  });
+}
+
 /** Mark the sheet row Applied after the queue Apply button is clicked. */
 async function markQueueJobAppliedOnSheet(jobMeta = {}) {
   const jdLink = String(jobMeta.jdLink || jobMeta.url || "").trim();
@@ -1105,6 +1115,7 @@ p, li {
   line-height: 1.18 !important;
   text-align: justify !important;
   text-justify: inter-word !important;
+  text-align-last: left !important;
 }
 ul { margin-top: 0 !important; margin-bottom: 6px !important; }
 li { margin-bottom: 3px !important; }
@@ -4503,6 +4514,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const parts = [`Autofilled ${filled} field(s)`];
         if (uploaded) parts.push(`uploaded ${uploaded} file(s)`);
         if (result.bankHits) parts.push(`${result.bankHits} from Q&A bank`);
+        if (result.aiHits) parts.push(`${result.aiHits} from OpenAI`);
         await setStatus(`${parts.join(", ")} on the current page.`);
         safeSendResponse(sendResponse, { ok: true, filled, ...result });
       } catch (err) {
@@ -4530,12 +4542,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (type === "apply_job_url") {
+    startKeepAlive();
     (async () => {
       const jobMeta = {
         ...(message.job && typeof message.job === "object" ? message.job : {}),
         jdLink: message.url || message.job?.jdLink || ""
       };
+      let responded = false;
+      const reply = (payload) => {
+        if (responded) return;
+        responded = true;
+        safeSendResponse(sendResponse, payload);
+      };
       try {
+        await persistJobContextForAutofill(jobMeta);
+        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+        const sheetLabel = sheet?.error
+          ? `Sheet Applied failed: ${sheet.error}`
+          : sheet?.skipped
+            ? ""
+            : `Sheet: ${sheet.status || (sheet.appliedDate ? `Applied ${sheet.appliedDate}` : "Applied")}`;
+        await setStatus(
+          sheetLabel ? `${sheetLabel}. Opening job and running Auto Apply…` : "Opening job and running Auto Apply…"
+        );
+        reply({
+          ok: true,
+          started: true,
+          applied: true,
+          appliedDate: sheet?.appliedDate || "",
+          status: sheetLabel
+            ? `${sheetLabel}. Opening job and running Auto Apply…`
+            : "Opening job and running Auto Apply…"
+        });
+
         const result = await openJobAndApply(message.url, { multiStep: message.multiStep !== false });
         const filled = Number(result.filled || result.filledCount || 0);
         let msg =
@@ -4543,36 +4582,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           `Apply assist: filled ${filled} field(s)` +
             (result.uploaded ? `, uploaded ${result.uploaded} file(s)` : "") +
             `. Review and submit.`;
-        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
-        if (sheet?.error) {
-          msg = `${msg} Sheet Applied failed: ${sheet.error}`;
-        } else if (!sheet?.skipped) {
-          const sheetLabel = sheet.status || (sheet.appliedDate ? `Applied ${sheet.appliedDate}` : "Applied");
-          msg = `${msg} Sheet: ${sheetLabel}.`;
-        }
+        if (sheetLabel) msg = `${msg} ${sheetLabel}.`;
         await setStatus(msg);
-        safeSendResponse(sendResponse, {
-          ...result,
-          ok: true,
-          filled,
-          applied: true,
-          appliedDate: sheet?.appliedDate || "",
-          status: msg
-        });
       } catch (err) {
-        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
-        let sheetNote = "";
-        if (sheet?.error) sheetNote = ` Sheet Applied failed: ${sheet.error}`;
-        else if (!sheet?.skipped) {
-          const sheetLabel = sheet.status || (sheet.appliedDate ? `Applied ${sheet.appliedDate}` : "Applied");
-          sheetNote = ` Sheet: ${sheetLabel}.`;
-        }
-        safeSendResponse(sendResponse, {
-          ok: false,
-          applied: true,
-          appliedDate: sheet?.appliedDate || "",
-          error: `${String(err?.message || err)}${sheetNote}`
-        });
+        const msg = `Apply assist failed: ${String(err?.message || err)}`;
+        await setStatus(msg);
+        reply({ ok: false, applied: true, appliedDate: "", error: msg });
+      } finally {
+        if (!isRunning) stopKeepAlive();
       }
     })();
     return true;
@@ -4607,7 +4624,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const answers = await answerQuestionsFromBank(message.questions || [], {
           choice: false,
-          site: message.site || ""
+          site: message.site || "",
+          jobMeta: message.jobMeta || null
         });
         safeSendResponse(sendResponse, { ok: true, answers });
       } catch (err) {

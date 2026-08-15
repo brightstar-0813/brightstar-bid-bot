@@ -1,17 +1,24 @@
 /**
  * Application autofill orchestrator.
  * Injects content/autofill.js into all frames, fills from the active person,
- * then answers leftover questions from extras + the Q&A bank.
+ * then answers leftover questions from extras + the Q&A bank, then OpenAI.
  * Multi-step Apply clicks Next/Continue but never auto-submits.
  */
 
-import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras } from "./profiles.js";
+import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson } from "./profiles.js";
 import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
+import { getEnv } from "./env.js";
+import { DEFAULT_OPENAI_MODEL } from "./openai.js";
+import {
+  generateHumanizedApplicationAnswers,
+  generateConstrainedChoiceAnswers,
+  shouldBankAnswer
+} from "./ai-answers.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
-const AUTOFILL_SCRIPT_BUILD = "2026-08-15.1";
-const APPLY_SETTLE_MS = 900;
+const AUTOFILL_SCRIPT_BUILD = "2026-08-16.1";
+const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;
 
@@ -70,27 +77,31 @@ export async function getStoredResumeJson() {
 }
 
 export function waitForTabComplete(tabId, timeoutMs = 30000) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let settled = false;
-    const finish = (err) => {
+    const done = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(onUpdated);
-      if (err) reject(err);
-      else resolve();
+      resolve();
     };
-    const timer = setTimeout(() => finish(), timeoutMs);
-    const onUpdated = (updatedTabId, changeInfo) => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") finish();
+    const isReady = (tab) => {
+      const url = String(tab?.url || "");
+      return tab?.status === "complete" && /^https?:\/\//i.test(url);
+    };
+    const timer = setTimeout(done, timeoutMs);
+    const onUpdated = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId !== tabId) return;
+      if (changeInfo.status === "complete" && isReady(tab)) done();
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs
       .get(tabId)
       .then((tab) => {
-        if (tab?.status === "complete") finish();
+        if (isReady(tab)) done();
       })
-      .catch((err) => finish(err instanceof Error ? err : new Error(String(err))));
+      .catch(() => {});
   });
 }
 
@@ -128,25 +139,32 @@ export async function getCurrentApplicationTab() {
 }
 
 async function ensureAutofillScript(tabId) {
+  const ping = async () => {
+    try {
+      const pong = await chrome.tabs.sendMessage(tabId, { type: "autofill_ping" });
+      return pong?.build === AUTOFILL_SCRIPT_BUILD;
+    } catch {
+      return false;
+    }
+  };
+  if (await ping()) return;
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       files: ["content/autofill.js"]
     });
-    return;
   } catch {
-    /* some frames may be restricted */
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content/autofill.js"]
+    }).catch(() => {});
   }
-  try {
-    const pong = await chrome.tabs.sendMessage(tabId, { type: "autofill_ping" });
-    if (pong?.build === AUTOFILL_SCRIPT_BUILD) return;
-  } catch {
-    /* not injected yet */
-  }
+  await sleep(250);
+  if (await ping()) return;
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ["content/autofill.js"]
-  });
+  }).catch(() => {});
 }
 
 async function sendMessageToTab(tabId, message, { attempts = 3, retryDelayMs = 200, frameId } = {}) {
@@ -411,9 +429,97 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
   return { advanced: false, tabId, reason: "timeout" };
 }
 
-async function fillUnmatchedAnswers(tabId, result, extras, profileId, site) {
+async function getOpenAiSettings() {
+  const apiKey = await getEnv("OPENAI_API_KEY");
+  const model = (await getEnv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)) || DEFAULT_OPENAI_MODEL;
+  return { apiKey, model };
+}
+
+async function getAutofillAiContext() {
+  const data = await chrome.storage.local.get([
+    "last_job_title",
+    "last_company_name",
+    "last_jd_text",
+    "last_jd_link"
+  ]);
+  const person = await getActivePerson();
+  return {
+    jobMeta: {
+      jobTitle: data.last_job_title || "",
+      companyName: data.last_company_name || "",
+      jdText: data.last_jd_text || "",
+      jdLink: data.last_jd_link || ""
+    },
+    resumeText: String(person?.masterResume || "").trim()
+  };
+}
+
+async function enrichAnswersWithAi(questions, answers, {
+  choice = false,
+  profileId = "",
+  site = "",
+  applicantInfo = {},
+  jobMeta = null
+} = {}) {
+  const answered = new Set(answers.map((a) => a.id));
+  const stillNeed = questions.filter((q) => {
+    if (!q?.id || answered.has(q.id)) return false;
+    return choice ? Array.isArray(q.options) && q.options.length : true;
+  });
+  const { apiKey, model } = await getOpenAiSettings();
+  if (!apiKey || !stillNeed.length) return { aiHits: 0 };
+
+  const ctx = await getAutofillAiContext();
+  const meta = {
+    ...ctx.jobMeta,
+    ...(jobMeta && typeof jobMeta === "object" ? jobMeta : {})
+  };
+  let aiHits = 0;
+  try {
+    const aiResult = choice
+      ? await generateConstrainedChoiceAnswers({
+          apiKey,
+          model,
+          questions: stillNeed,
+          applicantInfo,
+          jobMeta: meta,
+          resumeText: ctx.resumeText
+        })
+      : await generateHumanizedApplicationAnswers({
+          apiKey,
+          model,
+          questions: stillNeed,
+          applicantInfo,
+          jobMeta: meta,
+          resumeText: ctx.resumeText
+        });
+    for (const row of aiResult.answers || []) {
+      if (!row?.id || !row?.answer) continue;
+      answers.push({ id: row.id, answer: row.answer, source: "ai" });
+      aiHits += 1;
+      const q = stillNeed.find((item) => item.id === row.id);
+      if (!q?.label) continue;
+      if (choice || shouldBankAnswer(q, row.answer, q.fieldType || "text")) {
+        saveQa({
+          profileId: profileId || "",
+          question: q.label,
+          answer: row.answer,
+          fieldType: q.fieldType || (choice ? "select" : "text"),
+          source: "ai",
+          site
+        }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    await setApplyStatus(`OpenAI answers skipped: ${String(err?.message || err)}`).catch(() => {});
+  }
+  return { aiHits };
+}
+
+async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, applicantInfo = {}) {
   let extraFilled = 0;
   let bankHits = 0;
+  let aiHits = 0;
   const unmatched = Array.isArray(result?.unmatchedQuestions) ? result.unmatchedQuestions : [];
   const unmatchedChoice = Array.isArray(result?.unmatchedChoiceQuestions)
     ? result.unmatchedChoiceQuestions
@@ -429,6 +535,13 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site) {
     for (const [frameId, questions] of byFrame) {
       const answers = await resolveQuestionAnswers(questions, extras, profileId, site, { choice: true });
       bankHits += Number(answers.bankHits || 0);
+      const ai = await enrichAnswersWithAi(questions, answers, {
+        choice: true,
+        profileId,
+        site,
+        applicantInfo
+      });
+      aiHits += Number(ai.aiHits || 0);
       if (!answers.length) continue;
       const cRes = await sendMessageToTab(
         tabId,
@@ -449,6 +562,13 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site) {
     for (const [frameId, questions] of byFrame) {
       const answers = await resolveQuestionAnswers(questions, extras, profileId, site, { choice: false });
       bankHits += Number(answers.bankHits || 0);
+      const ai = await enrichAnswersWithAi(questions, answers, {
+        choice: false,
+        profileId,
+        site,
+        applicantInfo
+      });
+      aiHits += Number(ai.aiHits || 0);
       if (!answers.length) continue;
       const tRes = await sendMessageToTab(
         tabId,
@@ -459,7 +579,7 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site) {
     }
   }
 
-  return { extraFilled, bankHits };
+  return { extraFilled, bankHits, aiHits };
 }
 
 /**
@@ -517,7 +637,14 @@ export async function startAutofillOnTab(tabId = null) {
   });
   const result = mergeAutofillFrameResults(frameResults);
   const site = hostnameFromUrl(tab.url || "");
-  const leftover = await fillUnmatchedAnswers(tab.id, result, extras, person.id || "", site);
+  const leftover = await fillUnmatchedAnswers(
+    tab.id,
+    result,
+    extras,
+    person.id || "",
+    site,
+    applicantInfo
+  );
 
   return {
     ok: Boolean(result.ok) || result.filledCount > 0 || leftover.extraFilled > 0,
@@ -531,6 +658,7 @@ export async function startAutofillOnTab(tabId = null) {
     uploadSkipped: result.uploadSkipped,
     bankHits: leftover.bankHits,
     extraFilled: leftover.extraFilled,
+    aiHits: leftover.aiHits || 0,
     unmatchedQuestions: result.unmatchedQuestions,
     unmatchedChoiceQuestions: result.unmatchedChoiceQuestions
   };
@@ -561,6 +689,7 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12 } =
     uploadedCount: 0,
     bankHits: 0,
     extraFilled: 0,
+    aiHits: 0,
     status: "",
     detail: "",
     tabId: currentTabId,
@@ -643,6 +772,7 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12 } =
     summary.uploadedCount = summary.uploaded;
     summary.bankHits += Number(fillRes?.bankHits || 0);
     summary.extraFilled += Number(fillRes?.extraFilled || 0);
+    summary.aiHits += Number(fillRes?.aiHits || 0);
     summary.steps = step + 1;
     summary.tabId = currentTabId;
     summary.tabUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || summary.tabUrl;
@@ -745,7 +875,24 @@ export async function handleQaLearnCapture(message) {
 }
 
 /** Used by the content-script Easy Apply path when leftover questions need answers. */
-export async function answerQuestionsFromBank(questions = [], { choice = false, site = "" } = {}) {
-  const { person, extras } = await getApplicantInfoForAutofill();
-  return resolveQuestionAnswers(questions, extras, person?.id || "", site, { choice });
+export async function answerQuestionsFromBank(
+  questions = [],
+  { choice = false, site = "", jobMeta = null } = {}
+) {
+  const { person, extras, applicantInfo } = await getApplicantInfoForAutofill();
+  const answers = await resolveQuestionAnswers(
+    questions,
+    extras,
+    person?.id || "",
+    site,
+    { choice }
+  );
+  await enrichAnswersWithAi(questions, answers, {
+    choice,
+    profileId: person?.id || "",
+    site,
+    applicantInfo,
+    jobMeta
+  });
+  return answers;
 }
