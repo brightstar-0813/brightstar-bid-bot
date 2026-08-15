@@ -16,6 +16,11 @@ export function formatApplicationDate(date = new Date()) {
   return `${month}/${day}/${year}`;
 }
 
+/** Status cell after Apply: keeps Ready vs Applied distinguishable and records the apply day. */
+export function formatAppliedStatus(date = new Date()) {
+  return `Applied ${formatApplicationDate(date)}`;
+}
+
 /**
  * Normalize job URLs so sheet vs CSV links still match when tracking
  * params / trailing slashes differ.
@@ -49,8 +54,8 @@ export function normalizeJobLink(url) {
 }
 
 /**
- * Tab-separated row matching sheet columns A–F:
- * No | Date | Title | Company | Link | Salary
+ * Tab-separated row matching sheet columns A–G:
+ * No | Date | Title | Company | Link | Salary | Status
  * Paste into the first cell of an empty row in Google Sheets.
  */
 export function buildSheetRowTsv({
@@ -59,6 +64,7 @@ export function buildSheetRowTsv({
   companyName,
   jdLink,
   salary = "",
+  status = "",
   includeDate = true
 }) {
   const cells = [
@@ -67,7 +73,8 @@ export function buildSheetRowTsv({
     jobTitle || "",
     companyName || "",
     jdLink || "",
-    salary || ""
+    salary || "",
+    status || ""
   ];
   return cells.join("\t");
 }
@@ -119,7 +126,8 @@ export async function appendJobToSpreadsheet({
   jobTitle,
   companyName,
   jdLink,
-  salary
+  salary,
+  status = "Ready"
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
@@ -134,11 +142,53 @@ export async function appendJobToSpreadsheet({
     jobTitle: jobTitle || "",
     companyName: companyName || "",
     jobLink: jdLink || "",
-    salary: salary || ""
+    salary: salary || "",
+    status: status || "Ready"
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);
   return { spreadsheetId, duplicate: Boolean(parsed?.duplicate), ...payload };
+}
+
+/**
+ * Set Status to "Applied M/D/YYYY" on the existing row (matched by job link).
+ * Column B stays the resume-build date. If the job is not on the sheet yet, appends a row.
+ */
+export async function markJobAppliedOnSpreadsheet({
+  spreadsheetUrl,
+  webAppUrl,
+  jobNo,
+  jobTitle,
+  companyName,
+  jdLink,
+  salary
+}) {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid Google Spreadsheet link.");
+  }
+
+  const appliedDate = formatApplicationDate();
+  const payload = {
+    action: "markApplied",
+    spreadsheetId,
+    jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
+    applicationDate: appliedDate,
+    jobTitle: jobTitle || "",
+    companyName: companyName || "",
+    jobLink: jdLink || "",
+    salary: salary || "",
+    status: formatAppliedStatus()
+  };
+
+  const parsed = await postSheetWebApp(webAppUrl, payload);
+  return {
+    spreadsheetId,
+    updated: Boolean(parsed?.updated),
+    appended: Boolean(parsed?.appended),
+    appliedDate,
+    ...payload
+  };
 }
 
 /**

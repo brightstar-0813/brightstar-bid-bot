@@ -139,20 +139,22 @@ Manual one-off jobs (no CSV row) still use `Company - Title` without the numeric
 
 After each job’s files finish (batch or one-off), the extension can append a row:
 
-| No | Date | Title | Company | Link |
-|----|------|-------|---------|------|
-| CSV row # | M/D/YYYY | job title | company | JD URL |
+| No | Date | Title | Company | Link | Salary | Status |
+|----|------|-------|---------|------|--------|--------|
+| CSV row # | M/D/YYYY | job title | company | JD URL | (optional) | Ready, then Applied M/D/YYYY |
+
+**Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). Duplicate-by-link still skips jobs that are already on the sheet.
 
 **Duplicate prevention:** when you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
 
 Chrome cannot write from the spreadsheet share link alone:
 
-1. Open your sheet → put those five headers in row 1 (optional but recommended)
+1. Open your sheet → put those headers in row 1 (optional but recommended)
 2. Extensions → Apps Script → paste `apps-script/Code.gs` (or use **Copy script** in the popup) → Save
 3. Deploy → New deployment → Web app → Execute as: **Me**, Who has access: **Anyone**
 4. Paste the spreadsheet link and Web App URL into the extension’s **Google Sheet** section
 5. Reload the extension if you just changed code; values persist in `storage.local`
-6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listLinks` / duplicate guard are live
+6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listLinks` / `markApplied` are live
 
 If sheet append fails, file generation still succeeds — the status line will note the sheet error.
 

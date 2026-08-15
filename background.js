@@ -1,5 +1,7 @@
 import {
   appendJobToSpreadsheet,
+  markJobAppliedOnSpreadsheet,
+  formatAppliedStatus,
   fetchExistingJobLinks,
   buildKnownLinkSet,
   normalizeJobLink
@@ -761,6 +763,34 @@ async function getSheetConfig() {
     spreadsheetUrl: String(data.spreadsheet_url || "").trim(),
     webAppUrl: String(data.sheets_web_app_url || "").trim()
   };
+}
+
+/** Mark the sheet row Applied after the queue Apply button is clicked. */
+async function markQueueJobAppliedOnSheet(jobMeta = {}) {
+  const jdLink = String(jobMeta.jdLink || jobMeta.url || "").trim();
+  if (!jdLink) return { skipped: true, reason: "no-link" };
+  const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+  if (!spreadsheetUrl || !webAppUrl) return { skipped: true, reason: "no-sheet" };
+  try {
+    const result = await markJobAppliedOnSpreadsheet({
+      spreadsheetUrl,
+      webAppUrl,
+      jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      companyName: jobMeta.companyName || jobMeta.company || "",
+      jdLink,
+      salary: jobMeta.salary || ""
+    });
+    if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+      await updateQueueJob(jobMeta.csvRow, {
+        applied: true,
+        appliedDate: result.appliedDate || ""
+      });
+    }
+    return result;
+  } catch (err) {
+    return { skipped: false, error: String(err?.message || err) };
+  }
 }
 
 /**
@@ -3300,20 +3330,35 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
     if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.sheets_web_app_url || "").trim();
   }
   if (spreadsheetUrl && sheetsWebAppUrl) {
-    await setStatus("Appending row to Google Sheet...");
+    const manualBid = jobMeta.bidSource === "one-off" || jobMeta.oneOff === true;
+    await setStatus(manualBid ? "Recording Applied on Google Sheet..." : "Appending row to Google Sheet...");
     try {
-      const sheetResult = await appendJobToSpreadsheet({
-        spreadsheetUrl,
-        webAppUrl: sheetsWebAppUrl,
-        jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
-        jobTitle: jobMeta.jobTitle,
-        companyName: jobMeta.companyName,
-        jdLink: jobMeta.jdLink,
-        salary: jobMeta.salary || ""
-      });
-      status = sheetResult.duplicate
-        ? `${status} (already on Google Sheet — not re-appended)`
-        : `${status} and appended to Google Sheet`;
+      if (manualBid) {
+        const sheetResult = await markJobAppliedOnSpreadsheet({
+          spreadsheetUrl,
+          webAppUrl: sheetsWebAppUrl,
+          jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
+          jobTitle: jobMeta.jobTitle,
+          companyName: jobMeta.companyName,
+          jdLink: jobMeta.jdLink,
+          salary: jobMeta.salary || ""
+        });
+        const label = sheetResult.status || formatAppliedStatus();
+        status = `${status} Sheet: ${label}.`;
+      } else {
+        const sheetResult = await appendJobToSpreadsheet({
+          spreadsheetUrl,
+          webAppUrl: sheetsWebAppUrl,
+          jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
+          jobTitle: jobMeta.jobTitle,
+          companyName: jobMeta.companyName,
+          jdLink: jobMeta.jdLink,
+          salary: jobMeta.salary || ""
+        });
+        status = sheetResult.duplicate
+          ? `${status} (already on Google Sheet — not re-appended)`
+          : `${status} and appended to Google Sheet`;
+      }
     } catch (sheetErr) {
       status = `${status}, but sheet append failed: ${String(sheetErr?.message || sheetErr)}`;
     }
@@ -4486,18 +4531,48 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (type === "apply_job_url") {
     (async () => {
+      const jobMeta = {
+        ...(message.job && typeof message.job === "object" ? message.job : {}),
+        jdLink: message.url || message.job?.jdLink || ""
+      };
       try {
         const result = await openJobAndApply(message.url, { multiStep: message.multiStep !== false });
         const filled = Number(result.filled || result.filledCount || 0);
-        const msg =
+        let msg =
           result.detail ||
           `Apply assist: filled ${filled} field(s)` +
-          (result.uploaded ? `, uploaded ${result.uploaded} file(s)` : "") +
-          `. Review and submit.`;
+            (result.uploaded ? `, uploaded ${result.uploaded} file(s)` : "") +
+            `. Review and submit.`;
+        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+        if (sheet?.error) {
+          msg = `${msg} Sheet Applied failed: ${sheet.error}`;
+        } else if (!sheet?.skipped) {
+          const sheetLabel = sheet.status || (sheet.appliedDate ? `Applied ${sheet.appliedDate}` : "Applied");
+          msg = `${msg} Sheet: ${sheetLabel}.`;
+        }
         await setStatus(msg);
-        safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
+        safeSendResponse(sendResponse, {
+          ...result,
+          ok: true,
+          filled,
+          applied: true,
+          appliedDate: sheet?.appliedDate || "",
+          status: msg
+        });
       } catch (err) {
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+        let sheetNote = "";
+        if (sheet?.error) sheetNote = ` Sheet Applied failed: ${sheet.error}`;
+        else if (!sheet?.skipped) {
+          const sheetLabel = sheet.status || (sheet.appliedDate ? `Applied ${sheet.appliedDate}` : "Applied");
+          sheetNote = ` Sheet: ${sheetLabel}.`;
+        }
+        safeSendResponse(sendResponse, {
+          ok: false,
+          applied: true,
+          appliedDate: sheet?.appliedDate || "",
+          error: `${String(err?.message || err)}${sheetNote}`
+        });
       }
     })();
     return true;
@@ -4820,7 +4895,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
       try {
-        const meta = message.jobMeta || {};
+        const meta = { ...(message.jobMeta || {}), bidSource: "one-off" };
         const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
         const link = normalizeJobLink(meta.jdLink || "");
         if (link && spreadsheetUrl && webAppUrl) {
@@ -4889,7 +4964,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         const result = await runGenerationPipeline({
-          jobMeta: message.jobMeta || {},
+          jobMeta: { ...(message.jobMeta || {}), bidSource: "one-off" },
           jsonText: message.jsonText || ""
         });
         await chrome.storage.local.set({ generation_running: false });

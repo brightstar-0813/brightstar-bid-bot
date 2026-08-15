@@ -8,13 +8,14 @@
  *    - Execute as: Me
  *    - Who has access: Anyone
  * 5. Copy the Web App URL into the extension's "Web App URL" field
- *    (redeploy after updates so listLinks / duplicate guard are live)
+ *    (redeploy after updates so listLinks / markApplied are live)
  *
  * POST body (text/plain JSON):
- *   action: "append" (default) | "listLinks"
- *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary
+ *   action: "append" (default) | "listLinks" | "markApplied"
+ *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
  *
- * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary
+ * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
+ * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY" on that row.
  */
 function doPost(e) {
   try {
@@ -33,6 +34,30 @@ function doPost(e) {
     }
 
     const jobLink = String(data.jobLink || "").trim();
+
+    if (action === "markapplied" || action === "mark_applied" || action === "applied") {
+      ensureStatusHeader_(sheet);
+      const appliedOn = String(data.applicationDate || "").trim();
+      const status =
+        String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
+      const row = findRowByLink_(sheet, jobLink);
+      const statusCol = statusColumnIndex_(headerRow_(sheet)) + 1;
+      if (row > 0) {
+        sheet.getRange(row, statusCol).setValue(status);
+        return json_({ ok: true, updated: true, appended: false, row: row });
+      }
+      sheet.appendRow([
+        data.jobNo || "",
+        data.applicationDate || "",
+        data.jobTitle || "",
+        data.companyName || "",
+        jobLink,
+        data.salary || "",
+        status
+      ]);
+      return json_({ ok: true, updated: false, appended: true });
+    }
+
     if (jobLink && linkExists_(sheet, jobLink)) {
       return json_({ ok: true, duplicate: true });
     }
@@ -43,7 +68,8 @@ function doPost(e) {
       data.jobTitle || "",
       data.companyName || "",
       jobLink,
-      data.salary || ""
+      data.salary || "",
+      data.status || "Ready"
     ]);
 
     return json_({ ok: true, duplicate: false });
@@ -96,6 +122,11 @@ function normalizeLink_(url) {
   }
 }
 
+function headerRow_(sheet) {
+  var lastCol = Math.max(sheet.getLastColumn(), 7);
+  return sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+}
+
 function linkColumnIndex_(headerRow) {
   var headers = (headerRow || []).map(function (h) {
     return String(h || "")
@@ -110,6 +141,28 @@ function linkColumnIndex_(headerRow) {
   return 4; // column E
 }
 
+function statusColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["status", "applied", "state"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return 6; // column G
+}
+
+function ensureStatusHeader_(sheet) {
+  var headers = headerRow_(sheet);
+  var idx = statusColumnIndex_(headers);
+  if (!String(headers[idx] || "").trim()) {
+    sheet.getRange(1, idx + 1).setValue("Status");
+  }
+}
+
 function collectJobLinks_(sheet) {
   var values = sheet.getDataRange().getValues();
   if (!values || !values.length) return [];
@@ -122,12 +175,20 @@ function collectJobLinks_(sheet) {
   return links;
 }
 
-function linkExists_(sheet, jobLink) {
+function findRowByLink_(sheet, jobLink) {
   var target = normalizeLink_(jobLink);
-  if (!target) return false;
-  var links = collectJobLinks_(sheet);
-  for (var i = 0; i < links.length; i++) {
-    if (normalizeLink_(links[i]) === target) return true;
+  if (!target) return -1;
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return -1;
+  var linkCol = linkColumnIndex_(values[0]);
+  for (var r = 1; r < values.length; r++) {
+    if (normalizeLink_((values[r] && values[r][linkCol]) || "") === target) {
+      return r + 1;
+    }
   }
-  return false;
+  return -1;
+}
+
+function linkExists_(sheet, jobLink) {
+  return findRowByLink_(sheet, jobLink) > 0;
 }

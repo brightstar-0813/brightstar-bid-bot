@@ -82,7 +82,8 @@
       spreadsheetUrl: (s.spreadsheet_url || "").trim(),
       sheetsWebAppUrl: (s.sheets_web_app_url || "").trim(),
       templateId: s.selected_template_id || DEFAULT_TEMPLATE_ID,
-      resumeFilePrefix: (s.resume_file_prefix || "").trim() || "Resume"
+      resumeFilePrefix: (s.resume_file_prefix || "").trim() || "Resume",
+      bidSource: "one-off"
     };
   }
 

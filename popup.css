@@ -764,6 +764,12 @@ input[type="file"]::file-selector-button {
   margin-left: 4px;
 }
 
+.badge-applied {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+  margin-left: 4px;
+}
+
 .person-save-status {
   margin: 0 0 8px;
   padding: 8px 10px;
