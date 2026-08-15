@@ -617,18 +617,6 @@ async function loadSettings() {
   setBusy(Boolean(data.generation_running) || batchState === "running");
 
   await loadCsvSourceForm().catch(() => {});
-
-  // Open person editor when the active profile is still a built-in (setup not finished).
-  const active = profilesCache.find((p) => p.id === profileSelectEl.value);
-  if (active?.builtin) {
-    personPanelBody.hidden = false;
-    togglePersonPanelBtn.setAttribute("aria-expanded", "true");
-    syncSaveButtonLabels();
-    setPersonSaveStatus(
-      "Paste your resume tailor prompt once (put {JD} as a placeholder — each CSV job fills it automatically). Then Save as my person.",
-      { ok: true }
-    );
-  }
 }
 
 function updateCsvSummaryFromQueue() {

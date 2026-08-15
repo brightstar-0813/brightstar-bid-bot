@@ -219,8 +219,8 @@ const CSS = `
 
 export const timesClassicTemplate = {
   id: "times-classic",
-  label: "Brightstar template 1",
-  description: "Times serif · centered name · contact + cert badges · stacked experience",
+  label: "1 · US Times Classic",
+  description: "Times serif · cert badges · traditional US senior-engineer resume.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");

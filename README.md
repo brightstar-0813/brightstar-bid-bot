@@ -11,7 +11,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Saves under `Downloads / [output folder] / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
-  - `[Name]_Resume.pdf` (Times Classic / Developer Style layout with cert badges)
+  - `[Name]_Resume.pdf` (US senior templates — ATS, Silicon Valley, consulting, NYC finance, executive)
   - `[Name]_Cover Letter.pdf` (body + signature only — no top header block)
   - `N` = CSV data row number (1 = first job after the header); `[Name]` from the person / PDF prefix (e.g. Sandeep)
 - **Apply assist**: Open job URL, reveal saved files, autofill name/email/phone/LinkedIn on the application page

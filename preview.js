@@ -140,8 +140,9 @@ window.addEventListener("keydown", (event) => {
     const prev = templates[(index - 1 + templates.length) % templates.length];
     templateSelectEl.value = prev.id;
     templateSelectEl.dispatchEvent(new Event("change"));
-  } else if (/^[1-7]$/.test(event.key)) {
-    const picked = templates[Number(event.key) - 1];
+  } else if (/^[1-9]$/.test(event.key) || event.key === "0") {
+    const n = event.key === "0" ? 10 : Number(event.key);
+    const picked = templates[n - 1];
     if (!picked) return;
     event.preventDefault();
     templateSelectEl.value = picked.id;

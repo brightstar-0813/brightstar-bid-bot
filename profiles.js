@@ -14,7 +14,7 @@ export const BUILTIN_PROFILES = [
     id: "sandeep-mahankali",
     label: "Sandeep Mahankali (Salesforce)",
     promptTemplate: sandeepMahankaliPrompt,
-    templateId: "ruled-sans",
+    templateId: "ats-modern",
     resumeFilePrefix: "Sandeep_Resume",
     builtin: true,
     kind: "resume",

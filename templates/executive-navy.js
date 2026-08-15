@@ -257,8 +257,8 @@ function renderJobs(jobs) {
 
 export const executiveNavyTemplate = {
   id: "executive-navy",
-  label: "Brightstar template 7",
-  description: "Navy sidebar · gold accent · contact/skills/education on the left, experience on the right.",
+  label: "10 · Executive Navy",
+  description: "Navy sidebar · gold accent · US Staff / Principal / engineering manager.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");

@@ -377,6 +377,97 @@ export function renderSkillsStacked(skills) {
   return `<div class="skills-stack">${rows.join("\n")}</div>`;
 }
 
+/** One line per skill group: Category — items (FAANG / senior IC). */
+export function renderSkillsInline(skills) {
+  const rows = (skills || [])
+    .map((row) => {
+      const category = String(row?.category || "").trim();
+      const items = String(row?.items || "").trim();
+      if (!category && !items) return "";
+      if (!category) return `<div class="skill-inline">${escapeHtml(items)}</div>`;
+      return `<div class="skill-inline"><span class="skill-cat">${escapeHtml(
+        category
+      )}:</span> ${escapeHtml(items)}</div>`;
+    })
+    .filter(Boolean);
+  if (!rows.length) return "";
+  return `<div class="skills-inline">${rows.join("\n")}</div>`;
+}
+
+function jobBullets(job) {
+  return (job?.bullets || [])
+    .filter(Boolean)
+    .map((b) => `<li>${escapeHtml(b)}</li>`)
+    .join("\n");
+}
+
+/** Title, Company — dates on the right. Used by NYC Finance, Silicon Valley, Harvard Rule. */
+export function renderJobsTitleFirst(jobs) {
+  return (jobs || [])
+    .map((job) => {
+      const company = escapeHtml(job.company || "");
+      const title = escapeHtml(job.title || "");
+      const dates = escapeHtml(job.dates || "");
+      const location = escapeHtml(job.location || "");
+      const project = escapeHtml(job.project || "");
+      const bullets = jobBullets(job);
+      const heading = [title, company].filter(Boolean).join(", ");
+      return `<article class="job">
+  <div class="job-top">
+    <p class="job-title">${heading}</p>
+    ${dates ? `<span class="job-dates">${dates}</span>` : ""}
+  </div>
+  ${location ? `<p class="job-meta">${location}</p>` : ""}
+  ${project ? `<p class="project">${project}</p>` : ""}
+  ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
+</article>`;
+    })
+    .join("\n");
+}
+
+/** DACH/Benelux Lebenslauf: dates in a left column, role on the right. */
+export function renderJobsDatedColumn(jobs) {
+  return (jobs || [])
+    .map((job) => {
+      const company = escapeHtml(job.company || "");
+      const title = escapeHtml(job.title || "");
+      const dates = escapeHtml(job.dates || "");
+      const location = escapeHtml(job.location || "");
+      const project = escapeHtml(job.project || "");
+      const bullets = jobBullets(job);
+      const org = [company, location].filter(Boolean).join(" · ");
+      return `<article class="job">
+  <div class="job-dates">${dates || ""}</div>
+  <div class="job-body">
+    ${title ? `<h3 class="job-title">${title}</h3>` : ""}
+    ${org ? `<p class="job-company">${org}</p>` : ""}
+    ${project ? `<p class="project">${project}</p>` : ""}
+    ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
+  </div>
+</article>`;
+    })
+    .join("\n");
+}
+
+export function renderEducationDatedColumn(education) {
+  return educationList(education)
+    .map((edu) => {
+      const school = escapeHtml(edu.school || "");
+      const degree = escapeHtml(edu.degree || "");
+      const year = escapeHtml(edu.year || "");
+      const details = escapeHtml(edu.details || edu.gpa || "");
+      return `<article class="edu-col">
+  <div class="job-dates">${year}</div>
+  <div class="job-body">
+    ${degree ? `<h3 class="job-title">${degree}</h3>` : ""}
+    ${school ? `<p class="job-company">${school}</p>` : ""}
+    ${details ? `<p class="project">${details}</p>` : ""}
+  </div>
+</article>`;
+    })
+    .join("\n");
+}
+
 export function wrapHtmlDocument({ title, css, body }) {
   return `<!doctype html>
 <html lang="en">

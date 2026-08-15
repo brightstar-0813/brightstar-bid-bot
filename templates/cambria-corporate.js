@@ -9,8 +9,12 @@ import {
   wrapHtmlDocument
 } from "./shared.js";
 
+/**
+ * Fortune 500 / Microsoft Word “Elegant” look: Cambria, corporate-blue name.
+ * Used by senior engineers at large US corporates (Microsoft, IBM, Oracle, GE).
+ */
 const CSS = `
-    @page { size: A4; margin: 12mm; }
+    @page { size: A4; margin: 12mm 14mm; }
 
     * { box-sizing: border-box; }
 
@@ -18,8 +22,8 @@ const CSS = `
       width: 210mm;
       margin: 0;
       padding: 0;
-      font-family: Calibri, Arial, Helvetica, sans-serif;
-      color: #000;
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+      color: #222;
       background: #fff;
       font-size: 11pt;
       line-height: 1.28;
@@ -29,13 +33,13 @@ const CSS = `
 
     header.top {
       margin: 0 0 8px;
-      padding-bottom: 6px;
-      border-bottom: 1.5px solid #1f4e79;
+      padding: 0 0 6px;
+      border-bottom: 2px solid #1f4e79;
     }
 
     h1 {
       margin: 0;
-      font-size: 20pt;
+      font-size: 22pt;
       font-weight: 700;
       color: #1f4e79;
       line-height: 1.1;
@@ -45,21 +49,17 @@ const CSS = `
       margin: 2px 0 4px;
       font-size: 11pt;
       font-weight: 700;
-      color: #000;
+      color: #333;
     }
 
-    .contact {
-      margin: 0;
-      font-size: 10pt;
-    }
+    .contact { margin: 0; font-size: 10pt; }
 
-    a, a:visited { color: #000; text-decoration: underline; }
+    a, a:visited { color: #1f4e79; text-decoration: underline; }
 
     section { margin: 0 0 8px; }
 
     h2 {
       margin: 0 0 4px;
-      padding: 0;
       font-size: 12pt;
       font-weight: 700;
       color: #1f4e79;
@@ -74,13 +74,13 @@ const CSS = `
       margin: 6px 0 0;
       font-size: 11pt;
       font-weight: 700;
-      color: #000;
     }
 
     p.role-title {
       margin: 0;
       font-size: 11pt;
       font-weight: 700;
+      color: #1f4e79;
     }
 
     p.role-meta {
@@ -103,6 +103,7 @@ const CSS = `
       border-collapse: collapse;
       table-layout: fixed;
       font-size: 10pt;
+      font-family: Calibri, Arial, sans-serif;
     }
 
     .skills-table th, .skills-table td {
@@ -113,9 +114,9 @@ const CSS = `
     }
 
     .skills-table th {
-      background: #e7eef5;
+      background: #1f4e79;
+      color: #fff;
       font-weight: 700;
-      color: #1f4e79;
     }
 
     .skills-table .skill-cat { width: 30%; font-weight: 700; }
@@ -128,15 +129,15 @@ const CSS = `
     }
 
     .edu-degree { font-weight: 700; }
-    .edu-year { white-space: nowrap; font-weight: 700; }
+    .edu-year { white-space: nowrap; font-weight: 700; color: #1f4e79; }
 
     .tech-summary, .certifications { margin: 0; padding-left: 18px; }
 `;
 
-export const atsModernTemplate = {
-  id: "ats-modern",
-  label: "2 · ATS Calibri",
-  description: "Calibri · Workday/Taleo-safe · US Fortune 500 ATS.",
+export const cambriaCorporateTemplate = {
+  id: "cambria-corporate",
+  label: "7 · Fortune 500 Cambria",
+  description: "Cambria · corporate blue · US Fortune 500 / large-enterprise senior engineer.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");
@@ -154,12 +155,12 @@ export const atsModernTemplate = {
   <header class="top">
     <h1>${name}</h1>
     ${headline ? `<p class="headline">${headline}</p>` : ""}
-    <p class="contact">${contactLine(data)}</p>
+    <p class="contact">${contactLine(data, { linkColor: "#1f4e79" })}</p>
   </header>
   ${profile ? `<section><h2>Professional Summary</h2><p>${escapeHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2>Technical Summary</h2>${tech}</section>` : ""}
-  ${skills ? `<section><h2>Skills</h2>${skills}</section>` : ""}
   ${jobs ? `<section><h2>Professional Experience</h2>${jobs}</section>` : ""}
+  ${skills ? `<section><h2>Core Competencies</h2>${skills}</section>` : ""}
   ${edu ? `<section><h2>Education</h2>${edu}</section>` : ""}
   ${certs ? `<section><h2>Certifications</h2>${certs}</section>` : ""}
 </main>`
