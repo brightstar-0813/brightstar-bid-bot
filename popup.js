@@ -264,6 +264,7 @@ const keepOpenBtn = document.getElementById("keepOpen");
 const pasteJdBtn = document.getElementById("pasteJd");
 const runOneOffBtn = document.getElementById("runOneOff");
 const autofillPageBtn = document.getElementById("autofillPage");
+const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const resetBtn = document.getElementById("reset");
 
 let profilesCache = [];
@@ -1058,16 +1059,26 @@ async function revealJobFiles(job) {
 }
 
 async function applyAssist(job) {
-  // Open only the job link — do not pop the files folder (unnecessary).
-  await openJob(job);
-  const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
+  if (!job?.jdLink) {
+    setStatus("No JD link for this job.");
+    return;
+  }
+  setStatus("Opening job link and running Auto Apply…");
+  const res = await chrome.runtime.sendMessage({ type: "apply_job_url", url: job.jdLink });
   if (!res?.ok) {
     setStatus(
-      `Opened job link. Autofill: ${res?.error || "focus the application tab and click Autofill this page."}`
+      `Opened job link. Autofill: ${res?.error || "focus the application tab and click Auto Apply."}`
     );
     return;
   }
-  setStatus(`Apply assist: opened job link, autofilled ${res.filled || 0} field(s).`);
+  const filled = res.filled || res.filledCount || 0;
+  const uploaded = res.uploaded || res.uploadedCount || 0;
+  setStatus(
+    res.status ||
+      `Apply assist: filled ${filled} field(s)` +
+        (uploaded ? `, uploaded ${uploaded} file(s)` : "") +
+        `. Review and submit.`
+  );
 }
 
 async function sendBatch(type) {
@@ -1535,12 +1546,29 @@ async function runOneOff() {
 }
 
 async function autofillThisPage() {
+  setStatus("Autofilling the current page…");
   const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
   if (!res?.ok) {
     setStatus(res?.error || "Autofill failed. Focus the application tab first.");
     return;
   }
-  setStatus(`Autofilled ${res.filled || 0} field(s) on the active page.`);
+  const filled = res.filled || res.filledCount || 0;
+  const uploaded = res.uploaded || res.uploadedCount || 0;
+  setStatus(
+    `Autofilled ${filled} field(s)` +
+      (uploaded ? `, uploaded ${uploaded} file(s)` : "") +
+      " on the active page."
+  );
+}
+
+async function autoApplyThisPage() {
+  setStatus("Auto Apply: filling and advancing steps (stops before Submit)…");
+  const res = await chrome.runtime.sendMessage({ type: "autofill_multi_step" });
+  if (!res?.ok) {
+    setStatus(res?.error || "Auto Apply failed. Focus the application tab first.");
+    return;
+  }
+  setStatus(res.status || res.detail || `Auto Apply filled ${res.filled || 0} field(s). Review and submit.`);
 }
 
 async function clearJobsList({ confirmPrompt = true } = {}) {
@@ -1722,6 +1750,7 @@ keepOpenBtn.addEventListener("click", dockOutOfPopup);
 testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
+autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
 resetBtn.addEventListener("click", resetWorkflow);
 
 for (const el of [

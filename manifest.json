@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Brightstar Bid bot",
   "description": "CSV batch resume & cover letters via ChatGPT — Brightstar Bid bot.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "permissions": [
     "storage",
     "downloads",
@@ -33,6 +33,31 @@
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://*.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://*.lever.co/*",
+        "https://*.indeed.com/*",
+        "https://indeed.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.icims.com/*",
+        "https://*.taleo.net/*",
+        "https://*.successfactors.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.jobvite.com/*",
+        "https://*.ultipro.com/*",
+        "https://www.dice.com/*",
+        "https://*.dice.com/*"
+      ],
+      "js": ["content/autofill.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "icons": {
@@ -66,6 +91,13 @@
         "mac": "Command+Shift+Y"
       },
       "description": "Autofill application form from active person"
+    },
+    "auto-apply-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
+      },
+      "description": "Auto Apply on current page (multi-step, stops before Submit)"
     }
   }
 }

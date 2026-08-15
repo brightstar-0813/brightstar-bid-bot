@@ -640,3 +640,255 @@ export async function mergeAutofillExtras(learned) {
   const result = await savePersonProfile(patch);
   return result?.profile || patch;
 }
+
+const EXTRA_TO_APPLICANT_KEY = [
+  [["desired salary", "expected salary", "salary expectation", "salary", "compensation", "pay expectation"], "salaryExpectation"],
+  [["earliest start", "start date", "available date", "availability date", "when can you start"], "earliestStartDate"],
+  [["years of experience", "years experience", "total experience", "years of exp"], "yearsExperience"],
+  [["relevant experience"], "relevantExperience"],
+  [["github"], "githubUrl"],
+  [["portfolio", "personal website", "website url"], "portfolioUrl"],
+  [["willing to relocate", "relocate", "relocation"], "willingToRelocate"],
+  [["over 18", "18 years", "at least 18"], "over18"],
+  [["felony", "criminal conviction", "conviction"], "felonyConviction"],
+  [["background check"], "backgroundCheckConsent"],
+  [["drug test"], "drugTestConsent"],
+  [["preferred name", "nickname"], "preferredName"],
+  [["middle name"], "middleName"],
+  [["highest degree", "education level"], "highestDegree"],
+  [["school name", "university", "college"], "schoolName"],
+  [["field of study", "major"], "fieldOfStudy"],
+  [["graduation date", "graduated"], "graduationDate"],
+  [["why are you interested", "why do you want", "why this role"], "whyInterested"],
+  [["english level", "english proficiency"], "englishLevel"],
+  [["address line 2", "address2", "apt", "suite", "unit"], "addressLine2"]
+];
+
+const APPLICANT_KEY_TO_PERSON = {
+  email: "email",
+  phone: "phone",
+  linkedinUrl: "linkedin",
+  addressLine1: "address",
+  zipCode: "zip",
+  gender: "gender",
+  raceEthnicity: "ethnicity",
+  disabilityStatus: "disability",
+  veteranStatus: "veteran",
+  workAuthorized: "workAuthorized",
+  needsSponsorship: "sponsorship",
+  hispanicLatino: "hispanicLatino"
+};
+
+function splitPersonName(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return {
+    firstName: parts[0] || "",
+    lastName: parts.slice(1).join(" ")
+  };
+}
+
+function parsePersonLocation(location) {
+  const parts = String(location || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return {
+    city: parts[0] || "",
+    state: parts.length >= 2 ? parts[1] : "",
+    country: parts.length >= 3 ? parts[parts.length - 1] : ""
+  };
+}
+
+function yesNoToken(value) {
+  const t = String(value || "").trim().toLowerCase();
+  if (!t) return "";
+  if (/^(yes|y|true|1)\b/.test(t) || /^yes\b/.test(t)) return "yes";
+  if (
+    /^(no|n|false|0)\b/.test(t) ||
+    /^no\b/.test(t) ||
+    /^i (am not|do not|don't|do not want)/.test(t)
+  ) {
+    return "no";
+  }
+  return "";
+}
+
+function disabilityToken(value) {
+  const t = String(value || "").trim().toLowerCase();
+  if (!t) return "";
+  if (/decline|prefer not|do not want to answer|do not wish/.test(t)) return "decline";
+  if (/do not have a disability|don't have a disability|no disability/.test(t)) return "no";
+  const yn = yesNoToken(t);
+  if (yn) return yn;
+  return t;
+}
+
+function veteranToken(value) {
+  const t = String(value || "").trim().toLowerCase();
+  if (!t) return "";
+  if (/decline|prefer not|do not wish/.test(t)) return "decline";
+  if (/not a (protected )?veteran|i am not a veteran/.test(t)) return "not_veteran";
+  if (/protected veteran|i identify as|i am a veteran/.test(t)) return "protected_veteran";
+  const yn = yesNoToken(t);
+  if (yn === "no") return "not_veteran";
+  if (yn === "yes") return "protected_veteran";
+  return t;
+}
+
+function genderToken(value) {
+  const t = String(value || "").trim().toLowerCase();
+  if (!t) return "";
+  if (/non[-\s]?binary/.test(t)) return "non_binary";
+  if (/^f\b|female|woman/.test(t)) return "female";
+  if (/^m\b|male|man/.test(t) && !/female/.test(t)) return "male";
+  if (/other|self/.test(t)) return "other";
+  return t;
+}
+
+function raceToken(value) {
+  const t = String(value || "").trim().toLowerCase();
+  if (!t) return "";
+  if (/american indian|alaska native/.test(t)) return "american_indian";
+  if (/native hawaiian|pacific islander/.test(t)) return "native_hawaiian";
+  if (/two or more|multiracial|mixed/.test(t)) return "two_or_more";
+  if (/hispanic|latino|latinx/.test(t)) return "hispanic";
+  if (/african american|\bblack\b/.test(t)) return "black";
+  if (/\basian\b/.test(t)) return "asian";
+  if (/\bwhite\b|caucasian/.test(t)) return "white";
+  return t;
+}
+
+function matchExtraToApplicantKey(extraKey) {
+  const k = String(extraKey || "").trim().toLowerCase();
+  if (!k) return "";
+  for (const [aliases, field] of EXTRA_TO_APPLICANT_KEY) {
+    if (aliases.some((a) => k === a || k.includes(a) || a.includes(k))) return field;
+  }
+  return "";
+}
+
+function emptyApplicantInfo() {
+  return {
+    firstName: "",
+    lastName: "",
+    middleName: "",
+    preferredName: "",
+    email: "",
+    phone: "",
+    country: "United States",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    zipCode: "",
+    cityCountryOfResidence: "",
+    workAuthorized: "",
+    needsSponsorship: "",
+    postEmploymentRestrictions: "",
+    willingToRelocate: "",
+    over18: "",
+    felonyConviction: "",
+    felonyExplanation: "",
+    yearsExperience: "",
+    relevantExperience: "",
+    englishLevel: "",
+    linkedinUrl: "",
+    portfolioUrl: "",
+    githubUrl: "",
+    highestDegree: "",
+    schoolName: "",
+    fieldOfStudy: "",
+    graduationDate: "",
+    whyInterested: "",
+    salaryExpectation: "",
+    earliestStartDate: "",
+    backgroundCheckConsent: "",
+    drugTestConsent: "",
+    gender: "",
+    hispanicLatino: "",
+    raceEthnicity: "",
+    veteranStatus: "",
+    disabilityStatus: ""
+  };
+}
+
+/** Map Brightstar person + extras onto the resume-bot applicant-info shape. */
+export function personToApplicantInfo(person = {}) {
+  const info = emptyApplicantInfo();
+  const name = splitPersonName(person.name || person.label || "");
+  const loc = parsePersonLocation(person.location || "");
+  const extras =
+    person.autofillExtras && typeof person.autofillExtras === "object" && !Array.isArray(person.autofillExtras)
+      ? person.autofillExtras
+      : person.extras && typeof person.extras === "object"
+        ? person.extras
+        : {};
+
+  info.firstName = name.firstName;
+  info.lastName = name.lastName;
+  info.email = String(person.email || "").trim();
+  info.phone = String(person.phone || "").trim();
+  info.linkedinUrl = String(person.linkedin || "").trim();
+  info.addressLine1 = String(person.address || "").trim();
+  info.zipCode = String(person.zip || extras.zip || extras.postal || "").trim();
+  info.city = loc.city;
+  info.state = loc.state;
+  info.country = loc.country || extras.country || "United States";
+  info.cityCountryOfResidence = String(person.location || "").trim();
+  info.gender = genderToken(person.gender);
+  info.raceEthnicity = raceToken(person.ethnicity);
+  info.disabilityStatus = disabilityToken(person.disability);
+  info.veteranStatus = veteranToken(person.veteran);
+  info.hispanicLatino = yesNoToken(person.hispanicLatino) || String(person.hispanicLatino || "").trim();
+  info.workAuthorized = yesNoToken(person.workAuthorized) || String(person.workAuthorized || "").trim().toLowerCase();
+  info.needsSponsorship = yesNoToken(person.sponsorship) || String(person.sponsorship || "").trim().toLowerCase();
+
+  for (const [key, value] of Object.entries(extras)) {
+    const v = String(value || "").trim();
+    if (!v) continue;
+    const field = matchExtraToApplicantKey(key);
+    if (field && !String(info[field] || "").trim()) {
+      if (["workAuthorized", "needsSponsorship", "willingToRelocate", "over18", "felonyConviction", "backgroundCheckConsent", "drugTestConsent", "hispanicLatino"].includes(field)) {
+        info[field] = yesNoToken(v) || v;
+      } else {
+        info[field] = v;
+      }
+    }
+  }
+
+  return info;
+}
+
+export async function getApplicantInfoForAutofill() {
+  const person = await getActivePerson();
+  const extras =
+    person.autofillExtras && typeof person.autofillExtras === "object" ? person.autofillExtras : {};
+  return {
+    person,
+    applicantInfo: personToApplicantInfo(person),
+    extras: { ...extras, ...(person.citizenship ? { citizenship: person.citizenship } : {}) }
+  };
+}
+
+/**
+ * Learn-mode write-back: fill empty person fields or extras (custom persons only).
+ */
+export async function applyLearnedApplicantField(key, value) {
+  const k = String(key || "").trim();
+  const v = String(value || "").trim();
+  if (!k || !v) return null;
+  const person = await getActivePerson();
+  if (!person?.id || person.builtin) return null;
+
+  const personField = APPLICANT_KEY_TO_PERSON[k];
+  if (personField) {
+    if (String(person[personField] || "").trim()) return person;
+    const result = await savePersonProfile({ ...person, [personField]: v });
+    return result?.profile || person;
+  }
+
+  return mergeAutofillExtras({ [k]: v });
+}

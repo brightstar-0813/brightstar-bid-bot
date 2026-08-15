@@ -10,9 +10,17 @@ import {
   buildPrompt,
   getActivePerson,
   getAutofillContact,
-  mergeAutofillExtras,
   resolveExperienceRulesForPerson
 } from "./profiles.js";
+import {
+  setLastGeneratedDocs,
+  startAutofillOnTab,
+  startMultiStepApplyOnTab,
+  openJobAndApply,
+  handleProfileLearnCapture,
+  handleQaLearnCapture,
+  answerQuestionsFromBank
+} from "./autofill-runner.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -1351,6 +1359,10 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
     await setStatus(`Downloading ${resumePdfName}…`);
     await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(jobDir, resumePdfName));
     saved.pdf = true;
+    await setLastGeneratedDocs({
+      resume: { fileName: resumePdfName, mimeType: "application/pdf", base64: pdfBase64 },
+      folderName: jobDir
+    }).catch(() => {});
   } catch (err) {
     saved.pdfError = `${resumePdfName} failed: ${String(err?.message || err)}`;
     throw new Error(saved.pdfError);
@@ -1568,6 +1580,10 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameTok
       "application/pdf",
       joinDownloadPath(jobDir, coverPdfName)
     );
+    await setLastGeneratedDocs({
+      coverLetter: { fileName: coverPdfName, mimeType: "application/pdf", base64: pdfBase64 },
+      folderName: jobDir
+    }).catch(() => {});
     return { pdf: true, coverPdfName };
   } catch (err) {
     throw new Error(
@@ -3872,306 +3888,8 @@ async function revealJobFiles({ csvRow, jobDir }) {
   return { shown: results[0].filename };
 }
 
-function autofillPageFunc(contact) {
-  const filled = [];
-  const learned = {};
-  const name = String(contact.name || "").trim();
-  const email = String(contact.email || "").trim();
-  const phone = String(contact.phone || "").trim();
-  const linkedin = String(contact.linkedin || "").trim();
-  const location = String(contact.location || "").trim();
-  const address = String(contact.address || "").trim();
-  const zip = String(contact.zip || "").trim();
-  const city = String(contact.city || "").trim();
-  const state = String(contact.state || "").trim();
-  const country = String(contact.country || "").trim();
-  const gender = String(contact.gender || "").trim();
-  const ethnicity = String(contact.ethnicity || "").trim();
-  const disability = String(contact.disability || "").trim();
-  const veteran = String(contact.veteran || "").trim();
-  const citizenship = String(contact.citizenship || "").trim();
-  const workAuthorized = String(contact.workAuthorized || "").trim();
-  const sponsorship = String(contact.sponsorship || "").trim();
-  const hispanicLatino = String(contact.hispanicLatino || "").trim();
-  const extras =
-    contact.extras && typeof contact.extras === "object" && !Array.isArray(contact.extras)
-      ? contact.extras
-      : {};
-  const first = name.split(/\s+/)[0] || "";
-  const last = name.split(/\s+/).slice(1).join(" ") || "";
-
-  const setNativeValue = (el, value) => {
-    if (!el || value == null || value === "") return false;
-    const tag = (el.tagName || "").toLowerCase();
-    if (tag === "select") {
-      if (el.disabled) return false;
-      const want = String(value).toLowerCase().trim();
-      let matched = null;
-      for (const opt of Array.from(el.options)) {
-        const ov = String(opt.value || "").toLowerCase().trim();
-        const ot = String(opt.textContent || "").toLowerCase().trim();
-        if (!ov && !ot) continue;
-        if (ov === want || ot === want || ot.includes(want) || want.includes(ot)) {
-          matched = opt.value;
-          if (ov === want || ot === want) break;
-        }
-      }
-      if (matched == null) return false;
-      el.value = matched;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return true;
-    }
-    if (tag !== "input" && tag !== "textarea" && !el.isContentEditable) return false;
-    if (el.disabled || el.readOnly) return false;
-    const type = (el.getAttribute("type") || "text").toLowerCase();
-    if (type === "radio" || type === "checkbox") {
-      const labelText = [
-        el.value,
-        el.getAttribute("aria-label"),
-        el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
-        el.closest("label")?.textContent
-      ]
-        .join(" ")
-        .toLowerCase();
-      const want = String(value).toLowerCase();
-      const yesNo = /^(yes|no)$/i.test(value);
-      const matches =
-        labelText.includes(want) ||
-        String(el.value || "").toLowerCase() === want ||
-        (yesNo && want === "yes" && /\byes\b|true|\by\b/.test(`${labelText} ${el.value}`)) ||
-        (yesNo && want === "no" && /\bno\b|false|\bn\b/.test(`${labelText} ${el.value}`));
-      if (!matches) return false;
-      el.checked = true;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      return true;
-    }
-    const proto =
-      tag === "textarea"
-        ? window.HTMLTextAreaElement.prototype
-        : window.HTMLInputElement.prototype;
-    const desc = Object.getOwnPropertyDescriptor(proto, "value");
-    if (desc?.set) desc.set.call(el, value);
-    else el.value = value;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  };
-
-  const fieldBlob = (el) =>
-    [
-      el.name,
-      el.id,
-      el.placeholder,
-      el.getAttribute("aria-label"),
-      el.getAttribute("autocomplete"),
-      el.getAttribute("data-test"),
-      el.getAttribute("data-testid"),
-      el.className,
-      el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
-      el.closest("label")?.textContent,
-      el.closest("fieldset")?.querySelector("legend")?.textContent,
-      el.closest("[role='group']")?.getAttribute("aria-label")
-    ]
-      .join(" ")
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
-
-  const scoreField = (el, hints) => {
-    const blob = fieldBlob(el);
-    return hints.some((h) => blob.includes(String(h).toLowerCase()));
-  };
-
-  const controls = Array.from(document.querySelectorAll("input, textarea, select"));
-  const used = new Set();
-  const tryFill = (hints, value, label) => {
-    if (!value) return;
-    for (const el of controls) {
-      if (used.has(el)) continue;
-      const type = (el.getAttribute("type") || "text").toLowerCase();
-      if (["hidden", "submit", "button", "file", "password"].includes(type)) continue;
-      if (!scoreField(el, hints)) continue;
-      if (setNativeValue(el, value)) {
-        used.add(el);
-        filled.push(label);
-        learned[label] = value;
-        return;
-      }
-    }
-  };
-
-  tryFill(["email", "e-mail"], email, "email");
-  tryFill(["tel", "phone", "mobile"], phone, "phone");
-  tryFill(["linkedin", "linked-in", "profile url", "profileurl"], linkedin, "linkedin");
-  tryFill(["first name", "firstname", "given-name", "given_name"], first, "firstName");
-  tryFill(["last name", "lastname", "family-name", "surname"], last, "lastName");
-  tryFill(["full name", "fullname", "applicant", "candidate name", "your name"], name, "name");
-  tryFill(
-    [
-      "street address",
-      "address line 1",
-      "address1",
-      "address_1",
-      "addr1",
-      "mailing address",
-      "home address",
-      "street",
-      "address-line1"
-    ],
-    address,
-    "address"
-  );
-  tryFill(
-    ["address line 2", "address2", "addr2", "address-line2", "apt", "suite", "unit"],
-    extras["address line 2"] || extras.address2 || "",
-    "address2"
-  );
-  tryFill(["city", "address locality", "locality", "town"], city || "", "city");
-  tryFill(["state", "province", "region", "address region"], state, "state");
-  tryFill(
-    ["zip", "postal", "postcode", "postal code", "postal-code"],
-    zip || extras.zip || extras.postal || "",
-    "zip"
-  );
-  tryFill(["country", "nation"], country || extras.country || "", "country");
-  tryFill(["current location", "location"], location, "location");
-
-  tryFill(["gender", "sex", "gender identity"], gender, "gender");
-  tryFill(["ethnicity", "race", "race/ethnicity", "racial"], ethnicity, "ethnicity");
-  tryFill(["hispanic", "latino", "latina", "latinx"], hispanicLatino, "hispanicLatino");
-  tryFill(["disability", "disabled", "disability status"], disability, "disability");
-  tryFill(["veteran", "protected veteran", "military status", "veteran status"], veteran, "veteran");
-  tryFill(["citizenship", "citizen status", "nationality"], citizenship, "citizenship");
-  tryFill(
-    [
-      "authorized to work",
-      "work authorization",
-      "legally authorized",
-      "eligible to work",
-      "work authorized",
-      "right to work"
-    ],
-    workAuthorized,
-    "workAuthorized"
-  );
-  tryFill(
-    [
-      "sponsorship",
-      "visa sponsorship",
-      "require sponsorship",
-      "need sponsorship",
-      "immigration sponsorship",
-      "future sponsorship"
-    ],
-    sponsorship,
-    "sponsorship"
-  );
-
-  for (const [key, value] of Object.entries(extras)) {
-    const k = String(key || "").trim().toLowerCase();
-    const v = String(value || "").trim();
-    if (!k || !v) continue;
-    if (
-      [
-        "address",
-        "city",
-        "state",
-        "zip",
-        "postal",
-        "country",
-        "email",
-        "phone",
-        "name",
-        "gender",
-        "ethnicity",
-        "disability",
-        "veteran",
-        "citizenship"
-      ].includes(k)
-    ) {
-      continue;
-    }
-    tryFill([k, ...k.split(/\s+/)], v, `extra:${k}`);
-  }
-
-  for (const el of controls) {
-    const type = (el.getAttribute("type") || "text").toLowerCase();
-    if (["hidden", "submit", "button", "checkbox", "radio", "file", "password"].includes(type)) continue;
-    if ((el.tagName || "").toLowerCase() === "select") continue;
-    const val = String(el.value || "").trim();
-    if (!val || val.length < 2 || val.length > 120) continue;
-    const blob = fieldBlob(el);
-    if (!blob || blob.length < 2) continue;
-    if (Object.values(learned).some((v) => String(v) === val)) continue;
-    if ([name, email, phone, linkedin, address, city, state, location, zip].includes(val)) continue;
-    const key = blob
-      .replace(/[^a-z0-9 ]+/g, " ")
-      .trim()
-      .split(/\s+/)
-      .slice(0, 4)
-      .join(" ");
-    if (key && !learned[key] && !extras[key]) {
-      learned[`discovered:${key}`] = val;
-    }
-  }
-
-  return { filled: filled.length, fields: filled, learned };
-}
-
-async function autofillActiveTab() {
-  const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
-  const tab =
-    tabs.find((t) => t.active && t.id && t.url && !t.url.startsWith("chrome-extension://")) ||
-    (await chrome.tabs.query({ active: true })).find(
-      (t) => t.id && t.url && !/^chrome(-extension)?:\/\//.test(t.url || "")
-    );
-
-  if (!tab?.id) throw new Error("No active application tab. Focus the job form tab first.");
-  if (
-    tab.url &&
-    (tab.url.startsWith("chrome://") ||
-      tab.url.startsWith("chrome-extension://") ||
-      tab.url.startsWith("edge://"))
-  ) {
-    throw new Error("Cannot autofill Chrome system pages. Focus the job application tab.");
-  }
-
-  const contact = await getAutofillContact();
-  if (!contact.name && !contact.email && !contact.phone && !contact.address) {
-    throw new Error("Active person has no contact fields. Edit person and save name/email/phone/address.");
-  }
-
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    args: [contact],
-    func: autofillPageFunc
-  });
-  const result = results?.[0]?.result || { filled: 0, fields: [], learned: {} };
-
-  try {
-    const learned = result.learned || {};
-    const toSave = {};
-    for (const [k, v] of Object.entries(learned)) {
-      const key = String(k || "")
-        .replace(/^extra:/, "")
-        .replace(/^discovered:/, "")
-        .trim();
-      const val = String(v || "").trim();
-      if (!key || !val) continue;
-      if (["email", "phone", "name", "firstname", "lastname", "linkedin"].includes(key)) continue;
-      toSave[key] = val;
-    }
-    if (Object.keys(toSave).length) {
-      await mergeAutofillExtras(toSave);
-    }
-  } catch {
-    // learning is best-effort
-  }
-
-  return result;
+async function autofillActiveTab(tabId = null) {
+  return startAutofillOnTab(tabId);
 }
 
 /** Ensure the CSV poll alarm matches current settings. */
@@ -4706,8 +4424,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const url = String(message.url || "").trim();
         if (!url) throw new Error("Missing URL.");
-        await chrome.tabs.create({ url, active: true });
-        safeSendResponse(sendResponse, { ok: true });
+        const tab = await chrome.tabs.create({ url, active: true });
+        safeSendResponse(sendResponse, { ok: true, tabId: tab?.id || null });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }
@@ -4733,10 +4451,106 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "autofill_active_tab") {
     (async () => {
       try {
-        const result = await autofillActiveTab();
-        safeSendResponse(sendResponse, { ok: true, ...result });
+        const result = await autofillActiveTab(message.tabId || null);
+        const filled = Number(result.filled || result.filledCount || 0);
+        const uploaded = Number(result.uploaded || result.uploadedCount || 0);
+        const parts = [`Autofilled ${filled} field(s)`];
+        if (uploaded) parts.push(`uploaded ${uploaded} file(s)`);
+        if (result.bankHits) parts.push(`${result.bankHits} from Q&A bank`);
+        await setStatus(`${parts.join(", ")} on the current page.`);
+        safeSendResponse(sendResponse, { ok: true, filled, ...result });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_multi_step") {
+    (async () => {
+      try {
+        const result = await startMultiStepApplyOnTab(message.tabId || null);
+        const filled = Number(result.filled || result.filledCount || 0);
+        const msg =
+          result.detail ||
+          `Apply assist filled ${filled} field(s) across ${result.steps || 1} step(s).`;
+        await setStatus(msg);
+        safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "apply_job_url") {
+    (async () => {
+      try {
+        const result = await openJobAndApply(message.url, { multiStep: message.multiStep !== false });
+        const filled = Number(result.filled || result.filledCount || 0);
+        const msg =
+          result.detail ||
+          `Apply assist: filled ${filled} field(s)` +
+          (result.uploaded ? `, uploaded ${result.uploaded} file(s)` : "") +
+          `. Review and submit.`;
+        await setStatus(msg);
+        safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "profile_learn_capture") {
+    (async () => {
+      try {
+        const result = await handleProfileLearnCapture(message);
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "qa_learn_capture") {
+    (async () => {
+      try {
+        const result = await handleQaLearnCapture(message);
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "easy_apply_answer_questions") {
+    (async () => {
+      try {
+        const answers = await answerQuestionsFromBank(message.questions || [], {
+          choice: false,
+          site: message.site || ""
+        });
+        safeSendResponse(sendResponse, { ok: true, answers });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, answers: [], error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "easy_apply_choice_answers") {
+    (async () => {
+      try {
+        const answers = await answerQuestionsFromBank(message.questions || [], {
+          choice: true,
+          site: message.site || ""
+        });
+        safeSendResponse(sendResponse, { ok: true, answers });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, answers: [], error: String(err?.message || err) });
       }
     })();
     return true;
@@ -5096,7 +4910,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.commands.onCommand.addListener((command) => {
   if (command === "autofill-page") {
     autofillActiveTab()
-      .then((r) => setStatus(`Autofilled ${r.filled || 0} field(s).`))
+      .then((r) => setStatus(`Autofilled ${r.filled || r.filledCount || 0} field(s).`))
       .catch((err) => setStatus(`Autofill failed: ${String(err?.message || err)}`));
+  }
+  if (command === "auto-apply-page") {
+    startMultiStepApplyOnTab()
+      .then((r) =>
+        setStatus(r.detail || `Apply assist filled ${r.filled || 0} field(s). Review and submit.`)
+      )
+      .catch((err) => setStatus(`Apply assist failed: ${String(err?.message || err)}`));
   }
 });

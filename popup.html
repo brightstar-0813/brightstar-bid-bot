@@ -191,7 +191,7 @@
                 rows="3"
               ></textarea>
             </label>
-            <p class="hint">Extras are matched by field label/name on application forms and reused on the next autofill.</p>
+            <p class="hint">Extras match leftover questions by label. Answers you type on forms are remembered for the next apply (custom persons only).</p>
           </div>
 
           <div class="subblock">
@@ -418,7 +418,7 @@
       <section class="section">
         <header class="section-header">
           <p class="section-title">4 · Output &amp; apply</p>
-          <p class="section-sub">Where files land · autofill the open application tab</p>
+          <p class="section-sub">Where files land · autofill and Auto Apply on the job form</p>
         </header>
         <label class="field">
           <span>Output folder (under Downloads)</span>
@@ -426,8 +426,12 @@
         </label>
         <div class="row row-2">
           <button type="button" id="autofillPage" class="secondary">Autofill this page</button>
+          <button type="button" id="autoApplyPage">Auto Apply</button>
+        </div>
+        <div class="row row-2">
           <button type="button" id="reset" class="secondary">Reset jobs / Refresh</button>
         </div>
+        <p class="hint">Autofill fills the current step (Ctrl+Shift+Y). Auto Apply walks Next/Continue, uploads the last resume/cover PDFs, and stops before Submit (Ctrl+Shift+U).</p>
       </section>
 
       <!-- Google Sheet -->
