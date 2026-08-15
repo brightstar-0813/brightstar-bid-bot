@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-15.1";
+  const SCRIPT_BUILD = "2026-08-16.2";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -58,6 +58,8 @@
       "authorized to work",
       "legally authorized",
       "legally authorized to work",
+      "authorized to work in the country",
+      "country where the job is located",
       "work authorization",
       "right to work",
       "legally entitled to work"
@@ -1183,6 +1185,203 @@
     return false;
   }
 
+  function buttonChoiceText(el) {
+    return cleanLabelText(
+      el?.getAttribute?.("aria-label") || el?.textContent || el?.value || ""
+    );
+  }
+
+  function isYesNoChoiceButton(el) {
+    if (!el || el.disabled) return false;
+    const t = normalize(buttonChoiceText(el));
+    return t === "yes" || t === "no" || t === "y" || t === "n";
+  }
+
+  function isChoiceButtonSelected(el) {
+    if (!el) return false;
+    const pressed = el.getAttribute("aria-pressed");
+    const checked = el.getAttribute("aria-checked");
+    if (pressed === "true" || checked === "true") return true;
+    if (el.getAttribute("data-state") === "on" || el.getAttribute("data-selected") === "true") {
+      return true;
+    }
+    return /\b(selected|active|checked|pressed)\b/i.test(el.className || "");
+  }
+
+  function questionTextNearNode(el) {
+    let node = el;
+    for (let i = 0; i < 6 && node; i += 1) {
+      const raw = cleanLabelText(node.innerText || node.textContent || "");
+      const stripped = raw.replace(/\b(yes|no)\b/gi, " ").replace(/\s+/g, " ").trim();
+      if (stripped.length >= 24 && /[?]|\b(authorized|sponsorship|eligible|require|confirm|available)\b/i.test(stripped)) {
+        return stripped.slice(0, 1000);
+      }
+      node = node.parentElement;
+    }
+    const prev = el.previousElementSibling || el.parentElement?.previousElementSibling;
+    if (prev) {
+      const t = cleanLabelText(prev.textContent);
+      if (t.length >= 12) return t.slice(0, 1000);
+    }
+    return "";
+  }
+
+  function collectYesNoButtonGroups() {
+    const candidates = [
+      ...document.querySelectorAll('button, [role="button"], [role="radio"], [aria-pressed]')
+    ].filter(isYesNoChoiceButton);
+    const used = new WeakSet();
+    const groups = [];
+
+    for (const start of candidates) {
+      if (used.has(start)) continue;
+      let root = start.parentElement;
+      let buttons = [];
+      for (let i = 0; i < 5 && root; i += 1) {
+        const found = [
+          ...root.querySelectorAll('button, [role="button"], [role="radio"], [aria-pressed]')
+        ].filter(isYesNoChoiceButton);
+        const hasYes = found.some((b) => /^(yes|y)$/i.test(normalize(buttonChoiceText(b))));
+        const hasNo = found.some((b) => /^(no|n)$/i.test(normalize(buttonChoiceText(b))));
+        if (hasYes && hasNo && found.length >= 2 && found.length <= 6) {
+          buttons = found;
+          break;
+        }
+        root = root.parentElement;
+      }
+      if (!buttons.length) continue;
+      buttons.forEach((b) => used.add(b));
+      groups.push({
+        root,
+        buttons,
+        question: questionTextNearNode(root || start),
+        selected: buttons.some(isChoiceButtonSelected)
+      });
+    }
+    return groups;
+  }
+
+  function matchYesNoGroupKey(question) {
+    const primary = normalize(question);
+    if (!primary) return null;
+    if (/\b(require|need)\b/.test(primary) && /\bsponsorship\b/.test(primary)) {
+      return "needsSponsorship";
+    }
+    if (/\b(eligible|legally authorized|authorized)\b/.test(primary) && /\bwork\b/.test(primary)) {
+      return "workAuthorized";
+    }
+    if (/\brelocate\b/.test(primary)) return "willingToRelocate";
+    if (/\bover 18\b|\bat least 18\b/.test(primary)) return "over18";
+    return matchApplicantKey(primary, primary);
+  }
+
+  function clickYesNoValue(group, value) {
+    const wantYes = YES_VALUES.has(normalize(value));
+    const target = group.buttons.find((b) => {
+      const t = normalize(buttonChoiceText(b));
+      return wantYes ? t === "yes" || t === "y" : t === "no" || t === "n";
+    });
+    if (!target) return false;
+    target.click();
+    return true;
+  }
+
+  function fillYesNoButtonGroups(applicantInfo = {}) {
+    const filled = [];
+    for (const group of collectYesNoButtonGroups()) {
+      if (group.selected) continue;
+      const key = matchYesNoGroupKey(group.question);
+      if (!key) continue;
+      const value = resolveApplicantValue(applicantInfo, key);
+      if (!value) continue;
+      if (clickYesNoValue(group, value)) {
+        filled.push({ key, label: group.question.slice(0, 80) });
+      }
+    }
+    return filled;
+  }
+
+  function isRichTextEditor(el) {
+    if (!el) return false;
+    if (el.getAttribute("contenteditable") === "false") return false;
+    if (el.closest("nav, header, [role='toolbar'], .ql-toolbar, [class*='toolbar']")) return false;
+    if (el.getAttribute("contenteditable") === "true") return true;
+    if (el.classList?.contains("ProseMirror") || el.classList?.contains("ql-editor")) return true;
+    if (el.getAttribute("role") === "textbox" && el.isContentEditable) return true;
+    return false;
+  }
+
+  function collectRichTextEditors() {
+    const nodes = [
+      ...document.querySelectorAll(
+        '[contenteditable="true"], .ProseMirror, .ql-editor, [role="textbox"][contenteditable="true"]'
+      )
+    ];
+    return nodes.filter((el) => {
+      if (!isRichTextEditor(el)) return false;
+      const nested = el.parentElement?.closest("[contenteditable='true']");
+      if (nested && nested !== el) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 80 || rect.height < 36) return false;
+      return true;
+    });
+  }
+
+  function isRichTextEmpty(el) {
+    if (!el) return true;
+    if (el.classList?.contains("is-editor-empty") || el.classList?.contains("ProseMirror-empty")) {
+      return true;
+    }
+    const t = cleanLabelText(el.innerText || el.textContent || "");
+    if (!t) return true;
+    const ph = cleanLabelText(el.getAttribute("data-placeholder") || el.getAttribute("aria-placeholder") || "");
+    if (ph && normalize(t) === normalize(ph)) return true;
+    return t.length < 2;
+  }
+
+  function fillContentEditable(el, value) {
+    const text = String(value || "").trim();
+    if (!el || !text) return false;
+    try {
+      el.focus();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      const ok = document.execCommand("insertText", false, text);
+      if (!ok) el.textContent = text;
+    } catch {
+      el.textContent = text;
+    }
+    try {
+      el.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+          data: text
+        })
+      );
+    } catch {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      el.blur();
+    } catch {
+      /* ignore */
+    }
+    const now = cleanLabelText(el.innerText || el.textContent || "");
+    return now.length >= Math.min(8, text.length) || now.includes(text.slice(0, 12));
+  }
+
   async function fillControl(el, value, key = null) {
     if (value == null || String(value).trim() === "") return false;
     if (el.disabled || el.readOnly) return false;
@@ -1224,6 +1423,23 @@
       return true;
     }
 
+    if (isRichTextEditor(el) || el.isContentEditable) {
+      return fillContentEditable(el, value);
+    }
+
+    if (
+      tag === "button" ||
+      el.getAttribute("role") === "button" ||
+      el.getAttribute("role") === "radio"
+    ) {
+      const t = buttonChoiceText(el);
+      if (optionMatches(t, value) || (isYesNoValue(value) && optionMatches(t, value))) {
+        el.click();
+        return true;
+      }
+      return false;
+    }
+
     // Non-input combobox buttons / divs / react-select controls
     if (looksLikeCombobox(el) || isReactSelectInput(el) || el.getAttribute("role") === "combobox") {
       return fillCustomDropdown(el, value, key);
@@ -1245,10 +1461,18 @@
   }
 
   function classifyFileInput(el) {
-    const label = labelTextForControl(el);
-    const name = normalize(
-      [el.getAttribute("name"), el.getAttribute("id"), el.getAttribute("accept"), label].join(" ")
+    const nearby = cleanLabelText(
+      [
+        labelTextForControl(el),
+        el.getAttribute("name"),
+        el.getAttribute("id"),
+        el.getAttribute("accept"),
+        el.closest("div, section, label, form")?.innerText
+      ]
+        .filter(Boolean)
+        .join(" ")
     );
+    const name = normalize(nearby);
     if (/cover\s*letter|covering\s*letter|coverletter/.test(name)) return "coverLetter";
     if (/\b(resume|cv|curriculum|vitae)\b/.test(name)) return "resume";
     if (/\bcover\b/.test(name) && !/\b(resume|cv)\b/.test(name)) return "coverLetter";
@@ -1279,7 +1503,56 @@
     });
   }
 
-  function uploadApplicationFiles(uploadFiles = {}) {
+  function looksLikeUploadDropzone(el) {
+    const t = normalize(el.innerText || el.textContent || "");
+    if (!t || t.length > 500) return false;
+    return /\b(drag|drop file|drop your|browse|upload (a |your )?(resume|cv|cover)|include your resume|attach (a |your )?(resume|cv|file))\b/.test(
+      t
+    );
+  }
+
+  function findUploadDropzones() {
+    return [...document.querySelectorAll("div, section, label, aside, form")]
+      .filter(looksLikeUploadDropzone)
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 80 && rect.height > 24;
+      })
+      .slice(0, 10);
+  }
+
+  function dispatchFileDrop(target, file) {
+    if (!target || !file) return false;
+    const dt = new DataTransfer();
+    try {
+      dt.items.add(file);
+    } catch {
+      return false;
+    }
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      let event;
+      try {
+        event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+      } catch {
+        event = new Event(type, { bubbles: true, cancelable: true });
+      }
+      try {
+        Object.defineProperty(event, "dataTransfer", { value: dt, configurable: true });
+      } catch {
+        /* some browsers freeze dataTransfer */
+      }
+      target.dispatchEvent(event);
+    }
+    return true;
+  }
+
+  async function revealFileDropzones() {
+    if (findUploadDropzones().length && !collectFileInputs().length) {
+      await sleep(500);
+    }
+  }
+
+  async function uploadApplicationFiles(uploadFiles = {}) {
     const uploaded = [];
     const skipped = [];
     const resumeDoc = uploadFiles.resume;
@@ -1300,11 +1573,9 @@
       return { uploadedCount: 0, uploaded, skipped: [{ reason: "no-docs" }] };
     }
 
-    const inputs = collectFileInputs();
-    if (!inputs.length) {
-      return { uploadedCount: 0, uploaded, skipped: [{ reason: "no-file-inputs" }] };
-    }
+    await revealFileDropzones();
 
+    const inputs = collectFileInputs();
     const used = new WeakSet();
 
     for (const input of inputs) {
@@ -1321,6 +1592,7 @@
       const ok = setFileOnInput(input, file);
       if (ok) {
         used.add(input);
+        dispatchFileDrop(input.closest("div, section, label, form") || input.parentElement, file);
         uploaded.push({
           kind,
           fileName: file.name,
@@ -1333,6 +1605,34 @@
           label: labelTextForControl(input)
         });
       }
+    }
+
+    if (!uploaded.length) {
+      for (const zone of findUploadDropzones()) {
+        const kind = /cover/.test(normalize(zone.innerText || "")) ? "coverLetter" : "resume";
+        const file = kind === "coverLetter" && coverFile ? coverFile : resumeFile;
+        if (!file) continue;
+        const zoneText = zone.innerText || "";
+        if (/\.pdf\b/i.test(zoneText) && /remove|replace|uploaded|attached/i.test(zoneText)) {
+          continue;
+        }
+        const input = zone.querySelector('input[type="file"]');
+        if (input && setFileOnInput(input, file)) {
+          uploaded.push({ kind, fileName: file.name, label: cleanLabelText(zoneText).slice(0, 80) });
+          continue;
+        }
+        dispatchFileDrop(zone, file);
+        uploaded.push({
+          kind,
+          fileName: file.name,
+          label: cleanLabelText(zoneText).slice(0, 80),
+          via: "drop"
+        });
+      }
+    }
+
+    if (!inputs.length && !uploaded.length) {
+      skipped.push({ reason: "no-file-inputs" });
     }
 
     return { uploadedCount: uploaded.length, uploaded, skipped };
@@ -1487,6 +1787,30 @@
       });
     }
 
+    for (const el of collectRichTextEditors()) {
+      if (questions.length >= 25) break;
+      if (!isRichTextEmpty(el)) continue;
+      if (el.getAttribute("data-resume-bot-qid")) continue;
+      const near = questionTextNearNode(el);
+      const fromAi = questionTextForAi(el);
+      const questionLabel = (near && near.length >= (fromAi || "").length ? near : fromAi) || near || fromAi;
+      if (!questionLabel || shouldSkipAiField(el, questionLabel)) continue;
+      if (matchApplicantKeyFromControl(el) && SKIP_AI_KNOWN_KEYS.has(matchApplicantKeyFromControl(el))) {
+        continue;
+      }
+      const labelForAi = questionLabel.slice(0, 1000);
+      const id = `rbq_${questions.length}_${Math.abs(
+        Array.from(labelForAi).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
+      )}`;
+      el.setAttribute("data-resume-bot-qid", id);
+      questions.push({
+        id,
+        label: labelForAi,
+        multiline: true,
+        fieldType: "textarea"
+      });
+    }
+
     return questions;
   }
 
@@ -1567,6 +1891,27 @@
               ? "radio"
               : "select";
       out.push({ id, label: label.slice(0, 1000), options, fieldType });
+    }
+
+    for (const group of collectYesNoButtonGroups()) {
+      if (out.length >= 40) break;
+      if (group.selected) continue;
+      const label = group.question;
+      if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
+      const labelNorm = normalize(label);
+      if (!labelNorm || labelNorm.length < 6) continue;
+      const id = `rbc_${out.length}_${Math.abs(
+        Array.from(labelNorm).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
+      )}`;
+      for (const btn of group.buttons) {
+        btn.setAttribute("data-resume-bot-choice-qid", id);
+      }
+      out.push({
+        id,
+        label: label.slice(0, 1000),
+        options: ["Yes", "No"],
+        fieldType: "radio"
+      });
     }
 
     const seenLabels = new Set(out.map((q) => normalize(q.label)));
@@ -1930,6 +2275,10 @@
         filled.push({ key, label: questionLabelForControl(el) });
       }
     }
+
+    const yesNoFilled = fillYesNoButtonGroups(applicantInfo);
+    for (const row of yesNoFilled) filled.push(row);
+
     return { filledCount: filled.length, filled };
   }
 
@@ -2277,7 +2626,7 @@
     };
     const credResult = fillLoginCredentials(creds);
 
-    const uploadResult = uploadApplicationFiles(uploadFiles);
+    const uploadResult = await uploadApplicationFiles(uploadFiles);
     const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
     const unmatchedChoiceQuestions = collectUnmatchedChoiceQuestions();
 

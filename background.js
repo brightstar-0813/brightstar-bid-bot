@@ -4515,6 +4515,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (uploaded) parts.push(`uploaded ${uploaded} file(s)`);
         if (result.bankHits) parts.push(`${result.bankHits} from Q&A bank`);
         if (result.aiHits) parts.push(`${result.aiHits} from OpenAI`);
+        const skipped = Array.isArray(result.uploadSkipped) ? result.uploadSkipped : [];
+        if (!uploaded && skipped.some((s) => s?.reason === "no-docs")) {
+          parts.push("no resume PDF in cache — generate this job first");
+        }
         await setStatus(`${parts.join(", ")} on the current page.`);
         safeSendResponse(sendResponse, { ok: true, filled, ...result });
       } catch (err) {
