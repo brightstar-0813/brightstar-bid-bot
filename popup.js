@@ -280,7 +280,43 @@ if (masterResumeFileEl) {
 }
 
 function setStatus(message) {
-  statusEl.textContent = message;
+  const text = String(message || "").trim();
+  statusEl.textContent = text || "Ready";
+  statusEl.classList.remove("is-idle", "is-ok", "is-warn", "is-err");
+  if (!text) {
+    statusEl.classList.add("is-idle");
+    return;
+  }
+  const lower = text.toLowerCase();
+  if (/\b(fail|failed|error|could not|required|denied)\b/.test(lower)) {
+    statusEl.classList.add("is-err");
+  } else if (/\b(skip|skipped|pause|paused|unchanged|idle)\b/.test(lower)) {
+    statusEl.classList.add("is-warn");
+  } else if (/\b(saved|done|complete|loaded|started|sent|ok|ready|pinned|refreshed)\b/.test(lower)) {
+    statusEl.classList.add("is-ok");
+  }
+}
+
+function syncActivePersonChip() {
+  const chip = document.getElementById("activePersonChip");
+  if (!chip) return;
+  const selected = profilesCache.find((p) => p.id === profileSelectEl.value);
+  if (!selected) {
+    chip.hidden = true;
+    chip.textContent = "";
+    return;
+  }
+  chip.hidden = false;
+  chip.textContent = selected.label;
+  chip.classList.toggle("is-builtin", Boolean(selected.builtin));
+  chip.title = selected.builtin ? `${selected.label} (built-in preset)` : selected.label;
+}
+
+function syncBatchPill() {
+  const el = document.getElementById("batchStatePill");
+  if (!el) return;
+  el.textContent = batchState || "idle";
+  el.dataset.state = batchState || "idle";
 }
 
 function setPersonSaveStatus(message, { ok = true } = {}) {
@@ -376,6 +412,7 @@ function populateProfileSelect(selectedId) {
   const validIds = new Set(profilesCache.map((p) => p.id));
   profileSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_PROFILE_ID;
   syncDeleteButton();
+  syncActivePersonChip();
 }
 
 function extrasToText(extras) {
@@ -597,8 +634,10 @@ async function loadSettings() {
 }
 
 function updateCsvSummaryFromQueue() {
+  if (!csvSummaryEl) return;
   if (!allUsJobsCache.length && !queueCache.length) {
-    csvSummaryEl.textContent = "No CSV loaded.";
+    csvSummaryEl.classList.add("is-idle");
+    csvSummaryEl.innerHTML = `<span class="summary-idle">No CSV loaded</span>`;
     return;
   }
   const liTotal = allUsJobsCache.filter((j) => j.isLinkedIn || isLinkedInJob(j)).length;
@@ -609,7 +648,18 @@ function updateCsvSummaryFromQueue() {
   const skipped = queueCache.filter((j) => j.status === "skipped").length;
   const filterLabel =
     channelFilter === "linkedin" ? "LI only" : channelFilter === "all" ? "All" : "General only";
-  csvSummaryEl.textContent = `${queueCache.length} in queue (${filterLabel}) · US total ${allUsJobsCache.length} (General ${genTotal} / LI ${liTotal}) · ${done} done · ${pending} pending · ${skipped} skipped · ${errors} error · batch: ${batchState}`;
+  csvSummaryEl.classList.remove("is-idle");
+  csvSummaryEl.innerHTML = `
+    <div class="stat-grid">
+      <span class="stat"><em>${queueCache.length}</em> queue</span>
+      <span class="stat"><em>${done}</em> done</span>
+      <span class="stat"><em>${pending}</em> pending</span>
+      <span class="stat"><em>${skipped}</em> skipped</span>
+      <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
+    </div>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · General ${genTotal} · LI ${liTotal} · batch ${batchState}</p>
+  `;
+  syncBatchPill();
 }
 
 function syncChannelFilterButtons() {
@@ -675,7 +725,13 @@ function badgeClass(status) {
 
 function renderQueue() {
   queueListEl.innerHTML = "";
-  if (!queueCache.length) return;
+  if (!queueCache.length) {
+    const empty = document.createElement("div");
+    empty.className = "queue-empty";
+    empty.innerHTML = "<p>Queue is empty</p><span>Upload a jobs CSV to start a batch</span>";
+    queueListEl.appendChild(empty);
+    return;
+  }
 
   for (const job of queueCache) {
     const item = document.createElement("div");
@@ -734,6 +790,7 @@ function renderQueue() {
 
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
+    applyBtn.className = "primary";
     applyBtn.textContent = "Apply";
     applyBtn.addEventListener("click", () => applyAssist(job));
 
@@ -744,6 +801,7 @@ function renderQueue() {
     if (job.status === "error" || job.status === "failed") {
       const retryBtn = document.createElement("button");
       retryBtn.type = "button";
+      retryBtn.className = "secondary";
       retryBtn.textContent = "Retry";
       retryBtn.title = "Reset this job and run it again";
       retryBtn.addEventListener("click", () => retryOneJob(job));
@@ -1484,6 +1542,8 @@ function dockOutOfPopup() {
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
   runOneOffBtn.disabled = busy;
+  document.body.classList.toggle("is-busy", Boolean(busy));
+  syncBatchPill();
 }
 
 async function runOneOff() {

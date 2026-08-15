@@ -75,7 +75,7 @@
     }
   },
   "side_panel": {
-    "default_path": "popup.html"
+    "default_path": "popup.html?ctx=panel"
   },
   "commands": {
     "_execute_action": {
