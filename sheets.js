@@ -16,9 +16,18 @@ export function formatApplicationDate(date = new Date()) {
   return `${month}/${day}/${year}`;
 }
 
-/** Status cell after Apply: keeps Ready vs Applied distinguishable and records the apply day. */
+/** Local apply timestamp for Status, e.g. 8/16/2026 2:32 AM */
+export function formatApplicationDateTime(date = new Date()) {
+  const hours24 = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const ampm = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = hours24 % 12 || 12;
+  return `${formatApplicationDate(date)} ${hours12}:${minutes} ${ampm}`;
+}
+
+/** Status cell after Apply: Applied plus local date and time. */
 export function formatAppliedStatus(date = new Date()) {
-  return `Applied ${formatApplicationDate(date)}`;
+  return `Applied ${formatApplicationDateTime(date)}`;
 }
 
 /**
@@ -151,7 +160,7 @@ export async function appendJobToSpreadsheet({
 }
 
 /**
- * Set Status to "Applied M/D/YYYY" on the existing row (matched by job link).
+ * Set Status to "Applied M/D/YYYY h:mm AM/PM" on the existing row (matched by job link).
  * Column B stays the resume-build date. If the job is not on the sheet yet, appends a row.
  */
 export async function markJobAppliedOnSpreadsheet({
@@ -168,12 +177,12 @@ export async function markJobAppliedOnSpreadsheet({
     throw new Error("Invalid Google Spreadsheet link.");
   }
 
-  const appliedDate = formatApplicationDate();
+  const appliedDate = formatApplicationDateTime();
   const payload = {
     action: "markApplied",
     spreadsheetId,
     jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
-    applicationDate: appliedDate,
+    applicationDate: formatApplicationDate(),
     jobTitle: jobTitle || "",
     companyName: companyName || "",
     jobLink: jdLink || "",

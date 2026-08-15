@@ -15,7 +15,7 @@
  *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
  *
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
- * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY" on that row.
+ * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
  */
 function doPost(e) {
   try {

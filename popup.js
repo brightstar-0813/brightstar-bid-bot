@@ -77,7 +77,7 @@ const APPS_SCRIPT_SOURCE = `/**
  *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
  *
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
- * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY" on that row.
+ * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
  */
 function doPost(e) {
   try {
@@ -1040,7 +1040,7 @@ function renderQueue() {
     applyBtn.textContent = job.applied ? "Applied" : "Apply";
     applyBtn.title = job.applied
       ? `Marked Applied${job.appliedDate ? " " + job.appliedDate : ""} on the Google Sheet. Click to apply again.`
-      : "Open the job, autofill, and mark Applied (with today's date) on the Google Sheet";
+      : "Open the job, autofill, and mark Applied (date and time) on the Google Sheet";
     applyBtn.addEventListener("click", () => applyAssist(job));
 
     actions.appendChild(openBtn);
