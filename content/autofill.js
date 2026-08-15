@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.6";
+  const SCRIPT_BUILD = "2026-08-16.7";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1003,6 +1003,26 @@
     ) {
       return true;
     }
+    if (el.closest("[contenteditable='true'], .ProseMirror, .ql-editor")) return true;
+    return isBesideRichTextEditor(el);
+  }
+
+  function isBesideRichTextEditor(el) {
+    let node = el;
+    for (let i = 0; i < 5 && node; i += 1) {
+      for (const sib of [node.nextElementSibling, node.previousElementSibling]) {
+        if (!sib) continue;
+        if (sib.matches?.("[contenteditable='true'], .ProseMirror, .ql-editor")) return true;
+        if (
+          sib.querySelector?.(
+            ":scope > [contenteditable='true'], :scope > .ProseMirror, :scope > .ql-editor"
+          )
+        ) {
+          return true;
+        }
+      }
+      node = node.parentElement;
+    }
     return false;
   }
 
@@ -1154,6 +1174,20 @@
 
     const input = openReactSelect(el);
     options = await waitForOptions(reactSelect ? 10 : 6, reactSelect ? 100 : 80);
+    if (
+      isBesideRichTextEditor(el) ||
+      (options.length > 0 &&
+        options.every((n) => EDITOR_STYLE_OPTION_RE.test(cleanLabelText(n.textContent))))
+    ) {
+      try {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
+        );
+      } catch {
+        /* ignore */
+      }
+      return false;
+    }
     match = options.find((n) => optionMatchesAny(n.textContent, candidates));
     if (match) {
       const ok = clickOptionNode(match);
@@ -1406,8 +1440,12 @@
     if (styles >= 2) return "";
     const yesNo = labels.filter((l) => YES_NO_CHIP_RE.test(l)).length;
     const rates = labels.filter((l) => RATE_CHIP_RE.test(l)).length;
+    const starts = labels.filter((l) =>
+      /^(right away|two weeks after offer|after a specific date)$/i.test(l)
+    ).length;
     if (yesNo === 2 && buttons.length <= 3) return "yesno";
     if (rates >= 2 && rates >= buttons.length - 1 && buttons.length <= 8) return "rate";
+    if (starts >= 2 && starts >= buttons.length - 1 && buttons.length <= 5) return "start";
     if (buttons.length >= 2 && buttons.length <= 8 && yesNo < 2 && rates < 2) return "option";
     return "";
   }
@@ -1429,9 +1467,13 @@
       const labels = buttons.map((b) => radioOptionLabel(b));
       const yesNo = labels.filter((l) => YES_NO_CHIP_RE.test(l)).length;
       const rates = labels.filter((l) => RATE_CHIP_RE.test(l)).length;
+      const starts = labels.filter((l) =>
+        /^(right away|two weeks after offer|after a specific date)$/i.test(l)
+      ).length;
       let kind = "";
       if (yesNo === 2 && labels.length <= 3) kind = "yesno";
       else if (rates >= 2 && rates >= labels.length - 1) kind = "rate";
+      else if (starts >= 2 && starts >= labels.length - 1) kind = "start";
       else if (labels.length >= 2 && yesNo < 2 && rates < 2) kind = "option";
       if (!kind) continue;
       const root =
@@ -1594,15 +1636,13 @@
     const want = normalize(applicantInfo?.earliestStartDate || applicantInfo?.availableToStart || "");
     const opts = labels.filter(Boolean);
     const find = (re) => opts.find((o) => re.test(normalize(o)));
-    if (/specific date/.test(want)) return find(/specific date/) || "";
-    if (/two week|2 week|14 day/.test(want)) return find(/two week|2 week/) || "";
-    if (/right away|immediate|asap|now|today/.test(want) || !want) {
-      return find(/right away|immediate|asap/) || opts[0] || "";
+    if (/two week|2 week|14 day/.test(want)) {
+      return find(/two week|2 week/) || find(/right away|immediate|asap/) || "";
     }
-    for (const o of opts) {
-      if (optionMatches(o, want)) return o;
+    if (/specific date/.test(want) && !/right away|immediate|asap|now|today/.test(want)) {
+      return find(/specific date/) || find(/right away|immediate|asap/) || "";
     }
-    return find(/right away/) || "";
+    return find(/right away|immediate|asap/) || "";
   }
 
   function visibleChipTarget(el) {
@@ -1675,7 +1715,9 @@
     if (!want || !group?.buttons?.length) return false;
     const labels = group.buttons.map((b, i) => group.labels?.[i] || chipChoiceText(b));
     const wantNum = parseDollarAmount(want);
-    let idx = labels.findIndex((label) => optionMatches(label, want));
+    const skipSpecificDate = !/specific date/.test(normalize(want));
+    const usable = (label) => !(skipSpecificDate && /specific date/.test(normalize(label)));
+    let idx = labels.findIndex((label) => usable(label) && optionMatches(label, want));
     if (idx < 0 && Number.isFinite(wantNum)) {
       idx = labels.findIndex((label) => parseDollarAmount(label) === wantNum);
     }
@@ -1701,7 +1743,10 @@
       } else if (group.kind === "rate") {
         key = "salaryExpectation";
         value = pickRateOption(group.labels, applicantInfo, group.question);
-      } else if (/available to start|when can you start|when are you available/i.test(group.question)) {
+      } else if (
+        group.kind === "start" ||
+        /available to start|when can you start|when are you available/i.test(group.question)
+      ) {
         key = "earliestStartDate";
         value = pickStartOption(group.labels, applicantInfo);
       } else {
@@ -1797,6 +1842,7 @@
       sel.addRange(range);
       const ok = document.execCommand("insertText", false, text);
       if (!ok) el.textContent = text;
+      sel.collapseToEnd();
     } catch {
       el.textContent = text;
     }
@@ -1815,6 +1861,13 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
     try {
       el.blur();
+    } catch {
+      /* ignore */
+    }
+    try {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
+      );
     } catch {
       /* ignore */
     }
@@ -2342,6 +2395,7 @@
       if (group.selected) continue;
       if (group.buttons.some(isEditorChrome)) continue;
       if ((group.labels || []).some((l) => EDITOR_STYLE_OPTION_RE.test(l))) continue;
+      if (group.kind === "start") continue;
       const label = group.question;
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       const labelNorm = normalize(label);
