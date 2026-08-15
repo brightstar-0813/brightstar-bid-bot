@@ -170,6 +170,8 @@ function looksLikeJobTitle(value) {
 function isNoiseCompany(label) {
   const s = String(label || "").trim();
   if (s.length < 2 || s.length > 70) return true;
+  if (/^\{/.test(s) || /\bHYPERLINK\b/i.test(s) || /https?:\/\//i.test(s)) return true;
+  if (/linkedin\.com\/(company|in)\b/i.test(s)) return true;
   if (isJobMeta(s) || looksLikeJobTitle(s)) return true;
   if (
     /^(experience|education|skills|certifications?|summary|profile|technical|projects|awards|languages|contact|references|present|current)$/i.test(
@@ -196,7 +198,11 @@ function stripTitleFromCompany(value) {
 
 /** Keep the employer name only — drop titles, dates, location, Full-time/Contract. */
 export function cleanCompanyLabel(raw) {
-  let s = String(raw || "").replace(/\s+/g, " ").trim();
+  let s = String(raw || "")
+    .replace(/\{?\s*HYPERLINK\s+"[^"]*"\s*\}?/gi, " ")
+    .replace(/\{HYPERLINK[^}]*\}?/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!s) return "";
   const at = s.match(/\b(?:at|@)\s+(.+)$/i);
   if (at) s = at[1].trim();

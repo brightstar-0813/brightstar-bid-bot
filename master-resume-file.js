@@ -52,20 +52,33 @@ async function unzipFindFile(arrayBuffer, wantedName) {
   throw new Error(`Could not find ${wantedName} inside the DOCX.`);
 }
 
-function stripXmlToText(xml) {
-  return String(xml || "")
-    .replace(/<w:tab[^/]*\/>/gi, "\t")
-    .replace(/<\/w:p>/gi, "\n")
-    .replace(/<w:br[^/]*\/>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
+/** Drop Word field instructions (HYPERLINK, PAGEREF, TOC) so only visible text remains. */
+function stripWordFieldCodes(text) {
+  return String(text || "")
+    .replace(/\{?\s*HYPERLINK\s+"[^"]*"\s*\}?/gi, " ")
+    .replace(/\{HYPERLINK[^}\n]*\}?/gi, " ")
+    .replace(/^\s*\{HYPERLINK\s*$/gim, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function stripXmlToText(xml) {
+  return stripWordFieldCodes(
+    String(xml || "")
+      .replace(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/gi, "")
+      .replace(/<w:tab[^/]*\/>/gi, "\t")
+      .replace(/<\/w:p>/gi, "\n")
+      .replace(/<w:br[^/]*\/>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, " ")
+  );
 }
 
 async function extractDocxText(arrayBuffer) {
