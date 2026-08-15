@@ -1,4 +1,3 @@
-import { PROMPT as matthewDaleHoffmanPrompt } from "./prompts/matthew-dale-hoffman.js";
 import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import {
@@ -11,41 +10,6 @@ export const COVER_LETTER_PROFILE_ID = "cover-letter";
 
 /** Built-in prompts shipped as separate files under /prompts. */
 export const BUILTIN_PROFILES = [
-  {
-    id: "matthew-dale-hoffman",
-    label: "Matthew Dale Hoffman (Salesforce)",
-    promptTemplate: matthewDaleHoffmanPrompt,
-    templateId: "times-classic",
-    resumeFilePrefix: "Matthew_Resume",
-    builtin: true,
-    kind: "resume",
-    name: "Matthew Dale Hoffman",
-    email: "matthew.dale.hoffman0513@outlook.com",
-    phone: "+1 (254) 708-9742",
-    linkedin: "https://www.linkedin.com/in/hoffmantxstate/",
-    location: "Georgetown, Texas, United States",
-    address: "129 Cherry Ridge Rd",
-    zip: "78628",
-    gender: "",
-    ethnicity: "",
-    disability: "No, I do not have a disability",
-    veteran: "I am not a protected veteran",
-    citizenship: "US Citizen",
-    workAuthorized: "Yes",
-    sponsorship: "No",
-    hispanicLatino: "",
-    signatureTitle: "Senior Salesforce Engineer",
-    masterResume: "",
-    coverLetterPrompt: coverLetterPrompt,
-    autofillExtras: {},
-    // Repeat Accenture twice — two distinct roles in FIXED COMPANY HISTORY.
-    requiredExperience: [
-      "Accenture Federal Services",
-      "Hallmark Cards",
-      "TeleTech",
-      "Accenture Federal Services"
-    ]
-  },
   {
     id: "sandeep-mahankali",
     label: "Sandeep Mahankali (Salesforce)",
@@ -97,7 +61,7 @@ export const BUILTIN_PROFILES = [
 
 export { resolveExperienceRulesForPerson, normalizeRequiredExperienceInput, parseRequiredExperienceFromPrompt };
 
-export const DEFAULT_PROFILE_ID = "matthew-dale-hoffman";
+export const DEFAULT_PROFILE_ID = "sandeep-mahankali";
 
 /** @deprecated Use BUILTIN_PROFILES or getAllProfiles(). */
 export const PROFILES = BUILTIN_PROFILES;
@@ -142,10 +106,42 @@ export function applyPlaceholders(
     .replaceAll("{ADDRESS}", address);
 }
 
+const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman"]);
+const REMOVED_PERSON_NAME = /matthew\s+dale\s+hoffman/i;
+
+function isRemovedPerson(p) {
+  const id = String(p?.id || "");
+  const name = String(p?.name || p?.label || "");
+  return (
+    REMOVED_PERSON_IDS.has(id) ||
+    id.startsWith("matthew-dale-hoffman") ||
+    REMOVED_PERSON_NAME.test(name)
+  );
+}
+
+/** Drop retired built-in people (and saved copies) from this Chrome profile. */
+async function purgeRemovedPeopleFromStorage() {
+  const data = await chrome.storage.local.get([CUSTOM_PROFILES_KEY, ACTIVE_PERSON_ID_KEY, "selected_profile_id"]);
+  const list = Array.isArray(data[CUSTOM_PROFILES_KEY]) ? data[CUSTOM_PROFILES_KEY] : [];
+  const kept = list.filter((p) => !isRemovedPerson(p));
+  const patch = {};
+  if (kept.length !== list.length) patch[CUSTOM_PROFILES_KEY] = kept;
+  const activeId = String(data[ACTIVE_PERSON_ID_KEY] || "");
+  const selectedId = String(data.selected_profile_id || "");
+  if (REMOVED_PERSON_IDS.has(activeId) || activeId.startsWith("matthew-dale-hoffman")) {
+    patch[ACTIVE_PERSON_ID_KEY] = DEFAULT_PROFILE_ID;
+  }
+  if (REMOVED_PERSON_IDS.has(selectedId) || selectedId.startsWith("matthew-dale-hoffman")) {
+    patch.selected_profile_id = DEFAULT_PROFILE_ID;
+  }
+  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+}
+
 export async function getCustomProfiles() {
+  await purgeRemovedPeopleFromStorage();
   const data = await chrome.storage.local.get(CUSTOM_PROFILES_KEY);
   const list = data[CUSTOM_PROFILES_KEY];
-  return Array.isArray(list) ? list : [];
+  return Array.isArray(list) ? list.filter((p) => !isRemovedPerson(p)) : [];
 }
 
 export async function getAllProfiles() {
@@ -189,8 +185,8 @@ export async function getActivePerson() {
 function normalizePerson(p) {
   const empty = {
     id: DEFAULT_PROFILE_ID,
-    label: "Matthew Dale Hoffman (Salesforce)",
-    name: "Matthew Dale Hoffman",
+    label: "Person",
+    name: "",
     email: "",
     phone: "",
     linkedin: "",
@@ -208,12 +204,12 @@ function normalizePerson(p) {
     masterResume: "",
     promptTemplate: "",
     coverLetterPrompt: "",
-    resumeFilePrefix: "Matthew_Resume",
+    resumeFilePrefix: "Resume",
     templateId: "times-classic",
-    signatureTitle: "Salesforce Developer",
+    signatureTitle: "",
     autofillExtras: {},
     requiredExperience: [],
-    builtin: true,
+    builtin: false,
     kind: "resume"
   };
   if (!p) return empty;

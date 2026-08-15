@@ -1294,7 +1294,7 @@ function buildJobFolderName(jobMeta = {}) {
   return sanitizePathSegment(`${companyPart} - ${titlePart}`, "untitled-job");
 }
 
-/** First-name token for files like Matthew_Resume.pdf / Matthew_Cover Letter.pdf */
+/** First-name token for files like Name_Resume.pdf / Name_Cover Letter.pdf */
 function outputNameToken(jobMeta = {}, resumeData = {}) {
   const prefix = String(jobMeta.resumeFilePrefix || "").trim();
   if (prefix) {
@@ -1505,34 +1505,29 @@ function buildCoverLetterHtml(rawText, contact = {}) {
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;");
 
-  const name = String(contact.name || "Matthew Dale Hoffman").trim();
-  const title = String(contact.signatureTitle || contact.headline || "Salesforce Developer").trim();
-  const email = stripMarkdownLink(contact.email || "matthew.dale.hoffman0513@outlook.com")
+  const name = String(contact.name || "").trim() || "Applicant";
+  const title = String(contact.signatureTitle || contact.headline || "").trim();
+  const email = stripMarkdownLink(contact.email || "")
     .replace(/^mailto:/i, "")
     .trim();
-  let phone = String(contact.phone || "(254) 708-9742")
+  let phone = String(contact.phone || "")
     .replace(/^\+1\s*/i, "")
     .trim();
-  if (!phone) phone = "(254) 708-9742";
-  let linkedin = stripMarkdownLink(
-    contact.linkedin || "https://www.linkedin.com/in/hoffmantxstate/"
-  ).trim();
+  let linkedin = stripMarkdownLink(contact.linkedin || "").trim();
   if (linkedin && !/^https?:\/\//i.test(linkedin)) linkedin = `https://${linkedin}`;
   if (linkedin && !/\/$/.test(linkedin)) linkedin = `${linkedin}/`;
 
   const paragraphs = cleanCoverLetterParagraphs(coverLetterTextToParagraphs(rawText), name);
   const bodyHtml = paragraphs.map((p) => `<p>${esc(p)}</p>`).join("\n");
 
-  // No top header — signature matches:
-  // Matthew Dale Hoffman / Salesforce Developer / ✉️ 📞 🌐
   const signatureLines = [
     `<p>Sincerely,</p>`,
     `<p class="cl-name-sign">${esc(name)}</p>`,
-    `<p class="cl-sign-title">${esc(title)}</p>`,
-    `<p class="cl-sign-line">✉️ <a href="mailto:${esc(email)}">${esc(email)}</a></p>`,
-    `<p class="cl-sign-line">📞 ${esc(phone)}</p>`,
-    `<p class="cl-sign-line">🌐 <a href="${esc(linkedin)}">${esc(linkedin)}</a></p>`
-  ];
+    title ? `<p class="cl-sign-title">${esc(title)}</p>` : "",
+    email ? `<p class="cl-sign-line">✉️ <a href="mailto:${esc(email)}">${esc(email)}</a></p>` : "",
+    phone ? `<p class="cl-sign-line">📞 ${esc(phone)}</p>` : "",
+    linkedin ? `<p class="cl-sign-line">🌐 <a href="${esc(linkedin)}">${esc(linkedin)}</a></p>` : ""
+  ].filter(Boolean);
 
   return `<!doctype html>
 <html lang="en">
@@ -2649,7 +2644,7 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         resumeData = bestObj;
       }
 
-      // Large Matthew-style resumes are ~15–30KB JSON. Shipping 200KB of raw page
+      // Large tailored resumes are ~15–30KB JSON. Shipping 200KB of raw page
       // text + the object through executeScript routinely times out the poller —
       // which is exactly when the user can SEE the JSON but files never generate.
       // Persist into extension storage HERE so recognition survives return timeouts.

@@ -13,7 +13,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
   - `jd.txt`
   - `[Name]_Resume.pdf` (Times Classic / Developer Style layout with cert badges)
   - `[Name]_Cover Letter.pdf` (body + signature only — no top header block)
-  - `N` = CSV data row number (1 = first job after the header); `[Name]` from the person / PDF prefix (e.g. Matthew)
+  - `N` = CSV data row number (1 = first job after the header); `[Name]` from the person / PDF prefix (e.g. Sandeep)
 - **Apply assist**: Open job URL, reveal saved files, autofill name/email/phone/LinkedIn on the application page
 - Manual one-off job still available (also auto — no JSON paste)
 
@@ -67,7 +67,7 @@ flowchart TD
 ## First-time person setup
 
 1. Open the extension → **Edit person / master resume / prompts**
-2. Optionally **Load** the Matthew built-in preset
+2. Optionally **Load** a built-in preset (Sandeep)
 3. Paste your **master resume as text**, or upload **.txt / .pdf / .docx** (not JSON)
 4. Set the **resume tailor prompt** — ChatGPT instructions to rewrite the resume. Put `{JD}` where each job’s description should go; the batch **fills it from the CSV automatically** (do not paste JDs into the prompt). Also: `{MASTER_RESUME}`, `{JOB_TITLE}`, `{COMPANY}`, `{NAME}`, `{EMAIL}`, `{PHONE}`, `{LINKEDIN}`, `{LOCATION}`
 5. Optionally set a **cover letter prompt** (same rule: `{JD}` = auto from CSV)
@@ -123,8 +123,8 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 ```
 Downloads / Resume Applications / 12 - Acme Inc - Senior Salesforce Developer /
   jd.txt
-  Matthew_Resume.pdf
-  Matthew_Cover Letter.pdf
+  Sandeep_Resume.pdf
+  Sandeep_Cover Letter.pdf
 ```
 
 Manual one-off jobs (no CSV row) still use `Company - Title` without the numeric prefix.

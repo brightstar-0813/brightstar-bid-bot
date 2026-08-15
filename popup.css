@@ -70,7 +70,8 @@ body.ctx-window {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+  flex-wrap: nowrap;
   padding: 10px 14px 10px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(18, 32, 54, 0.92), rgba(11, 18, 32, 0.78));
@@ -81,6 +82,7 @@ body.ctx-window {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -105,6 +107,7 @@ h1 {
   line-height: 1.15;
   font-weight: 750;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .hype {
@@ -121,26 +124,6 @@ h1 {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-}
-
-.person-chip {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(245, 197, 66, 0.28);
-  background: rgba(245, 197, 66, 0.1);
-  color: var(--gold-bright);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.person-chip.is-builtin {
-  border-color: var(--line-strong);
-  background: rgba(148, 175, 210, 0.08);
-  color: var(--ink-soft);
 }
 
 .app-body {
@@ -183,6 +166,10 @@ h1 {
 
 .section-apply {
   border-color: rgba(245, 197, 66, 0.26);
+}
+
+.section-style {
+  border-color: rgba(245, 197, 66, 0.28);
 }
 
 .section-muted {

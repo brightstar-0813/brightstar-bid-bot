@@ -7,9 +7,6 @@ import {
 } from "./experience-rules.js";
 
 const EXPECTED_BULLET_COUNTS = [
-  { match: /accenture\s*federal/i, count: 10 },
-  { match: /^hallmark/i, count: 9 },
-  { match: /^teletech$/i, count: 9 },
   { match: /sfa\s*solutions/i, count: 6 },
   { match: /^amazon$/i, count: 5 },
   { match: /bhg\s*financial/i, count: 5 },
@@ -128,7 +125,7 @@ function expectedBulletFloor(company, richResume) {
 /**
  * Roles that have some bullets but fewer than expected — the signature of a
  * reply that got cut off (e.g. a trailing employer left with a single bullet).
- * Returns labels like "Accenture Federal Services (1/4)".
+ * Returns labels like "Deloitte (1/4)".
  */
 export function underfilledExperienceEntries(data) {
   if (!Array.isArray(data?.experience)) return [];
@@ -802,7 +799,7 @@ export function isUsableResumeJson(data) {
   const jobs = Array.isArray(data.experience) ? data.experience.length : 0;
   if (jobs < 1) return false;
 
-  // Known fixed-history candidates must not drop employers (e.g. Matthew needs 4).
+  // Known fixed-history candidates must not drop required employers.
   if (!hasRequiredExperienceCompanies(data)) return false;
 
   // A role with no bullets (or far too few) means the resume was cut off mid-stream.

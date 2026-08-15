@@ -1378,7 +1378,13 @@ async function loadPresetIntoEditor() {
     setStatus("Preset not found.");
     return;
   }
-  fillPersonForm({ ...preset, id: editingPersonId && !String(editingPersonId).startsWith("matthew") && !BUILTIN_PROFILES.some((b) => b.id === editingPersonId) ? editingPersonId : preset.id });
+  fillPersonForm({
+    ...preset,
+    id:
+      editingPersonId && !BUILTIN_PROFILES.some((b) => b.id === editingPersonId)
+        ? editingPersonId
+        : preset.id
+  });
   personPanelBody.hidden = false;
   togglePersonPanelBtn.setAttribute("aria-expanded", "true");
   setStatus(`Loaded preset "${preset.label}" into editor. Add/upload master resume text, then Save person.`);

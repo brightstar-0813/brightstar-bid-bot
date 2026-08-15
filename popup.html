@@ -17,7 +17,6 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <span id="activePersonChip" class="person-chip" hidden></span>
           <button
             type="button"
             id="keepOpen"
@@ -36,7 +35,7 @@
             <span class="step" aria-hidden="true">1</span>
             <div class="section-copy">
               <p class="section-title">Person</p>
-              <p class="section-sub">Presets fill content only. Any person can use any Brightstar resume style.</p>
+              <p class="section-sub">Who to bid as — content only. Resume style is the next step.</p>
             </div>
           </header>
           <div class="row-split">
@@ -96,11 +95,11 @@
               <div class="grid-2">
                 <label class="field">
                   <span>Street address (autofill)</span>
-                  <input id="personAddress" type="text" placeholder="129 Cherry Ridge Rd" autocomplete="off" />
+                  <input id="personAddress" type="text" placeholder="Street address" autocomplete="off" />
                 </label>
                 <label class="field">
                   <span>ZIP / postal code</span>
-                  <input id="personZip" type="text" placeholder="78626" autocomplete="off" />
+                  <input id="personZip" type="text" placeholder="ZIP" autocomplete="off" />
                 </label>
               </div>
             </div>
@@ -217,16 +216,6 @@
                   <input id="personSignatureTitle" type="text" placeholder="Salesforce Developer" autocomplete="off" />
                 </label>
               </div>
-              <div class="row-split">
-                <label class="field grow">
-                  <span>Resume style</span>
-                  <select id="templateSelect"></select>
-                </label>
-                <button type="button" id="previewTemplate" class="ghost compact" title="Open a full-page preview of this style">
-                  Preview
-                </button>
-              </div>
-              <p class="hint">Style only — the active person’s resume content stays the same. Preview shows sample layout, or your last generated resume.</p>
               <label class="field">
                 <span>Master resume (text, or upload .txt / .pdf / .docx — not JSON)</span>
                 <textarea
@@ -249,7 +238,7 @@
                 <textarea
                   id="personRequiredExperience"
                   class="prompt-input"
-                  placeholder="Accenture Federal Services&#10;Hallmark Cards&#10;TeleTech&#10;Accenture Federal Services"
+                  placeholder="Taproot Solutions Inc&#10;Deloitte&#10;Avco Consulting, Inc."
                   rows="5"
                 ></textarea>
               </label>
@@ -295,10 +284,31 @@
           </div>
         </section>
 
+        <!-- Resume style -->
+        <section class="section section-style">
+          <header class="section-header">
+            <span class="step" aria-hidden="true">2</span>
+            <div class="section-copy">
+              <p class="section-title">Resume style</p>
+              <p class="section-sub">Layout for PDFs — works with any person. Preview before you generate.</p>
+            </div>
+          </header>
+          <div class="row-split">
+            <label class="field grow">
+              <span>Brightstar template</span>
+              <select id="templateSelect"></select>
+            </label>
+            <button type="button" id="previewTemplate" class="primary compact" title="Open a full-page preview of this style">
+              Preview
+            </button>
+          </div>
+          <p class="hint">Style only — the active person’s resume content stays the same. Preview uses a sample layout, or your last generated resume.</p>
+        </section>
+
         <!-- CSV batch -->
         <section class="section section-hero">
           <header class="section-header">
-            <span class="step" aria-hidden="true">2</span>
+            <span class="step" aria-hidden="true">3</span>
             <div class="section-copy">
               <p class="section-title">CSV batch</p>
               <p class="section-sub">US jobs — upload once, or auto-refresh from pin / URL / native watcher</p>
@@ -413,7 +423,7 @@
         <!-- Manual one-off -->
         <section class="section">
           <header class="section-header">
-            <span class="step" aria-hidden="true">3</span>
+            <span class="step" aria-hidden="true">4</span>
             <div class="section-copy">
               <p class="section-title">Manual one-off</p>
               <p class="section-sub">Single JD without a CSV row</p>
@@ -457,7 +467,7 @@
         <!-- Apply -->
         <section class="section section-apply">
           <header class="section-header">
-            <span class="step" aria-hidden="true">4</span>
+            <span class="step" aria-hidden="true">5</span>
             <div class="section-copy">
               <p class="section-title">Apply</p>
               <p class="section-sub">Fill the open job form — focus the application tab first</p>
@@ -479,7 +489,7 @@
         <!-- Google Sheet -->
         <section class="section section-muted" id="spreadsheetSection">
           <header class="section-header">
-            <span class="step step-muted" aria-hidden="true">5</span>
+            <span class="step step-muted" aria-hidden="true">6</span>
             <div class="section-copy">
               <p class="section-title">Google Sheet</p>
               <p class="section-sub">Log bids · skip CSV jobs already on the sheet (by Link)</p>
@@ -504,7 +514,7 @@
         <!-- Slack -->
         <section class="section section-muted" id="slackSection">
           <header class="section-header">
-            <span class="step step-muted" aria-hidden="true">6</span>
+            <span class="step step-muted" aria-hidden="true">7</span>
             <div class="section-copy">
               <p class="section-title">Slack alert</p>
               <p class="section-sub">Error/fail pings + batch finish summary</p>
