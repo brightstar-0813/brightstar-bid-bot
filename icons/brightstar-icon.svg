@@ -1,29 +1,91 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Brightstar Bid bot">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0B1F3A"/>
-      <stop offset="55%" stop-color="#123A5F"/>
-      <stop offset="100%" stop-color="#0E2A4A"/>
+    <linearGradient id="bs-bg" x1="18%" y1="0%" x2="86%" y2="100%">
+      <stop offset="0%" stop-color="#1C456F"/>
+      <stop offset="46%" stop-color="#0E2A4C"/>
+      <stop offset="100%" stop-color="#071221"/>
     </linearGradient>
-    <linearGradient id="star" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FFE08A"/>
+    <linearGradient id="bs-sheen" x1="50%" y1="0%" x2="50%" y2="70%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bs-rim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE9A8"/>
       <stop offset="45%" stop-color="#F5C542"/>
-      <stop offset="100%" stop-color="#E0A100"/>
+      <stop offset="100%" stop-color="#8A6808"/>
     </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="42%" r="45%">
-      <stop offset="0%" stop-color="#FFE9A8" stop-opacity="0.55"/>
-      <stop offset="70%" stop-color="#F5C542" stop-opacity="0.12"/>
+    <radialGradient id="bs-glow" cx="50%" cy="44%" r="50%">
+      <stop offset="0%" stop-color="#FFE9A8" stop-opacity="0.5"/>
+      <stop offset="48%" stop-color="#F5C542" stop-opacity="0.14"/>
       <stop offset="100%" stop-color="#0B1F3A" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="bs-hi" x1="18%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFF8DE"/>
+      <stop offset="42%" stop-color="#FFE08A"/>
+      <stop offset="100%" stop-color="#F0BC2E"/>
+    </linearGradient>
+    <linearGradient id="bs-lo" x1="0%" y1="15%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E0A100"/>
+      <stop offset="100%" stop-color="#7A5A06"/>
+    </linearGradient>
+    <linearGradient id="bs-mid" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFE08A"/>
+      <stop offset="100%" stop-color="#C49212"/>
+    </linearGradient>
+    <radialGradient id="bs-core" cx="36%" cy="30%" r="72%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="40%" stop-color="#FFF1B8"/>
+      <stop offset="100%" stop-color="#E0A100"/>
+    </radialGradient>
   </defs>
-  <rect x="0" y="0" width="128" height="128" rx="26" ry="26" fill="url(#bg)"/>
-  <circle cx="64" cy="54" r="42" fill="url(#glow)"/>
-  <!-- 5-point star -->
+
+  <rect width="128" height="128" rx="28" fill="url(#bs-bg)"/>
+  <rect width="128" height="128" rx="28" fill="url(#bs-sheen)"/>
+  <rect x="5" y="5" width="118" height="118" rx="24" fill="none" stroke="url(#bs-rim)" stroke-width="1.8" opacity="0.85"/>
+  <circle cx="64" cy="64" r="51" fill="url(#bs-glow)"/>
+
+  <circle cx="64" cy="64" r="48.5" fill="none" stroke="#F5C542" stroke-width="1.4" opacity="0.42"/>
+  <circle cx="64" cy="64" r="44" fill="none" stroke="#FFE08A" stroke-width="0.7" opacity="0.28"/>
+
+  <!-- Compass star: long 46 / short 17 -->
+  <polygon fill="url(#bs-hi)" points="64,64 64,18 76,52"/>
+  <polygon fill="url(#bs-lo)" points="64,64 76,52 110,64"/>
+  <polygon fill="url(#bs-hi)" points="64,64 110,64 76,76"/>
+  <polygon fill="url(#bs-lo)" points="64,64 76,76 64,110"/>
+  <polygon fill="url(#bs-mid)" points="64,64 64,110 52,76"/>
+  <polygon fill="url(#bs-lo)" points="64,64 52,76 18,64"/>
+  <polygon fill="url(#bs-mid)" points="64,64 18,64 52,52"/>
+  <polygon fill="url(#bs-hi)" points="64,64 52,52 64,18"/>
+
   <path
-    fill="url(#star)"
-    d="M64 22l11.2 22.7 25.1 3.6-18.1 17.7 4.3 25-22.5-11.8L41.5 91l4.3-25L27.7 48.3l25.1-3.6L64 22z"
+    fill="none"
+    stroke="#5C4304"
+    stroke-width="1.15"
+    stroke-linejoin="round"
+    d="M64 18 L76 52 L110 64 L76 76 L64 110 L52 76 L18 64 L52 52 Z"
   />
-  <!-- small accent spark -->
-  <circle cx="96" cy="34" r="4.5" fill="#FFE08A" opacity="0.9"/>
-  <circle cx="28" cy="40" r="3" fill="#F5C542" opacity="0.75"/>
+  <path
+    fill="none"
+    stroke="#FFF6D0"
+    stroke-width="0.75"
+    stroke-linejoin="round"
+    opacity="0.45"
+    d="M64 18 L76 52 L110 64 L76 76 L64 110 L52 76 L18 64 L52 52 Z"
+  />
+
+  <!-- Inner spark -->
+  <path
+    fill="url(#bs-hi)"
+    stroke="#8A6808"
+    stroke-width="0.55"
+    stroke-linejoin="round"
+    d="M64 47.5 L67.4 60.8 L80.5 64 L67.4 67.2 L64 80.5 L60.6 67.2 L47.5 64 L60.6 60.8 Z"
+  />
+  <circle cx="64" cy="64" r="5.4" fill="url(#bs-core)"/>
+  <circle cx="62.3" cy="62.1" r="1.8" fill="#FFFFFF" opacity="0.9"/>
+
+  <!-- Corner sparks -->
+  <path fill="#FFE08A" d="M103 23.5 L105.2 28.9 L110.8 31.1 L105.2 33.3 L103 38.7 L100.8 33.3 L95.2 31.1 L100.8 28.9 Z"/>
+  <path fill="#F5C542" d="M26.5 93.5 L28.1 97.3 L32 98.9 L28.1 100.5 L26.5 104.3 L24.9 100.5 L21 98.9 L24.9 97.3 Z"/>
+  <circle cx="24.5" cy="35" r="2.2" fill="#FFE08A" opacity="0.85"/>
 </svg>

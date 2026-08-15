@@ -85,11 +85,14 @@ body.ctx-window {
 }
 
 .brand-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
   flex: 0 0 auto;
-  box-shadow: 0 0 0 1px rgba(245, 197, 66, 0.28), 0 6px 16px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(245, 197, 66, 0.42),
+    0 0 20px rgba(245, 197, 66, 0.22),
+    0 8px 18px rgba(0, 0, 0, 0.4);
 }
 
 .brand-copy {
@@ -176,6 +179,10 @@ h1 {
   border-color: rgba(245, 197, 66, 0.22);
   background:
     linear-gradient(180deg, rgba(40, 32, 12, 0.28), rgba(11, 20, 36, 0.78));
+}
+
+.section-apply {
+  border-color: rgba(245, 197, 66, 0.26);
 }
 
 .section-muted {
@@ -981,8 +988,8 @@ input[type="file"]::file-selector-button {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-height: 46px;
-  padding: 8px 8px 7px;
+  min-height: 56px;
+  padding: 10px 8px 9px;
 }
 
 .apply-actions kbd {
@@ -995,10 +1002,6 @@ input[type="file"]::file-selector-button {
   background: rgba(0, 0, 0, 0.28);
   color: inherit;
   opacity: 0.78;
-}
-
-#reset {
-  margin-bottom: 8px;
 }
 
 body.ctx-panel .queue-item .actions,

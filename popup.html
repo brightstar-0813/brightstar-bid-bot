@@ -377,16 +377,24 @@
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No CSV loaded</span>
           </div>
+          <label class="field">
+            <span>Output folder (under Downloads)</span>
+            <input id="outputDir" type="text" placeholder="Resume Applications" autocomplete="off" />
+          </label>
+          <p class="hint">Resumes and cover letters land here for CSV batch and one-off jobs.</p>
           <div class="batch-bar">
             <button type="button" id="batchStart" class="primary">Start</button>
             <button type="button" id="batchPause" class="ghost">Pause</button>
             <button type="button" id="batchSkip" class="ghost">Skip</button>
             <button type="button" id="batchStop" class="ghost danger">Stop</button>
           </div>
-          <div class="row row-3">
+          <div class="row row-2">
             <button type="button" id="forceSaveChatgpt" class="ghost">Save JSON now</button>
             <button type="button" id="retryErrors" class="ghost">Retry errors</button>
+          </div>
+          <div class="row row-2">
             <button type="button" id="clearJobs" class="ghost danger">Clear jobs</button>
+            <button type="button" id="reset" class="ghost">Reset jobs / Refresh</button>
           </div>
           <div id="queueList" class="queue-list">
             <div class="queue-empty">
@@ -440,19 +448,15 @@
           </div>
         </section>
 
-        <!-- Output & apply -->
-        <section class="section">
+        <!-- Apply -->
+        <section class="section section-apply">
           <header class="section-header">
             <span class="step" aria-hidden="true">4</span>
             <div class="section-copy">
-              <p class="section-title">Output &amp; apply</p>
-              <p class="section-sub">Where files land · autofill and Auto Apply on the job form</p>
+              <p class="section-title">Apply</p>
+              <p class="section-sub">Fill the open job form — focus the application tab first</p>
             </div>
           </header>
-          <label class="field">
-            <span>Output folder (under Downloads)</span>
-            <input id="outputDir" type="text" placeholder="Resume Applications" autocomplete="off" />
-          </label>
           <div class="apply-actions">
             <button type="button" id="autofillPage" class="ghost">
               Autofill this page
@@ -463,7 +467,6 @@
               <kbd>Ctrl+Shift+U</kbd>
             </button>
           </div>
-          <button type="button" id="reset" class="ghost">Reset jobs / Refresh</button>
           <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads the last resume/cover PDFs, and stops before Submit.</p>
         </section>
 
