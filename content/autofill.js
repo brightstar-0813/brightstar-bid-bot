@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.5";
+  const SCRIPT_BUILD = "2026-08-16.6";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -977,8 +977,39 @@
     return Boolean(getReactSelectRoot(el));
   }
 
+  const EDITOR_STYLE_OPTION_RE =
+    /^(heading\s*[1-6]|paragraph|normal(\s+text)?|body(\s+text)?|title|subtitle|blockquote|code block)$/i;
+
+  function isEditorChrome(el) {
+    if (!el?.closest) return false;
+    if (
+      el.closest(
+        "[role='toolbar'], [role='menubar'], .ql-toolbar, .ql-formats, .ProseMirror-menubar, .tox-toolbar, .tox-editor-header, .tox-menubar"
+      )
+    ) {
+      return true;
+    }
+    const cls = String(el.className || "");
+    if (/\b(ql-|tox-|ProseMirror-menu|tiptap-toolbar|editor-toolbar|rich-text-toolbar)\b/i.test(cls)) {
+      return true;
+    }
+    const t = buttonChoiceText(el);
+    if (EDITOR_STYLE_OPTION_RE.test(t)) return true;
+    const aria = `${el.getAttribute?.("aria-label") || ""} ${el.getAttribute?.("title") || ""}`;
+    if (
+      /\b(text style|heading style|paragraph format|font family|font size|text align|align (left|center|right|justify)|bold|italic|underline)\b/i.test(
+        aria
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   function looksLikeCombobox(el) {
     if (!el) return false;
+    if (isRichTextEditor(el) || el.isContentEditable) return false;
+    if (isEditorChrome(el)) return false;
     if (isReactSelectInput(el)) return true;
     const role = (el.getAttribute("role") || "").toLowerCase();
     if (role === "combobox" || role === "listbox") return true;
@@ -987,12 +1018,10 @@
       return true;
     }
     if (el.getAttribute("aria-autocomplete") === "list") return true;
-    if (el.getAttribute("aria-expanded") != null && role === "combobox") return true;
-    return Boolean(
-      el.closest?.(
-        '[role="combobox"], .select__control, [class*="select__control"], [class*="dropdown"]'
-      )
-    );
+    if (el.closest?.(".select__control, [class*='select__control']")) return true;
+    const combo = el.closest?.('[role="combobox"]');
+    if (combo && !isEditorChrome(combo) && !isRichTextEditor(combo)) return true;
+    return false;
   }
 
   function collectVisibleOptions(root = document) {
@@ -1026,6 +1055,7 @@
       const text = cleanLabelText(node.textContent);
       if (!text || text.length > 300) continue;
       if (/^select\.\.\.?$/i.test(text)) continue;
+      if (isEditorChrome(node) || EDITOR_STYLE_OPTION_RE.test(text)) continue;
       const style = window.getComputedStyle(node);
       if (style.display === "none" || style.visibility === "hidden") continue;
       out.push(node);
@@ -1113,6 +1143,7 @@
 
   async function fillCustomDropdown(el, value, key = null) {
     if (value == null || String(value).trim() === "") return false;
+    if (isEditorChrome(el) || isRichTextEditor(el)) return false;
     const candidates = key ? expandValueCandidates(key, value) : [String(value).trim()];
     const reactSelect = isReactSelectInput(el);
 
@@ -1241,7 +1272,7 @@
   }
 
   function isChoiceChip(el) {
-    if (!el || el.disabled || isNavOrSubmitChip(el)) return false;
+    if (!el || el.disabled || isNavOrSubmitChip(el) || isEditorChrome(el)) return false;
     const tag = el.tagName.toLowerCase();
     const t = buttonChoiceText(el);
     if (!t || t.length > 60) return false;
@@ -1371,6 +1402,8 @@
 
   function classifyChipGroup(buttons) {
     const labels = buttons.map((b) => buttonChoiceText(b));
+    const styles = labels.filter((l) => EDITOR_STYLE_OPTION_RE.test(l)).length;
+    if (styles >= 2) return "";
     const yesNo = labels.filter((l) => YES_NO_CHIP_RE.test(l)).length;
     const rates = labels.filter((l) => RATE_CHIP_RE.test(l)).length;
     if (yesNo === 2 && buttons.length <= 3) return "yesno";
@@ -1380,7 +1413,9 @@
   }
 
   function collectNamedRadioGroups() {
-    const radios = [...document.querySelectorAll('input[type="radio"]')].filter((el) => !el.disabled);
+    const radios = [...document.querySelectorAll('input[type="radio"]')].filter(
+      (el) => !el.disabled && !isEditorChrome(el)
+    );
     const byKey = new Map();
     for (const el of radios) {
       const key = el.name || `id:${el.id || ""}`;
@@ -1716,15 +1751,33 @@
     });
   }
 
+  function isEditorPlaceholderText(text) {
+    const t = normalize(text);
+    return (
+      !t ||
+      /^format paragraph/.test(t) ||
+      /^type (here|your answer|something)/.test(t) ||
+      /^enter (text|your answer|a response)/.test(t) ||
+      /^start typing/.test(t) ||
+      /^write (your|an) answer/.test(t)
+    );
+  }
+
   function isRichTextEmpty(el) {
     if (!el) return true;
     if (el.classList?.contains("is-editor-empty") || el.classList?.contains("ProseMirror-empty")) {
       return true;
     }
+    if (el.querySelector?.(".is-editor-empty, .ProseMirror-empty, p.is-empty")) {
+      const raw = cleanLabelText(el.innerText || el.textContent || "");
+      if (isEditorPlaceholderText(raw) || raw.length < 8) return true;
+    }
     const t = cleanLabelText(el.innerText || el.textContent || "");
-    if (!t) return true;
-    const ph = cleanLabelText(el.getAttribute("data-placeholder") || el.getAttribute("aria-placeholder") || "");
-    if (ph && normalize(t) === normalize(ph)) return true;
+    if (isEditorPlaceholderText(t)) return true;
+    const ph = cleanLabelText(
+      el.getAttribute("data-placeholder") || el.getAttribute("aria-placeholder") || ""
+    );
+    if (ph && (normalize(t) === normalize(ph) || t.startsWith(ph.slice(0, 16)))) return true;
     return t.length < 2;
   }
 
@@ -1772,6 +1825,7 @@
   async function fillControl(el, value, key = null) {
     if (value == null || String(value).trim() === "") return false;
     if (el.disabled || el.readOnly) return false;
+    if (isEditorChrome(el) && !isRichTextEditor(el)) return false;
     const tag = el.tagName.toLowerCase();
 
     if (tag === "select") return fillSelect(el, value, key);
@@ -2059,11 +2113,13 @@
       return true;
     }
     // Never send React-Select / Greenhouse dropdowns to AI text fill.
-    if (isReactSelectInput(el) || looksLikeCombobox(el)) return true;
-    if (el.getAttribute("role") === "combobox") return true;
-    if (el.getAttribute("aria-autocomplete") === "list") return true;
-    if (el.classList?.contains("select__input")) return true;
-    if (/^react-select-/i.test(el.id || "")) return true;
+    if (!isRichTextEditor(el)) {
+      if (isReactSelectInput(el) || looksLikeCombobox(el) || isEditorChrome(el)) return true;
+      if (el.getAttribute("role") === "combobox") return true;
+      if (el.getAttribute("aria-autocomplete") === "list") return true;
+      if (el.classList?.contains("select__input")) return true;
+      if (/^react-select-/i.test(el.id || "")) return true;
+    }
 
     const blob = normalize(
       [label, el.name, el.id, el.getAttribute("autocomplete"), el.getAttribute("placeholder")].join(
@@ -2211,7 +2267,8 @@
       const el = document.querySelector(`[data-resume-bot-qid="${CSS.escape(id)}"]`);
       if (!el) continue;
       // Combobox / React-Select must never receive free-text AI answers.
-      if (isReactSelectInput(el) || looksLikeCombobox(el)) {
+      // Rich-text editors can look combobox-adjacent because of their toolbars.
+      if (!isRichTextEditor(el) && (isReactSelectInput(el) || looksLikeCombobox(el) || isEditorChrome(el))) {
         el.removeAttribute("data-resume-bot-qid");
         continue;
       }
@@ -2283,6 +2340,8 @@
     for (const group of collectChoiceChipGroups()) {
       if (out.length >= 40) break;
       if (group.selected) continue;
+      if (group.buttons.some(isEditorChrome)) continue;
+      if ((group.labels || []).some((l) => EDITOR_STYLE_OPTION_RE.test(l))) continue;
       const label = group.question;
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       const labelNorm = normalize(label);
@@ -2309,6 +2368,7 @@
     ];
     for (const el of comboNodes) {
       if (out.length >= 40) break;
+      if (isEditorChrome(el) || isRichTextEditor(el)) continue;
       if (!looksLikeCombobox(el) && !isReactSelectInput(el)) continue;
       const style = window.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") continue;
@@ -2376,6 +2436,7 @@
       )
     ];
     return nodes.filter((el) => {
+      if (isEditorChrome(el) || isRichTextEditor(el)) return false;
       const type = (el.type || "").toLowerCase();
       if (type === "file") return false;
       if (type === "hidden" || type === "submit" || type === "button") return false;
