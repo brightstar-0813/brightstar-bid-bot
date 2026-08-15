@@ -124,7 +124,7 @@ h1 {
 }
 
 .person-chip {
-  max-width: 140px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

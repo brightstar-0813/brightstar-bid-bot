@@ -1,23 +1,37 @@
 import { classicBlueTemplate } from "./classic-blue.js";
-import { sandeepClassicTemplate } from "./sandeep-classic.js";
+import { ruledSansTemplate } from "./ruled-sans.js";
 import { timesClassicTemplate } from "./times-classic.js";
+import { executiveNavyTemplate } from "./executive-navy.js";
+import { consultingClassicTemplate } from "./consulting-classic.js";
+import { modernTimelineTemplate } from "./modern-timeline.js";
+import { atsModernTemplate } from "./ats-modern.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
 export const BUILTIN_TEMPLATES = [
   timesClassicTemplate,
-  sandeepClassicTemplate,
-  classicBlueTemplate
+  ruledSansTemplate,
+  classicBlueTemplate,
+  atsModernTemplate,
+  consultingClassicTemplate,
+  modernTimelineTemplate,
+  executiveNavyTemplate
 ];
 
 export const DEFAULT_TEMPLATE_ID = timesClassicTemplate.id;
+
+/** Old ids kept so saved people still resolve after renames. */
+const TEMPLATE_ID_ALIASES = {
+  "sandeep-classic": "ruled-sans"
+};
 
 export function getAllTemplates() {
   return BUILTIN_TEMPLATES;
 }
 
 export function getTemplateById(templateId) {
+  const resolved = TEMPLATE_ID_ALIASES[templateId] || templateId;
   return (
-    BUILTIN_TEMPLATES.find((t) => t.id === templateId) ||
+    BUILTIN_TEMPLATES.find((t) => t.id === resolved) ||
     BUILTIN_TEMPLATES.find((t) => t.id === DEFAULT_TEMPLATE_ID) ||
     BUILTIN_TEMPLATES[0]
   );

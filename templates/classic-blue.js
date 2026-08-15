@@ -158,8 +158,8 @@ const CSS = `
 
 export const classicBlueTemplate = {
   id: "classic-blue",
-  label: "Classic Blue (Arial)",
-  description: "Modern layout with blue header accents and flex job rows.",
+  label: "Brightstar template 3",
+  description: "Arial · centered header · flex job rows with dates on the right.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");

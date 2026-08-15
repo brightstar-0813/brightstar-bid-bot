@@ -330,6 +330,53 @@ ${bullets}
     .join("\n");
 }
 
+export function educationList(education) {
+  const list = Array.isArray(education)
+    ? education
+    : education && typeof education === "object"
+      ? [education]
+      : [];
+  return list.filter(
+    (edu) => String(edu?.school || "").trim() || String(edu?.degree || "").trim()
+  );
+}
+
+/** Degree + school on the left, year on the right. */
+export function renderEducationRows(education) {
+  return educationList(education)
+    .map((edu) => {
+      const school = escapeHtml(edu.school || "");
+      const degree = escapeHtml(edu.degree || "");
+      const year = escapeHtml(edu.year || "");
+      const details = escapeHtml(edu.details || edu.gpa || "");
+      return `<div class="edu-row">
+  <div class="edu-main">
+    ${degree ? `<div class="edu-degree">${degree}</div>` : ""}
+    ${school ? `<div class="edu-school">${school}</div>` : ""}
+    ${details ? `<div class="edu-details">${details}</div>` : ""}
+  </div>
+  ${year ? `<div class="edu-year">${year}</div>` : ""}
+</div>`;
+    })
+    .join("\n");
+}
+
+/** Category / items as stacked rows (no table borders). */
+export function renderSkillsStacked(skills) {
+  const rows = (skills || [])
+    .map((row) => {
+      const category = String(row?.category || "").trim();
+      const items = String(row?.items || "").trim();
+      if (!category && !items) return "";
+      return `<div class="skill-row"><span class="skill-cat">${escapeHtml(
+        category
+      )}</span><span class="skill-items">${escapeHtml(items)}</span></div>`;
+    })
+    .filter(Boolean);
+  if (!rows.length) return "";
+  return `<div class="skills-stack">${rows.join("\n")}</div>`;
+}
+
 export function wrapHtmlDocument({ title, css, body }) {
   return `<!doctype html>
 <html lang="en">

@@ -36,7 +36,7 @@
             <span class="step" aria-hidden="true">1</span>
             <div class="section-copy">
               <p class="section-title">Person</p>
-              <p class="section-sub">Presets: Matthew, Sandeep — each ships with its resume PDF template</p>
+              <p class="section-sub">Presets fill content only. Any person can use any Brightstar resume style.</p>
             </div>
           </header>
           <div class="row-split">
@@ -217,10 +217,16 @@
                   <input id="personSignatureTitle" type="text" placeholder="Salesforce Developer" autocomplete="off" />
                 </label>
               </div>
-              <label class="field">
-                <span>Resume template (PDF layout)</span>
-                <select id="templateSelect"></select>
-              </label>
+              <div class="row-split">
+                <label class="field grow">
+                  <span>Resume style</span>
+                  <select id="templateSelect"></select>
+                </label>
+                <button type="button" id="previewTemplate" class="ghost compact" title="Open a full-page preview of this style">
+                  Preview
+                </button>
+              </div>
+              <p class="hint">Style only — the active person’s resume content stays the same. Preview shows sample layout, or your last generated resume.</p>
               <label class="field">
                 <span>Master resume (text, or upload .txt / .pdf / .docx — not JSON)</span>
                 <textarea

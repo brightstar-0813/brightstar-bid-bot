@@ -1307,7 +1307,7 @@ function outputNameToken(jobMeta = {}, resumeData = {}) {
 }
 
 async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
-  // Developer Style (Times Classic) matches Matthew's Senior Developer master resume.
+  // Style comes from the selected Brightstar template; content comes from resume JSON.
   const templateId = jobMeta.templateId || "times-classic";
   const outputDir = sanitizePathSegment(jobMeta.outputDir || "Resume Applications", "Resume Applications");
   const jobFolder = buildJobFolderName(jobMeta);
@@ -3370,6 +3370,12 @@ async function rememberApplyHistory(csvRow, entry) {
   await chrome.storage.local.set({ [APPLY_HISTORY_KEY]: map });
 }
 
+async function pickTemplateId(jobMeta = {}, person = {}) {
+  if (jobMeta.templateId) return jobMeta.templateId;
+  const stored = await chrome.storage.local.get("selected_template_id");
+  return stored.selected_template_id || person.templateId || DEFAULT_TEMPLATE_ID;
+}
+
 /**
  * Fully automatic — ONE new ChatGPT chat per position:
  * resume (with JD) → save files → cover letter in the same chat → save CL.
@@ -3569,7 +3575,7 @@ async function runAutoJob(jobMeta) {
   // Save JD + resume immediately (before cover letter), same chat continues after.
   const enrichedMeta = {
     ...jobMeta,
-    templateId: jobMeta.templateId || person.templateId || DEFAULT_TEMPLATE_ID,
+    templateId: await pickTemplateId(jobMeta, person),
     resumeFilePrefix: jobMeta.resumeFilePrefix || person.resumeFilePrefix || "Resume"
   };
 
@@ -4650,7 +4656,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             jdText: job.jdText || "",
             salary: job.salary || "",
             outputDir: "Resume Applications",
-            templateId: person.templateId,
+            templateId: await pickTemplateId({}, person),
             resumeFilePrefix: person.resumeFilePrefix
           },
           { runCoverLetter: true }

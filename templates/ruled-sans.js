@@ -1,10 +1,8 @@
 import { escapeHtml, renderSkills, wrapHtmlDocument } from "./shared.js";
 
 /**
- * Sandeep layout: keeps the master PDF's black-and-white serif/sans mix,
- * uppercase ruled headings, single column and right-aligned dates, but uses a
- * recruiter/ATS-first order — contact, summary, skills, experience, education,
- * certifications — and tighter spacing so a 10-role history stays readable.
+ * Ruled single-column layout: serif name, sans body, uppercase headings,
+ * ATS-first order (summary → skills → experience → education → certifications).
  */
 const CSS = `
     @page { size: A4; margin: 11mm 12mm; }
@@ -352,11 +350,11 @@ function renderCertifications(certs) {
   return `<ul class="certifications">\n${items.join("\n")}\n</ul>`;
 }
 
-export const sandeepClassicTemplate = {
-  id: "sandeep-classic",
-  label: "Sandeep Classic (PDF)",
+export const ruledSansTemplate = {
+  id: "ruled-sans",
+  label: "Brightstar template 2",
   description:
-    "Sandeep master-PDF styling with ATS-first order: contact, summary, skills, experience, education, certifications.",
+    "Ruled sans · ATS-first order: summary, skills, experience, education, certifications.",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");

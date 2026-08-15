@@ -219,9 +219,8 @@ const CSS = `
 
 export const timesClassicTemplate = {
   id: "times-classic",
-  label: "Matthew · Times Classic (Serif)",
-  description:
-    "Matthew-style layout: centered name/headline, contact + cert badges header, company/title/meta experience.",
+  label: "Brightstar template 1",
+  description: "Times serif · centered name · contact + cert badges · stacked experience",
   render(data) {
     const name = escapeHtml(data.name || "Resume");
     const headline = escapeHtml(data.headline || "");

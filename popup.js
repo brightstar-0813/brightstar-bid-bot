@@ -36,6 +36,7 @@ const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "general";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
 const DETACHED_WINDOW_KEY = "detached_window_id";
+const PREVIEW_WINDOW_KEY = "template_preview_window_id";
 
 /** "popup" (closes on focus loss), "panel" (docked), or "window" (detached). */
 const UI_CONTEXT = new URLSearchParams(location.search).get("ctx") || "popup";
@@ -261,6 +262,7 @@ const slackWebhookUrlEl = document.getElementById("slackWebhookUrl");
 const testSlackBtn = document.getElementById("testSlack");
 const copySheetRowBtn = document.getElementById("copySheetRow");
 const keepOpenBtn = document.getElementById("keepOpen");
+const previewTemplateBtn = document.getElementById("previewTemplate");
 const pasteJdBtn = document.getElementById("pasteJd");
 const runOneOffBtn = document.getElementById("runOneOff");
 const autofillPageBtn = document.getElementById("autofillPage");
@@ -373,7 +375,9 @@ function populateTemplateSelect(selectedId) {
     const option = document.createElement("option");
     option.value = template.id;
     option.textContent = template.label;
-    option.title = template.description || "";
+    option.title = template.description
+      ? `${template.label} — ${template.description}`
+      : template.label;
     templateSelectEl.appendChild(option);
   }
   const validIds = new Set(templatesCache.map((t) => t.id));
@@ -477,9 +481,6 @@ function fillPersonForm(person) {
   personRequiredExperienceEl.value = requiredExperienceToText(person?.requiredExperience || []);
   personResumePromptEl.value = person?.promptTemplate || "";
   personCoverPromptEl.value = person?.coverLetterPrompt || "";
-  if (person?.templateId) {
-    templateSelectEl.value = person.templateId;
-  }
   masterResumeFileHintEl.textContent = person?.masterResume
     ? `Master resume loaded (${person.masterResume.length} chars).`
     : "";
@@ -540,11 +541,8 @@ async function refreshTemplates(selectedId) {
 async function loadActivePersonIntoForm() {
   const person = await getActivePerson();
   fillPersonForm(person);
-  if (person?.templateId) {
-    await chrome.storage.local.set({ selected_template_id: person.templateId });
-    templateSelectEl.value = person.templateId;
-  }
   syncSaveButtonLabels();
+  syncActivePersonChip();
 }
 
 async function persistJobFields() {
@@ -1407,13 +1405,13 @@ async function removeSelectedProfile() {
 async function onProfileChange() {
   const profileId = profileSelectEl.value;
   syncDeleteButton();
+  syncActivePersonChip();
   await setActivePersonId(profileId);
   await loadActivePersonIntoForm();
   const person = await getActivePerson();
   const rules = resolveExperienceRulesForPerson(person);
   await chrome.storage.local.set({
     resume_file_prefix: person.resumeFilePrefix || "Resume",
-    selected_template_id: person.templateId || DEFAULT_TEMPLATE_ID,
     experience_validation_rules: rules,
     experience_validation_person: person.name || person.label || ""
   });
@@ -1498,6 +1496,32 @@ async function testSlackWebhook() {
   } catch (err) {
     setStatus(`Slack test failed: ${String(err?.message || err)}`);
   }
+}
+
+async function openTemplatePreview() {
+  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
+  const url = chrome.runtime.getURL(`preview.html?template=${encodeURIComponent(templateId)}`);
+  const stored = (await chrome.storage.local.get(PREVIEW_WINDOW_KEY))[PREVIEW_WINDOW_KEY];
+  if (stored != null) {
+    try {
+      await chrome.windows.update(stored, { focused: true, drawAttention: true });
+      await chrome.runtime.sendMessage({ type: "template_preview_show", templateId }).catch(() => {});
+      const template = templatesCache.find((t) => t.id === templateId);
+      setStatus(`Previewing ${template?.label || "resume style"}…`);
+      return;
+    } catch {
+      // Window was closed.
+    }
+  }
+  const created = await chrome.windows.create({
+    url,
+    type: "popup",
+    width: 980,
+    height: 1040
+  });
+  await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
+  const template = templatesCache.find((t) => t.id === templateId);
+  setStatus(`Opened preview for ${template?.label || "resume style"}.`);
 }
 
 async function openDetachedWindow() {
@@ -1590,7 +1614,7 @@ async function runOneOff() {
       outputDir,
       spreadsheetUrl: spreadsheetUrlEl.value.trim(),
       sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
-      templateId: person.templateId || templateSelectEl.value || DEFAULT_TEMPLATE_ID,
+      templateId: templateSelectEl.value || person.templateId || DEFAULT_TEMPLATE_ID,
       resumeFilePrefix: person.resumeFilePrefix || "Resume",
       profileId: person.id
     }
@@ -1688,11 +1712,14 @@ async function resetWorkflow() {
 
 // Events
 profileSelectEl.addEventListener("change", () => {
+  syncActivePersonChip();
   onProfileChange().catch((e) => setStatus(String(e.message || e)));
 });
 
 templateSelectEl.addEventListener("change", () => {
-  chrome.storage.local.set({ selected_template_id: templateSelectEl.value }).catch(() => {});
+  const templateId = templateSelectEl.value;
+  chrome.storage.local.set({ selected_template_id: templateId }).catch(() => {});
+  chrome.runtime.sendMessage({ type: "template_preview_show", templateId }).catch(() => {});
 });
 
 function setManualPanelOpen(open, { persist = true } = {}) {
@@ -1807,6 +1834,9 @@ pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 copySheetRowBtn.addEventListener("click", copySheetRow);
 keepOpenBtn.addEventListener("click", dockOutOfPopup);
+previewTemplateBtn?.addEventListener("click", () => {
+  openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
+});
 testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
@@ -1840,6 +1870,14 @@ if (UI_CONTEXT === "popup") {
 }
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.selected_template_id || !templateSelectEl) return;
+  const next = changes.selected_template_id.newValue;
+  if (next && templateSelectEl.value !== next) {
+    templateSelectEl.value = next;
+  }
+});
 
 setInterval(async () => {
   const data = await chrome.storage.local.get([
