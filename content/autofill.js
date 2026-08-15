@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.7";
+  const SCRIPT_BUILD = "2026-08-16.8";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -883,7 +883,7 @@
       }
     }
     const aria = cleanLabelText(el.getAttribute("aria-label"));
-    if (aria) candidates.push(aria);
+    if (aria && !looksLikeEditorChromeValue(aria)) candidates.push(aria);
 
     const prev = el.previousElementSibling;
     if (prev && /LABEL|SPAN|DIV|P|LEGEND|H1|H2|H3|H4|H5|H6/i.test(prev.tagName)) {
@@ -893,6 +893,7 @@
     let best = "";
     for (const c of candidates) {
       if (!c) continue;
+      if (looksLikeEditorChromeValue(c)) continue;
       if (/^(type here|enter text|write here|your answer)\.?$/i.test(c)) continue;
       if (c.length > best.length) best = c;
     }
@@ -1003,7 +1004,9 @@
     ) {
       return true;
     }
-    if (el.closest("[contenteditable='true'], .ProseMirror, .ql-editor")) return true;
+    if (el.closest("[contenteditable='true'], .ProseMirror, .ql-editor") && !isRichTextEditor(el)) {
+      return true;
+    }
     return isBesideRichTextEditor(el);
   }
 
@@ -1346,14 +1349,14 @@
         .map((id) => document.getElementById(id)?.textContent || "")
         .join(" ");
       const t = stripEmoji(cleanLabelText(fromIds));
-      if (t.length >= 8) return t.slice(0, 1000);
+      if (t.length >= 8 && !looksLikeEditorChromeValue(t)) return t.slice(0, 1000);
     }
     const legend = el?.matches?.("fieldset, [role='radiogroup'], [role='group']")
       ? el.querySelector(":scope > legend")
       : el?.closest?.("fieldset")?.querySelector("legend");
     if (legend) {
       const t = stripEmoji(cleanLabelText(legend.textContent));
-      if (t.length >= 8) return t.slice(0, 1000);
+      if (t.length >= 8 && !looksLikeEditorChromeValue(t)) return t.slice(0, 1000);
     }
 
     let walk = el;
@@ -1361,7 +1364,7 @@
       let sib = walk.previousElementSibling;
       while (sib) {
         const t = stripEmoji(cleanLabelText(sib.innerText || sib.textContent || ""));
-        if (t.length >= 12 && /[?]/.test(t)) {
+        if (t.length >= 12 && /[?]/.test(t) && !looksLikeEditorChromeValue(t)) {
           const qs = t.match(/[^?]*\?/g);
           return (qs?.[qs.length - 1] || t).trim().slice(0, 1000);
         }
@@ -1800,12 +1803,32 @@
     const t = normalize(text);
     return (
       !t ||
-      /^format paragraph/.test(t) ||
+      /format paragraph/.test(t) ||
+      /heading dropdown/.test(t) ||
       /^type (here|your answer|something)/.test(t) ||
       /^enter (text|your answer|a response)/.test(t) ||
       /^start typing/.test(t) ||
       /^write (your|an) answer/.test(t)
     );
+  }
+
+  function looksLikeEditorChromeValue(text) {
+    const t = normalize(text);
+    if (!t) return true;
+    if (isEditorPlaceholderText(t)) return true;
+    if (EDITOR_STYLE_OPTION_RE.test(t)) return true;
+    if (/heading dropdown|text style|paragraph format|format paragraph/.test(t)) return true;
+    return t.split(" ").length <= 8 && /\b(dropdown|toolbar|heading|placeholder)\b/.test(t);
+  }
+
+  function editorVisibleText(el) {
+    const t = cleanLabelText(el?.innerText || el?.textContent || "");
+    if (looksLikeEditorChromeValue(t)) return "";
+    const ph = cleanLabelText(
+      el?.getAttribute("data-placeholder") || el?.getAttribute("aria-placeholder") || ""
+    );
+    if (ph && (normalize(t) === normalize(ph) || t.startsWith(ph.slice(0, 16)))) return "";
+    return t;
   }
 
   function isRichTextEmpty(el) {
@@ -1815,37 +1838,88 @@
     }
     if (el.querySelector?.(".is-editor-empty, .ProseMirror-empty, p.is-empty")) {
       const raw = cleanLabelText(el.innerText || el.textContent || "");
-      if (isEditorPlaceholderText(raw) || raw.length < 8) return true;
+      if (isEditorPlaceholderText(raw) || looksLikeEditorChromeValue(raw) || raw.length < 8) {
+        return true;
+      }
     }
-    const t = cleanLabelText(el.innerText || el.textContent || "");
-    if (isEditorPlaceholderText(t)) return true;
-    const ph = cleanLabelText(
-      el.getAttribute("data-placeholder") || el.getAttribute("aria-placeholder") || ""
-    );
-    if (ph && (normalize(t) === normalize(ph) || t.startsWith(ph.slice(0, 16)))) return true;
-    return t.length < 2;
+    return !editorVisibleText(el);
   }
 
   function fillContentEditable(el, value) {
     const text = String(value || "").trim();
-    if (!el || !text) return false;
+    if (!el || !text || looksLikeEditorChromeValue(text)) return false;
+
+    try {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
+      );
+    } catch {
+      /* ignore */
+    }
     try {
       el.focus();
     } catch {
       /* ignore */
     }
-    try {
+
+    const selectAll = () => {
+      const sel = window.getSelection();
       const range = document.createRange();
       range.selectNodeContents(el);
-      const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
-      const ok = document.execCommand("insertText", false, text);
-      if (!ok) el.textContent = text;
+      return sel;
+    };
+
+    try {
+      const sel = selectAll();
+      document.execCommand("delete", false, null);
+      document.execCommand("insertText", false, text);
       sel.collapseToEnd();
     } catch {
-      el.textContent = text;
+      /* try other methods below */
     }
+
+    const wroteAnswer = () => {
+      const now = editorVisibleText(el);
+      return now.includes(text.slice(0, Math.min(24, text.length))) || (text.length <= 12 && now === text);
+    };
+
+    if (!wroteAnswer()) {
+      try {
+        selectAll();
+        el.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: true,
+            inputType: "insertFromPaste",
+            data: text
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (!wroteAnswer()) {
+      try {
+        const dt = new DataTransfer();
+        dt.setData("text/plain", text);
+        const ev = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "clipboardData", { value: dt });
+        el.dispatchEvent(ev);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (!wroteAnswer()) {
+      el.innerHTML = "";
+      const p = document.createElement("p");
+      p.textContent = text;
+      el.appendChild(p);
+    }
+
     try {
       el.dispatchEvent(
         new InputEvent("input", {
@@ -1859,20 +1933,7 @@
       el.dispatchEvent(new Event("input", { bubbles: true }));
     }
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    try {
-      el.blur();
-    } catch {
-      /* ignore */
-    }
-    try {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
-      );
-    } catch {
-      /* ignore */
-    }
-    const now = cleanLabelText(el.innerText || el.textContent || "");
-    return now.length >= Math.min(8, text.length) || now.includes(text.slice(0, 12));
+    return wroteAnswer();
   }
 
   async function fillControl(el, value, key = null) {
@@ -2289,8 +2350,12 @@
       if (el.getAttribute("data-resume-bot-qid")) continue;
       const near = questionTextNearNode(el);
       const fromAi = questionTextForAi(el);
-      const questionLabel = (near && near.length >= (fromAi || "").length ? near : fromAi) || near || fromAi;
-      if (!questionLabel || shouldSkipAiField(el, questionLabel)) continue;
+      let questionLabel = (near && near.length >= (fromAi || "").length ? near : fromAi) || near || fromAi;
+      if (looksLikeEditorChromeValue(questionLabel)) {
+        questionLabel = looksLikeEditorChromeValue(near) ? fromAi : near;
+      }
+      if (!questionLabel || looksLikeEditorChromeValue(questionLabel)) continue;
+      if (shouldSkipAiField(el, questionLabel)) continue;
       if (matchApplicantKeyFromControl(el) && SKIP_AI_KNOWN_KEYS.has(matchApplicantKeyFromControl(el))) {
         continue;
       }
@@ -2328,6 +2393,7 @@
       if (/^(yes|no)([.,!]|$)/i.test(answer)) {
         answer = answer.charAt(0).toUpperCase() + answer.slice(1);
       }
+      if (looksLikeEditorChromeValue(answer)) continue;
       if (await fillControl(el, answer, null)) {
         filled.push({ id, label: labelTextForControl(el), preview: answer.slice(0, 80) });
       }
@@ -3797,6 +3863,7 @@
 
     const answer = readControlAnswer(el);
     if (!answer || answer.length > 2000) return;
+    if (looksLikeEditorChromeValue(answer)) return;
 
     // Known profile field (name, contact, links, work-eligibility, education,
     // EEO, salary, ...) → learn into the PROFILE with fill-if-empty semantics so
