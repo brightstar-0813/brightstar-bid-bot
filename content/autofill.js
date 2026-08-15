@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.9";
+  const SCRIPT_BUILD = "2026-08-16.10";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1377,7 +1377,14 @@
       let sib = walk.previousElementSibling;
       while (sib) {
         const t = stripEmoji(cleanLabelText(sib.innerText || sib.textContent || ""));
-        if (t.length >= 12 && /[?]/.test(t) && !looksLikeEditorChromeValue(t)) {
+        if (
+          t.length >= 24 &&
+          !looksLikeEditorChromeValue(t) &&
+          (/[?]/.test(t) ||
+            /\b(please (describe|share|answer|explain)|share an example|describe your|tell us about)\b/i.test(
+              t
+            ))
+        ) {
           const qs = t.match(/[^?]*\?/g);
           return (qs?.[qs.length - 1] || t).trim().slice(0, 1000);
         }
@@ -1399,7 +1406,7 @@
         .trim();
       if (
         stripped.length >= 12 &&
-        /[?]|\b(authorized|sponsorship|eligible|require|confirm|available|hourly rate|start)\b/i.test(
+        /[?]|\b(authorized|sponsorship|eligible|require|confirm|available|hourly rate|start|describe|share an example)\b/i.test(
           stripped
         )
       ) {
@@ -1816,8 +1823,9 @@
 
   function isEditorPlaceholderText(text) {
     const t = normalize(text);
+    if (!t) return true;
+    if (t.length > 240) return false;
     return (
-      !t ||
       /format paragraph/.test(t) ||
       /heading dropdown/.test(t) ||
       /we want to hear from/.test(t) ||
@@ -1865,9 +1873,58 @@
     return !editorVisibleText(el);
   }
 
-  function fillContentEditable(el, value) {
+  function rawEditorText(el) {
+    return cleanLabelText(el?.innerText || el?.textContent || "");
+  }
+
+  function answerPresentInEditor(el, text) {
+    const want = normalize(text).slice(0, 32);
+    if (!want) return false;
+    return normalize(rawEditorText(el)).includes(want);
+  }
+
+  function writeEditorPlainText(el, text) {
+    el.innerHTML = "";
+    const p = document.createElement("p");
+    p.textContent = text;
+    el.appendChild(p);
+    try {
+      el.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+          data: text
+        })
+      );
+    } catch {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function collapseDuplicatedAnswer(el, text) {
+    const raw = rawEditorText(el);
+    const t = String(text || "").trim();
+    if (!t) return;
+    const nRaw = normalize(raw);
+    const nT = normalize(t);
+    const rest = nRaw.startsWith(nT) ? nRaw.slice(nT.length) : "";
+    const duplicated = rest && rest.includes(nT.slice(0, Math.min(40, nT.length)));
+    const hasPlaceholder = /we want to hear from|format paragraph|heading dropdown/i.test(raw);
+    if (duplicated || (hasPlaceholder && nRaw.includes(nT.slice(0, 32)))) {
+      writeEditorPlainText(el, t);
+    }
+  }
+
+  async function fillContentEditable(el, value) {
     const text = String(value || "").trim();
     if (!el || !text || looksLikeEditorChromeValue(text)) return false;
+
+    if (answerPresentInEditor(el, text)) {
+      collapseDuplicatedAnswer(el, text);
+      return true;
+    }
 
     try {
       const rect = el.getBoundingClientRect();
@@ -1897,67 +1954,41 @@
 
     try {
       const sel = selectAll();
+      document.execCommand("selectAll", false, null);
       document.execCommand("delete", false, null);
       document.execCommand("insertText", false, text);
       sel.collapseToEnd();
     } catch {
       /* try other methods below */
     }
+    await sleep(40);
 
-    const wroteAnswer = () => {
-      const now = editorVisibleText(el);
-      return now.includes(text.slice(0, Math.min(24, text.length))) || (text.length <= 12 && now === text);
-    };
-
-    if (!wroteAnswer()) {
-      try {
-        selectAll();
-        el.dispatchEvent(
-          new InputEvent("beforeinput", {
-            bubbles: true,
-            cancelable: true,
-            inputType: "insertFromPaste",
-            data: text
-          })
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (!wroteAnswer()) {
-      try {
-        const dt = new DataTransfer();
-        dt.setData("text/plain", text);
-        const ev = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
-        Object.defineProperty(ev, "clipboardData", { value: dt });
-        el.dispatchEvent(ev);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (!wroteAnswer()) {
-      el.innerHTML = "";
-      const p = document.createElement("p");
-      p.textContent = text;
-      el.appendChild(p);
+    if (answerPresentInEditor(el, text)) {
+      collapseDuplicatedAnswer(el, text);
+      return true;
     }
 
     try {
-      el.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertText",
-          data: text
-        })
-      );
+      const dt = new DataTransfer();
+      dt.setData("text/plain", text);
+      const ev = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "clipboardData", { value: dt });
+      selectAll();
+      document.execCommand("delete", false, null);
+      el.dispatchEvent(ev);
     } catch {
-      el.dispatchEvent(new Event("input", { bubbles: true }));
+      /* ignore */
     }
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    return wroteAnswer();
+    await sleep(40);
+
+    if (answerPresentInEditor(el, text)) {
+      collapseDuplicatedAnswer(el, text);
+      return true;
+    }
+
+    writeEditorPlainText(el, text);
+    collapseDuplicatedAnswer(el, text);
+    return answerPresentInEditor(el, text);
   }
 
   async function fillControl(el, value, key = null) {
@@ -2003,7 +2034,7 @@
     }
 
     if (isRichTextEditor(el) || el.isContentEditable) {
-      return fillContentEditable(el, value);
+      return await fillContentEditable(el, value);
     }
 
     if (
