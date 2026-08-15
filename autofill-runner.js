@@ -17,7 +17,7 @@ import {
 } from "./ai-answers.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
-const AUTOFILL_SCRIPT_BUILD = "2026-08-16.2";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-16.5";
 const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;

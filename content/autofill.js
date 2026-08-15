@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.2";
+  const SCRIPT_BUILD = "2026-08-16.5";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -163,9 +163,17 @@
       "expected salary",
       "salary expectations",
       "desired salary",
-      "pay expectation"
+      "pay expectation",
+      "hourly rate",
+      "hourly rate for this job"
     ],
-    earliestStartDate: ["start date", "earliest start", "available to start", "when can you start"],
+    earliestStartDate: [
+      "start date",
+      "earliest start",
+      "available to start",
+      "when can you start",
+      "when are you available to start"
+    ],
     backgroundCheckConsent: ["background check", "background screening"],
     drugTestConsent: ["drug test", "drug screen", "drug screening"],
 
@@ -498,6 +506,21 @@
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return true;
+  }
+
+  function setNativeChecked(el, checked) {
+    if (!el || el.disabled) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked");
+    try {
+      if (descriptor?.set) descriptor.set.call(el, Boolean(checked));
+      else el.checked = Boolean(checked);
+    } catch {
+      el.checked = Boolean(checked);
+    }
+    el.dispatchEvent(new Event("click", { bubbles: true }));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return Boolean(el.checked) === Boolean(checked);
   }
 
   const DATE_LIKE_TYPES = new Set(["date", "month", "week", "time", "datetime-local"]);
@@ -1167,34 +1190,76 @@
     }
 
     if (el.type === "radio") {
+      const optionLabel = radioOptionLabel(el) || optionSide;
       const matchesOption =
-        optionMatchesAny(el.value, candidates) || optionMatchesAny(optionSide, candidates);
+        optionMatchesAny(el.value, candidates) ||
+        optionMatchesAny(optionSide, candidates) ||
+        optionMatchesAny(optionLabel, candidates);
       const yesNoOnGroup =
         isYesNoValue(value) &&
-        ((wantYes && (optionSide.startsWith("yes") || optionSide === "y")) ||
+        ((wantYes && /^(yes|y)$/i.test(optionLabel)) ||
+          (!wantYes && /^(no|n)$/i.test(optionLabel)) ||
+          (wantYes && (optionSide.startsWith("yes") || optionSide === "y")) ||
           (!wantYes &&
             (optionSide === "no" ||
               optionSide.startsWith("no ") ||
               optionSide.startsWith("no,") ||
               optionSide === "n")));
       if (matchesOption || yesNoOnGroup) {
-        if (!el.checked) el.click();
+        clickChip(el);
         return true;
       }
     }
     return false;
   }
 
-  function buttonChoiceText(el) {
-    return cleanLabelText(
-      el?.getAttribute?.("aria-label") || el?.textContent || el?.value || ""
-    );
+  function stripEmoji(text) {
+    return String(text || "")
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
+
+  function buttonChoiceText(el) {
+    const raw = stripEmoji(
+      cleanLabelText(el?.textContent || el?.innerText || el?.getAttribute?.("aria-label") || el?.value || "")
+    );
+    return raw;
+  }
+
+  function isNavOrSubmitChip(el) {
+    const t = normalize(buttonChoiceText(el));
+    return /\b(send application|go back|submit|sign up|log in|next|continue)\b/.test(t);
+  }
+
+  const RATE_CHIP_RE = /^\$?\s*\d+(\.\d+)?$/;
+  const YES_NO_CHIP_RE = /^(yes|no|y|n)$/i;
 
   function isYesNoChoiceButton(el) {
     if (!el || el.disabled) return false;
-    const t = normalize(buttonChoiceText(el));
-    return t === "yes" || t === "no" || t === "y" || t === "n";
+    return YES_NO_CHIP_RE.test(buttonChoiceText(el));
+  }
+
+  function isChoiceChip(el) {
+    if (!el || el.disabled || isNavOrSubmitChip(el)) return false;
+    const tag = el.tagName.toLowerCase();
+    const t = buttonChoiceText(el);
+    if (!t || t.length > 60) return false;
+    if (el.querySelector?.("textarea, select, [contenteditable='true']")) return false;
+    const extraInput = el.querySelector?.(
+      'input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'
+    );
+    if (extraInput) return false;
+    const rect = el.getBoundingClientRect();
+    const hasHiddenChoice = Boolean(el.querySelector?.('input[type="radio"], input[type="checkbox"]'));
+    if (!hasHiddenChoice && (rect.width < 24 || rect.height < 18 || rect.width > 640)) return false;
+    if (YES_NO_CHIP_RE.test(t) || RATE_CHIP_RE.test(t) || /^custom$/i.test(t)) return true;
+    if (/right away|two weeks after offer|after a specific date|prefer not/i.test(t)) return true;
+    if (tag === "button" || el.getAttribute("role") === "button" || el.getAttribute("role") === "radio") {
+      return t.split(/\s+/).length <= 8;
+    }
+    if (tag === "label" && hasHiddenChoice) return YES_NO_CHIP_RE.test(t) || t.split(/\s+/).length <= 8;
+    return false;
   }
 
   function isChoiceButtonSelected(el) {
@@ -1208,57 +1273,245 @@
     return /\b(selected|active|checked|pressed)\b/i.test(el.className || "");
   }
 
-  function questionTextNearNode(el) {
+  function questionTextNearNode(el, optionLabels = []) {
+    const labelledBy = el?.getAttribute?.("aria-labelledby") || "";
+    if (labelledBy) {
+      const fromIds = labelledBy
+        .split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent || "")
+        .join(" ");
+      const t = stripEmoji(cleanLabelText(fromIds));
+      if (t.length >= 8) return t.slice(0, 1000);
+    }
+    const legend = el?.matches?.("fieldset, [role='radiogroup'], [role='group']")
+      ? el.querySelector(":scope > legend")
+      : el?.closest?.("fieldset")?.querySelector("legend");
+    if (legend) {
+      const t = stripEmoji(cleanLabelText(legend.textContent));
+      if (t.length >= 8) return t.slice(0, 1000);
+    }
+
+    let walk = el;
+    for (let up = 0; up < 5 && walk; up += 1) {
+      let sib = walk.previousElementSibling;
+      while (sib) {
+        const t = stripEmoji(cleanLabelText(sib.innerText || sib.textContent || ""));
+        if (t.length >= 12 && /[?]/.test(t)) {
+          const qs = t.match(/[^?]*\?/g);
+          return (qs?.[qs.length - 1] || t).trim().slice(0, 1000);
+        }
+        sib = sib.previousElementSibling;
+      }
+      walk = walk.parentElement;
+    }
+
     let node = el;
     for (let i = 0; i < 6 && node; i += 1) {
-      const raw = cleanLabelText(node.innerText || node.textContent || "");
-      const stripped = raw.replace(/\b(yes|no)\b/gi, " ").replace(/\s+/g, " ").trim();
-      if (stripped.length >= 24 && /[?]|\b(authorized|sponsorship|eligible|require|confirm|available)\b/i.test(stripped)) {
+      let stripped = stripEmoji(cleanLabelText(node.innerText || node.textContent || ""));
+      for (const opt of optionLabels) {
+        if (opt) stripped = stripped.replace(new RegExp(opt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ");
+      }
+      stripped = stripped
+        .replace(/\brequired\b/gi, " ")
+        .replace(/\bthe client has input a budget of\b[^.?\n]*/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (
+        stripped.length >= 12 &&
+        /[?]|\b(authorized|sponsorship|eligible|require|confirm|available|hourly rate|start)\b/i.test(
+          stripped
+        )
+      ) {
+        const qs = stripped.match(/[^?]*\?/g);
+        if (qs?.length) {
+          const last = qs[qs.length - 1].trim();
+          if (last.length >= 12) return last.slice(0, 1000);
+        }
         return stripped.slice(0, 1000);
       }
       node = node.parentElement;
     }
     const prev = el.previousElementSibling || el.parentElement?.previousElementSibling;
     if (prev) {
-      const t = cleanLabelText(prev.textContent);
+      const t = stripEmoji(cleanLabelText(prev.textContent));
       if (t.length >= 12) return t.slice(0, 1000);
     }
     return "";
   }
 
-  function collectYesNoButtonGroups() {
-    const candidates = [
-      ...document.querySelectorAll('button, [role="button"], [role="radio"], [aria-pressed]')
-    ].filter(isYesNoChoiceButton);
+  function collectChipCandidates() {
+    const seen = new Set();
+    const out = [];
+    const push = (el) => {
+      if (!el || seen.has(el) || !isChoiceChip(el)) return;
+      seen.add(el);
+      out.push(el);
+    };
+    for (const el of document.querySelectorAll(
+      'button, [role="button"], [role="radio"], [aria-pressed], [tabindex="0"]'
+    )) {
+      push(el);
+    }
+    for (const el of document.querySelectorAll("div, span, label")) {
+      if (el.childElementCount > 3) continue;
+      const raw = el.innerText || el.textContent || "";
+      if (raw.length > 80) continue;
+      const t = buttonChoiceText(el);
+      if (
+        YES_NO_CHIP_RE.test(t) ||
+        RATE_CHIP_RE.test(t) ||
+        /^custom$/i.test(t) ||
+        /^(right away|two weeks after offer|after a specific date)$/i.test(t)
+      ) {
+        push(el);
+      }
+    }
+    return out;
+  }
+
+  function classifyChipGroup(buttons) {
+    const labels = buttons.map((b) => buttonChoiceText(b));
+    const yesNo = labels.filter((l) => YES_NO_CHIP_RE.test(l)).length;
+    const rates = labels.filter((l) => RATE_CHIP_RE.test(l)).length;
+    if (yesNo === 2 && buttons.length <= 3) return "yesno";
+    if (rates >= 2 && rates >= buttons.length - 1 && buttons.length <= 8) return "rate";
+    if (buttons.length >= 2 && buttons.length <= 8 && yesNo < 2 && rates < 2) return "option";
+    return "";
+  }
+
+  function collectNamedRadioGroups() {
+    const radios = [...document.querySelectorAll('input[type="radio"]')].filter((el) => !el.disabled);
+    const byKey = new Map();
+    for (const el of radios) {
+      const key = el.name || `id:${el.id || ""}`;
+      if (!key || key === "id:") continue;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(el);
+    }
+    const groups = [];
+    for (const [, buttons] of byKey) {
+      if (buttons.length < 2 || buttons.length > 8) continue;
+      const labels = buttons.map((b) => radioOptionLabel(b));
+      const yesNo = labels.filter((l) => YES_NO_CHIP_RE.test(l)).length;
+      const rates = labels.filter((l) => RATE_CHIP_RE.test(l)).length;
+      let kind = "";
+      if (yesNo === 2 && labels.length <= 3) kind = "yesno";
+      else if (rates >= 2 && rates >= labels.length - 1) kind = "rate";
+      else if (labels.length >= 2 && yesNo < 2 && rates < 2) kind = "option";
+      if (!kind) continue;
+      const root =
+        buttons[0].closest("fieldset, [role='radiogroup'], [role='group']") ||
+        (() => {
+          let node = buttons[0].parentElement;
+          while (node) {
+            if (buttons.every((b) => node.contains(b))) {
+              const tighter = [...node.children].find((k) => buttons.every((b) => k.contains(b)));
+              if (tighter) {
+                node = tighter;
+                continue;
+              }
+              return node;
+            }
+            node = node.parentElement;
+          }
+          return buttons[0].parentElement;
+        })();
+      groups.push({
+        root,
+        buttons,
+        kind,
+        labels,
+        question: questionTextNearNode(root || buttons[0].parentElement, labels),
+        selected: buttons.some((b) => b.checked)
+      });
+    }
+    return groups;
+  }
+
+  function collectChoiceChipGroups() {
     const used = new WeakSet();
     const groups = [];
 
+    for (const group of collectNamedRadioGroups()) {
+      group.buttons.forEach((b) => {
+        used.add(b);
+        const lab = b.closest("label");
+        if (lab) used.add(lab);
+      });
+      groups.push(group);
+    }
+
+    const candidates = collectChipCandidates();
     for (const start of candidates) {
       if (used.has(start)) continue;
       let root = start.parentElement;
-      let buttons = [];
+      let chosen = null;
       for (let i = 0; i < 5 && root; i += 1) {
-        const found = [
-          ...root.querySelectorAll('button, [role="button"], [role="radio"], [aria-pressed]')
-        ].filter(isYesNoChoiceButton);
-        const hasYes = found.some((b) => /^(yes|y)$/i.test(normalize(buttonChoiceText(b))));
-        const hasNo = found.some((b) => /^(no|n)$/i.test(normalize(buttonChoiceText(b))));
-        if (hasYes && hasNo && found.length >= 2 && found.length <= 6) {
-          buttons = found;
+        const found = candidates.filter((el) => root.contains(el) && !used.has(el));
+        const kind = classifyChipGroup(found);
+        if (kind) {
+          chosen = { root, buttons: found, kind };
           break;
         }
         root = root.parentElement;
       }
-      if (!buttons.length) continue;
-      buttons.forEach((b) => used.add(b));
+      if (!chosen && isYesNoChoiceButton(start)) {
+        const oppositeRe = /^(yes|y)$/i.test(buttonChoiceText(start)) ? /^(no|n)$/i : /^(yes|y)$/i;
+        let node = start.parentElement;
+        for (let i = 0; i < 4 && node && !chosen; i += 1) {
+          const partner = candidates.find(
+            (el) =>
+              el !== start &&
+              !used.has(el) &&
+              node.contains(el) &&
+              oppositeRe.test(buttonChoiceText(el))
+          );
+          if (partner) chosen = { root: node, buttons: [start, partner], kind: "yesno" };
+          node = node.parentElement;
+        }
+      }
+      if (!chosen) continue;
+      chosen.buttons.forEach((b) => used.add(b));
+      const labels = chosen.buttons.map((b) => buttonChoiceText(b));
       groups.push({
-        root,
-        buttons,
-        question: questionTextNearNode(root || start),
-        selected: buttons.some(isChoiceButtonSelected)
+        root: chosen.root,
+        buttons: chosen.buttons,
+        kind: chosen.kind,
+        labels,
+        question: questionTextNearNode(chosen.root || start, labels),
+        selected: chosen.buttons.some((b) => isChoiceButtonSelected(b) || b.checked)
       });
     }
     return groups;
+  }
+
+  function collectYesNoButtonGroups() {
+    return collectChoiceChipGroups().filter((g) => g.kind === "yesno");
+  }
+
+  function radioOptionLabel(el) {
+    if (!el) return "";
+    if (el.id) {
+      try {
+        const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (byFor) {
+          const clone = byFor.cloneNode(true);
+          clone.querySelectorAll("input").forEach((n) => n.remove());
+          const t = stripEmoji(cleanLabelText(clone.textContent));
+          if (t) return t;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const wrap = el.closest?.("label");
+    if (wrap) {
+      const clone = wrap.cloneNode(true);
+      clone.querySelectorAll("input").forEach((n) => n.remove());
+      const t = stripEmoji(cleanLabelText(clone.textContent));
+      if (t) return t;
+    }
+    return buttonChoiceText(el) || String(el.value || "").trim();
   }
 
   function matchYesNoGroupKey(question) {
@@ -1270,35 +1523,169 @@
     if (/\b(eligible|legally authorized|authorized)\b/.test(primary) && /\bwork\b/.test(primary)) {
       return "workAuthorized";
     }
+    if (/\bcountry where the job is located\b/.test(primary)) return "workAuthorized";
     if (/\brelocate\b/.test(primary)) return "willingToRelocate";
     if (/\bover 18\b|\bat least 18\b/.test(primary)) return "over18";
     return matchApplicantKey(primary, primary);
   }
 
-  function clickYesNoValue(group, value) {
-    const wantYes = YES_VALUES.has(normalize(value));
-    const target = group.buttons.find((b) => {
-      const t = normalize(buttonChoiceText(b));
-      return wantYes ? t === "yes" || t === "y" : t === "no" || t === "n";
-    });
-    if (!target) return false;
-    target.click();
+  function parseDollarAmount(text) {
+    const m = String(text || "").replace(/,/g, "").match(/\$?\s*(\d+(?:\.\d+)?)/);
+    return m ? Number(m[1]) : NaN;
+  }
+
+  function pickRateOption(labels, applicantInfo, question) {
+    const nums = labels
+      .map((label) => ({ label, n: parseDollarAmount(label) }))
+      .filter((row) => Number.isFinite(row.n));
+    if (!nums.length) return "";
+    const want = parseDollarAmount(
+      applicantInfo?.salaryExpectation || applicantInfo?.desiredSalary || applicantInfo?.hourlyRate || ""
+    );
+    if (Number.isFinite(want)) {
+      nums.sort((a, b) => Math.abs(a.n - want) - Math.abs(b.n - want));
+      return nums[0].label;
+    }
+    const range = String(question || "").match(/\$\s*(\d+(?:\.\d+)?).{0,24}\$\s*(\d+(?:\.\d+)?)/);
+    if (range) {
+      const max = Number(range[2]);
+      const hit = nums.find((row) => row.n === max);
+      if (hit) return hit.label;
+    }
+    return nums[nums.length - 1].label;
+  }
+
+  function pickStartOption(labels, applicantInfo) {
+    const want = normalize(applicantInfo?.earliestStartDate || applicantInfo?.availableToStart || "");
+    const opts = labels.filter(Boolean);
+    const find = (re) => opts.find((o) => re.test(normalize(o)));
+    if (/specific date/.test(want)) return find(/specific date/) || "";
+    if (/two week|2 week|14 day/.test(want)) return find(/two week|2 week/) || "";
+    if (/right away|immediate|asap|now|today/.test(want) || !want) {
+      return find(/right away|immediate|asap/) || opts[0] || "";
+    }
+    for (const o of opts) {
+      if (optionMatches(o, want)) return o;
+    }
+    return find(/right away/) || "";
+  }
+
+  function visibleChipTarget(el) {
+    if (!el) return null;
+    if (el.tagName !== "INPUT") return el;
+    const wrap = el.closest("label");
+    if (wrap) return wrap;
+    if (el.id) {
+      try {
+        const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (byFor) return byFor;
+      } catch {
+        /* ignore */
+      }
+    }
+    return el.parentElement || el;
+  }
+
+  function hiddenChoiceInput(el) {
+    if (!el) return null;
+    if (el.tagName === "INPUT" && (el.type === "radio" || el.type === "checkbox")) return el;
+    return el.querySelector?.('input[type="radio"], input[type="checkbox"]') || null;
+  }
+
+  function clickChip(el) {
+    if (!el) return false;
+    const radio = hiddenChoiceInput(el);
+    const target = visibleChipTarget(el);
+    try {
+      (target || el).scrollIntoView({ block: "center", inline: "nearest" });
+    } catch {
+      /* ignore */
+    }
+    const fire = (node) => {
+      if (!node) return;
+      try {
+        node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+        node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      } catch {
+        /* ignore */
+      }
+      try {
+        node.click();
+      } catch {
+        /* ignore */
+      }
+      try {
+        node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+        node.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
+      } catch {
+        /* ignore */
+      }
+    };
+    fire(target);
+    if (radio && target !== radio) fire(radio);
+    if (radio && !radio.checked) setNativeChecked(radio, true);
     return true;
   }
 
-  function fillYesNoButtonGroups(applicantInfo = {}) {
+  function chipChoiceText(el, fallback = "") {
+    if (!el) return fallback;
+    if (el.tagName === "INPUT") return radioOptionLabel(el) || fallback;
+    const nested = hiddenChoiceInput(el);
+    if (nested) return radioOptionLabel(nested) || buttonChoiceText(el) || fallback;
+    return buttonChoiceText(el) || fallback;
+  }
+
+  function clickChipValue(group, value) {
+    const want = String(value || "").trim();
+    if (!want || !group?.buttons?.length) return false;
+    const labels = group.buttons.map((b, i) => group.labels?.[i] || chipChoiceText(b));
+    const wantNum = parseDollarAmount(want);
+    let idx = labels.findIndex((label) => optionMatches(label, want));
+    if (idx < 0 && Number.isFinite(wantNum)) {
+      idx = labels.findIndex((label) => parseDollarAmount(label) === wantNum);
+    }
+    if (idx < 0 && YES_VALUES.has(normalize(want))) {
+      idx = labels.findIndex((label) => /^(yes|y)$/i.test(label));
+    }
+    if (idx < 0 && NO_VALUES.has(normalize(want))) {
+      idx = labels.findIndex((label) => /^(no|n)$/i.test(label));
+    }
+    if (idx < 0) return false;
+    return clickChip(group.buttons[idx]);
+  }
+
+  function fillChoiceChipGroups(applicantInfo = {}) {
     const filled = [];
-    for (const group of collectYesNoButtonGroups()) {
+    for (const group of collectChoiceChipGroups()) {
       if (group.selected) continue;
-      const key = matchYesNoGroupKey(group.question);
-      if (!key) continue;
-      const value = resolveApplicantValue(applicantInfo, key);
+      let key = group.kind;
+      let value = "";
+      if (group.kind === "yesno") {
+        key = matchYesNoGroupKey(group.question);
+        value = key ? resolveApplicantValue(applicantInfo, key) : "";
+      } else if (group.kind === "rate") {
+        key = "salaryExpectation";
+        value = pickRateOption(group.labels, applicantInfo, group.question);
+      } else if (/available to start|when can you start|when are you available/i.test(group.question)) {
+        key = "earliestStartDate";
+        value = pickStartOption(group.labels, applicantInfo);
+      } else {
+        const mapped = matchApplicantKey(normalize(group.question), normalize(group.question));
+        if (mapped) {
+          key = mapped;
+          value = resolveApplicantValue(applicantInfo, mapped);
+        }
+      }
       if (!value) continue;
-      if (clickYesNoValue(group, value)) {
-        filled.push({ key, label: group.question.slice(0, 80) });
+      if (clickChipValue(group, value)) {
+        filled.push({ key, label: (group.question || value).slice(0, 80) });
       }
     }
     return filled;
+  }
+
+  function fillYesNoButtonGroups(applicantInfo = {}) {
+    return fillChoiceChipGroups(applicantInfo);
   }
 
   function isRichTextEditor(el) {
@@ -1434,7 +1821,7 @@
     ) {
       const t = buttonChoiceText(el);
       if (optionMatches(t, value) || (isYesNoValue(value) && optionMatches(t, value))) {
-        el.click();
+        clickChip(el);
         return true;
       }
       return false;
@@ -1893,7 +2280,7 @@
       out.push({ id, label: label.slice(0, 1000), options, fieldType });
     }
 
-    for (const group of collectYesNoButtonGroups()) {
+    for (const group of collectChoiceChipGroups()) {
       if (out.length >= 40) break;
       if (group.selected) continue;
       const label = group.question;
@@ -1909,8 +2296,8 @@
       out.push({
         id,
         label: label.slice(0, 1000),
-        options: ["Yes", "No"],
-        fieldType: "radio"
+        options: group.labels.filter(Boolean).slice(0, 20),
+        fieldType: group.kind === "yesno" ? "radio" : "select"
       });
     }
 
@@ -2001,7 +2388,8 @@
         if (inner) return false;
       }
       const style = window.getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") return false;
+      const hiddenChoice = type === "radio" || type === "checkbox";
+      if (!hiddenChoice && (style.display === "none" || style.visibility === "hidden")) return false;
       return true;
     });
   }
@@ -2009,19 +2397,17 @@
   function isFieldFillable(el) {
     if (!el || el.disabled || el.readOnly) return false;
     if (typeof el.value === "undefined") return false;
+    const type = (el.type || "").toLowerCase();
+    const hiddenChoice = type === "radio" || type === "checkbox";
     try {
       const style = window.getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") return false;
-      // Don't require offsetParent — iCIMS / fixed-position layouts often leave
-      // it null even when the control is visible and editable.
+      if (!hiddenChoice && (style.display === "none" || style.visibility === "hidden")) return false;
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) {
-        const type = (el.type || "").toLowerCase();
-        // Hidden file inputs are still usable for programmatic upload.
-        if (type !== "file") return false;
+        if (type !== "file" && !hiddenChoice) return false;
       }
     } catch {
-      return false;
+      return hiddenChoice;
     }
     return true;
   }
@@ -2250,6 +2636,10 @@
   async function fillRemainingChoiceControls(applicantInfo = {}) {
     const filled = [];
     const handledRadioGroups = new Set();
+
+    const yesNoFilled = fillYesNoButtonGroups(applicantInfo);
+    for (const row of yesNoFilled) filled.push(row);
+
     const nodes = [
       ...document.querySelectorAll('select, input[type="radio"], input[type="checkbox"]')
     ];
@@ -2257,16 +2647,33 @@
     for (const el of nodes) {
       if (el.disabled) continue;
       if (isHistoryFilled(el)) continue;
+      const type = (el.type || "").toLowerCase();
       const style = window.getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") continue;
+      const hiddenChoice = type === "radio" || type === "checkbox";
+      if (!hiddenChoice && (style.display === "none" || style.visibility === "hidden")) continue;
       if (el.type === "radio" && el.name) {
         if (handledRadioGroups.has(el.name)) continue;
         handledRadioGroups.add(el.name);
         if (!isChoiceControlEmpty(el)) continue;
-      } else if (!isChoiceControlEmpty(el)) {
+        const key = matchApplicantKeyFromControl(el);
+        if (!key) continue;
+        const value = resolveApplicantValue(applicantInfo, key);
+        if (!value) continue;
+        const group = [
+          ...document.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`)
+        ];
+        let ok = false;
+        for (const radio of group) {
+          if (await fillControl(radio, value, key)) {
+            ok = true;
+            break;
+          }
+        }
+        if (ok) filled.push({ key, label: questionLabelForControl(el) });
         continue;
       }
 
+      if (!isChoiceControlEmpty(el)) continue;
       const key = matchApplicantKeyFromControl(el);
       if (!key) continue;
       const value = resolveApplicantValue(applicantInfo, key);
@@ -2275,9 +2682,6 @@
         filled.push({ key, label: questionLabelForControl(el) });
       }
     }
-
-    const yesNoFilled = fillYesNoButtonGroups(applicantInfo);
-    for (const row of yesNoFilled) filled.push(row);
 
     return { filledCount: filled.length, filled };
   }
