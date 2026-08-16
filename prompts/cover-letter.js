@@ -19,6 +19,7 @@ RULES
 - Keep to 3–4 short paragraphs (about 280–400 words).
 - Opening: specific interest in THIS role and company (1–2 sentences). No “I am excited to apply” clichés.
 - Middle: 2–3 concrete strengths tied to {NAME}'s real work and JD-relevant Salesforce themes (Apex/LWC, integrations, Service Cloud, architecture, BA/delivery — whichever fits). Use different wording from the JD.
+- Name the JD's must-have skills — the ones under "Required", "Must have", or "Primary Skill" — plainly and without hedging, so the letter matches the resume rather than undercutting it. Never hedge one ("some exposure to", "eager to learn") that the resume states outright.
 - Closing: brief interest in a conversation + thank-you.
 - Do NOT invent metrics, employers, degrees, clearances, or awards.
 - Do NOT paste a skills laundry list.
