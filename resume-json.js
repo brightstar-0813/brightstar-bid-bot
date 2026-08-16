@@ -506,15 +506,83 @@ export function sanitizeResumeData(data) {
   out.headline = String(out.headline || "").trim();
   out.location = String(out.location || "").trim();
 
+  out.profile = stripDisqualifyingClaims(out.profile);
+
+  if (Array.isArray(out.technicalSummary)) {
+    out.technicalSummary = out.technicalSummary
+      .map((line) => stripDisqualifyingClaims(line))
+      .filter(Boolean);
+  }
+
   if (Array.isArray(out.experience)) {
-    out.experience = out.experience.map((job) =>
-      job && typeof job === "object"
-        ? { ...job, location: stripEmploymentType(job.location) }
-        : job
-    );
+    out.experience = out.experience.map((job) => {
+      if (!job || typeof job !== "object") return job;
+      const next = {
+        ...job,
+        location: stripEmploymentType(job.location),
+        title: stripEmploymentType(job.title)
+      };
+      if (Array.isArray(job.bullets)) {
+        next.bullets = job.bullets.map((b) => stripDisqualifyingClaims(b)).filter(Boolean);
+      }
+      return next;
+    });
   }
 
   return out;
+}
+
+/**
+ * Sentences that disqualify the candidate on sight. Models add these when a JD
+ * names a skill the source material lacks, or demands a clearance:
+ *   "the verified master resume does not establish production Data Cloud … experience"
+ *   "U.S. citizen since 2023; no active Secret clearance is stated"
+ * A resume never argues against itself — the recruiter decides, not the document.
+ */
+const DISQUALIFYING_RE = [
+  /\bclearance\b/i,
+  /\b(u\.?s\.?\s+)?citizen(ship)?\b/i,
+  /\b(visa|green card|work authoriz|immigration|naturaliz)/i,
+  /\b(does|do|did) not (establish|list|include|show|reflect|demonstrate|contain)\b/i,
+  /\bis not (stated|established|listed|documented|reflected)\b/i,
+  /\bno (verified|documented|production|direct|hands-on)\b.{0,40}\bexperience\b/i,
+  /\bmaster resume (does not|lacks|omits)\b/i,
+  /\b(verified|source) (resume|profile|history) (does not|lacks)\b/i,
+  /\blacks? (production|direct|hands-on|documented)\b/i
+];
+
+function isDisqualifyingSentence(sentence) {
+  return DISQUALIFYING_RE.some((re) => re.test(sentence));
+}
+
+/**
+ * Drop disqualifying sentences from free text, keeping the rest intact.
+ * Returns "" when nothing survives.
+ */
+const DOT = "";
+// "U.S.", "Ph.D.", "Inc." must not be mistaken for sentence ends when splitting.
+const ABBREVIATIONS = /\b(?:[A-Za-z]\.){1,4}|\b(?:Inc|Ltd|Co|Corp|Jr|Sr|Dr|Mr|Ms|Mrs|St|vs|etc|approx|No)\./g;
+
+export function stripDisqualifyingClaims(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+
+  const masked = raw.replace(ABBREVIATIONS, (m) => m.replace(/\./g, DOT));
+  const sentences = masked.match(/[^.;!?]+[.;!?]*/g);
+  if (!sentences) {
+    return isDisqualifyingSentence(raw) ? "" : raw;
+  }
+
+  const kept = sentences
+    .map((s) => s.replace(new RegExp(DOT, "g"), "."))
+    .filter((s) => s.trim() && !isDisqualifyingSentence(s));
+
+  return kept
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.;,!?])/g, "$1")
+    .replace(/[;,]\s*$/, ".")
+    .trim();
 }
 
 const EMPLOYMENT_TYPE_RE =
@@ -850,6 +918,100 @@ function coerceResumeObject(value) {
     if (inner && typeof inner === "object" && !Array.isArray(inner)) return inner;
   }
   return null;
+}
+
+/**
+ * Salesforce products a JD may demand, with the recruiter/ATS spelling to emit.
+ * `group` picks the skills row a missing product is added to.
+ */
+const SF_PRODUCT_CATALOG = [
+  { name: "Service Cloud", re: /\bservice cloud\b/i, group: "clouds" },
+  { name: "Sales Cloud", re: /\bsales cloud\b/i, group: "clouds" },
+  { name: "Salesforce Data Cloud", re: /\bdata cloud\b|\bsalesforce genie\b/i, group: "clouds" },
+  { name: "Agentforce", re: /\bagentforce\b/i, group: "clouds" },
+  { name: "Public Sector Solutions (PSS)", re: /\bpublic sector solutions\b|\bPSS\b/, group: "clouds" },
+  { name: "Experience Cloud", re: /\bexperience cloud\b|\bcommunity cloud\b/i, group: "clouds" },
+  { name: "Health Cloud", re: /\bhealth cloud\b/i, group: "clouds" },
+  { name: "Financial Services Cloud", re: /\bfinancial services cloud\b|\bFSC\b/, group: "clouds" },
+  { name: "Marketing Cloud", re: /\bmarketing cloud\b|\bpardot\b/i, group: "clouds" },
+  { name: "Revenue Cloud", re: /\brevenue cloud\b/i, group: "clouds" },
+  { name: "Commerce Cloud", re: /\bcommerce cloud\b/i, group: "clouds" },
+  { name: "Nonprofit Cloud", re: /\bnonprofit cloud\b/i, group: "clouds" },
+  { name: "Education Cloud", re: /\beducation cloud\b/i, group: "clouds" },
+  { name: "Field Service (FSL)", re: /\bfield service\b|\bFSL\b/, group: "clouds" },
+  { name: "Salesforce CPQ", re: /\bCPQ\b/, group: "platform" },
+  { name: "OmniStudio", re: /\bomnistudio\b|\bomniscript\b|\bvlocity\b/i, group: "platform" },
+  { name: "Document Generation (DocGen)", re: /\bdocgen\b|\bdocument generation\b|\bconga\b|\bdrawloop\b/i, group: "platform" },
+  { name: "MuleSoft", re: /\bmulesoft\b|\banypoint\b/i, group: "platform" },
+  { name: "Salesforce Shield", re: /\bsalesforce shield\b/i, group: "platform" },
+  { name: "Omni-Channel", re: /\bomni-?channel\b/i, group: "platform" },
+  { name: "Tableau", re: /\btableau\b/i, group: "platform" },
+  { name: "Apex", re: /\bapex\b/i, group: "development" },
+  { name: "Lightning Web Components (LWC)", re: /\bLWC\b|\blightning web components?\b/i, group: "development" },
+  { name: "Flow", re: /\bflow builder\b|\brecord-triggered flow\b|\bsalesforce flow\b/i, group: "development" },
+  { name: "SOQL", re: /\bSOQL\b/, group: "development" }
+];
+
+const GROUP_TO_CATEGORY = {
+  clouds: "Salesforce Clouds",
+  platform: "Salesforce Platform",
+  development: "Salesforce Development"
+};
+
+/** Products the JD actually asks for, in catalog order. */
+export function jdRequiredProducts(jdText) {
+  const jd = String(jdText || "");
+  if (!jd.trim()) return [];
+  return SF_PRODUCT_CATALOG.filter((p) => p.re.test(jd));
+}
+
+/**
+ * Guarantee every Salesforce product named in the JD appears in the skills
+ * table, and that the clouds row leads. The model is asked to do this, but the
+ * ask is routinely ignored — and a person's stored prompt may predate the rule
+ * entirely — so this enforces it after the fact.
+ */
+export function enforceJdSkills(data, jdText) {
+  const wanted = jdRequiredProducts(jdText);
+  if (!data || typeof data !== "object" || Array.isArray(data) || !wanted.length) return data;
+
+  const out = { ...data };
+  const rows = (Array.isArray(out.skills) ? out.skills : [])
+    .filter((r) => r && typeof r === "object")
+    .map((r) => ({ category: String(r.category || "").trim(), items: String(r.items || "").trim() }));
+
+  const rowFor = (categoryName) => {
+    const wantCloud = /clouds?$/i.test(categoryName);
+    let idx = rows.findIndex((r) => r.category.toLowerCase() === categoryName.toLowerCase());
+    // "Salesforce Clouds" may arrive as "Clouds" / "Salesforce Cloud"; never match "Cloud Architecture".
+    if (idx < 0 && wantCloud) {
+      idx = rows.findIndex((r) => /\bclouds?\b/i.test(r.category) && !/architect/i.test(r.category));
+    }
+    if (idx < 0) {
+      rows.push({ category: categoryName, items: "" });
+      idx = rows.length - 1;
+    }
+    return idx;
+  };
+
+  for (const product of wanted) {
+    const idx = rowFor(GROUP_TO_CATEGORY[product.group] || "Salesforce Platform");
+    const items = rows[idx].items;
+    if (product.re.test(items)) continue;
+    rows[idx].items = items ? `${product.name}, ${items}` : product.name;
+  }
+
+  // JD-critical products lead their row, and the clouds row leads the table.
+  const cloudsIdx = rows.findIndex(
+    (r) => /\bclouds?\b/i.test(r.category) && !/architect/i.test(r.category)
+  );
+  if (cloudsIdx > 0) {
+    const [cloudsRow] = rows.splice(cloudsIdx, 1);
+    rows.unshift(cloudsRow);
+  }
+
+  out.skills = rows.filter((r) => r.category && r.items);
+  return out;
 }
 
 export function extractResumeJson(responseText) {

@@ -28,6 +28,8 @@ import {
 import {
   resumeJsonToHtml,
   extractResumeJson,
+  enforceJdSkills,
+  jdRequiredProducts,
   isUsableResumeJson,
   isMinimallySaveableResume,
   isRichResumeJson,
@@ -3638,6 +3640,18 @@ async function runAutoJob(jobMeta) {
 
   if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     throw new Error(describeUnusableResume(rawOutput, resumeData));
+  }
+
+  // ChatGPT drops JD-required Salesforce products even when the prompt forbids
+  // it, and a person's saved prompt may predate that rule — enforce it here.
+  {
+    const required = jdRequiredProducts(jobMeta.jdText || "");
+    if (required.length) {
+      resumeData = enforceJdSkills(resumeData, jobMeta.jdText || "");
+      await setStatus(
+        `JD skills enforced: ${required.map((p) => p.name).join(", ")}`
+      );
+    }
   }
 
   await setStatus(`JSON accepted (${resumeData.name || "ok"}). Saving jd.txt + PDF…`);
