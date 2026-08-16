@@ -1040,7 +1040,7 @@ function renderQueue() {
     applyBtn.textContent = job.applied ? "Applied" : "Apply";
     applyBtn.title = job.applied
       ? `Marked Applied${job.appliedDate ? " " + job.appliedDate : ""} on the Google Sheet. Click to apply again.`
-      : "Open the job, autofill, and mark Applied (date and time) on the Google Sheet";
+      : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
     applyBtn.addEventListener("click", () => applyAssist(job));
 
     actions.appendChild(openBtn);
@@ -1356,7 +1356,8 @@ async function revealJobFiles(job) {
   const res = await chrome.runtime.sendMessage({
     type: "reveal_job_files",
     csvRow: job.csvRow,
-    jobDir: job.jobDir || ""
+    jobDir: job.jobDir || "",
+    jdLink: job.jdLink || ""
   });
   if (!res?.ok) {
     setStatus(res?.error || "Could not reveal files. Generate this job first.");
@@ -1376,6 +1377,7 @@ async function applyAssist(job) {
     url: job.jdLink,
     job: {
       csvRow: job.csvRow,
+      jobDir: job.jobDir || "",
       jobTitle: job.title || job.jobTitle || "",
       title: job.title || "",
       companyName: job.company || job.companyName || "",

@@ -19,6 +19,8 @@ import {
   startAutofillOnTab,
   startMultiStepApplyOnTab,
   openJobAndApply,
+  resolveUploadDocs,
+  setActiveApplyJob,
   handleProfileLearnCapture,
   handleQaLearnCapture,
   answerQuestionsFromBank
@@ -767,12 +769,16 @@ async function getSheetConfig() {
 
 /** Remember the current job so leftover-question OpenAI calls have JD context. */
 async function persistJobContextForAutofill(job = {}) {
+  const csvRow = job.csvRow != null && String(job.csvRow).trim() !== "" ? Number(job.csvRow) : "";
+  const jobDir = String(job.jobDir || "").trim();
+  const jdLink = String(job.jdLink || job.url || "").trim();
   await chrome.storage.local.set({
     last_job_title: String(job.jobTitle || job.title || "").trim(),
     last_company_name: String(job.companyName || job.company || "").trim(),
-    last_jd_link: String(job.jdLink || job.url || "").trim(),
+    last_jd_link: jdLink,
     last_jd_text: String(job.jdText || "").trim()
   });
+  await setActiveApplyJob({ csvRow, jobDir, jdLink });
 }
 
 /** Mark the sheet row Applied after the queue Apply button is clicked. */
@@ -1402,7 +1408,10 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
     saved.pdf = true;
     await setLastGeneratedDocs({
       resume: { fileName: resumePdfName, mimeType: "application/pdf", base64: pdfBase64 },
-      folderName: jobDir
+      folderName: jobDir,
+      jobDir,
+      csvRow: jobMeta.csvRow,
+      jdLink: jobMeta.jdLink || ""
     }).catch(() => {});
   } catch (err) {
     saved.pdfError = `${resumePdfName} failed: ${String(err?.message || err)}`;
@@ -1601,7 +1610,13 @@ function buildCoverLetterHtml(rawText, contact = {}) {
 </html>`;
 }
 
-async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameToken = "Applicant") {
+async function autoDownloadCoverLetterPdf(
+  rawText,
+  jobDir,
+  contact = {},
+  nameToken = "Applicant",
+  jobMeta = {}
+) {
   const plain = String(rawText || "").trim();
   const token = sanitizePathSegment(nameToken || "Applicant", "Applicant");
   const coverPdfName = `${token}_Cover Letter.pdf`;
@@ -1618,7 +1633,10 @@ async function autoDownloadCoverLetterPdf(rawText, jobDir, contact = {}, nameTok
     );
     await setLastGeneratedDocs({
       coverLetter: { fileName: coverPdfName, mimeType: "application/pdf", base64: pdfBase64 },
-      folderName: jobDir
+      folderName: jobDir,
+      jobDir,
+      csvRow: jobMeta.csvRow,
+      jdLink: jobMeta.jdLink || ""
     }).catch(() => {});
     return { pdf: true, coverPdfName };
   } catch (err) {
@@ -3323,7 +3341,8 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           phone: contact.phone || resumeData?.phone || "",
           linkedin: contact.linkedin || resumeData?.linkedin || ""
         },
-        token
+        token,
+        jobMeta
       );
       if (cl.pdf) status = `${status} + ${cl.coverPdfName || coverPdfName}`;
     } catch (coverErr) {
@@ -3905,7 +3924,7 @@ async function runBatchLoop(outputDir) {
   }
 }
 
-async function revealJobFiles({ csvRow, jobDir }) {
+async function revealJobFiles({ csvRow, jobDir, jdLink }) {
   let filenamePrefix = jobDir || "";
   if (!filenamePrefix && csvRow != null) {
     const hist = (await chrome.storage.local.get(APPLY_HISTORY_KEY))[APPLY_HISTORY_KEY] || {};
@@ -3919,6 +3938,9 @@ async function revealJobFiles({ csvRow, jobDir }) {
   if (!filenamePrefix) {
     throw new Error("No saved folder for this job yet. Generate it first.");
   }
+
+  await persistJobContextForAutofill({ csvRow, jobDir: filenamePrefix, jdLink: jdLink || "" });
+  await resolveUploadDocs({ csvRow, jobDir: filenamePrefix, jdLink: jdLink || "" }).catch(() => null);
 
   const results = await chrome.downloads.search({
     filenameRegex: filenamePrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\//g, "[\\\\/]") + ".*",
@@ -4495,7 +4517,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const result = await revealJobFiles({
           csvRow: message.csvRow,
-          jobDir: message.jobDir
+          jobDir: message.jobDir,
+          jdLink: message.jdLink || ""
         });
         safeSendResponse(sendResponse, { ok: true, ...result });
       } catch (err) {
@@ -4579,7 +4602,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             : "Opening job and running Auto Apply…"
         });
 
-        const result = await openJobAndApply(message.url, { multiStep: message.multiStep !== false });
+        const result = await openJobAndApply(message.url, {
+          multiStep: message.multiStep !== false,
+          csvRow: jobMeta.csvRow,
+          jobDir: jobMeta.jobDir || "",
+          jdLink: jobMeta.jdLink || message.url || ""
+        });
         const filled = Number(result.filled || result.filledCount || 0);
         let msg =
           result.detail ||
