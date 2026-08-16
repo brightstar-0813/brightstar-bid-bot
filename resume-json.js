@@ -929,17 +929,17 @@ const SF_PRODUCT_CATALOG = [
   { name: "Sales Cloud", re: /\bsales cloud\b/i, group: "clouds" },
   { name: "Salesforce Data Cloud", re: /\bdata cloud\b|\bsalesforce genie\b/i, group: "clouds" },
   { name: "Agentforce", re: /\bagentforce\b/i, group: "clouds" },
-  { name: "Public Sector Solutions (PSS)", re: /\bpublic sector solutions\b|\bPSS\b/, group: "clouds" },
+  { name: "Public Sector Solutions (PSS)", re: /\bpublic sector solutions\b|\bPSS\b/i, group: "clouds" },
   { name: "Experience Cloud", re: /\bexperience cloud\b|\bcommunity cloud\b/i, group: "clouds" },
   { name: "Health Cloud", re: /\bhealth cloud\b/i, group: "clouds" },
-  { name: "Financial Services Cloud", re: /\bfinancial services cloud\b|\bFSC\b/, group: "clouds" },
+  { name: "Financial Services Cloud", re: /\bfinancial services cloud\b|\bFSC\b/i, group: "clouds" },
   { name: "Marketing Cloud", re: /\bmarketing cloud\b|\bpardot\b/i, group: "clouds" },
   { name: "Revenue Cloud", re: /\brevenue cloud\b/i, group: "clouds" },
   { name: "Commerce Cloud", re: /\bcommerce cloud\b/i, group: "clouds" },
   { name: "Nonprofit Cloud", re: /\bnonprofit cloud\b/i, group: "clouds" },
   { name: "Education Cloud", re: /\beducation cloud\b/i, group: "clouds" },
-  { name: "Field Service (FSL)", re: /\bfield service\b|\bFSL\b/, group: "clouds" },
-  { name: "Salesforce CPQ", re: /\bCPQ\b/, group: "platform" },
+  { name: "Field Service (FSL)", re: /\bfield service\b|\bFSL\b/i, group: "clouds" },
+  { name: "Salesforce CPQ", re: /\bCPQ\b/i, group: "platform" },
   { name: "OmniStudio", re: /\bomnistudio\b|\bomniscript\b|\bvlocity\b/i, group: "platform" },
   { name: "Document Generation (DocGen)", re: /\bdocgen\b|\bdocument generation\b|\bconga\b|\bdrawloop\b/i, group: "platform" },
   { name: "MuleSoft", re: /\bmulesoft\b|\banypoint\b/i, group: "platform" },
@@ -949,7 +949,7 @@ const SF_PRODUCT_CATALOG = [
   { name: "Apex", re: /\bapex\b/i, group: "development" },
   { name: "Lightning Web Components (LWC)", re: /\bLWC\b|\blightning web components?\b/i, group: "development" },
   { name: "Flow", re: /\bflow builder\b|\brecord-triggered flow\b|\bsalesforce flow\b/i, group: "development" },
-  { name: "SOQL", re: /\bSOQL\b/, group: "development" }
+  { name: "SOQL", re: /\bSOQL\b/i, group: "development" }
 ];
 
 const GROUP_TO_CATEGORY = {
@@ -1014,11 +1014,93 @@ export function enforceJdSkills(data, jdText) {
   return out;
 }
 
+/**
+ * Roles among the most recent `roles` that do not prove the JD's products in
+ * their bullets. The skills table can be enforced outright; bullets cannot, so
+ * this drives one targeted re-prompt.
+ * @returns {Array<{index:number, company:string, covered:number, need:number, missing:string[]}>}
+ */
+export function rolesMissingJdSkills(data, jdText, { roles = 2, minBullets = 2 } = {}) {
+  const wanted = jdRequiredProducts(jdText);
+  if (!wanted.length || !Array.isArray(data?.experience)) return [];
+  const top = data.experience.slice(0, roles);
+  if (!top.length) return [];
+
+  const bulletsOf = (job) =>
+    (Array.isArray(job?.bullets) ? job.bullets : []).map((b) => String(b || ""));
+
+  // A product the candidate already owns (Service Cloud, Apex) can satisfy the
+  // per-role bullet count while the scarce must-haves appear nowhere — so track
+  // which products are proven across the recent roles, not just how many bullets hit.
+  const proven = new Set();
+  for (const job of top) {
+    for (const bullet of bulletsOf(job)) {
+      for (const p of wanted) if (p.re.test(bullet)) proven.add(p.name);
+    }
+  }
+  const unproven = wanted.filter((p) => !proven.has(p.name)).map((p) => p.name);
+
+  const gaps = [];
+  top.forEach((job, index) => {
+    const bullets = bulletsOf(job);
+    const covered = bullets.filter((b) => wanted.some((p) => p.re.test(b))).length;
+    const missing = wanted.filter((p) => !bullets.some((b) => p.re.test(b))).map((p) => p.name);
+    // Products proven nowhere belong to the most recent role, which is the one
+    // whose dates can carry a recently released product.
+    const owesUnproven = index === 0 && unproven.length > 0;
+    if (covered < minBullets || owesUnproven) {
+      gaps.push({
+        index,
+        company: String(job?.company || `role ${index + 1}`),
+        covered,
+        need: minBullets,
+        missing,
+        unproven: index === 0 ? unproven : []
+      });
+    }
+  });
+  return gaps;
+}
+
+/**
+ * Re-prompt that asks only for the recent roles' bullets to be rewritten around
+ * the JD's required products. Built in code so it works no matter which prompt
+ * template the active person is running.
+ */
+export function buildJdSkillsRetryPrompt(data, jdText, { roles = 2, minBullets = 3 } = {}) {
+  const wanted = jdRequiredProducts(jdText).map((p) => p.name);
+  const recent = (Array.isArray(data?.experience) ? data.experience : [])
+    .slice(0, roles)
+    .map((j) => String(j?.company || "").trim())
+    .filter(Boolean);
+  const gaps = rolesMissingJdSkills(data, jdText, { roles, minBullets: 2 });
+  const unproven = gaps.find((g) => g.unproven?.length)?.unproven || [];
+
+  return [
+    "The JSON you just returned lists the required skills in the skills table but never proves them in Professional Experience. Return the COMPLETE corrected JSON object again — every role, every field, same schema — with these changes:",
+    "",
+    `REQUIRED SKILLS: ${wanted.join(", ")}`,
+    unproven.length
+      ? `PROVEN NOWHERE IN THE RECENT ROLES — these are the priority: ${unproven.join(", ")}`
+      : "",
+    `ROLES TO FIX: ${recent.join(" and ")}`,
+    "",
+    `1. Each of those roles must contain at least ${minBullets} bullets that name the required skills explicitly and describe real work with them.`,
+    "2. Spread the skills across those bullets rather than stuffing them all into one line.",
+    "3. Each such bullet names the business process, the exact feature or capability used, what was personally built or configured, and the outcome. Show internals, not product names alone: Data Cloud means data streams, data model objects, identity resolution, unified profiles, segmentation; Agentforce means agent topics, actions, Prompt Builder, grounding on CRM records, Einstein Trust Layer guardrails; Public Sector Solutions means licensing, permits, benefits, inspections, business rules engine; Document Generation means templates, merge fields, conditional content, batch generation, e-signature handoff; Service Cloud means Cases, Queues, Omni-Channel routing, Entitlements, escalation.",
+    "4. If a product was released after a role ended, place it in the most recent role instead of that older one.",
+    "5. Keep every employer, date, location, title, education entry and certification exactly as they already are. Do not mention clearance, citizenship, visa status, or employment type anywhere.",
+    "6. Do not explain what is missing or unsupported. Never write that the resume does not establish something.",
+    "",
+    "Return ONLY the JSON object, starting with { and ending with }. Do not put double quotes inside string values."
+  ].join("\n");
+}
+
 export function extractResumeJson(responseText) {
   return sanitizeResumeData(coerceResumeObject(tryParseJson(responseText)));
 }
 
-function totalExperienceBullets(data) {
+export function totalExperienceBullets(data) {
   if (!Array.isArray(data?.experience)) return 0;
   return data.experience.reduce(
     (sum, job) => sum + (Array.isArray(job?.bullets) ? job.bullets.filter(Boolean).length : 0),

@@ -30,6 +30,9 @@ import {
   extractResumeJson,
   enforceJdSkills,
   jdRequiredProducts,
+  rolesMissingJdSkills,
+  buildJdSkillsRetryPrompt,
+  totalExperienceBullets,
   isUsableResumeJson,
   isMinimallySaveableResume,
   isRichResumeJson,
@@ -3645,12 +3648,51 @@ async function runAutoJob(jobMeta) {
   // ChatGPT drops JD-required Salesforce products even when the prompt forbids
   // it, and a person's saved prompt may predate that rule — enforce it here.
   {
-    const required = jdRequiredProducts(jobMeta.jdText || "");
+    const jd = jobMeta.jdText || "";
+    const required = jdRequiredProducts(jd);
     if (required.length) {
-      resumeData = enforceJdSkills(resumeData, jobMeta.jdText || "");
-      await setStatus(
-        `JD skills enforced: ${required.map((p) => p.name).join(", ")}`
-      );
+      resumeData = enforceJdSkills(resumeData, jd);
+      await setStatus(`JD skills enforced: ${required.map((p) => p.name).join(", ")}`);
+
+      // Skills can be injected; bullets cannot. One targeted re-prompt when the
+      // recent roles never prove those skills.
+      const gaps = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2 });
+      if (gaps.length && !batchControl.skipCurrent && !batchControl.stop) {
+        await setStatus(
+          `Row ${rowLabel}${jobMeta.companyName}: ${gaps
+            .map((g) => `${g.company} proves ${g.covered}/${g.need}`)
+            .join(", ")} — one re-prompt for JD-skill bullets…`
+        );
+        try {
+          const bulletsRaw = await automateChatGpt(
+            tab.id,
+            buildJdSkillsRetryPrompt(resumeData, jd, { roles: 2, minBullets: 3 }),
+            {
+              newChat: false,
+              expectResumeJson: true,
+              statusLabel: `Same chat · JD-skill bullets (${jobMeta.companyName || "job"})…`
+            }
+          );
+          const improved = enforceJdSkills(extractResumeJson(bulletsRaw), jd);
+          // Keep the retry only when it is complete AND actually covers more.
+          if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
+            const before = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2 }).length;
+            const after = rolesMissingJdSkills(improved, jd, { roles: 2, minBullets: 2 }).length;
+            if (after <= before && totalExperienceBullets(improved) >= totalExperienceBullets(resumeData) * 0.8) {
+              resumeData = improved;
+              await setStatus(
+                after === 0
+                  ? "JD-skill bullets added to both recent roles."
+                  : `JD-skill bullets improved (${before} → ${after} roles short).`
+              );
+            } else {
+              await setStatus("Re-prompt was weaker than the original — keeping the first resume.");
+            }
+          }
+        } catch (err) {
+          await setStatus(`JD-skill re-prompt skipped (${err?.message || "failed"}). Keeping resume.`);
+        }
+      }
     }
   }
 
