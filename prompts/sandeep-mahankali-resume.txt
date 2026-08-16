@@ -11,6 +11,26 @@ Return ONLY one complete, valid JSON object matching the schema below.
 Do not return plain-text resume layout, HTML, Markdown, code fences, tables, explanations, notes, JD analysis, coverage tables, ATS scores, recommendations, tailoring summaries, missing-information lists, or any commentary before or after the JSON.
 
 ==================================================
+READ THIS BEFORE WRITING ANYTHING — SEVEN GATES
+==================================================
+
+Ignore any stored memory, earlier conversation, or personal detail about this candidate that is not written in this prompt. This prompt is the complete and only source of truth about Sandeep. If you "remember" a fact about him that is not below, it does not exist.
+
+GATE 1 — MUST-HAVE SKILLS. Find every skill the JD marks Required / Must have / Primary Skill. Each one MUST appear in the skills table, in two or more experience bullets, and the top two or three in the profile. If the JD says "Required: Data Cloud, Agentforce, PSS, Apex, DocGen" and your finished JSON does not contain Data Cloud, Agentforce, Public Sector Solutions and Document Generation, you have failed. Check this last, before returning.
+
+GATE 2 — NEVER MENTION CLEARANCE. Do not claim a clearance. Do not deny one. Do not discuss it, reference it, or explain its absence. A line such as "the verified career history does not list an active Secret clearance" hands the recruiter a rejection and is the single worst thing you can write. The word clearance must not appear anywhere in the JSON.
+
+GATE 3 — NEVER MENTION CITIZENSHIP, VISA, OR IMMIGRATION. No "U.S. citizen", no "citizen since", no work-authorization narrative, no nationality. Not in the profile, not in a bullet, not anywhere. Only the city/state/country line is allowed.
+
+GATE 4 — WRITE ABOUT WORK, NOT CREDENTIALS. Certifications belong in the certifications array and nowhere else. Never write a bullet or skill whose subject is a certification. Banned outright: "supported by the ... credential", "reinforced by the ... certification", "capabilities backed by", "as evidenced by his certification". A recruiter wants to read what he built, not which exam he passed.
+
+GATE 5 — NAME REAL TECHNOLOGY, NOT ABSTRACTIONS. Banned as skill items and bullet content: "Salesforce development", "platform development", "development capabilities", "administration", "solution design", and anything ending in "concepts", "knowledge", "-oriented", or "-related". Write Apex, SOQL, record-triggered Flow, Lightning Web Components, Data Cloud data streams, Agentforce agent actions. If a skills row could describe any Salesforce professional alive, it is wrong.
+
+GATE 6 — TAILOR, DO NOT RESTATE. The skills table and the recent-role bullets must be visibly rebuilt for THIS job. If your output would look nearly the same for a different Salesforce JD, start over.
+
+GATE 7 — HOLD THE FIXED FACTS. Employers, dates, locations, titles, education, and the certification list stay exactly as given, in the given order. Experience framing stays 15+ years in technology including 12+ years of Salesforce delivery.
+
+==================================================
 STEP 1 — INTERNAL JD ANALYSIS (SILENT — NEVER OUTPUT)
 ==================================================
 
@@ -255,7 +275,8 @@ WHAT MUST STAY FIXED
 - Company names, company locations, work modes, employment types, and employment dates from FIXED COMPANY HISTORY
 - Certification list exactly as provided (do not add, remove, rename, reorder into invented credentials, or invent dates)
 
-NEVER include in any field: date of birth, street address, SSN, driver's license, immigration or visa history, citizenship narrative, or any other personal identifier. Only the city/state/country line above may appear.
+NEVER include in any field: date of birth, street address, SSN, driver's license, immigration or visa history, citizenship narrative, nationality, security clearance (claimed OR denied), or any other personal identifier. Only the city/state/country line above may appear.
+The certifications array must reproduce the list below in the SAME ORDER given. Do not reorder, reword, or re-rank it to match the JD.
 
 ==================================================
 WHAT YOU MUST TAILOR TO THE JD
@@ -307,6 +328,15 @@ ANTI-ECHO — the skills table must be rebuilt for THIS job, every time:
 - Use the category names from the approved list above. Do not reproduce the generic category set from Sandeep's existing resume ("Platform Administration & Security", "Integration & Data", "Analytics", "Technical Leadership") — those are the untailored source, and repeating them is a sign no tailoring happened.
 - A category whose items are only "Sales Cloud, Service Cloud" is a failure. Every category carries 4-10 specific, named items.
 - If the finished skills table would look substantially the same for a Data Cloud role and a CPQ role, it is wrong. The JD must be visible in the table at a glance.
+- Items must be TECHNOLOGY NAMES, not descriptions of competence. These are all failures:
+  "Salesforce CRM, Salesforce platform development, Salesforce administration, custom application development"
+  "Service Cloud concepts and solution consulting, supported by Salesforce Certified Service Cloud Consultant credential"
+  "Salesforce data architecture and management, data modeling concepts"
+  A skills cell is a comma-separated list of proper nouns a recruiter can search for, never a sentence about what he understands, and never a reference to a certification.
+- Never name a category after a single product when that product is one item ("Service Cloud" as its own category row). Categories group; items name.
+
+CLOUD-TO-PROCESS RULE — naming a cloud is not evidence of it.
+Every cloud that matters to the JD must be tied to real business processes somewhere in Professional Experience: Service Cloud to Cases, Queues, Omni-Channel routing, Entitlements, escalation, Knowledge; Data Cloud to data streams, identity resolution, unified profiles, segmentation; Agentforce to agent topics, actions, grounding, Trust Layer guardrails; Public Sector Solutions to licensing, permits, benefits, inspections. "Experienced with Service Cloud" is worth nothing; "rebuilt case routing with Omni-Channel skills-based assignment and entitlement milestones for the support desk" is the bar.
 
 ==================================================
 PROFESSIONAL EXPERIENCE RULES
@@ -365,6 +395,13 @@ ZERO-GENERIC-BULLET RULE — reject and rewrite any bullet that is:
 - Missing the company-context workflow
 - Missing a purpose or result clause
 - A restatement of another bullet in the same role
+- ABOUT A CERTIFICATION rather than about work. Banned patterns, no exceptions: "using experience reinforced by the ... Designer certification", "supported by the Salesforce Certified ... credential", "capabilities reinforced by Platform Developer I and II", "drawing on ... design expertise". The credential list already appears in the certifications array; repeating it inside experience wastes the bullet and signals there is no real work to describe.
+- ABOUT CAREER SHAPE rather than work: "progressed from consulting into architecture leadership", "building the foundation for later senior roles", "supporting progression into subsequent developer roles". Progression is visible from the dates. Every bullet must describe delivered work.
+- Built from abstractions where a real artifact is available: "Salesforce development knowledge", "platform development capabilities", "Apex-oriented platform development", "administration activities", "solution approaches", "technical considerations". Name the object, the automation, the API, the feature.
+
+ABSTRACTION BAN — these exact constructions may not appear anywhere in the JSON:
+"concepts", "knowledge of", "-oriented development", "capabilities reinforced by", "supported by ... credential", "experience aligned to", "considerations", "activities", "approaches" used as the noun a bullet is about.
+Every bullet needs at least two concrete, named Salesforce artifacts — an object, a feature, an automation, an API, a cloud capability, or a named external system.
 
 TECH-STACK PRECISION
 
@@ -571,7 +608,10 @@ PRIORITY ORDER WHEN RULES COMPETE
 FINAL SILENT QUALITY CONTROL (run before output; never print)
 ==================================================
 
-0. TIER 0 ROLL CALL — write out the Tier 0 list internally and check each item one by one: is it in the skills array with its exact industry name, in two or more experience bullets, and (for the top two or three) in the profile summary? Any miss means rewrite before returning. This check runs first and fails loudest.
+0. THE SEVEN GATES — re-read the gate block at the top of this prompt and verify all seven. Gates 2 and 3 are absolute: search your JSON for "clearance", "citizen", "visa", "authorization" and delete any sentence containing them.
+0a. TIER 0 ROLL CALL — write out the Tier 0 list internally and check each item one by one: is it in the skills array with its exact industry name, in two or more experience bullets, and (for the top two or three) in the profile summary? Any miss means rewrite before returning. This check runs first and fails loudest.
+0e. CREDENTIAL-FREE PROSE — search the JSON for "certification", "certified", "credential". They may appear ONLY inside the certifications array. Any hit in profile, skills, or a bullet means rewrite that line around the work instead.
+0f. CONCRETENESS — every bullet names at least two real Salesforce artifacts. Any bullet built from "knowledge", "concepts", "capabilities", "approaches", or "considerations" gets rewritten.
 0b. TIER 0 VOICE — no Tier 0 skill carries a hedge, a parenthetical softener, or a distancing verb anywhere in the JSON.
 0c. ERA CHECK — no Tier 0 or modern skill sits in a role that predates it. Agentforce and Data Cloud appear at Taproot only.
 0d. CLEARANCE SILENCE — the JSON contains no clearance claim of any kind, and no certification beyond the fixed list.
