@@ -25,7 +25,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-16.13";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-16.15";
 const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;
@@ -426,9 +426,11 @@ async function sendMessageToTab(tabId, message, { attempts = 3, retryDelayMs = 2
 
 async function listTabFrameIds(tabId) {
   try {
+    // Inject the real file rather than a `func` probe: enumerating frames this
+    // way also guarantees the autofill script is present in each one.
     const infos = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      func: () => true
+      files: ["content/autofill.js"]
     });
     const ids = (infos || [])
       .map((row) => row.frameId)

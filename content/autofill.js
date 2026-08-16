@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.13";
+  const SCRIPT_BUILD = "2026-08-16.15";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -18,6 +18,169 @@
   const learnSentByQuestion = new Map();
   function suppressLearn(ms = 2500) {
     learnSuppressUntil = Date.now() + ms;
+  }
+
+  function isJavascriptUrl(value) {
+    return /^\s*javascript:/i.test(String(value || ""));
+  }
+
+  function javascriptUrlAttr(el) {
+    if (!el?.getAttribute) return "";
+    for (const attr of ["href", "formaction", "action"]) {
+      const v = el.getAttribute(attr) || "";
+      if (isJavascriptUrl(v)) return v;
+    }
+    return "";
+  }
+
+  function javascriptUrlNear(el) {
+    let node = el;
+    for (let i = 0; i < 8 && node && node !== document.body; i += 1) {
+      const v = javascriptUrlAttr(node);
+      if (v) return v;
+      node = node.parentElement;
+    }
+    return "";
+  }
+
+  // composedPath() is the reliable chain: event.target is retargeted for clicks
+  // that originate inside a shadow root, which hides the real <a href="javascript:">.
+  function javascriptUrlOnPath(event) {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    for (const node of path) {
+      if (node === document || node === window) break;
+      const v = javascriptUrlAttr(node);
+      if (v) return v;
+    }
+    return javascriptUrlNear(event.target);
+  }
+
+  function parseDoPostBack(text) {
+    const s = String(text || "").replace(/^\s*javascript:/i, "");
+    const m = s.match(
+      /__doPostBack\s*\(\s*(['"])((?:\\.|[^\\])*?)\1\s*,\s*(['"])((?:\\.|[^\\])*?)\3\s*\)/
+    );
+    if (!m) return null;
+    const unquote = (x) => x.replace(/\\(.)/g, "$1");
+    return { target: unquote(m[2]), argument: unquote(m[4]) };
+  }
+
+  const BRIDGE_READY_ATTR = "data-brightstar-bridge-ready";
+
+  function bridgeReady() {
+    return Boolean(document.documentElement?.hasAttribute(BRIDGE_READY_ATTR));
+  }
+
+  function injectPageBridge() {
+    try {
+      if (bridgeReady() || document.querySelector("script[data-brightstar-bridge]")) return;
+      const s = document.createElement("script");
+      s.src = chrome.runtime.getURL("content/page-bridge.js");
+      s.dataset.brightstarBridge = "1";
+      s.onload = () => {
+        try {
+          s.remove();
+        } catch {
+          /* ignore */
+        }
+      };
+      (document.head || document.documentElement).appendChild(s);
+    } catch {
+      /* CSP or missing web_accessible_resources */
+    }
+  }
+
+  const pendingPostbacks = [];
+
+  function flushPagePostbacks() {
+    if (!bridgeReady()) return;
+    while (pendingPostbacks.length) {
+      const post = pendingPostbacks.shift();
+      try {
+        document.dispatchEvent(
+          new CustomEvent("__brightstar_page_cmd", {
+            bubbles: true,
+            detail: { cmd: "postback", target: post.target, argument: post.argument }
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function invokePagePostback(post) {
+    if (!post) return false;
+    pendingPostbacks.push(post);
+    if (bridgeReady()) {
+      flushPagePostbacks();
+      return true;
+    }
+    // The bridge <script> loads asynchronously — replay once it marks itself ready.
+    injectPageBridge();
+    for (const delay of [60, 200, 600, 1500]) setTimeout(flushPagePostbacks, delay);
+    return true;
+  }
+
+  // iCIMS drives Next / dropdowns / ASP.NET postbacks through
+  // <a href="javascript:__doPostBack(...)">. A javascript: navigation started from
+  // our isolated world is checked against the extension CSP and blocked, so cancel
+  // it and run the postback in the page instead. Only our own synthetic clicks are
+  // intercepted; the user's real clicks are left completely alone.
+  let syntheticClickDepth = 0;
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!syntheticClickDepth) return;
+      const url = javascriptUrlOnPath(event);
+      if (!url) return;
+      event.preventDefault();
+      invokePagePostback(parseDoPostBack(url));
+    },
+    true
+  );
+  injectPageBridge();
+
+  function asSyntheticClick(fn) {
+    syntheticClickDepth += 1;
+    try {
+      return fn();
+    } finally {
+      syntheticClickDepth -= 1;
+    }
+  }
+
+  // Every programmatic click must go through here (or safeClick) so the guard
+  // above can turn a javascript: href into a real postback.
+  function nativeClick(el) {
+    if (!el) return false;
+    return asSyntheticClick(() => {
+      try {
+        el.click();
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function safeClick(el) {
+    if (!el) return false;
+    try {
+      el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    } catch {
+      /* ignore */
+    }
+    nativeClick(el);
+    try {
+      el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
+    } catch {
+      /* ignore */
+    }
+    return true;
   }
 
   const FIELD_ALIASES = {
@@ -1113,8 +1276,10 @@
     clickable.dispatchEvent(
       new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window })
     );
-    clickable.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+    asSyntheticClick(() =>
+      clickable.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+      )
     );
     return true;
   }
@@ -1138,7 +1303,7 @@
     target.dispatchEvent(
       new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window })
     );
-    target.click?.();
+    nativeClick(target);
 
     // Focus the real search input so filtering / keyboard works.
     const input =
@@ -1266,7 +1431,7 @@
       const shouldCheck = isYesNoValue(value)
         ? wantYes
         : optionMatchesAny(optionSide, candidates) || optionMatchesAny(label, candidates);
-      if (el.checked !== shouldCheck) el.click();
+      if (el.checked !== shouldCheck) nativeClick(el);
       return true;
     }
 
@@ -1739,11 +1904,7 @@
       } catch {
         /* ignore */
       }
-      try {
-        node.click();
-      } catch {
-        /* ignore */
-      }
+      nativeClick(node);
       try {
         node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
         node.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
@@ -3258,7 +3419,7 @@
       const btn = findAddHistoryButton(headingScope, sectionKind);
       if (!btn) break;
       scrollElIntoView(btn);
-      btn.click();
+      safeClick(btn);
       await sleep(550);
       groups = collectHistoryGroups(headingScope, sectionKind);
     }
@@ -3324,7 +3485,7 @@
 
     if (entry.current && slot.current) {
       const el = slot.current;
-      if (el.type === "checkbox" && !el.checked) el.click();
+      if (el.type === "checkbox" && !el.checked) nativeClick(el);
       else await fillHistoryValue(el, ["yes", "Yes", "Present"]);
       markHistoryFilled(el);
       filled.push("current");
@@ -3697,7 +3858,7 @@
     const target = preferred || controls.find((el) => EASY_ENTRY_RE.test(elActionText(el)));
     if (!target) return { ok: false, clicked: false };
     scrollElIntoView(target);
-    target.click();
+    safeClick(target);
     await sleep(1200);
     return { ok: true, clicked: true, text: elActionText(target) };
   }
@@ -3792,7 +3953,7 @@
       };
     }
     scrollElIntoView(action.el);
-    action.el.click();
+    safeClick(action.el);
     await sleep(400);
     return {
       ok: true,
@@ -3956,7 +4117,7 @@
       if (action.type === "submit") {
         if (autoSubmit) {
           scrollElIntoView(action.el);
-          action.el.click();
+          safeClick(action.el);
           summary.status = "submitted";
           summary.detail = "Submitted the application.";
           return summary;
@@ -3968,7 +4129,7 @@
 
       const sigBefore = stepSignature();
       scrollElIntoView(action.el);
-      action.el.click();
+      safeClick(action.el);
       const advanced = await waitForStepChange(sigBefore);
       if (advanced) {
         noAdvance = 0;

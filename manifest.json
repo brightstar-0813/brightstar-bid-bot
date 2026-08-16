@@ -65,6 +65,12 @@
       "all_frames": true
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/page-bridge.js"],
+      "matches": ["https://*.icims.com/*", "https://*/*", "http://*/*"]
+    }
+  ],
   "icons": {
     "16": "icons/brightstar-icon.svg",
     "32": "icons/brightstar-icon.svg",
