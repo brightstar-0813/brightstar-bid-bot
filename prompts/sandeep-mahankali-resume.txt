@@ -237,6 +237,8 @@ JSON SAFETY RULES
 
 - Return ONLY one syntactically valid JSON object. Start with { and end with }.
 - Every key and string value must be properly quoted and terminated.
+- NEVER put a double quote inside a string value. This prompt quotes many terms while instructing you; do not carry those quotation marks into the resume text. Write Data Cloud, not "Data Cloud". If a term genuinely needs quoting, use single quotes. One unescaped inner quote breaks the parse and the whole job fails.
+- Use straight ASCII quotes for JSON structure. Do not use curly/typographic quotes as delimiters.
 - NEVER copy instructional or schema-example wording into the JSON (for example: "One summary paragraph", "One sentence bullet", "tailored to the JD", "One realistic project name"). Every string must be real tailored resume content.
 - The schema sample above shows FIELD NAMES and shape only. Do not reuse its example bullet text.
 - linkedin must be exactly: "linkedin": "https://www.linkedin.com/in/sandeep-mahankali-7b8652129/"

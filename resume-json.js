@@ -278,10 +278,13 @@ export function stripMarkdownFences(text) {
   return trimmed;
 }
 
-function normalizeJsonText(text) {
+function normalizeJsonText(text, { convertSmartQuotes = true } = {}) {
+  // Curly quotes are legal *content* inside a JSON string. Converting them
+  // globally turns `"\u2026the \u201Cgolden record\u201D pattern\u2026"` into unescaped delimiters
+  // and destroys the object, so callers retry with this off.
   let trimmed = stripMarkdownFences(text)
     .replace(/^\uFEFF/, "")
-    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u201C\u201D]/g, (m) => (convertSmartQuotes ? '"' : m))
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/\u00A0/g, " ")
     .trim();
@@ -384,6 +387,75 @@ function escapeControlCharsInJsonStrings(text) {
     }
     if (ch === '"') inString = true;
     out += ch;
+  }
+  return out;
+}
+
+/**
+ * Escape stray double quotes that appear INSIDE a JSON string value.
+ * ChatGPT writes bullets like: "applied the "golden record" pattern" — those
+ * inner quotes are content, not delimiters, and JSON.parse rejects the object.
+ *
+ * A quote only closes a string when what follows continues the JSON grammar:
+ * `:` (key), `}` / `]` (end of object/array), or `,` followed by the start of
+ * another value. Anything else is treated as content and escaped.
+ * Fallback only — run this after a normal parse has already failed.
+ */
+function escapeStrayQuotesInJsonStrings(text) {
+  const input = String(text || "");
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  const closesString = (idx) => {
+    let j = idx + 1;
+    while (j < input.length && /\s/.test(input[j])) j += 1;
+    if (j >= input.length) return true;
+    const next = input[j];
+    if (next === ":" || next === "}" || next === "]") return true;
+    if (next !== ",") return false;
+    // `,` only ends the string when a fresh value/key follows it.
+    let k = j + 1;
+    while (k < input.length && /\s/.test(input[k])) k += 1;
+    if (k >= input.length) return true;
+    const after = input[k];
+    return (
+      after === '"' ||
+      after === "{" ||
+      after === "[" ||
+      after === "-" ||
+      /[0-9]/.test(after) ||
+      /^(true|false|null)/.test(input.slice(k, k + 5))
+    );
+  };
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (!inString) {
+      out += ch;
+      if (ch === '"') inString = true;
+      continue;
+    }
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch !== '"') {
+      out += ch;
+      continue;
+    }
+    if (closesString(i)) {
+      out += ch;
+      inString = false;
+    } else {
+      out += '\\"';
+    }
   }
   return out;
 }
@@ -598,9 +670,27 @@ function safeJsonParse(text) {
   }
 }
 
-function tryParseJson(text) {
-  const trimmed = normalizeJsonText(text);
+/** Rank parsed candidates so the richest resume object wins. */
+function scoreResumeObject(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
+  let score = 0;
+  if (Array.isArray(obj.experience)) score += 100000 + obj.experience.length * 1000;
+  if (Array.isArray(obj.certifications)) score += 50000 + obj.certifications.length * 100;
+  if (Array.isArray(obj.skills)) score += 20000 + obj.skills.length * 50;
+  if (typeof obj.profile === "string") score += 25000 + Math.min(obj.profile.length, 500);
+  if (typeof obj.name === "string") score += 1000;
+  const bullets = Array.isArray(obj.experience)
+    ? obj.experience.reduce((n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0), 0)
+    : 0;
+  score += bullets * 25;
+  return score;
+}
 
+/**
+ * Parse one already-normalized candidate string.
+ * tryParseJson feeds this several repaired variants and keeps the best result.
+ */
+function parseNormalizedJson(trimmed) {
   // Always prefer the richest balanced resume object when several {...} exist
   // (prompt schema example + real answer often appear in the same transcript).
   const objects = [...extractBalancedJsonObjects(trimmed)];
@@ -649,28 +739,10 @@ function tryParseJson(text) {
   }
 
   if (objects.length) {
-    const scoreObj = (obj) => {
-      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return -1;
-      let score = 0;
-      if (Array.isArray(obj.experience)) score += 100000 + obj.experience.length * 1000;
-      if (Array.isArray(obj.certifications)) score += 50000 + obj.certifications.length * 100;
-      if (Array.isArray(obj.skills)) score += 20000 + obj.skills.length * 50;
-      if (typeof obj.profile === "string") score += 25000 + Math.min(obj.profile.length, 500);
-      if (typeof obj.name === "string") score += 1000;
-      const bullets = Array.isArray(obj.experience)
-        ? obj.experience.reduce(
-            (n, j) => n + (Array.isArray(j?.bullets) ? j.bullets.length : 0),
-            0
-          )
-        : 0;
-      score += bullets * 25;
-      return score;
-    };
-
     let best = null;
     let bestScore = -1;
     for (const obj of objects) {
-      const s = scoreObj(obj);
+      const s = scoreResumeObject(obj);
       if (s > bestScore) {
         best = obj;
         bestScore = s;
@@ -705,6 +777,42 @@ function tryParseJson(text) {
   }
 
   return null;
+}
+
+/**
+ * Parse ChatGPT's reply, retrying with progressively more aggressive repairs.
+ * Variants cover the two ways a well-formed answer still fails JSON.parse:
+ * curly quotes used as content, and unescaped inner quotes inside a bullet.
+ * The richest successful parse wins, so a repair never costs us content.
+ */
+function tryParseJson(text) {
+  const seen = new Set();
+  const variants = [];
+  const addVariant = (candidate) => {
+    const v = String(candidate || "");
+    if (!v || seen.has(v)) return;
+    seen.add(v);
+    variants.push(v);
+  };
+
+  for (const convertSmartQuotes of [true, false]) {
+    const normalized = normalizeJsonText(text, { convertSmartQuotes });
+    addVariant(normalized);
+    addVariant(escapeStrayQuotesInJsonStrings(normalized));
+  }
+
+  let best = null;
+  let bestScore = -1;
+  for (const variant of variants) {
+    const parsed = parseNormalizedJson(variant);
+    if (!parsed) continue;
+    const score = scoreResumeObject(parsed);
+    if (score > bestScore) {
+      best = parsed;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 function coerceResumeObject(value) {

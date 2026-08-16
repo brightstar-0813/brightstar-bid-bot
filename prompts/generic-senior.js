@@ -118,6 +118,8 @@ JSON RULES
 - experience bullets: action + system/workflow + technology + what {NAME} owned + result.
 - education and certifications: only what the master resume lists. Omit empty objects.
 - Return valid JSON only. Start with { and end with }.
+- NEVER put a double quote inside a string value. This prompt quotes terms while instructing you; do not carry those quotation marks into the resume text. Use single quotes if a term must be quoted. One unescaped inner quote breaks the parse and the whole job fails.
+- Use straight ASCII quotes for JSON structure, never curly/typographic quotes.
 
 JOB TITLE
 {JOB_TITLE}
