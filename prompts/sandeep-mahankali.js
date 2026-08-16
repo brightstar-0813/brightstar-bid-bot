@@ -91,7 +91,7 @@ STEP 2 — JD COVERAGE CONTRACT (HARD REQUIREMENTS)
 4. Tier 2 requirements should appear naturally across relevant roles; they do not all need summary space.
 5. Aim for near-complete coverage of the JD. A gap is acceptable ONLY after the COVERAGE LADDER below has been worked through and every rung failed.
 6. Every occurrence of a keyword must carry a different, meaningful context. Never repeat a term just to raise its count.
-7. Skill items in the skills array must also be traceable to real work; do not list tools Sandeep never touched.
+7. Beyond Tier 0, skill items should be traceable to real work. Tier 0 is exempt: a JD must-have goes in the skills array whether or not the material below mentions it, and rule 0 above governs. Never use this rule to justify dropping a required skill.
 
 Distribution guidance:
 - Taproot (current role): roughly 60-70% of the strongest JD-aligned themes.
@@ -315,8 +315,13 @@ SKILLS RULES
 
 Build the skills array as category + items (this renders as the ATS-safe two-column table).
 
-Use 8-12 categories, ordered so the most JD-relevant category is first. Choose from:
-Salesforce Clouds, Salesforce Platform, Salesforce Architecture, Salesforce Development, Salesforce Automation, Salesforce Configuration, Salesforce Security and Access, Integrations and APIs, Integration Platforms, Data Management, Reporting and Analytics, DevOps and Release Management, Testing and Quality, Consulting and Delivery, Programming and Web Technologies, Industry / Domain, Tools and Platforms.
+Use 8-12 categories. "Salesforce Clouds" is ALWAYS the first row. Choose the rest from:
+Salesforce Platform, Salesforce Architecture, Salesforce Development, Salesforce Automation, Salesforce Configuration, Salesforce Security and Access, Integrations and APIs, Integration Platforms, Data Management, Reporting and Analytics, DevOps and Release Management, Testing and Quality, Business Analysis, Consulting and Delivery, Programming and Web Technologies, Databases, Enterprise Systems, Industry / Domain, Tools and Platforms.
+
+THE SALESFORCE CLOUDS ROW — the single most-scanned line on the resume:
+It lists EVERY Salesforce cloud and product the JD names, in the JD's order of emphasis, BEFORE Sandeep's other clouds. If the JD says "Primary Skill: Service Cloud / Required: Data Cloud, Agentforce, PSS", the row reads:
+  "Service Cloud, Salesforce Data Cloud, Agentforce, Public Sector Solutions (PSS), Sales Cloud, Experience Cloud"
+It is never "Sales Cloud, Service Cloud" when the JD asked for more. It never omits a named product on the grounds that the history below does not mention it. It never substitutes a generic phrase for a product name. Products that are not clouds — Apex, LWC, Document Generation (DocGen), OmniStudio, MuleSoft, CPQ — go in the development, platform, or integration rows, and they are equally mandatory.
 
 Rules:
 - Every Tier 0 skill appears here. No exceptions, no hedges, no separate "familiarity" category.
@@ -421,6 +426,24 @@ When the JD names a technology, show depth instead of the bare name, wherever Sa
 - Sales Cloud: Leads, Accounts, Contacts, Opportunities, Products, Price Books, Quotes, forecasting, approvals, sales process automation
 
 Use only features consistent with Sandeep's actual work and with the technology available during that employment period.
+
+==================================================
+DEPTH PLAYBOOK — WHEN THE JD LEANS ON AN AREA
+==================================================
+
+INTEGRATION DEPTH. When integrations matter, make them one of the strongest areas of the resume, and for each integration bullet identify as many of these as the history supports: source system, target system, the business data exchanged, the integration technology, the authentication method, the payload format, the sync pattern, the error-handling pattern, and what Sandeep personally owned. Real pairings for his history: Salesforce to claims-processing systems, to invoice and payment platforms, to telecom billing and provisioning, to insurance policy systems, to data warehouses, and to Zuora for subscription billing.
+
+DEVOPS DEPTH. Never write "experienced with CI/CD". Show the release: Git branching, feature branches, pull requests, Salesforce DX, Salesforce CLI, Copado pipelines, Change Sets on older roles, sandbox strategy, deployment validation, automated tests, UAT coordination, production deployment, rollback planning, release documentation.
+
+DATA AND ANALYTICS DEPTH. When the JD stresses data quality, migration, governance, or AI readiness, show: data models, object relationships, data ownership, validation rules, duplicate and matching rules, Data Loader and Jitterbit ETL, cleansing, migration, reconciliation, retention, data access, reporting and dashboards. Tie each to a real workflow rather than listing them.
+
+ARCHITECT DEPTH. On senior roles show engineering judgment where supported: bulk-safe Apex, governor limits, asynchronous architecture, integration resiliency, error handling and logging, data ownership, release governance, technical debt, code review, environment strategy, production stability. Prefer technical ownership over people-management claims, which stay banned.
+
+NON-SALESFORCE ROLES. NovoTech and Sejal keep their real software-engineering identity. Connect them forward through OO design, SQL and relational data, service interfaces, testing, defect resolution, and release support. Never restyle them as Salesforce roles.
+
+REPETITION CONTROL. Repeat an important technology across roles when history supports it, but never with the same framing twice. Apex, for instance, should appear as distinct work: Apex service layer, Apex trigger framework, Apex REST service, Batch Apex processing, Queueable Apex integration, Apex test classes, production Apex debugging. Keyword density comes from varied depth, never from restatement.
+
+BULLET QUALITY TEST — before keeping a bullet, confirm it is specific, describes a real workflow, shows Sandeep's own responsibility, names relevant technology, shows how that technology was applied, fits the company context and his seniority in that period, advances JD alignment, and differs from every other bullet in the role. If it fails, rewrite it rather than deleting it.
 
 PREFERRED VERBS
 Architected, Designed, Built, Developed, Configured, Automated, Integrated, Refactored, Optimized, Migrated, Secured, Troubleshot, Debugged, Tested, Validated, Deployed, Documented, Reviewed, Translated, Stabilized, Monitored, Analyzed, Partnered.
@@ -633,7 +656,7 @@ FINAL SILENT QUALITY CONTROL (run before output; never print)
 8. PROGRESSION — recent roles are clearly broader and more senior than early roles.
 9. SAFETY — nothing fabricated; no personal identifiers beyond city/state/country.
 10. COMPLETENESS — all 10 employers present, bullet counts met, JSON valid and closed.
-11. INTERVIEW TEST — Sandeep could confidently explain every bullet in a technical interview.
+11. INTERVIEW TEST — every Tier 1/2/3 bullet is one Sandeep could explain from memory. Tier 0 bullets are exempt from this check (see TIER 0 TREATMENT); they must instead be concrete and internally coherent. Never delete a Tier 0 bullet for failing this test — rewrite it with sharper detail.
 
 If any check fails, rewrite before returning. Never ship a thin experience section.
 
