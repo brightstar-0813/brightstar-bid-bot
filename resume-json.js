@@ -506,7 +506,34 @@ export function sanitizeResumeData(data) {
   out.headline = String(out.headline || "").trim();
   out.location = String(out.location || "").trim();
 
+  if (Array.isArray(out.experience)) {
+    out.experience = out.experience.map((job) =>
+      job && typeof job === "object"
+        ? { ...job, location: stripEmploymentType(job.location) }
+        : job
+    );
+  }
+
   return out;
+}
+
+const EMPLOYMENT_TYPE_RE =
+  /^(full[\s-]?time|part[\s-]?time|contract[\s-]?to[\s-]?hire|contract(?:or|ing)?|c2h|temp(?:orary)?|intern(?:ship)?|permanent|perm|freelance|consultant|w[\s-]?2|1099|corp[\s-]?to[\s-]?corp|c2c|seasonal|per[\s-]?diem)$/i;
+
+/**
+ * Drop employment type (Full-Time, Contract, Intern…) from a role's location line.
+ * Work mode (Hybrid / Remote / On-Site) is kept — recruiters filter on it.
+ * "Austin, TX, USA | Hybrid | Full-Time" -> "Austin, TX, USA | Hybrid"
+ */
+export function stripEmploymentType(location) {
+  const raw = String(location || "").trim();
+  if (!raw) return "";
+  if (!raw.includes("|")) return raw;
+  const kept = raw
+    .split("|")
+    .map((part) => part.trim())
+    .filter((part) => part && !EMPLOYMENT_TYPE_RE.test(part));
+  return kept.join(" | ");
 }
 
 /**

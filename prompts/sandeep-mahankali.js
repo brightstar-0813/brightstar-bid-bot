@@ -18,6 +18,9 @@ Ignore any stored memory, earlier conversation, or personal detail about this ca
 
 GATE 1 — MUST-HAVE SKILLS. Find every skill the JD marks Required / Must have / Primary Skill. Each one MUST appear in the skills table, in two or more experience bullets, and the top two or three in the profile. If the JD says "Required: Data Cloud, Agentforce, PSS, Apex, DocGen" and your finished JSON does not contain Data Cloud, Agentforce, Public Sector Solutions and Document Generation, you have failed. Check this last, before returning.
 
+GATE 1B — EVERY SALESFORCE CLOUD OR PRODUCT NAMED IN THE JD GOES ON THE RESUME. This is absolute and has no exceptions. Sweep the JD for every Salesforce cloud and product — Service Cloud, Sales Cloud, Data Cloud, Agentforce, Experience Cloud, Public Sector Solutions, Health Cloud, Financial Services Cloud, Marketing Cloud, Revenue Cloud, CPQ, Field Service, Commerce Cloud, Nonprofit Cloud, Education Cloud, OmniStudio, Document Generation, MuleSoft, Tableau, Slack, Einstein, Salesforce Shield, or anything else Salesforce sells. Every one of them belongs in the FIRST skills row and in the experience section, tied to a real business process. A JD naming Service Cloud and Data Cloud whose resume ships a "Salesforce Clouds" row reading only "Sales Cloud, Service Cloud" is the exact failure this rule exists to stop.
+Do not decide a cloud is unsupported and drop it. Do not replace it with a generic phrase such as "Salesforce platform" or "CRM solutions". Name the product.
+
 GATE 2 — NEVER MENTION CLEARANCE. Do not claim a clearance. Do not deny one. Do not discuss it, reference it, or explain its absence. A line such as "the verified career history does not list an active Secret clearance" hands the recruiter a rejection and is the single worst thing you can write. The word clearance must not appear anywhere in the JSON.
 
 GATE 3 — NEVER MENTION CITIZENSHIP, VISA, OR IMMIGRATION. No "U.S. citizen", no "citizen since", no work-authorization narrative, no nationality. Not in the profile, not in a bullet, not anywhere. Only the city/state/country line is allowed.
@@ -240,7 +243,7 @@ Return exactly this shape (field names must match):
   "experience": [
     {
       "company": "Taproot Solutions Inc",
-      "location": "Austin, Texas, United States | Hybrid | Full-Time",
+      "location": "Austin, Texas, United States | Hybrid",
       "title": "Salesforce Technical Architect / Senior Salesforce Developer",
       "dates": "May 2023 - Present",
       "project": "Enterprise Salesforce Architecture and Platform Delivery",
@@ -272,7 +275,7 @@ WHAT MUST STAY FIXED
 
 - Name, location, phone, email, LinkedIn
 - Education entries exactly as listed in CANDIDATE INFORMATION
-- Company names, company locations, work modes, employment types, and employment dates from FIXED COMPANY HISTORY
+- Company names, company locations, work modes, and employment dates from FIXED COMPANY HISTORY (employment type is never shown)
 - Certification list exactly as provided (do not add, remove, rename, reorder into invented credentials, or invent dates)
 
 NEVER include in any field: date of birth, street address, SSN, driver's license, immigration or visa history, citizenship narrative, nationality, security clearance (claimed OR denied), or any other personal identifier. Only the city/state/country line above may appear.
@@ -356,7 +359,8 @@ Bullet counts (HARD REQUIREMENTS):
 - NovoTech Solutions (Apr 2012 - Dec 2012): 3-4 bullets
 - Sejal Technologies (May 2011 - Mar 2012): 2-3 bullets
 
-Set "location" for each role to the exact "City, State, Country | Mode | Type" string from FIXED COMPANY HISTORY.
+Set "location" for each role to the exact "City, State, Country | Mode" string from FIXED COMPANY HISTORY.
+NEVER append an employment type. Full-Time, Part-Time, Contract, Contract-to-Hire, Temporary, Intern, Freelance, W2, C2C and every variant are banned from the location line and from every other field. Work mode (Hybrid / Remote / On-Site) stays.
 Set "project" to a realistic descriptive engagement name for that employer's actual business (for example "Healthcare Claims CRM Architecture" or "Telecom Service Cloud Case Management"). Never invent a branded internal project codename and never use the target company's product names.
 
 Do not remove roles, invent employers, or reorder the history.
@@ -440,43 +444,43 @@ Outside of Tier 0, do not claim industry regulations, clinical systems, or platf
 COMPANY CONTEXT (use the real business of each employer)
 ==================================================
 
-Taproot Solutions Inc (Austin, TX | Hybrid | Full-Time | current):
+Taproot Solutions Inc (Austin, TX | Hybrid | current):
 IT services and consulting firm, SBA 8(a) and EDWOSB/WOSB/MBE certified, founded 2012, 51-200 employees. Primary focus on healthcare and financial systems and technologies. Capabilities: consulting, project management, full life-cycle application development, analysis, systems architecture and design, operations, and infrastructure support. Has supported large government integration firms on healthcare claims processing systems, invoice payment and processing systems, and state and local government projects. Salesforce sits alongside BPM/case-management, DevOps, and UI/UX practices.
 Sandeep's work: enterprise Salesforce architecture across Sales Cloud and Service Cloud, Apex and trigger frameworks, Lightning components, security and sharing architecture, integration design with enterprise and healthcare-adjacent systems, Jitterbit and Data Loader migrations, Copado CI/CD and release governance, design and code reviews, production troubleshooting.
 
-Deloitte (Austin, TX | Remote | Full-time):
+Deloitte (Austin, TX | Remote):
 Global professional services firm: consulting, financial advisory, risk management, audit and assurance, tax and legal, with a large healthcare practice.
 Sandeep's work: Salesforce architecture and consulting on enterprise client engagements, Sales Cloud and Service Cloud technical architecture, reusable Apex and trigger patterns, Visualforce and Lightning development, enterprise security configuration, Jitterbit and Data Loader integrations and migrations, Zuora subscription management and CPQ-adjacent quote-to-cash patterns, stakeholder design reviews, testing, deployment, production stabilization, and architecture documentation.
 
-Avco Consulting, Inc. (Worcester, MA | On-Site | Full-Time):
+Avco Consulting, Inc. (Worcester, MA | On-Site):
 Minority Business Enterprise IT consultancy founded 1999 delivering IT consulting, custom and offshore software development, and web application development. Focus industries: financial services, e-commerce, healthcare, telecom, retail, and media.
 Sandeep's work: Salesforce and Force.com application development and maintenance across client engagements, configuration plus programmatic enhancements, data models and access settings, REST/SOAP integrations, Data Loader migrations, reports and dashboards, defect investigation, regression-safe changes, release support, documentation, and production support.
 
-Salesforce (Greater Boston Area, MA | Remote | Contract | short engagement):
+Salesforce (Greater Boston Area, MA | Remote | short engagement):
 The CRM platform vendor itself.
 Sandeep's work: short senior consulting engagement mapping requirements to platform capability, reviewing existing implementations for maintainability and security issues, configuration and customization, testing, issue resolution, and documentation. Keep this role brief and consulting-flavored.
 
-Altice USA (Town and Country, MO | Remote | Contract):
+Altice USA (Town and Country, MO | Remote):
 Large telecommunications, media, broadband, and advertising provider (now Optimum).
 Sandeep's work: high-volume telecom CRM development — Apex, triggers, Visualforce, SOQL, custom objects, validation, Service Cloud case processes, REST/SOAP integrations with telecom and enterprise applications, governor-limit and performance optimization, unit tests, release and production support.
 
-Suddenlink Communications (Town and Country, MO | Hybrid | Contract):
+Suddenlink Communications (Town and Country, MO | Hybrid):
 Cable operator serving roughly 1.4 million residential customers plus commercial accounts across Arkansas, Louisiana, North Carolina, Oklahoma, Texas, and West Virginia, with TV, internet, phone, and home security bundled on one bill.
 Sandeep's work: Salesforce development and administration for customer and service operations — objects, layouts, validation, case management and escalation, access model, custom logic, web-service interfaces, reports, defect tracing, sandbox validation, production support.
 
-Allstate (Northbrook, IL | On-Site | Contract):
+Allstate (Northbrook, IL | On-Site):
 Major US insurance carrier: auto, home, life, renters, powersports, annuities, roadside, and related products.
 Sandeep's work: insurance CRM Salesforce development and administration — Apex, Visualforce, SOQL, custom objects, validation logic, workflow and approval automation, profiles/roles/sharing/field-level security, reports and dashboards, data loading and reconciliation, sandbox UAT, documentation.
 
-Visions Healthcare (Dedham, MA | On-Site | Contract):
+Visions Healthcare (Dedham, MA | On-Site):
 Multi-disciplinary medical practice (company closed in 2015).
 Sandeep's work: healthcare Salesforce administration and development — configuration for administrative, service, and relationship-management workflows, custom objects/fields/record types/validation, careful access control over sensitive patient-related information, targeted Visualforce and introductory Apex, operational reports, data cleanup, platform support.
 
-NovoTech Solutions (Bangalore, Karnataka, India | On-Site | Full-time | pre-Salesforce):
+NovoTech Solutions (Bangalore, Karnataka, India | On-Site | pre-Salesforce):
 Software development company.
 Sandeep's work: object-oriented application development, database queries and data-access logic, server-side validation and error handling, service-interface integration between modules, unit testing, defect correction, release support, and production issue analysis. This is a software engineering role — never describe Salesforce work here.
 
-Sejal Technologies (Hanamkonda, Telangana, India | On-Site | Intern | pre-Salesforce):
+Sejal Technologies (Hanamkonda, Telangana, India | On-Site | pre-Salesforce):
 Technology services company where Sandeep interned.
 Sandeep's work: supported web-based and internal business application development under senior engineers, wrote and tested database queries, fixed defects found in functional and regression testing, validated UI behavior, and supported release verification. Keep this the shortest, most junior entry.
 
@@ -541,28 +545,29 @@ Verified Certifications (use all 12, exactly as written):
 - AWS Certified Solutions Architect - Associate
 
 ==================================================
-FIXED COMPANY HISTORY — DO NOT MODIFY COMPANY NAMES, LOCATIONS, MODES, TYPES, OR DATES
+FIXED COMPANY HISTORY — DO NOT MODIFY COMPANY NAMES, LOCATIONS, MODES, OR DATES
+(Employment type is deliberately absent. Never add it back.)
 ==================================================
 
-Taproot Solutions Inc (Austin, Texas, United States | Hybrid | Full-Time) — default title: Salesforce Technical Architect / Senior Salesforce Developer | May 2023 - Present
+Taproot Solutions Inc (Austin, Texas, United States | Hybrid) — default title: Salesforce Technical Architect / Senior Salesforce Developer | May 2023 - Present
 
-Deloitte (Austin, Texas, United States | Remote | Full-time) — default title: Salesforce Architect / Salesforce Consultant | Jan 2017 - Apr 2023
+Deloitte (Austin, Texas, United States | Remote) — default title: Salesforce Architect / Salesforce Consultant | Jan 2017 - Apr 2023
 
-Avco Consulting, Inc. (Worcester, Massachusetts, United States | On-Site | Full-Time) — default title: Salesforce Consultant | Aug 2014 - Sep 2018
+Avco Consulting, Inc. (Worcester, Massachusetts, United States | On-Site) — default title: Salesforce Consultant | Aug 2014 - Sep 2018
 
-Salesforce (Greater Boston Area, Massachusetts, United States | Remote | Contract) — default title: Senior Salesforce Consultant | Dec 2016 - Jan 2017
+Salesforce (Greater Boston Area, Massachusetts, United States | Remote) — default title: Senior Salesforce Consultant | Dec 2016 - Jan 2017
 
-Altice USA (Town and Country, Missouri, United States | Remote | Contract) — default title: Senior Salesforce Developer | Dec 2015 - Dec 2016
+Altice USA (Town and Country, Missouri, United States | Remote) — default title: Senior Salesforce Developer | Dec 2015 - Dec 2016
 
-Suddenlink Communications (Town and Country, Missouri, United States | Hybrid | Contract) — default title: Senior Salesforce Developer / Administrator | Aug 2015 - Dec 2015
+Suddenlink Communications (Town and Country, Missouri, United States | Hybrid) — default title: Senior Salesforce Developer / Administrator | Aug 2015 - Dec 2015
 
-Allstate (Northbrook, Illinois, United States | On-Site | Contract) — default title: Salesforce Developer / Administrator | Sep 2014 - Aug 2015
+Allstate (Northbrook, Illinois, United States | On-Site) — default title: Salesforce Developer / Administrator | Sep 2014 - Aug 2015
 
-Visions Healthcare (Dedham, Massachusetts, United States | On-Site | Contract) — default title: Salesforce Administrator / Developer | May 2014 - Oct 2014
+Visions Healthcare (Dedham, Massachusetts, United States | On-Site) — default title: Salesforce Administrator / Developer | May 2014 - Oct 2014
 
-NovoTech Solutions (Bangalore, Karnataka, India | On-Site | Full-time) — default title: Software Developer | Apr 2012 - Dec 2012
+NovoTech Solutions (Bangalore, Karnataka, India | On-Site) — default title: Software Developer | Apr 2012 - Dec 2012
 
-Sejal Technologies (Hanamkonda, Telangana, India | On-Site | Intern) — default title: Intern | May 2011 - Mar 2012
+Sejal Technologies (Hanamkonda, Telangana, India | On-Site) — default title: Intern | May 2011 - Mar 2012
 
 ==================================================
 EXISTING TECHNICAL COVERAGE (draw selectively; never dump all of it)
@@ -609,6 +614,8 @@ FINAL SILENT QUALITY CONTROL (run before output; never print)
 ==================================================
 
 0. THE SEVEN GATES — re-read the gate block at the top of this prompt and verify all seven. Gates 2 and 3 are absolute: search your JSON for "clearance", "citizen", "visa", "authorization" and delete any sentence containing them.
+0g. CLOUD SWEEP — list every Salesforce cloud and product named in the JD, then confirm each one appears in the first skills row AND in Professional Experience. Any miss means rewrite.
+0h. NO EMPLOYMENT TYPE — search every experience location for "Full-Time", "Full Time", "Part-Time", "Contract", "Temporary", "Intern", "Freelance", "W2", "C2C" and remove it. Each location reads "City, State, Country | Mode" and nothing more.
 0a. TIER 0 ROLL CALL — write out the Tier 0 list internally and check each item one by one: is it in the skills array with its exact industry name, in two or more experience bullets, and (for the top two or three) in the profile summary? Any miss means rewrite before returning. This check runs first and fails loudest.
 0e. CREDENTIAL-FREE PROSE — search the JSON for "certification", "certified", "credential". They may appear ONLY inside the certifications array. Any hit in profile, skills, or a bullet means rewrite that line around the work instead.
 0f. CONCRETENESS — every bullet names at least two real Salesforce artifacts. Any bullet built from "knowledge", "concepts", "capabilities", "approaches", or "considerations" gets rewritten.
