@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-16.15";
+  const SCRIPT_BUILD = "2026-08-19.01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -2337,10 +2337,101 @@
     return [...document.querySelectorAll('input[type="file"]')].filter((el) => {
       if (el.disabled) return false;
       if (el.getAttribute("data-brightstar-uploaded") === "1") return false;
-      if (el.files && el.files.length) return false;
       if (isOptionalExtraAttachmentText(localUploadText(el))) return false;
       return true;
     });
+  }
+
+  function uploadKindFromText(text) {
+    const n = normalize(text);
+    if (!n || isOptionalExtraAttachmentText(text)) return "";
+    if (/cover\s*letter|covering\s*letter|coverletter/.test(n) && !/not required/.test(n)) {
+      return "coverLetter";
+    }
+    if (/\b(resume|cv|curriculum vitae)\b/.test(n) && !/cover\s*letter/.test(n)) return "resume";
+    return "";
+  }
+
+  function findUploadCards() {
+    const scored = [];
+    for (const el of document.querySelectorAll("div, section, article, li, label, aside")) {
+      const raw = el.innerText || "";
+      if (raw.length < 8 || raw.length > 700) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 60 || rect.height < 18) continue;
+      const kind = uploadKindFromText(raw);
+      if (!kind) continue;
+      scored.push({ el, kind, len: raw.length });
+    }
+    scored.sort((a, b) => a.len - b.len);
+    const best = {};
+    for (const row of scored) {
+      if (!best[row.kind]) best[row.kind] = row.el;
+    }
+    return Object.entries(best).map(([kind, el]) => ({ kind, el }));
+  }
+
+  function zoneLooksOccupied(el) {
+    const t = normalize(el?.innerText || "");
+    if (!t) return false;
+    if (/\buploaded to profile\b/.test(t)) return true;
+    return /\.(pdf|docx?|txt)\b/.test(t) && /\b(replace|remove|delete|attached|uploaded)\b/.test(t);
+  }
+
+  function clickTextIn(el, re) {
+    const nodes = [
+      ...(el?.querySelectorAll?.('button, a, [role="button"], [role="menuitem"], li, span') || [])
+    ];
+    const hit = nodes.find((node) => {
+      const label = `${elActionText(node) || ""} ${node.getAttribute?.("aria-label") || ""} ${node.textContent || ""}`;
+      return re.test(cleanLabelText(label));
+    });
+    if (!hit) return false;
+    safeClick(hit);
+    return true;
+  }
+
+  async function clickReplaceInZone(zone) {
+    if (!zone) return false;
+    if (clickTextIn(zone, /^(replace|change|update|re-?upload|upload new)$/i)) {
+      await sleep(350);
+      return true;
+    }
+    const menuBtn = [...zone.querySelectorAll("button, [role='button'], [aria-haspopup]")].find((el) => {
+      const popup = String(el.getAttribute("aria-haspopup") || "").toLowerCase();
+      const label = `${el.getAttribute("aria-label") || ""} ${elActionText(el) || ""}`;
+      return popup === "menu" || popup === "true" || /\b(more|options|actions|menu)\b/i.test(label);
+    });
+    if (menuBtn) {
+      safeClick(menuBtn);
+      await sleep(280);
+    } else if (
+      clickTextIn(
+        zone,
+        /\b(more|more options|more actions|open menu|actions menu|options)\b/i
+      )
+    ) {
+      await sleep(280);
+    }
+    const items = [...document.querySelectorAll('[role="menuitem"], button, a, li, span')].filter(
+      (el) => isElVisible(el)
+    );
+    const replace = items.find((el) =>
+      /^(replace|change|update)$/i.test(cleanLabelText(el.textContent || elActionText(el)))
+    );
+    if (replace) {
+      safeClick(replace);
+      await sleep(350);
+      return true;
+    }
+    return Boolean(menuBtn);
+  }
+
+  function findFileInputNear(zone) {
+    const marked = (el) => el?.getAttribute?.("data-brightstar-uploaded") === "1";
+    const inZone = [...(zone?.querySelectorAll?.('input[type="file"]') || [])].find((el) => !marked(el));
+    if (inZone) return inZone;
+    return [...document.querySelectorAll('input[type="file"]')].filter((el) => !el.disabled && !marked(el)).pop() || null;
   }
 
   function looksLikeUploadDropzone(el) {
@@ -2448,10 +2539,46 @@
 
     await revealFileDropzones();
 
-    const inputs = collectFileInputs();
     const used = new WeakSet();
 
+    async function attachToZone(kind, file, zone) {
+      if (!file || !zone || used.has(zone) || zoneIsBusy(zone)) return false;
+      if (kind === "resume" && zoneLooksOccupied(zone)) {
+        await clickReplaceInZone(zone);
+      }
+      const input = findFileInputNear(zone);
+      if (input && setFileOnInput(input, file)) {
+        used.add(zone);
+        used.add(input);
+        markUploaded(input);
+        markUploaded(zone);
+        return true;
+      }
+      if (dispatchFileDrop(zone, file)) {
+        used.add(zone);
+        markUploaded(zone);
+        return true;
+      }
+      return false;
+    }
+
+    for (const { kind, el } of findUploadCards()) {
+      const file = kind === "coverLetter" ? coverFile : resumeFile;
+      if (!file) continue;
+      const ok = await attachToZone(kind, file, el);
+      if (ok) {
+        uploaded.push({
+          kind,
+          fileName: file.name,
+          label: cleanLabelText(el.innerText || "").slice(0, 80)
+        });
+      }
+    }
+
+    const inputs = collectFileInputs();
+
     for (const input of inputs) {
+      if (used.has(input) || input.getAttribute("data-brightstar-uploaded") === "1") continue;
       const kind = classifyFileInput(input);
       let file = null;
       if (!kind) continue;
@@ -2462,9 +2589,12 @@
         continue;
       }
 
-      if (!file || used.has(input)) continue;
+      if (!file) continue;
       const zone = input.closest("div, section, label, form") || input.parentElement;
-      if (zoneIsBusy(zone) || zoneAlreadyHasFile(zone) || zoneAlreadyHasFile(input)) continue;
+      if (used.has(zone) || zoneIsBusy(zone)) continue;
+      if (kind === "resume" && zoneLooksOccupied(zone)) {
+        await clickReplaceInZone(zone);
+      }
       const ok = setFileOnInput(input, file);
       if (ok) {
         used.add(input);
@@ -2484,32 +2614,25 @@
       }
     }
 
-    if (!uploaded.length) {
+    if (!uploaded.some((row) => row.kind === "coverLetter") || !uploaded.some((row) => row.kind === "resume")) {
       for (const zone of findUploadDropzones()) {
         if (isOptionalExtraAttachmentText(zone.innerText || "")) continue;
-        if (zoneIsBusy(zone) || zoneAlreadyHasFile(zone)) continue;
+        if (used.has(zone) || zoneIsBusy(zone)) continue;
         const n = normalize(zone.innerText || "");
         let kind = classifyFileInput(zone);
         if (!kind) {
           kind = /cover/.test(n) && !/not required/.test(n) ? "coverLetter" : "resume";
         }
+        if (uploaded.some((row) => row.kind === kind)) continue;
         const file = kind === "coverLetter" && coverFile ? coverFile : kind === "resume" ? resumeFile : null;
         if (!file) continue;
-        const zoneText = zone.innerText || "";
-        const input = zone.querySelector('input[type="file"]');
-        if (input && setFileOnInput(input, file)) {
-          markUploaded(input);
-          markUploaded(zone);
-          uploaded.push({ kind, fileName: file.name, label: cleanLabelText(zoneText).slice(0, 80) });
-          continue;
-        }
-        if (dispatchFileDrop(zone, file)) {
-          markUploaded(zone);
+        const ok = await attachToZone(kind, file, zone);
+        if (ok) {
           uploaded.push({
             kind,
             fileName: file.name,
-            label: cleanLabelText(zoneText).slice(0, 80),
-            via: "drop"
+            label: cleanLabelText(zone.innerText || "").slice(0, 80),
+            via: "dropzone"
           });
         }
       }

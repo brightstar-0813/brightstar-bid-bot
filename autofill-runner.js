@@ -33,7 +33,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-16.15";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-19.01";
 const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;
