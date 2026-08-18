@@ -140,7 +140,7 @@ export function parseRequiredExperienceFromPrompt(promptText) {
         continue;
       }
       // "Company Name (Location…) — …"  (require location-ish paren + dash/pipe after)
-      // The comma is allowed so suffixed names ("Avco Consulting, Inc.") parse.
+      // The comma is allowed so suffixed names ("Acme Consulting, Inc.") parse.
       const withParen = line.match(
         /^([A-Z0-9][A-Za-z0-9&.,'''/\- ]{1,90}?)\s*\(([^)]{2,140})\)\s*[—–\-|:]/
       );

@@ -13,17 +13,13 @@ const EXPECTED_BULLET_COUNTS = [
   { match: /scholastic/i, count: 4 },
   { match: /vonage/i, count: 4 },
   { match: /forefront/i, count: 4 },
-  // Sandeep — deep on the recent consulting roles; shorter floors on early roles
-  { match: /taproot\s*solutions/i, count: 10 },
-  { match: /^deloitte$/i, count: 10 },
-  { match: /avco\s*consulting/i, count: 9 },
-  { match: /^salesforce$/i, count: 3 },
-  { match: /^altice(\s*usa)?$/i, count: 4 },
-  { match: /suddenlink/i, count: 3 },
-  { match: /^allstate$/i, count: 4 },
-  { match: /visions\s*healthcare/i, count: 3 },
-  { match: /novo\s*tech/i, count: 3 },
-  { match: /sejal/i, count: 2 }
+  // D'mario Lewis — deep on the three senior roles; short floors on the 2014 internships
+  { match: /culligan/i, count: 10 },
+  { match: /fusion\s*academy/i, count: 9 },
+  { match: /hexarmor/i, count: 10 },
+  { match: /christian\s*reformed\s*church/i, count: 6 },
+  { match: /bostwick\s*lake/i, count: 2 },
+  { match: /wolverine\s*world\s*wide/i, count: 2 }
 ];
 
 /** Active per-person experience rules (set by background for the current job). */
@@ -151,7 +147,7 @@ function roleUnderfillLabels(data, floorFn) {
 
 /**
  * Roles that have some bullets but fewer than the quality target — used to
- * re-prompt, not to block PDF save. Returns labels like "Deloitte (1/4)".
+ * re-prompt, not to block PDF save. Returns labels like "Fusion Academy (1/4)".
  */
 export function underfilledExperienceEntries(data) {
   if (!Array.isArray(data?.experience)) return [];
@@ -232,15 +228,21 @@ export function buildIncompleteExperienceRetryPrompt(data, rulesOverride = null)
     ? `\n- Also add missing employer(s): ${missing.join(", ")}`
     : "";
   const shortRoles = [...incomplete, ...underfilled].join("; ");
+  // Employer names come from the resume itself so this prompt stays person-agnostic.
+  const companies = (Array.isArray(data?.experience) ? data.experience : [])
+    .map((j) => String(j?.company || "").trim())
+    .filter(Boolean);
+  const recentNames = companies.slice(0, 2).join(" and ");
+  const olderNames = companies.slice(2).join(", ");
   return `Your previous resume JSON was cut off — these role(s) are incomplete (${problemText}).
 
 Return ONLY one complete valid resume JSON object with REAL tailored content.
 Rules:
 - No markdown, no code fences, no commentary before or after the JSON
 - Start with { and end with }
-- Keep Taproot and Deloitte as already written if they already have 8+ bullets
+- Keep the recent roles (${recentNames || "the two most recent employers"}) as already written if they already have 8+ bullets
 - Expand ONLY these short roles to the counts shown: ${shortRoles || "every role that is still thin"}
-- Early roles (Salesforce, Altice, Suddenlink, Allstate, Visions, NovoTech, Sejal) need 2–4 compact bullets each — do not spend the whole reply rewriting Taproot${missingLine}
+- Older roles (${olderNames || "everything below the recent roles"}) need 2–4 compact bullets each — do not spend the whole reply rewriting the most recent role${missingLine}
 - Required employers: ${requiredList || "all employers from FIXED COMPANY HISTORY in the original prompt"}
 - Finish the entire JSON in one message — do not stop early or split into parts
 

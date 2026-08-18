@@ -493,7 +493,7 @@ function promptNeedsPersonTemplate(prompt) {
   const p = String(prompt || "");
   if (!p.trim()) return true;
   if (!p.includes("{MASTER_RESUME}") || !p.includes("{NAME}") || !p.includes("{JD}")) return true;
-  if (/sandeep\s+mahankali/i.test(p)) return true;
+  if (/sandeep\s+mahankali|d.?mario\s+lewis/i.test(p)) return true;
   return false;
 }
 
@@ -521,7 +521,7 @@ function applyExtractedProfileToForm(parsed, resumeText, { resetEeo = true } = {
     personResumePromptEl.value = GENERIC_SENIOR_PROMPT;
   }
   const cover = String(personCoverPromptEl.value || "");
-  if (resetEeo || !cover.trim() || !cover.includes("{JD}") || /sandeep\s+mahankali|matthew\s+dale/i.test(cover)) {
+  if (resetEeo || !cover.trim() || !cover.includes("{JD}") || /sandeep\s+mahankali|matthew\s+dale|d.?mario\s+lewis/i.test(cover)) {
     personCoverPromptEl.value = GENERIC_COVER_LETTER_PROMPT;
   }
 }

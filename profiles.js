@@ -1,4 +1,4 @@
-import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
+import { PROMPT as dmarioLewisPrompt } from "./prompts/dmario-lewis.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
@@ -14,20 +14,20 @@ export const GENERIC_COVER_LETTER_PROMPT = coverLetterPrompt;
 /** Built-in prompts shipped as separate files under /prompts. */
 export const BUILTIN_PROFILES = [
   {
-    id: "sandeep-mahankali",
-    label: "Sandeep Mahankali (Salesforce)",
-    promptTemplate: sandeepMahankaliPrompt,
+    id: "dmario-lewis",
+    label: "D'mario Lewis (Salesforce)",
+    promptTemplate: dmarioLewisPrompt,
     templateId: "ats-modern",
-    resumeFilePrefix: "Sandeep_Resume",
+    resumeFilePrefix: "Lewis_Resume",
     builtin: true,
     kind: "resume",
-    name: "Sandeep Mahankali",
-    email: "msandeep129@outlook.com",
-    phone: "+1 (669) 223-1191",
-    linkedin: "https://www.linkedin.com/in/sandeep-mahankali-7b8652129/",
-    location: "Round Rock, Texas, United States",
-    address: "1462 Sawmill Xing",
-    zip: "78665",
+    name: "D'mario Lewis",
+    email: "dmario.lewis1992@outlook.com",
+    phone: "+1 (248) 340-3582",
+    linkedin: "https://www.linkedin.com/in/dmario-lewis/",
+    location: "Muskegon, Michigan, United States",
+    address: "1325 Sumac St",
+    zip: "49445",
     gender: "",
     ethnicity: "",
     disability: "No, I do not have a disability",
@@ -36,21 +36,17 @@ export const BUILTIN_PROFILES = [
     workAuthorized: "Yes",
     sponsorship: "No",
     hispanicLatino: "",
-    signatureTitle: "Salesforce Technical Architect",
+    signatureTitle: "Senior Salesforce Engineer",
     masterResume: "",
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
-      "Taproot Solutions Inc",
-      "Deloitte",
-      "Avco Consulting, Inc.",
-      "Salesforce",
-      "Altice USA",
-      "Suddenlink Communications",
-      "Allstate",
-      "Visions Healthcare",
-      "NovoTech Solutions",
-      "Sejal Technologies"
+      "Culligan International",
+      "Fusion Academy",
+      "HexArmor",
+      "Christian Reformed Church in North America",
+      "Bostwick Lake Congregation UCC",
+      "Wolverine World Wide"
     ]
   },
   {
@@ -64,7 +60,7 @@ export const BUILTIN_PROFILES = [
 
 export { resolveExperienceRulesForPerson, normalizeRequiredExperienceInput, parseRequiredExperienceFromPrompt };
 
-export const DEFAULT_PROFILE_ID = "sandeep-mahankali";
+export const DEFAULT_PROFILE_ID = "dmario-lewis";
 
 /** @deprecated Use BUILTIN_PROFILES or getAllProfiles(). */
 export const PROFILES = BUILTIN_PROFILES;
