@@ -775,8 +775,20 @@ async function getSheetConfig() {
 /** Remember the current job so leftover-question OpenAI calls have JD context. */
 async function persistJobContextForAutofill(job = {}) {
   const csvRow = job.csvRow != null && String(job.csvRow).trim() !== "" ? Number(job.csvRow) : "";
-  const jobDir = String(job.jobDir || "").trim();
+  let jobDir = String(job.jobDir || "").trim();
   const jdLink = String(job.jdLink || job.url || "").trim();
+  if (!jobDir && csvRow !== "") {
+    const queue = await getQueue();
+    const row = queue.find((j) => Number(j.csvRow) === Number(csvRow));
+    const hist = (await chrome.storage.local.get(APPLY_HISTORY_KEY))[APPLY_HISTORY_KEY] || {};
+    jobDir = String(row?.jobDir || hist[String(csvRow)]?.jobDir || "").trim();
+  }
+  if (jobDir && csvRow !== "") {
+    const folder = jobDir.replace(/\\/g, "/").split("/").pop() || "";
+    if (!new RegExp(`^${Number(csvRow)}\\s+-\\s+`).test(folder)) {
+      jobDir = "";
+    }
+  }
   await chrome.storage.local.set({
     last_job_title: String(job.jobTitle || job.title || "").trim(),
     last_company_name: String(job.companyName || job.company || "").trim(),
@@ -4146,6 +4158,9 @@ async function handleNativeCsvMessage(msg) {
       autoStart: true,
       force: false
     });
+    return;
+  }
+  if (type === "file" || type === "job_docs") {
     return;
   }
   if (type === "status" || type === "pong") {

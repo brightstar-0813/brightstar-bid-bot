@@ -11,6 +11,7 @@ import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilari
 import { getEnv } from "./env.js";
 import { DEFAULT_OPENAI_MODEL } from "./openai.js";
 import { normalizeJobLink } from "./sheets.js";
+import { NATIVE_HOST_NAME } from "./csv-source.js";
 import {
   generateHumanizedApplicationAnswers,
   generateConstrainedChoiceAnswers,
@@ -21,6 +22,13 @@ import {
   certificationsFromText,
   bankAnswerFitsQuestion
 } from "./ai-answers.js";
+import {
+  docsHaveFile,
+  getJobDocs,
+  jobDirMatchesCsvRow,
+  jobDocsId,
+  putJobDocs
+} from "./job-docs-db.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
@@ -88,12 +96,30 @@ export async function getLastGeneratedDocs() {
   return docs && typeof docs === "object" ? docs : null;
 }
 
-function jobDocsId({ csvRow, jobDir } = {}) {
-  if (csvRow != null && String(csvRow).trim() !== "" && !Number.isNaN(Number(csvRow))) {
-    return `row:${Number(csvRow)}`;
+function hasCsvRow(csvRow) {
+  return csvRow != null && String(csvRow).trim() !== "" && !Number.isNaN(Number(csvRow));
+}
+
+function folderSegment(jobDir) {
+  const parts = String(jobDir || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+function downloadPathInJobFolder(absPath, jobDir, csvRow) {
+  const norm = String(absPath || "").replace(/\\/g, "/").toLowerCase();
+  if (!norm) return false;
+  const segment = folderSegment(jobDir).toLowerCase();
+  if (segment && (norm.includes(`/${segment}/`) || norm.endsWith(`/${segment}`))) {
+    return !hasCsvRow(csvRow) || jobDirMatchesCsvRow(jobDir, csvRow);
   }
-  const dir = String(jobDir || "").trim();
-  return dir ? `dir:${dir}` : "";
+  if (hasCsvRow(csvRow)) {
+    return new RegExp(`/${Number(csvRow)}\\s+-\\s+[^/]+/`).test(norm);
+  }
+  return false;
 }
 
 async function readJobDocsMap() {
@@ -102,15 +128,18 @@ async function readJobDocsMap() {
 }
 
 async function persistJobGeneratedDocs(partial = {}) {
-  const csvRow = partial.csvRow != null && String(partial.csvRow).trim() !== "" ? Number(partial.csvRow) : null;
+  const csvRow = hasCsvRow(partial.csvRow) ? Number(partial.csvRow) : null;
   const jobDir = String(partial.jobDir || partial.folderName || "").trim();
   const id = jobDocsId({ csvRow, jobDir });
   if (!id) return null;
+
+  const stored = await putJobDocs(partial).catch(() => null);
+
   const map = await readJobDocsMap();
   const prev = map[id] || {};
   map[id] = {
     ...prev,
-    csvRow: csvRow != null && !Number.isNaN(csvRow) ? csvRow : prev.csvRow,
+    csvRow: csvRow != null ? csvRow : prev.csvRow,
     jobDir: jobDir || prev.jobDir || "",
     jdLink: String(partial.jdLink || prev.jdLink || "").trim(),
     resume: docsHaveFile(partial, "resume") ? partial.resume : prev.resume || null,
@@ -118,30 +147,44 @@ async function persistJobGeneratedDocs(partial = {}) {
     savedAt: Date.now()
   };
   const ranked = Object.entries(map).sort((a, b) => (b[1]?.savedAt || 0) - (a[1]?.savedAt || 0));
-  const pruned = Object.fromEntries(ranked.slice(0, MAX_JOB_DOCS));
+  const pruned = Object.fromEntries(
+    ranked.slice(0, MAX_JOB_DOCS).map(([key, row]) => [
+      key,
+      {
+        csvRow: row?.csvRow,
+        jobDir: row?.jobDir || "",
+        jdLink: row?.jdLink || "",
+        resumeName: row?.resume?.fileName || row?.resumeName || "",
+        coverName: row?.coverLetter?.fileName || row?.coverName || "",
+        savedAt: row?.savedAt || Date.now()
+      }
+    ])
+  );
   try {
     await chrome.storage.local.set({ [JOB_DOCS_KEY]: pruned });
   } catch {
-    /* quota */
+    /* quota — IndexedDB still holds the PDFs */
   }
-  return map[id];
-}
-
-function docsHaveFile(docs, kind) {
-  return Boolean(docs?.[kind]?.base64);
+  return stored || map[id];
 }
 
 function pickJobDocsFromMap(map, { csvRow, jobDir, jdLink } = {}) {
-  const id = jobDocsId({ csvRow, jobDir });
-  if (id && map[id]) return map[id];
   const rows = Object.values(map);
+  if (hasCsvRow(csvRow)) {
+    const n = Number(csvRow);
+    const id = jobDocsId({ csvRow: n, jobDir });
+    if (id && map[id] && (jobDirMatchesCsvRow(map[id].jobDir, n) || !map[id].jobDir)) {
+      return map[id];
+    }
+    const byRow = rows.find((row) => Number(row?.csvRow) === n);
+    if (byRow) return byRow;
+    const byFolder = rows.find((row) => jobDirMatchesCsvRow(row?.jobDir, n));
+    if (byFolder) return byFolder;
+    return null;
+  }
   if (jobDir) {
     const byDir = rows.find((row) => String(row?.jobDir || "") === String(jobDir));
     if (byDir) return byDir;
-  }
-  if (csvRow != null && String(csvRow).trim() !== "") {
-    const byRow = rows.find((row) => Number(row?.csvRow) === Number(csvRow));
-    if (byRow) return byRow;
   }
   const want = normalizeJobLink(jdLink || "");
   if (want) {
@@ -152,20 +195,31 @@ function pickJobDocsFromMap(map, { csvRow, jobDir, jdLink } = {}) {
 }
 
 async function lookupSavedJobFolder({ csvRow, jobDir, jdLink } = {}) {
-  if (jobDir) return { csvRow, jobDir, jdLink };
   const data = await chrome.storage.local.get(["job_queue", "apply_history"]);
   const queue = Array.isArray(data.job_queue) ? data.job_queue : [];
   const hist = data.apply_history && typeof data.apply_history === "object" ? data.apply_history : {};
-  if (csvRow != null && String(csvRow).trim() !== "") {
-    const job = queue.find((j) => Number(j.csvRow) === Number(csvRow));
-    if (job?.jobDir) {
-      return { csvRow: job.csvRow, jobDir: job.jobDir, jdLink: job.jdLink || jdLink };
-    }
-    const remembered = hist[String(csvRow)];
-    if (remembered?.jobDir) {
-      return { csvRow, jobDir: remembered.jobDir, jdLink: remembered.jdLink || jdLink };
-    }
+
+  if (hasCsvRow(csvRow)) {
+    const n = Number(csvRow);
+    const job = queue.find((j) => Number(j.csvRow) === n);
+    const remembered = hist[String(n)];
+    const fromQueue = String(job?.jobDir || "").trim();
+    const fromHist = String(remembered?.jobDir || "").trim();
+    const passed = String(jobDir || "").trim();
+    const chosen =
+      (fromQueue && jobDirMatchesCsvRow(fromQueue, n) && fromQueue) ||
+      (fromHist && jobDirMatchesCsvRow(fromHist, n) && fromHist) ||
+      (passed && jobDirMatchesCsvRow(passed, n) && passed) ||
+      "";
+    return {
+      csvRow: n,
+      jobDir: chosen,
+      jdLink: job?.jdLink || remembered?.jdLink || jdLink
+    };
   }
+
+  if (jobDir) return { csvRow, jobDir, jdLink };
+
   const want = normalizeJobLink(jdLink || "");
   if (want) {
     const job = queue.find((j) => normalizeJobLink(j?.jdLink || "") === want);
@@ -183,9 +237,9 @@ async function lookupSavedJobFolder({ csvRow, jobDir, jdLink } = {}) {
 }
 
 function downloadPrefixRegex(jobDir) {
-  return `${String(jobDir || "")
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\//g, "[\\\\/]")}.*`;
+  const segment = folderSegment(jobDir);
+  const target = segment || String(jobDir || "");
+  return `${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\//g, "[\\\\/]")}.*`;
 }
 
 function isResumeDownload(filename) {
@@ -198,110 +252,187 @@ function isCoverLetterDownload(filename) {
   return /cover[\s_-]*letter\.pdf$/i.test(name);
 }
 
-function filePathToUrl(absPath) {
-  let p = String(absPath || "").trim().replace(/\\/g, "/");
-  if (!p) return "";
-  if (/^[a-zA-Z]:/.test(p)) p = `/${p}`;
-  if (!p.startsWith("/")) p = `/${p}`;
-  return `file://${encodeURI(p)}`;
+function sendNativeMessage(payload, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    if (!chrome.runtime?.sendNativeMessage) {
+      reject(new Error("Native messaging is not available."));
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Native host timed out."));
+    }, timeoutMs);
+    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, payload, (response) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const err = chrome.runtime.lastError?.message;
+      if (err) {
+        reject(new Error(err));
+        return;
+      }
+      resolve(response);
+    });
+  });
 }
 
-async function readLocalPdfDoc(absPath, fallbackName) {
-  const url = filePathToUrl(absPath);
-  if (!url) return null;
+function nativeFileToDoc(res, fallbackName) {
+  if (!res?.ok || !res.base64) return null;
+  return {
+    fileName: res.fileName || fallbackName,
+    mimeType: res.mimeType || "application/pdf",
+    base64: res.base64
+  };
+}
+
+async function readPdfViaNative(absPath, fallbackName) {
+  const path = String(absPath || "").trim();
+  if (!path) return null;
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength < 80) return null;
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-    }
-    const fileName = String(absPath).replace(/\\/g, "/").split("/").pop() || fallbackName;
+    const res = await sendNativeMessage({ type: "read_file", path });
+    return nativeFileToDoc(res, fallbackName);
+  } catch {
+    return null;
+  }
+}
+
+async function loadDocsFromNativeHost({ csvRow, jobDir } = {}) {
+  try {
+    const found = await sendNativeMessage({
+      type: "read_job_docs",
+      csvRow: hasCsvRow(csvRow) ? Number(csvRow) : "",
+      jobDir: String(jobDir || "").trim()
+    });
+    if (!found?.ok) return null;
+    const resume = found.resumePath
+      ? await readPdfViaNative(found.resumePath, found.resumeName || "Resume.pdf")
+      : null;
+    const coverLetter = found.coverPath
+      ? await readPdfViaNative(found.coverPath, found.coverName || "Cover_Letter.pdf")
+      : null;
+    if (!resume && !coverLetter) return null;
     return {
-      fileName,
-      mimeType: "application/pdf",
-      base64: btoa(binary)
+      resume,
+      coverLetter,
+      folderName: found.folder || jobDir || "",
+      jobDir: found.folder || jobDir || "",
+      csvRow: hasCsvRow(csvRow) ? Number(csvRow) : found.csvRow,
+      via: "native"
     };
   } catch {
     return null;
   }
 }
 
-async function loadDocsFromDownloads(jobDir) {
+async function findDownloadItemsForJob({ csvRow, jobDir } = {}) {
+  if (!chrome.downloads?.search) return [];
   const prefix = String(jobDir || "").trim();
-  if (!prefix || !chrome.downloads?.search) return null;
   let results = [];
-  try {
-    results = await chrome.downloads.search({
-      filenameRegex: downloadPrefixRegex(prefix),
-      limit: 40,
-      orderBy: ["-startTime"]
-    });
-  } catch {
-    results = [];
-  }
-  if (!results?.length) {
-    const segment = prefix.split("/").pop();
-    if (segment) {
+  if (prefix) {
+    try {
       results = await chrome.downloads.search({
-        query: [segment],
+        filenameRegex: downloadPrefixRegex(prefix),
         limit: 40,
         orderBy: ["-startTime"]
-      }).catch(() => []);
+      });
+    } catch {
+      results = [];
     }
   }
-  const items = (results || []).filter((row) => row?.filename && row.state === "complete");
+  if (!results?.length && hasCsvRow(csvRow)) {
+    try {
+      results = await chrome.downloads.search({
+        filenameRegex: `${Number(csvRow)}\\s+-\\s+.*`,
+        limit: 40,
+        orderBy: ["-startTime"]
+      });
+    } catch {
+      results = [];
+    }
+  }
+  return (results || []).filter((row) => {
+    if (!row?.filename || row.state !== "complete") return false;
+    return downloadPathInJobFolder(row.filename, prefix, csvRow);
+  });
+}
+
+async function loadDocsFromDownloads({ csvRow, jobDir } = {}) {
+  const items = await findDownloadItemsForJob({ csvRow, jobDir });
   const resumeItem = items.find((row) => isResumeDownload(row.filename));
   const coverItem = items.find((row) => isCoverLetterDownload(row.filename));
-  const resume = resumeItem ? await readLocalPdfDoc(resumeItem.filename, "Resume.pdf") : null;
-  const coverLetter = coverItem ? await readLocalPdfDoc(coverItem.filename, "Cover_Letter.pdf") : null;
+  const resume = resumeItem ? await readPdfViaNative(resumeItem.filename, "Resume.pdf") : null;
+  const coverLetter = coverItem ? await readPdfViaNative(coverItem.filename, "Cover_Letter.pdf") : null;
   if (!resume && !coverLetter) return null;
-  return { resume, coverLetter, folderName: prefix, via: "downloads" };
+  return {
+    resume,
+    coverLetter,
+    folderName: jobDir || "",
+    jobDir: jobDir || "",
+    csvRow: hasCsvRow(csvRow) ? Number(csvRow) : undefined,
+    via: "downloads"
+  };
+}
+
+function lastDocsMatchJob(last, { csvRow, jobDir } = {}) {
+  if (!last) return false;
+  if (hasCsvRow(csvRow)) {
+    if (Number(last.csvRow) === Number(csvRow)) return true;
+    return jobDirMatchesCsvRow(last.folderName || last.jobDir, csvRow);
+  }
+  if (jobDir) {
+    return String(last.folderName || last.jobDir || "") === String(jobDir);
+  }
+  return false;
 }
 
 /**
- * Resume + cover letter PDFs for this job folder, not the last batch job.
+ * Resume + cover letter PDFs for this CSV row / job folder — never another row.
  */
 export async function resolveUploadDocs({ csvRow, jobDir, jdLink } = {}) {
   const located = await lookupSavedJobFolder({ csvRow, jobDir, jdLink });
-  const map = await readJobDocsMap();
-  let docs = pickJobDocsFromMap(map, located);
-  const last = await getLastGeneratedDocs();
-  const lastMatches =
-    last &&
-    located.jobDir &&
-    String(last.folderName || "") === String(located.jobDir);
+  let docs = await getJobDocs(located).catch(() => null);
+  if (!docsHaveFile(docs, "resume") || !docsHaveFile(docs, "coverLetter")) {
+    const map = await readJobDocsMap();
+    const fromMap = pickJobDocsFromMap(map, located);
+    if (fromMap) {
+      docs = {
+        ...(docs || {}),
+        ...fromMap,
+        resume: docsHaveFile(docs, "resume") ? docs.resume : fromMap.resume,
+        coverLetter: docsHaveFile(docs, "coverLetter") ? docs.coverLetter : fromMap.coverLetter
+      };
+    }
+  }
 
   if (!docsHaveFile(docs, "resume") || !docsHaveFile(docs, "coverLetter")) {
-    const fromDisk = located.jobDir ? await loadDocsFromDownloads(located.jobDir) : null;
+    const fromNative = await loadDocsFromNativeHost(located);
+    const fromDisk = fromNative || (await loadDocsFromDownloads(located));
     if (fromDisk) {
       docs = {
         ...(docs || {}),
         resume: docsHaveFile(docs, "resume") ? docs.resume : fromDisk.resume,
         coverLetter: docsHaveFile(docs, "coverLetter") ? docs.coverLetter : fromDisk.coverLetter,
-        jobDir: located.jobDir,
+        jobDir: fromDisk.jobDir || located.jobDir,
         csvRow: located.csvRow,
         jdLink: located.jdLink,
-        folderName: located.jobDir
+        folderName: fromDisk.folderName || located.jobDir
       };
       await persistJobGeneratedDocs(docs).catch(() => {});
     }
   }
 
-  if (!docsHaveFile(docs, "resume") && lastMatches && docsHaveFile(last, "resume")) {
-    docs = { ...(docs || {}), resume: last.resume, folderName: located.jobDir };
-  }
-  if (!docsHaveFile(docs, "coverLetter") && lastMatches && docsHaveFile(last, "coverLetter")) {
-    docs = { ...(docs || {}), coverLetter: last.coverLetter, folderName: located.jobDir };
+  const last = await getLastGeneratedDocs();
+  if (lastDocsMatchJob(last, located)) {
+    if (!docsHaveFile(docs, "resume") && docsHaveFile(last, "resume")) {
+      docs = { ...(docs || {}), resume: last.resume, folderName: located.jobDir, csvRow: located.csvRow };
+    }
+    if (!docsHaveFile(docs, "coverLetter") && docsHaveFile(last, "coverLetter")) {
+      docs = { ...(docs || {}), coverLetter: last.coverLetter, folderName: located.jobDir, csvRow: located.csvRow };
+    }
   }
 
-  if (!located.jobDir && !docsHaveFile(docs, "resume") && !docsHaveFile(docs, "coverLetter")) {
-    return last;
-  }
   return docs;
 }
 
@@ -962,16 +1093,26 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     "last_apply_jd_link",
     "last_jd_link"
   ]);
-  const docs = await resolveUploadDocs({
-    csvRow: applyHint.csvRow ?? stored.last_apply_csv_row,
-    jobDir: applyHint.jobDir || stored.last_apply_job_dir || "",
-    jdLink:
-      applyHint.jdLink ||
-      stored.last_apply_jd_link ||
-      stored.last_jd_link ||
-      tab?.url ||
-      ""
-  });
+  const csvRow = applyHint.csvRow ?? stored.last_apply_csv_row;
+  const sameRow =
+    !hasCsvRow(csvRow) ||
+    !hasCsvRow(stored.last_apply_csv_row) ||
+    Number(stored.last_apply_csv_row) === Number(csvRow);
+  const jobDir = applyHint.jobDir || (sameRow ? stored.last_apply_job_dir : "") || "";
+  const jdLink =
+    applyHint.jdLink ||
+    (sameRow ? stored.last_apply_jd_link : "") ||
+    stored.last_jd_link ||
+    tab?.url ||
+    "";
+  const docs = await resolveUploadDocs({ csvRow, jobDir, jdLink });
+  if (hasCsvRow(csvRow)) {
+    await setApplyStatus(
+      docsHaveFile(docs, "resume") || docsHaveFile(docs, "coverLetter")
+        ? `Apply row ${Number(csvRow)}: uploading ${[docs?.resume?.fileName, docs?.coverLetter?.fileName].filter(Boolean).join(" + ")}`
+        : `Apply row ${Number(csvRow)}: no matching resume/cover letter found. Generate this row first.`
+    );
+  }
   const hasUploadDocs = Boolean(docs?.resume?.base64 || docs?.coverLetter?.base64);
   let history = { workHistory: [], educationHistory: [] };
   try {
@@ -1043,7 +1184,8 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     unmatchedChoiceQuestions: result.unmatchedChoiceQuestions,
     uploadFolder: docs?.jobDir || docs?.folderName || "",
     uploadResumeName: docs?.resume?.fileName || "",
-    uploadCoverName: docs?.coverLetter?.fileName || ""
+    uploadCoverName: docs?.coverLetter?.fileName || "",
+    uploadCsvRow: hasCsvRow(csvRow) ? Number(csvRow) : ""
   };
 }
 
@@ -1051,7 +1193,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
  * Multi-step apply: fill → click Next/Continue → wait → refill.
  * Stops before Submit so the user can review.
  */
-export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12 } = {}) {
+export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, applyHint = {} } = {}) {
   const tab = tabId
     ? await chrome.tabs.get(tabId).catch(() => null)
     : await getCurrentApplicationTab();
@@ -1148,7 +1290,7 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12 } =
     }
 
     await setApplyStatus(`Apply: step ${step + 1}/${maxSteps} — filling form...`);
-    const fillRes = await startAutofillOnTab(currentTabId);
+    const fillRes = await startAutofillOnTab(currentTabId, applyHint);
     summary.filled += Number(fillRes?.filledCount || 0);
     summary.filledCount = summary.filled;
     summary.uploaded += Number(fillRes?.uploadedCount || 0);
@@ -1219,11 +1361,12 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12 } =
 export async function openJobAndApply(url, { multiStep = true, csvRow, jobDir, jdLink } = {}) {
   const href = String(url || "").trim();
   if (!href) throw new Error("Missing job URL.");
-  await setActiveApplyJob({
+  const applyHint = {
     csvRow,
     jobDir,
     jdLink: jdLink || href
-  });
+  };
+  await setActiveApplyJob(applyHint);
   const tab = await chrome.tabs.create({ url: href, active: true });
   try {
     await waitForTabComplete(tab.id, 35000);
@@ -1231,8 +1374,8 @@ export async function openJobAndApply(url, { multiStep = true, csvRow, jobDir, j
     /* fill anyway */
   }
   await sleep(APPLY_SETTLE_MS);
-  if (multiStep) return startMultiStepApplyOnTab(tab.id);
-  return startAutofillOnTab(tab.id);
+  if (multiStep) return startMultiStepApplyOnTab(tab.id, { applyHint });
+  return startAutofillOnTab(tab.id, applyHint);
 }
 
 export async function handleProfileLearnCapture(message) {
