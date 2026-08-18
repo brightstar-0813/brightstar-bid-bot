@@ -109,6 +109,122 @@ function folderSegment(jobDir) {
   return parts.length ? parts[parts.length - 1] : "";
 }
 
+function toStoredJobDir(absPath) {
+  const n = String(absPath || "").replace(/\\/g, "/");
+  if (!n) return "";
+  const marker = "/Resume Applications/";
+  const lower = n.toLowerCase();
+  const i = lower.lastIndexOf(marker.toLowerCase());
+  if (i >= 0) return `Resume Applications/${n.slice(i + marker.length)}`;
+  const segment = folderSegment(n);
+  return segment ? `Resume Applications/${segment}` : n;
+}
+
+function folderFitsJob(jobDir, job = {}) {
+  const csvRow = job.csvRow;
+  if (!jobDirMatchesCsvRow(jobDir, csvRow)) return false;
+  const company = String(job.company || job.companyName || "").trim().toLowerCase();
+  if (!company) return true;
+  const name = folderSegment(jobDir).toLowerCase();
+  const token = company.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim();
+  return !token || name.includes(token.slice(0, 24));
+}
+
+async function listJobFoldersFromDownloads() {
+  if (!chrome.downloads?.search) return [];
+  let results = [];
+  try {
+    results = await chrome.downloads.search({
+      filenameRegex: "Resume Applications[\\\\/]\\d+\\s+-\\s+",
+      limit: 1000,
+      orderBy: ["-startTime"]
+    });
+  } catch {
+    results = [];
+  }
+  const byRow = new Map();
+  for (const row of results || []) {
+    const path = String(row?.filename || "").replace(/\\/g, "/");
+    const match = path.match(/Resume Applications\/(\d+)\s+-\s+[^/]+/i);
+    if (!match) continue;
+    const csvRow = Number(match[1]);
+    const folder = match[0].replace(/\//g, "/");
+    const name = folder.split("/").pop();
+    const prev = byRow.get(csvRow) || {
+      csvRow,
+      jobDir: `Resume Applications/${name}`,
+      name,
+      hasResume: false,
+      hasCover: false
+    };
+    if (isResumeDownload(path)) prev.hasResume = true;
+    if (isCoverLetterDownload(path)) prev.hasCover = true;
+    byRow.set(csvRow, prev);
+  }
+  return [...byRow.values()];
+}
+
+export async function listJobFoldersFromDisk() {
+  try {
+    const res = await sendNativeMessage({ type: "list_job_folders" });
+    if (res?.ok && Array.isArray(res.folders)) {
+      return res.folders.map((f) => ({
+        csvRow: Number(f.csvRow),
+        jobDir: toStoredJobDir(f.folder || f.name),
+        absPath: f.folder || "",
+        name: f.name || folderSegment(f.folder),
+        hasResume: Boolean(f.hasResume),
+        hasCover: Boolean(f.hasCover)
+      }));
+    }
+  } catch {
+    /* native host missing — fall through */
+  }
+  return listJobFoldersFromDownloads();
+}
+
+export async function locateJobFolder({ csvRow, jobDir, jdLink, company, title, companyName, jobTitle } = {}) {
+  const located = await lookupSavedJobFolder({ csvRow, jobDir, jdLink });
+  if (located.jobDir && jobDirMatchesCsvRow(located.jobDir, csvRow)) return located;
+  if (!hasCsvRow(csvRow)) return located;
+  const n = Number(csvRow);
+  const folders = await listJobFoldersFromDisk();
+  const job = {
+    csvRow: n,
+    company: company || companyName || "",
+    companyName: companyName || company || "",
+    title: title || jobTitle || "",
+    jobTitle: jobTitle || title || ""
+  };
+  const hit =
+    folders.find((f) => Number(f.csvRow) === n && folderFitsJob(f.jobDir, job)) ||
+    folders.find((f) => Number(f.csvRow) === n);
+  if (!hit) return located;
+  return { ...located, csvRow: n, jobDir: hit.jobDir };
+}
+
+export async function hydrateJobsWithFolders(jobs = []) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  if (!list.length) return list;
+  const folders = await listJobFoldersFromDisk();
+  if (!folders.length) return list;
+  const byRow = new Map(folders.map((f) => [Number(f.csvRow), f]));
+  return list.map((job) => {
+    const n = Number(job.csvRow);
+    const existing = String(job.jobDir || "").trim();
+    if (existing && jobDirMatchesCsvRow(existing, n)) {
+      return { ...job, hasFiles: true };
+    }
+    const hit = byRow.get(n);
+    if (!hit?.jobDir) return job;
+    return {
+      ...job,
+      jobDir: hit.jobDir,
+      hasFiles: Boolean(hit.hasResume || hit.hasCover || hit.jobDir)
+    };
+  });
+}
+
 function downloadPathInJobFolder(absPath, jobDir, csvRow) {
   const norm = String(absPath || "").replace(/\\/g, "/").toLowerCase();
   if (!norm) return false;
@@ -211,6 +327,17 @@ async function lookupSavedJobFolder({ csvRow, jobDir, jdLink } = {}) {
       (fromHist && jobDirMatchesCsvRow(fromHist, n) && fromHist) ||
       (passed && jobDirMatchesCsvRow(passed, n) && passed) ||
       "";
+    if (!chosen) {
+      const folders = await listJobFoldersFromDisk();
+      const hit = folders.find((f) => Number(f.csvRow) === n);
+      if (hit?.jobDir) {
+        return {
+          csvRow: n,
+          jobDir: hit.jobDir,
+          jdLink: job?.jdLink || remembered?.jdLink || jdLink
+        };
+      }
+    }
     return {
       csvRow: n,
       jobDir: chosen,

@@ -85,8 +85,12 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
   const prevQueue = Array.isArray(previousQueue) ? previousQueue : [];
 
   const statusById = new Map();
+  const dirByRow = new Map();
   for (const j of [...prevQueue, ...prevJobs]) {
     const id = jobIdentity(j);
+    if (j?.csvRow != null && j.jobDir && !dirByRow.has(Number(j.csvRow))) {
+      dirByRow.set(Number(j.csvRow), j.jobDir);
+    }
     if (!id) continue;
     const prev = statusById.get(id);
     // Prefer richer status records (done/running over bare pending)
@@ -111,7 +115,7 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
     if (!prev) {
       added += 1;
       newIdentities.push(id);
-      return { ...j, status: "pending", attempts: 0, error: "" };
+      return { ...j, status: "pending", attempts: 0, error: "", jobDir: dirByRow.get(Number(j.csvRow)) || "" };
     }
     const status = prev.status || "pending";
     if (status === "pending" || status === "error" || status === "failed") updated += 1;
@@ -120,7 +124,7 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       ...j,
       status,
       attempts: prev.attempts || 0,
-      jobDir: prev.jobDir,
+      jobDir: prev.jobDir || dirByRow.get(Number(j.csvRow)) || "",
       error: prev.error || ""
     };
   });

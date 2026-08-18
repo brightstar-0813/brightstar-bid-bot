@@ -21,6 +21,8 @@ import {
   openJobAndApply,
   resolveUploadDocs,
   setActiveApplyJob,
+  hydrateJobsWithFolders,
+  locateJobFolder,
   handleProfileLearnCapture,
   handleQaLearnCapture,
   answerQuestionsFromBank
@@ -777,6 +779,16 @@ async function persistJobContextForAutofill(job = {}) {
   const csvRow = job.csvRow != null && String(job.csvRow).trim() !== "" ? Number(job.csvRow) : "";
   let jobDir = String(job.jobDir || "").trim();
   const jdLink = String(job.jdLink || job.url || "").trim();
+  if (!jobDir && csvRow !== "") {
+    const located = await locateJobFolder({
+      csvRow,
+      jobDir: "",
+      jdLink,
+      company: job.companyName || job.company || "",
+      title: job.jobTitle || job.title || ""
+    }).catch(() => null);
+    jobDir = String(located?.jobDir || "").trim();
+  }
   if (!jobDir && csvRow !== "") {
     const queue = await getQueue();
     const row = queue.find((j) => Number(j.csvRow) === Number(csvRow));
@@ -3457,6 +3469,29 @@ async function rememberApplyHistory(csvRow, entry) {
   await chrome.storage.local.set({ [APPLY_HISTORY_KEY]: map });
 }
 
+async function hydrateQueueFromDisk() {
+  const data = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY, APPLY_HISTORY_KEY]);
+  const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  const allUs = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  const nextQueue = await hydrateJobsWithFolders(queue);
+  const nextAll = await hydrateJobsWithFolders(allUs);
+  const changed =
+    nextQueue.some((j, i) => j.jobDir && j.jobDir !== queue[i]?.jobDir) ||
+    nextAll.some((j, i) => j.jobDir && j.jobDir !== allUs[i]?.jobDir);
+  if (changed) {
+    await chrome.storage.local.set({
+      [QUEUE_KEY]: nextQueue,
+      [ALL_US_JOBS_KEY]: nextAll
+    });
+    for (const job of nextQueue) {
+      if (job?.csvRow != null && job.jobDir) {
+        await rememberApplyHistory(job.csvRow, { jobDir: job.jobDir, jdLink: job.jdLink || "" });
+      }
+    }
+  }
+  return { queue: nextQueue, allUsJobs: nextAll };
+}
+
 async function pickTemplateId(jobMeta = {}, person = {}) {
   if (jobMeta.templateId) return jobMeta.templateId;
   const stored = await chrome.storage.local.get("selected_template_id");
@@ -3993,7 +4028,8 @@ async function runBatchLoop(outputDir) {
 }
 
 async function revealJobFiles({ csvRow, jobDir, jdLink }) {
-  let filenamePrefix = jobDir || "";
+  const located = await locateJobFolder({ csvRow, jobDir, jdLink }).catch(() => null);
+  let filenamePrefix = located?.jobDir || jobDir || "";
   if (!filenamePrefix && csvRow != null) {
     const hist = (await chrome.storage.local.get(APPLY_HISTORY_KEY))[APPLY_HISTORY_KEY] || {};
     filenamePrefix = hist[String(csvRow)]?.jobDir || "";
@@ -4005,6 +4041,11 @@ async function revealJobFiles({ csvRow, jobDir, jdLink }) {
   }
   if (!filenamePrefix) {
     throw new Error("No saved folder for this job yet. Generate it first.");
+  }
+
+  if (csvRow != null && filenamePrefix) {
+    await updateQueueJob(csvRow, { jobDir: filenamePrefix, hasFiles: true }).catch(() => {});
+    await rememberApplyHistory(csvRow, { jobDir: filenamePrefix, jdLink: jdLink || "" }).catch(() => {});
   }
 
   await persistJobContextForAutofill({ csvRow, jobDir: filenamePrefix, jdLink: jdLink || "" });
@@ -4160,7 +4201,7 @@ async function handleNativeCsvMessage(msg) {
     });
     return;
   }
-  if (type === "file" || type === "job_docs") {
+  if (type === "file" || type === "job_docs" || type === "job_folders") {
     return;
   }
   if (type === "status" || type === "pong") {
@@ -4235,6 +4276,12 @@ async function ingestCsvText({
     dedupe = await dedupeQueueAgainstSheet({ notifySlack: merged.added > 0 });
   } catch (err) {
     dedupe = { checked: false, skipped: 0, error: String(err?.message || err) };
+  }
+
+  try {
+    await hydrateQueueFromDisk();
+  } catch {
+    /* native host optional */
   }
 
   const queue = await getQueue();
@@ -4470,6 +4517,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const result = await dedupeQueueAgainstSheet({
           notifySlack: message?.notifySlack !== false
         });
+        await hydrateQueueFromDisk().catch(() => {});
         safeSendResponse(sendResponse, result);
       } catch (err) {
         safeSendResponse(sendResponse, {
@@ -4583,6 +4631,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (type === "hydrate_job_dirs") {
+    (async () => {
+      try {
+        const result = await hydrateQueueFromDisk();
+        safeSendResponse(sendResponse, { ok: true, ...result });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "reveal_job_files") {
     (async () => {
       try {
@@ -4653,6 +4713,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         safeSendResponse(sendResponse, payload);
       };
       try {
+        const located = await locateJobFolder({
+          csvRow: jobMeta.csvRow,
+          jobDir: jobMeta.jobDir || "",
+          jdLink: jobMeta.jdLink,
+          company: jobMeta.companyName || jobMeta.company || "",
+          title: jobMeta.jobTitle || jobMeta.title || ""
+        }).catch(() => null);
+        if (located?.jobDir) {
+          jobMeta.jobDir = located.jobDir;
+          if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+            await updateQueueJob(jobMeta.csvRow, { jobDir: located.jobDir, hasFiles: true }).catch(() => {});
+            await rememberApplyHistory(jobMeta.csvRow, {
+              jobDir: located.jobDir,
+              jdLink: jobMeta.jdLink || ""
+            }).catch(() => {});
+          }
+        }
         await persistJobContextForAutofill(jobMeta);
         const sheet = await markQueueJobAppliedOnSheet(jobMeta);
         const sheetLabel = sheet?.error

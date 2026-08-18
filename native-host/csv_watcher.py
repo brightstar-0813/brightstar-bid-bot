@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import struct
 import sys
 import threading
@@ -242,6 +243,33 @@ def handle_read_job_docs(csv_row, job_dir: str) -> None:
     send_message(payload)
 
 
+def handle_list_job_folders() -> None:
+    apps = downloads_root() / "Resume Applications"
+    folders = []
+    if apps.is_dir():
+        try:
+            children = list(apps.iterdir())
+        except OSError:
+            children = []
+        for child in children:
+            if not child.is_dir():
+                continue
+            match = re.match(r"^(\d+)\s+-\s+", child.name)
+            if not match:
+                continue
+            resume, cover = pick_pdfs(child)
+            folders.append(
+                {
+                    "csvRow": int(match.group(1)),
+                    "folder": str(child),
+                    "name": child.name,
+                    "hasResume": bool(resume),
+                    "hasCover": bool(cover),
+                }
+            )
+    send_message({"type": "job_folders", "ok": True, "folders": folders})
+
+
 def main() -> int:
     watch_path = os.environ.get("BRIGHTSTAR_CSV_PATH", "").strip()
     if len(sys.argv) > 1 and not watch_path:
@@ -309,6 +337,8 @@ def main() -> int:
             handle_read_file(str(msg.get("path") or ""))
         elif mtype == "read_job_docs":
             handle_read_job_docs(msg.get("csvRow"), str(msg.get("jobDir") or ""))
+        elif mtype == "list_job_folders":
+            handle_list_job_folders()
         elif mtype == "stop":
             break
         else:

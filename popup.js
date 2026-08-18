@@ -871,6 +871,25 @@ async function loadSettings() {
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   await refreshQaBank().catch(() => {});
+  await hydrateJobDirsInUi().catch(() => {});
+}
+
+async function hydrateJobDirsInUi() {
+  const res = await chrome.runtime.sendMessage({ type: "hydrate_job_dirs" }).catch(() => null);
+  if (!res?.ok) return;
+  if (Array.isArray(res.allUsJobs)) {
+    allUsJobsCache = res.allUsJobs.map((j) => ({
+      ...j,
+      isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j)
+    }));
+  }
+  if (Array.isArray(res.queue)) queueCache = res.queue;
+  else if (allUsJobsCache.length) {
+    await applyChannelFilter(channelFilter, { persist: false });
+    return;
+  }
+  renderQueue();
+  updateCsvSummaryFromQueue();
 }
 
 function updateCsvSummaryFromQueue() {
@@ -923,7 +942,8 @@ function mergeStatusFromQueue(jobs, previousQueue) {
       ...j,
       status: prev.status || "pending",
       attempts: prev.attempts || 0,
-      jobDir: prev.jobDir,
+      jobDir: prev.jobDir || j.jobDir,
+      hasFiles: Boolean(prev.hasFiles || j.hasFiles || prev.jobDir || j.jobDir),
       error: prev.error
     };
   });
@@ -1031,7 +1051,12 @@ function renderQueue() {
     revealBtn.type = "button";
     revealBtn.className = "secondary";
     revealBtn.textContent = "Files";
-    revealBtn.disabled = !job.jobDir && job.status !== "done";
+    revealBtn.disabled = !job.jobDir && job.status !== "done" && !job.hasFiles;
+    revealBtn.title = job.jobDir
+      ? `Open ${job.jobDir}`
+      : job.status === "done" || job.hasFiles
+        ? "Reveal generated resume and cover letter"
+        : "Generate this job first to create files";
     revealBtn.addEventListener("click", () => revealJobFiles(job));
 
     const applyBtn = document.createElement("button");
@@ -1290,6 +1315,7 @@ async function onCsvSelected(file) {
       queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : queueCache;
       renderQueue();
       updateCsvSummaryFromQueue();
+      await hydrateJobDirsInUi().catch(() => {});
       if (dedupe?.checked && dedupe.skipped > 0) {
         dedupeNote = ` Skipped ${dedupe.skipped} duplicate(s) already on the sheet.`;
       } else if (dedupe?.checked === false && dedupe?.error) {
