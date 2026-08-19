@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-19.02";
+  const SCRIPT_BUILD = "2026-08-19.03";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -217,6 +217,14 @@
   }
 
   let pendingUploadFile = null;
+  let pendingUploadKind = "";
+
+  function pendingFileFitsInput(input) {
+    if (!pendingUploadFile || !input) return false;
+    if (!pendingUploadKind) return true;
+    const kind = classifyFileInput(input);
+    return !kind || kind === pendingUploadKind;
+  }
 
   function patchFileInputOpeners() {
     const proto = HTMLInputElement.prototype;
@@ -224,7 +232,7 @@
     proto.__brightstarFileOpenPatched = true;
     const origClick = proto.click;
     proto.click = function (...args) {
-      if (String(this.type || "").toLowerCase() === "file" && pendingUploadFile) {
+      if (String(this.type || "").toLowerCase() === "file" && pendingFileFitsInput(this)) {
         setFileOnInput(this, pendingUploadFile);
         return;
       }
@@ -233,7 +241,7 @@
     if (typeof proto.showPicker === "function") {
       const origPicker = proto.showPicker;
       proto.showPicker = function (...args) {
-        if (String(this.type || "").toLowerCase() === "file" && pendingUploadFile) {
+        if (String(this.type || "").toLowerCase() === "file" && pendingFileFitsInput(this)) {
           setFileOnInput(this, pendingUploadFile);
           return;
         }
@@ -2364,15 +2372,54 @@
     return false;
   }
 
-  function classifyFileInput(el) {
-    const nearby = localUploadText(el).replace(/a cover letter is not required/gi, " ");
-    const name = normalize(nearby);
-    if (isOptionalExtraAttachmentText(nearby)) return "";
-    if (/cover\s*letter|covering\s*letter|coverletter/.test(name) && !/not required/.test(name)) {
-      return "coverLetter";
+  function uploadAttrBlob(el) {
+    if (!el?.getAttribute) return "";
+    return [
+      el.getAttribute("name"),
+      el.id,
+      el.getAttribute("for"),
+      el.getAttribute("data-field"),
+      el.getAttribute("data-name"),
+      el.getAttribute("data-testid"),
+      el.getAttribute("aria-label"),
+      el.className
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function mentionsCoverLetter(n) {
+    return /cover\s*letter|covering\s*letter|coverletter|cover_letter/.test(n);
+  }
+
+  function mentionsResume(n) {
+    return /\b(resume|curriculum vitae)\b/.test(n) || /(?:^|[^a-z])cv(?:[^a-z]|$)/.test(n);
+  }
+
+  function uploadKindFromText(text) {
+    const n = normalize(text);
+    if (!n || isOptionalExtraAttachmentText(text)) return "";
+    const cover = mentionsCoverLetter(n);
+    const resume = mentionsResume(n);
+    if (cover && resume) {
+      if (/use (your |my )?resume (as|for) (a |my )?cover/.test(n)) return "coverLetter";
+      if (/cover letter (is )?(optional|not required)/.test(n)) return "resume";
+      return "";
     }
-    if (/\b(resume|cv|curriculum|vitae)\b/.test(name)) return "resume";
+    if (cover && !/not required/.test(n)) return "coverLetter";
+    if (resume) return "resume";
     return "";
+  }
+
+  function classifyFileInput(el) {
+    let node = el;
+    for (let i = 0; i < 8 && node && node !== document.body; i += 1) {
+      const fromAttrs = uploadKindFromText(uploadAttrBlob(node));
+      if (fromAttrs) return fromAttrs;
+      node = node.parentElement || node.host || node.getRootNode?.()?.host || null;
+    }
+    const nearby = localUploadText(el).replace(/a cover letter is not required/gi, " ");
+    return uploadKindFromText(nearby);
   }
 
   function setFileOnInput(input, file) {
@@ -2413,16 +2460,6 @@
       if (isOptionalExtraAttachmentText(localUploadText(el))) return false;
       return true;
     });
-  }
-
-  function uploadKindFromText(text) {
-    const n = normalize(text);
-    if (!n || isOptionalExtraAttachmentText(text)) return "";
-    if (/cover\s*letter|covering\s*letter|coverletter/.test(n) && !/not required/.test(n)) {
-      return "coverLetter";
-    }
-    if (/\b(resume|cv|curriculum vitae)\b/.test(n) && !/cover\s*letter/.test(n)) return "resume";
-    return "";
   }
 
   function findUploadCards() {
@@ -2496,15 +2533,78 @@
     return Boolean(menuBtn);
   }
 
-  function findFileInputNear(zone) {
+  function fieldContainer(el) {
+    let node = el;
+    for (let i = 0; i < 8 && node && node !== document.body; i += 1) {
+      if (
+        node.matches?.(
+          "label, fieldset, .field, [data-field], [class*='field'], [class*='upload'], [class*='dropzone' i], [class*='Dropzone']"
+        )
+      ) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return el;
+  }
+
+  function rectDistance(a, b) {
+    const ra = a.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    const dx = ra.left + ra.width / 2 - (rb.left + rb.width / 2);
+    const dy = ra.top + ra.height / 2 - (rb.top + rb.height / 2);
+    return dx * dx + dy * dy;
+  }
+
+  function findFileInputNear(zone, kind = "") {
     const marked = (el) => el?.getAttribute?.("data-brightstar-uploaded") === "1";
-    const inZone = queryAllDeep('input[type="file"]', zone || document).find(
-      (el) => !marked(el) && !el.disabled
-    );
-    if (inZone) return inZone;
-    return (
-      queryAllDeep('input[type="file"]').filter((el) => !el.disabled && !marked(el)).pop() || null
-    );
+    const usable = (el) => el && !el.disabled && !marked(el);
+    const fitsKind = (el) => {
+      if (!kind) return true;
+      const k = classifyFileInput(el);
+      return !k || k === kind;
+    };
+    const pick = (list) => {
+      const rows = (list || []).filter(usable);
+      if (!rows.length) return null;
+      const matched = rows.filter((el) => classifyFileInput(el) === kind);
+      if (kind && matched.length) return matched[0];
+      const ok = rows.filter(fitsKind);
+      return ok.length === 1 || (kind && ok.length) ? ok[0] : rows.length === 1 ? rows[0] : null;
+    };
+
+    const inZone = pick(queryAllDeep('input[type="file"]', zone || document));
+    if (inZone && zone && zone !== document) return inZone;
+
+    const container = fieldContainer(zone);
+    if (container && container !== document.body && container !== document.documentElement) {
+      const inField = pick(queryAllDeep('input[type="file"]', container));
+      if (inField) return inField;
+    }
+
+    const parent = zone?.parentElement;
+    if (parent && parent !== document.body) {
+      const inParent = pick(queryAllDeep('input[type="file"]', parent));
+      if (inParent) return inParent;
+    }
+
+    const all = queryAllDeep('input[type="file"]').filter(usable);
+    const kinded = kind ? all.filter((el) => classifyFileInput(el) === kind) : [];
+    if (kinded.length === 1) return kinded[0];
+    if (kinded.length > 1) {
+      kinded.sort((a, b) => rectDistance(zone, a) - rectDistance(zone, b));
+      return kinded[0];
+    }
+    const unknown = all.filter((el) => !classifyFileInput(el));
+    if (unknown.length === 1) return unknown[0];
+    if (all.length === 1) return all[0];
+    if (zone && all.length) {
+      const near = all
+        .filter(fitsKind)
+        .sort((a, b) => rectDistance(zone, a) - rectDistance(zone, b));
+      if (near[0] && rectDistance(zone, near[0]) < 220 * 220) return near[0];
+    }
+    return null;
   }
 
   function looksLikeUploadDropzone(el) {
@@ -2612,7 +2712,8 @@
 
     patchFileInputOpeners();
     try {
-    pendingUploadFile = resumeFile || coverFile;
+    pendingUploadFile = null;
+    pendingUploadKind = "";
     await revealFileDropzones();
 
     const used = new WeakSet();
@@ -2620,7 +2721,8 @@
     async function attachToZone(kind, file, zone) {
       if (!file || !zone || used.has(zone) || zoneIsBusy(zone)) return false;
       pendingUploadFile = file;
-      let input = findFileInputNear(zone);
+      pendingUploadKind = kind || "";
+      let input = findFileInputNear(zone, kind);
       if (input && setFileOnInput(input, file)) {
         used.add(zone);
         used.add(input);
@@ -2630,7 +2732,7 @@
       }
       if (kind === "resume" && zoneLooksOccupied(zone)) {
         await clickReplaceInZone(zone);
-        input = findFileInputNear(zone);
+        input = findFileInputNear(zone, kind);
         if (input && setFileOnInput(input, file)) {
           used.add(zone);
           used.add(input);
@@ -2646,7 +2748,7 @@
       }
       if (clickTextIn(zone, /^(browse|upload|select file|choose file|attach)$/i)) {
         await sleep(250);
-        input = findFileInputNear(zone);
+        input = findFileInputNear(zone, kind);
         if (input && setFileOnInput(input, file)) {
           used.add(zone);
           used.add(input);
@@ -2658,21 +2760,7 @@
       return false;
     }
 
-    for (const { kind, el } of findUploadCards()) {
-      const file = kind === "coverLetter" ? coverFile : resumeFile;
-      if (!file) continue;
-      const ok = await attachToZone(kind, file, el);
-      if (ok) {
-        uploaded.push({
-          kind,
-          fileName: file.name,
-          label: cleanLabelText(el.innerText || "").slice(0, 80)
-        });
-      }
-    }
-
     const inputs = collectFileInputs();
-
     for (const input of inputs) {
       if (used.has(input) || input.getAttribute("data-brightstar-uploaded") === "1") continue;
       const kind = classifyFileInput(input);
@@ -2684,12 +2772,12 @@
         skipped.push({ reason: "no-cover-letter-doc", label: labelTextForControl(input) });
         continue;
       }
-
       if (!file) continue;
+      pendingUploadFile = file;
+      pendingUploadKind = kind;
       const zone = input.closest("div, section, label, form") || input.parentElement;
       if (used.has(zone) || zoneIsBusy(zone)) continue;
       if (kind === "resume" && zoneLooksOccupied(zone)) {
-        pendingUploadFile = file;
         await clickReplaceInZone(zone);
       }
       const ok = setFileOnInput(input, file);
@@ -2702,11 +2790,19 @@
           fileName: file.name,
           label: labelTextForControl(input)
         });
-      } else {
-        skipped.push({
-          reason: "set-failed",
+      }
+    }
+
+    for (const { kind, el } of findUploadCards()) {
+      const file = kind === "coverLetter" ? coverFile : resumeFile;
+      if (!file) continue;
+      if (uploaded.some((row) => row.kind === kind)) continue;
+      const ok = await attachToZone(kind, file, el);
+      if (ok) {
+        uploaded.push({
           kind,
-          label: labelTextForControl(input)
+          fileName: file.name,
+          label: cleanLabelText(el.innerText || "").slice(0, 80)
         });
       }
     }
@@ -2715,11 +2811,8 @@
       for (const zone of findUploadDropzones()) {
         if (isOptionalExtraAttachmentText(zone.innerText || "")) continue;
         if (used.has(zone) || zoneIsBusy(zone)) continue;
-        const n = normalize(zone.innerText || "");
-        let kind = classifyFileInput(zone);
-        if (!kind) {
-          kind = /cover/.test(n) && !/not required/.test(n) ? "coverLetter" : "resume";
-        }
+        let kind = classifyFileInput(zone) || uploadKindFromText(zone.innerText || "");
+        if (!kind) continue;
         if (uploaded.some((row) => row.kind === kind)) continue;
         const file = kind === "coverLetter" && coverFile ? coverFile : kind === "resume" ? resumeFile : null;
         if (!file) continue;
@@ -2742,6 +2835,7 @@
     return { uploadedCount: uploaded.length, uploaded, skipped };
     } finally {
       pendingUploadFile = null;
+      pendingUploadKind = "";
     }
   }
 
