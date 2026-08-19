@@ -4744,13 +4744,47 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         safeSendResponse(sendResponse, payload);
       };
       try {
-        const located = await locateJobFolder({
+        const folderPromise = locateJobFolder({
           csvRow: jobMeta.csvRow,
           jobDir: jobMeta.jobDir || "",
           jdLink: jobMeta.jdLink,
           company: jobMeta.companyName || jobMeta.company || "",
           title: jobMeta.jobTitle || jobMeta.title || ""
         }).catch(() => null);
+        await persistJobContextForAutofill(jobMeta);
+        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+        const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
+        const sheetFailed = Boolean(sheet?.error);
+        const sheetLabel = sheetFailed
+          ? `Sheet Applied failed: ${sheet.error}`
+          : sheet?.skipped
+            ? ""
+            : `Sheet: ${sheet.status || (appliedDate ? `Applied ${appliedDate}` : "Applied")}`;
+        if (!sheetFailed && jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+          await updateQueueJob(jobMeta.csvRow, {
+            applied: true,
+            appliedDate,
+            jobDir: jobMeta.jobDir || "",
+            hasFiles: Boolean(jobMeta.jobDir)
+          }).catch(() => {});
+        }
+        await setStatus(
+          sheetLabel
+            ? `${sheetLabel}. Opening job and running Auto Apply…`
+            : "Sheet marked Applied. Opening job and running Auto Apply…"
+        );
+        reply({
+          ok: !sheetFailed,
+          started: true,
+          applied: !sheetFailed,
+          appliedDate: sheetFailed ? "" : appliedDate,
+          jobDir: jobMeta.jobDir || "",
+          status: sheetLabel
+            ? `${sheetLabel}. Opening job and running Auto Apply…`
+            : "Sheet marked Applied. Opening job and running Auto Apply…"
+        });
+
+        const located = await folderPromise;
         if (located?.jobDir) {
           jobMeta.jobDir = located.jobDir;
           if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
@@ -4762,34 +4796,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           }
         }
         await persistJobContextForAutofill(jobMeta);
-        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
-        const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
-        const sheetLabel = sheet?.error
-          ? `Sheet Applied failed: ${sheet.error}`
-          : sheet?.skipped
-            ? ""
-            : `Sheet: ${sheet.status || (appliedDate ? `Applied ${appliedDate}` : "Applied")}`;
-        if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-          await updateQueueJob(jobMeta.csvRow, {
-            applied: true,
-            appliedDate,
-            jobDir: jobMeta.jobDir || "",
-            hasFiles: Boolean(jobMeta.jobDir)
-          }).catch(() => {});
-        }
-        await setStatus(
-          sheetLabel ? `${sheetLabel}. Opening job and running Auto Apply…` : "Opening job and running Auto Apply…"
-        );
-        reply({
-          ok: true,
-          started: true,
-          applied: true,
-          appliedDate,
-          jobDir: jobMeta.jobDir || "",
-          status: sheetLabel
-            ? `${sheetLabel}. Opening job and running Auto Apply…`
-            : "Opening job and running Auto Apply…"
-        });
 
         const result = await openJobAndApply(message.url, {
           multiStep: message.multiStep !== false,

@@ -1434,7 +1434,7 @@ async function applyAssist(job) {
     setStatus("No JD link for this job.");
     return;
   }
-  setStatus("Looking up this row’s files and marking Applied on the Google Sheet…");
+  setStatus("Marking Applied on the Google Sheet…");
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
