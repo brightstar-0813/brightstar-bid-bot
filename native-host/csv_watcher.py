@@ -215,6 +215,22 @@ def handle_read_file(path_str: str) -> None:
     )
 
 
+def pdf_to_doc(path):
+    if not path or not path.is_file():
+        return None
+    if not is_allowed_pdf(path):
+        return None
+    data = path.read_bytes()
+    if len(data) > 700_000:
+        return None
+    return {
+        "ok": True,
+        "fileName": path.name,
+        "mimeType": "application/pdf",
+        "base64": base64.b64encode(data).decode("ascii"),
+    }
+
+
 def handle_read_job_docs(csv_row, job_dir: str) -> None:
     folder = find_job_folder(csv_row, job_dir)
     if not folder:
@@ -227,6 +243,16 @@ def handle_read_job_docs(csv_row, job_dir: str) -> None:
         )
         return
     resume, cover = pick_pdfs(folder)
+    resume_doc = pdf_to_doc(resume)
+    cover_doc = pdf_to_doc(cover)
+    encoded = 0
+    if resume_doc:
+        encoded += len(resume_doc.get("base64") or "")
+    if cover_doc:
+        encoded += len(cover_doc.get("base64") or "")
+    if encoded > 850_000:
+        resume_doc = None
+        cover_doc = None
     payload = {
         "type": "job_docs",
         "ok": True,
@@ -236,6 +262,8 @@ def handle_read_job_docs(csv_row, job_dir: str) -> None:
         "resumeName": resume.name if resume else "",
         "coverPath": str(cover) if cover else "",
         "coverName": cover.name if cover else "",
+        "resume": resume_doc,
+        "coverLetter": cover_doc,
     }
     if not resume and not cover:
         payload["ok"] = False
@@ -265,6 +293,8 @@ def handle_list_job_folders() -> None:
                     "name": child.name,
                     "hasResume": bool(resume),
                     "hasCover": bool(cover),
+                    "resumeName": resume.name if resume else "",
+                    "coverName": cover.name if cover else "",
                 }
             )
     send_message({"type": "job_folders", "ok": True, "folders": folders})

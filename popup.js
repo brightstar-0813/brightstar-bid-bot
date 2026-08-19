@@ -944,6 +944,10 @@ function mergeStatusFromQueue(jobs, previousQueue) {
       attempts: prev.attempts || 0,
       jobDir: prev.jobDir || j.jobDir,
       hasFiles: Boolean(prev.hasFiles || j.hasFiles || prev.jobDir || j.jobDir),
+      resumeName: prev.resumeName || j.resumeName || "",
+      coverName: prev.coverName || j.coverName || "",
+      applied: Boolean(prev.applied || j.applied),
+      appliedDate: prev.appliedDate || j.appliedDate || "",
       error: prev.error
     };
   });
@@ -970,6 +974,29 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
         ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
         : `Showing all US jobs — ${queueCache.length} in queue.`
   );
+}
+
+function folderLabelFromJobDir(jobDir) {
+  const parts = String(jobDir || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+function appliedDocsTitle(job) {
+  const lines = [];
+  lines.push(job.appliedDate ? `Applied ${job.appliedDate}` : "Applied");
+  const folder = folderLabelFromJobDir(job.jobDir);
+  if (folder) lines.push(folder);
+  if (job.resumeName) lines.push(`Resume: ${job.resumeName}`);
+  if (job.coverName) lines.push(`Cover letter: ${job.coverName}`);
+  if (!job.resumeName && !job.coverName && (job.jobDir || job.hasFiles)) {
+    lines.push("Resume and cover letter are in this job folder.");
+  }
+  lines.push("Marked on the Google Sheet.");
+  return lines.join("\n");
 }
 
 function badgeClass(status) {
@@ -1011,24 +1038,28 @@ function renderQueue() {
     const sub = document.createElement("div");
     sub.className = "sub";
     sub.textContent = `${job.company || ""}${job.location ? " · " + job.location : ""}`;
+    const badges = document.createElement("div");
+    badges.className = "queue-badges";
     const badge = document.createElement("span");
     badge.className = badgeClass(job.status);
     badge.textContent = job.status || "pending";
-    meta.appendChild(title);
-    meta.appendChild(sub);
-    meta.appendChild(badge);
+    badges.appendChild(badge);
     if (job.isLinkedIn || isLinkedInJob(job)) {
       const liBadge = document.createElement("span");
       liBadge.className = "badge badge-li";
       liBadge.textContent = "LI";
-      meta.appendChild(liBadge);
+      badges.appendChild(liBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
       appliedBadge.className = "badge badge-applied";
-      appliedBadge.textContent = job.appliedDate ? `Applied ${job.appliedDate}` : "Applied";
-      meta.appendChild(appliedBadge);
+      appliedBadge.textContent = "Applied";
+      appliedBadge.title = appliedDocsTitle(job);
+      badges.appendChild(appliedBadge);
     }
+    meta.appendChild(title);
+    meta.appendChild(sub);
+    meta.appendChild(badges);
     if (job.error) {
       const err = document.createElement("div");
       err.className = "sub";
@@ -1053,7 +1084,13 @@ function renderQueue() {
     revealBtn.textContent = "Files";
     revealBtn.disabled = !job.jobDir && job.status !== "done" && !job.hasFiles;
     revealBtn.title = job.jobDir
-      ? `Open ${job.jobDir}`
+      ? [
+          `Open ${job.jobDir}`,
+          job.resumeName ? `Resume: ${job.resumeName}` : "",
+          job.coverName ? `Cover letter: ${job.coverName}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
       : job.status === "done" || job.hasFiles
         ? "Reveal generated resume and cover letter"
         : "Generate this job first to create files";
@@ -1064,7 +1101,7 @@ function renderQueue() {
     applyBtn.className = job.applied ? "secondary" : "primary";
     applyBtn.textContent = job.applied ? "Applied" : "Apply";
     applyBtn.title = job.applied
-      ? `Marked Applied${job.appliedDate ? " " + job.appliedDate : ""} on the Google Sheet. Click to apply again.`
+      ? `${appliedDocsTitle(job)}\nClick to apply again.`
       : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
     applyBtn.addEventListener("click", () => applyAssist(job));
 

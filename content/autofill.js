@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-19.01";
+  const SCRIPT_BUILD = "2026-08-19.02";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -181,6 +181,65 @@
       /* ignore */
     }
     return true;
+  }
+
+  function queryAllDeep(selector, root = document) {
+    const out = [];
+    const seen = new Set();
+    const visit = (node) => {
+      if (!node || seen.has(node)) return;
+      seen.add(node);
+      let matches = [];
+      try {
+        if (node.querySelectorAll) matches = [...node.querySelectorAll(selector)];
+      } catch {
+        matches = [];
+      }
+      for (const el of matches) {
+        if (!seen.has(el)) {
+          seen.add(el);
+          out.push(el);
+        }
+      }
+      let all = [];
+      try {
+        if (node.querySelectorAll) all = [...node.querySelectorAll("*")];
+      } catch {
+        all = [];
+      }
+      if (node instanceof Element) all.unshift(node);
+      for (const el of all) {
+        if (el.shadowRoot) visit(el.shadowRoot);
+      }
+    };
+    visit(root);
+    return out;
+  }
+
+  let pendingUploadFile = null;
+
+  function patchFileInputOpeners() {
+    const proto = HTMLInputElement.prototype;
+    if (proto.__brightstarFileOpenPatched) return;
+    proto.__brightstarFileOpenPatched = true;
+    const origClick = proto.click;
+    proto.click = function (...args) {
+      if (String(this.type || "").toLowerCase() === "file" && pendingUploadFile) {
+        setFileOnInput(this, pendingUploadFile);
+        return;
+      }
+      return origClick.apply(this, args);
+    };
+    if (typeof proto.showPicker === "function") {
+      const origPicker = proto.showPicker;
+      proto.showPicker = function (...args) {
+        if (String(this.type || "").toLowerCase() === "file" && pendingUploadFile) {
+          setFileOnInput(this, pendingUploadFile);
+          return;
+        }
+        return origPicker.apply(this, args);
+      };
+    }
   }
 
   const FIELD_ALIASES = {
@@ -2321,20 +2380,34 @@
     try {
       const dt = new DataTransfer();
       dt.items.add(file);
-      input.files = dt.files;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
+      if (desc?.set) desc.set.call(input, dt.files);
+      else input.files = dt.files;
+      const fire = (target, type) => {
+        try {
+          target.dispatchEvent(new Event(type, { bubbles: true, composed: true }));
+        } catch {
+          target.dispatchEvent(new Event(type, { bubbles: true }));
+        }
+      };
+      fire(input, "input");
+      fire(input, "change");
+      const host = input.getRootNode?.()?.host;
+      if (host) {
+        fire(host, "input");
+        fire(host, "change");
+      }
       input.dispatchEvent(
-        new CustomEvent("file-upload-success", { bubbles: true, detail: { fileName: file.name } })
+        new CustomEvent("file-upload-success", { bubbles: true, composed: true, detail: { fileName: file.name } })
       );
-      return input.files && input.files.length > 0;
+      return Boolean(input.files && input.files.length > 0);
     } catch {
       return false;
     }
   }
 
   function collectFileInputs() {
-    return [...document.querySelectorAll('input[type="file"]')].filter((el) => {
+    return queryAllDeep('input[type="file"]').filter((el) => {
       if (el.disabled) return false;
       if (el.getAttribute("data-brightstar-uploaded") === "1") return false;
       if (isOptionalExtraAttachmentText(localUploadText(el))) return false;
@@ -2354,7 +2427,7 @@
 
   function findUploadCards() {
     const scored = [];
-    for (const el of document.querySelectorAll("div, section, article, li, label, aside")) {
+    for (const el of queryAllDeep("div, section, article, li, label, aside")) {
       const raw = el.innerText || "";
       if (raw.length < 8 || raw.length > 700) continue;
       const rect = el.getBoundingClientRect();
@@ -2379,9 +2452,7 @@
   }
 
   function clickTextIn(el, re) {
-    const nodes = [
-      ...(el?.querySelectorAll?.('button, a, [role="button"], [role="menuitem"], li, span') || [])
-    ];
+    const nodes = queryAllDeep('button, a, [role="button"], [role="menuitem"], li, span', el || document);
     const hit = nodes.find((node) => {
       const label = `${elActionText(node) || ""} ${node.getAttribute?.("aria-label") || ""} ${node.textContent || ""}`;
       return re.test(cleanLabelText(label));
@@ -2397,7 +2468,7 @@
       await sleep(350);
       return true;
     }
-    const menuBtn = [...zone.querySelectorAll("button, [role='button'], [aria-haspopup]")].find((el) => {
+    const menuBtn = queryAllDeep("button, [role='button'], [aria-haspopup]", zone).find((el) => {
       const popup = String(el.getAttribute("aria-haspopup") || "").toLowerCase();
       const label = `${el.getAttribute("aria-label") || ""} ${elActionText(el) || ""}`;
       return popup === "menu" || popup === "true" || /\b(more|options|actions|menu)\b/i.test(label);
@@ -2413,9 +2484,7 @@
     ) {
       await sleep(280);
     }
-    const items = [...document.querySelectorAll('[role="menuitem"], button, a, li, span')].filter(
-      (el) => isElVisible(el)
-    );
+    const items = queryAllDeep('[role="menuitem"], button, a, li, span').filter((el) => isElVisible(el));
     const replace = items.find((el) =>
       /^(replace|change|update)$/i.test(cleanLabelText(el.textContent || elActionText(el)))
     );
@@ -2429,9 +2498,13 @@
 
   function findFileInputNear(zone) {
     const marked = (el) => el?.getAttribute?.("data-brightstar-uploaded") === "1";
-    const inZone = [...(zone?.querySelectorAll?.('input[type="file"]') || [])].find((el) => !marked(el));
+    const inZone = queryAllDeep('input[type="file"]', zone || document).find(
+      (el) => !marked(el) && !el.disabled
+    );
     if (inZone) return inZone;
-    return [...document.querySelectorAll('input[type="file"]')].filter((el) => !el.disabled && !marked(el)).pop() || null;
+    return (
+      queryAllDeep('input[type="file"]').filter((el) => !el.disabled && !marked(el)).pop() || null
+    );
   }
 
   function looksLikeUploadDropzone(el) {
@@ -2476,7 +2549,7 @@
   }
 
   function findUploadDropzones() {
-    return [...document.querySelectorAll("div, section, label, aside, form")]
+    return queryAllDeep("div, section, label, aside, form")
       .filter(looksLikeUploadDropzone)
       .filter((el) => {
         const rect = el.getBoundingClientRect();
@@ -2537,16 +2610,17 @@
       return { uploadedCount: 0, uploaded, skipped: [{ reason: "no-docs" }] };
     }
 
+    patchFileInputOpeners();
+    try {
+    pendingUploadFile = resumeFile || coverFile;
     await revealFileDropzones();
 
     const used = new WeakSet();
 
     async function attachToZone(kind, file, zone) {
       if (!file || !zone || used.has(zone) || zoneIsBusy(zone)) return false;
-      if (kind === "resume" && zoneLooksOccupied(zone)) {
-        await clickReplaceInZone(zone);
-      }
-      const input = findFileInputNear(zone);
+      pendingUploadFile = file;
+      let input = findFileInputNear(zone);
       if (input && setFileOnInput(input, file)) {
         used.add(zone);
         used.add(input);
@@ -2554,10 +2628,32 @@
         markUploaded(zone);
         return true;
       }
+      if (kind === "resume" && zoneLooksOccupied(zone)) {
+        await clickReplaceInZone(zone);
+        input = findFileInputNear(zone);
+        if (input && setFileOnInput(input, file)) {
+          used.add(zone);
+          used.add(input);
+          markUploaded(input);
+          markUploaded(zone);
+          return true;
+        }
+      }
       if (dispatchFileDrop(zone, file)) {
         used.add(zone);
         markUploaded(zone);
         return true;
+      }
+      if (clickTextIn(zone, /^(browse|upload|select file|choose file|attach)$/i)) {
+        await sleep(250);
+        input = findFileInputNear(zone);
+        if (input && setFileOnInput(input, file)) {
+          used.add(zone);
+          used.add(input);
+          markUploaded(input);
+          markUploaded(zone);
+          return true;
+        }
       }
       return false;
     }
@@ -2593,6 +2689,7 @@
       const zone = input.closest("div, section, label, form") || input.parentElement;
       if (used.has(zone) || zoneIsBusy(zone)) continue;
       if (kind === "resume" && zoneLooksOccupied(zone)) {
+        pendingUploadFile = file;
         await clickReplaceInZone(zone);
       }
       const ok = setFileOnInput(input, file);
@@ -2643,6 +2740,9 @@
     }
 
     return { uploadedCount: uploaded.length, uploaded, skipped };
+    } finally {
+      pendingUploadFile = null;
+    }
   }
 
   function looksLikeQuestionLabel(label) {
@@ -3028,11 +3128,9 @@
   }
 
   function collectFillableControls() {
-    const nodes = [
-      ...document.querySelectorAll(
-        'input, textarea, select, [role="combobox"], [aria-haspopup="listbox"], .select__control, [class*="select__control"]'
-      )
-    ];
+    const nodes = queryAllDeep(
+      'input, textarea, select, [role="combobox"], [aria-haspopup="listbox"], .select__control, [class*="select__control"]'
+    );
     return nodes.filter((el) => {
       if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) return false;
       const type = (el.type || "").toLowerCase();
@@ -3723,7 +3821,14 @@
       applyUrls.push(url);
     }
 
-    for (const a of document.querySelectorAll("a[href]")) {
+    const diceId = String(location.href || "").match(
+      /dice\.com\/(?:job-detail|job-applications)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    );
+    if (diceId && !/\/job-applications\//i.test(location.href || "")) {
+      pushUrl(`https://www.dice.com/job-applications/${diceId[1]}/wizard`);
+    }
+
+    for (const a of queryAllDeep("a[href]")) {
       try {
         const text = String(a.textContent || a.getAttribute("aria-label") || "").trim();
         if (applyRe.test(text)) pushUrl(a.href);
@@ -3829,6 +3934,7 @@
     const fillableCount = controls.length;
 
     const hasFileInput = collectFileInputs().length > 0;
+    const hasUploadUi = findUploadCards().length > 0 || findUploadDropzones().length > 0;
 
     let identityFields = 0;
     let filterFields = 0;
@@ -3851,6 +3957,7 @@
 
     const isApplicationForm =
       hasFileInput ||
+      hasUploadUi ||
       identityFields >= 2 ||
       (hasApplyForm && fillableCount >= 2) ||
       looksLikeHistoryForm();
@@ -3914,9 +4021,9 @@
       '[role="dialog"], dialog[open], dialog, [aria-modal="true"], .modal, [class*="modal"], [class*="apply"], [id*="apply"]';
     let best = null;
     let bestCount = -1;
-    for (const node of document.querySelectorAll(sel)) {
+    for (const node of queryAllDeep(sel)) {
       if (!isElVisible(node)) continue;
-      const count = node.querySelectorAll("input, textarea, select, button").length;
+      const count = queryAllDeep("input, textarea, select, button", node).length;
       if (count > bestCount) {
         best = node;
         bestCount = count;
@@ -3941,11 +4048,10 @@
    */
   function findActionButton(scope) {
     const scopeEl = scope || getApplyScope();
-    const buttons = [
-      ...scopeEl.querySelectorAll(
-        'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]'
-      )
-    ].filter((el) => isElVisible(el) && isElEnabled(el));
+    const buttons = queryAllDeep(
+      'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
+      scopeEl
+    ).filter((el) => isElVisible(el) && isElEnabled(el));
 
     let next = null;
     let review = null;
@@ -3972,7 +4078,35 @@
   }
 
   async function clickEasyApplyEntry() {
-    const controls = [...document.querySelectorAll('button, a, [role="button"]')].filter(
+    const hosts = [
+      ...queryAllDeep("apply-button-wc, dhi-apply-button"),
+      ...queryAllDeep("[class*='apply-button-wc'], [class*='easy-apply']")
+    ];
+    const seenHosts = new Set();
+    for (const host of hosts) {
+      if (!host || seenHosts.has(host)) continue;
+      seenHosts.add(host);
+      const root = host.shadowRoot;
+      const shadowButtons = root
+        ? [...root.querySelectorAll("button, a, [role='button']")]
+        : [];
+      const target =
+        shadowButtons.find((el) => /apply/i.test(elActionText(el) || host.textContent || "")) ||
+        shadowButtons[0];
+      if (target && (isElVisible(target) || isElVisible(host))) {
+        scrollElIntoView(host);
+        safeClick(target);
+        await sleep(1200);
+        return { ok: true, clicked: true, text: elActionText(target) || "Easy Apply" };
+      }
+      if (isElVisible(host) && /apply/i.test(elActionText(host) || host.textContent || "")) {
+        scrollElIntoView(host);
+        safeClick(host);
+        await sleep(1200);
+        return { ok: true, clicked: true, text: "Easy Apply" };
+      }
+    }
+    const controls = queryAllDeep("button, a, [role='button']").filter(
       (el) => isElVisible(el) && isElEnabled(el)
     );
     const preferred = controls.find((el) =>
@@ -3991,7 +4125,7 @@
     const heading = cleanLabelText(
       scope.querySelector?.('h1, h2, h3, [role="heading"], legend')?.textContent || ""
     );
-    const fields = scope.querySelectorAll?.("input, textarea, select").length || 0;
+    const fields = queryAllDeep("input, textarea, select", scope).length || 0;
     return `${location.href}|${heading}|${fields}`;
   }
 
@@ -4035,11 +4169,10 @@
     }
     if (preferredType) {
       const scopeEl = getApplyScope();
-      const buttons = [
-        ...scopeEl.querySelectorAll(
-          'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]'
-        )
-      ].filter((el) => isElVisible(el) && isElEnabled(el));
+      const buttons = queryAllDeep(
+        'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
+        scopeEl
+      ).filter((el) => isElVisible(el) && isElEnabled(el));
       const match = buttons.find((btn) => {
         const text = elActionText(btn);
         const cls = classifyActionButton(text);

@@ -33,7 +33,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-19.01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-19.02";
 const APPLY_SETTLE_MS = 2200;
 
 let lastFocusedNormalWindowId = null;
@@ -155,10 +155,19 @@ async function listJobFoldersFromDownloads() {
       jobDir: `Resume Applications/${name}`,
       name,
       hasResume: false,
-      hasCover: false
+      hasCover: false,
+      resumeName: "",
+      coverName: ""
     };
-    if (isResumeDownload(path)) prev.hasResume = true;
-    if (isCoverLetterDownload(path)) prev.hasCover = true;
+    const fileName = path.split("/").pop() || "";
+    if (isResumeDownload(path)) {
+      prev.hasResume = true;
+      prev.resumeName = prev.resumeName || fileName;
+    }
+    if (isCoverLetterDownload(path)) {
+      prev.hasCover = true;
+      prev.coverName = prev.coverName || fileName;
+    }
     byRow.set(csvRow, prev);
   }
   return [...byRow.values()];
@@ -174,7 +183,9 @@ export async function listJobFoldersFromDisk() {
         absPath: f.folder || "",
         name: f.name || folderSegment(f.folder),
         hasResume: Boolean(f.hasResume),
-        hasCover: Boolean(f.hasCover)
+        hasCover: Boolean(f.hasCover),
+        resumeName: f.resumeName || "",
+        coverName: f.coverName || ""
       }));
     }
   } catch {
@@ -212,15 +223,22 @@ export async function hydrateJobsWithFolders(jobs = []) {
   return list.map((job) => {
     const n = Number(job.csvRow);
     const existing = String(job.jobDir || "").trim();
-    if (existing && jobDirMatchesCsvRow(existing, n)) {
-      return { ...job, hasFiles: true };
-    }
     const hit = byRow.get(n);
+    if (existing && jobDirMatchesCsvRow(existing, n)) {
+      return {
+        ...job,
+        hasFiles: true,
+        resumeName: job.resumeName || hit?.resumeName || "",
+        coverName: job.coverName || hit?.coverName || ""
+      };
+    }
     if (!hit?.jobDir) return job;
     return {
       ...job,
       jobDir: hit.jobDir,
-      hasFiles: Boolean(hit.hasResume || hit.hasCover || hit.jobDir)
+      hasFiles: Boolean(hit.hasResume || hit.hasCover || hit.jobDir),
+      resumeName: job.resumeName || hit.resumeName || "",
+      coverName: job.coverName || hit.coverName || ""
     };
   });
 }
@@ -406,7 +424,7 @@ function sendNativeMessage(payload, timeoutMs = 20000) {
 }
 
 function nativeFileToDoc(res, fallbackName) {
-  if (!res?.ok || !res.base64) return null;
+  if (!res || res.ok === false || !res.base64) return null;
   return {
     fileName: res.fileName || fallbackName,
     mimeType: res.mimeType || "application/pdf",
@@ -433,12 +451,12 @@ async function loadDocsFromNativeHost({ csvRow, jobDir } = {}) {
       jobDir: String(jobDir || "").trim()
     });
     if (!found?.ok) return null;
-    const resume = found.resumePath
-      ? await readPdfViaNative(found.resumePath, found.resumeName || "Resume.pdf")
-      : null;
-    const coverLetter = found.coverPath
-      ? await readPdfViaNative(found.coverPath, found.coverName || "Cover_Letter.pdf")
-      : null;
+    const resume =
+      nativeFileToDoc(found.resume, found.resumeName || "Resume.pdf") ||
+      (found.resumePath ? await readPdfViaNative(found.resumePath, found.resumeName || "Resume.pdf") : null);
+    const coverLetter =
+      nativeFileToDoc(found.coverLetter, found.coverName || "Cover_Letter.pdf") ||
+      (found.coverPath ? await readPdfViaNative(found.coverPath, found.coverName || "Cover_Letter.pdf") : null);
     if (!resume && !coverLetter) return null;
     return {
       resume,
@@ -1425,6 +1443,9 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
     summary.bankHits += Number(fillRes?.bankHits || 0);
     summary.extraFilled += Number(fillRes?.extraFilled || 0);
     summary.aiHits += Number(fillRes?.aiHits || 0);
+    summary.uploadResumeName = fillRes?.uploadResumeName || summary.uploadResumeName || "";
+    summary.uploadCoverName = fillRes?.uploadCoverName || summary.uploadCoverName || "";
+    summary.uploadFolder = fillRes?.uploadFolder || summary.uploadFolder || "";
     summary.steps = step + 1;
     summary.tabId = currentTabId;
     summary.tabUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || summary.tabUrl;
@@ -1433,15 +1454,21 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
 
     if (!probe.best) {
       summary.status = probe.anyForm ? "ready_for_review" : "needs_review";
+      const files = [fillRes?.uploadResumeName, fillRes?.uploadCoverName].filter(Boolean).join(" + ");
       summary.detail = probe.anyForm
-        ? "Filled the form. No Next/Submit button detected — please review and submit."
+        ? (summary.uploaded
+            ? `Uploaded ${files || `${summary.uploaded} file(s)`}. No Next/Submit button detected — please review and submit.`
+            : "Filled the form. No Next/Submit button detected — please review and submit.")
         : "No application form or action button found on this page.";
       return summary;
     }
 
     if (probe.best.action.type === "submit") {
       summary.status = "ready_for_review";
-      summary.detail = `Reached Submit (${probe.best.action.text || "Submit"}). Stopped so you can review.`;
+      const files = [fillRes?.uploadResumeName, fillRes?.uploadCoverName].filter(Boolean).join(" + ");
+      summary.detail = files
+        ? `Uploaded ${files}. Reached Submit (${probe.best.action.text || "Submit"}). Stopped so you can review.`
+        : `Reached Submit (${probe.best.action.text || "Submit"}). Stopped so you can review.`;
       return summary;
     }
 
@@ -1485,6 +1512,77 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
   return summary;
 }
 
+function diceJobIdFromUrl(url) {
+  const match = String(url || "").match(
+    /dice\.com\/(?:job-detail|job-applications)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  return match ? match[1] : "";
+}
+
+function diceWizardUrl(jobId) {
+  return jobId ? `https://www.dice.com/job-applications/${jobId}/wizard` : "";
+}
+
+async function findExistingDiceApplyTab(jdLink) {
+  const id = diceJobIdFromUrl(jdLink);
+  if (!id) return null;
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ url: ["https://www.dice.com/*", "https://*.dice.com/*"] });
+  } catch {
+    tabs = await chrome.tabs.query({});
+  }
+  const wizard = tabs.find((t) => (t.url || "").includes(`/job-applications/${id}`));
+  if (wizard) return { tab: wizard, isWizard: true };
+  const detail = tabs.find((t) => (t.url || "").includes(`/job-detail/${id}`));
+  if (detail) return { tab: detail, isWizard: false };
+  return null;
+}
+
+function looksLikeApplicationUrl(url) {
+  return /\b(apply|application|job-applications|easy-apply|jobapp|gh_jid)\b/i.test(String(url || ""));
+}
+
+async function findExistingApplyTab(jdLink) {
+  const href = String(jdLink || "").trim();
+  if (!href) return null;
+
+  const dice = await findExistingDiceApplyTab(href);
+  if (dice) return dice;
+
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    return null;
+  }
+  const http = tabs.filter((t) => /^https?:/i.test(t.url || ""));
+  const target = normalizeJobLink(href);
+  const exact = target
+    ? http.find((t) => normalizeJobLink(t.url) === target)
+    : null;
+  if (exact) return { tab: exact, isWizard: looksLikeApplicationUrl(exact.url) };
+
+  try {
+    const want = new URL(href);
+    const sameJob = http.find((t) => {
+      try {
+        const have = new URL(t.url);
+        if (have.origin !== want.origin) return false;
+        const a = have.pathname.replace(/\/+$/, "");
+        const b = want.pathname.replace(/\/+$/, "");
+        return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+      } catch {
+        return false;
+      }
+    });
+    if (sameJob) return { tab: sameJob, isWizard: looksLikeApplicationUrl(sameJob.url) };
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export async function openJobAndApply(url, { multiStep = true, csvRow, jobDir, jdLink } = {}) {
   const href = String(url || "").trim();
   if (!href) throw new Error("Missing job URL.");
@@ -1494,13 +1592,35 @@ export async function openJobAndApply(url, { multiStep = true, csvRow, jobDir, j
     jdLink: jdLink || href
   };
   await setActiveApplyJob(applyHint);
-  const tab = await chrome.tabs.create({ url: href, active: true });
-  try {
-    await waitForTabComplete(tab.id, 35000);
-  } catch {
-    /* fill anyway */
+  const jobId = diceJobIdFromUrl(href);
+  const existing = await findExistingApplyTab(href);
+  let tab = existing?.tab || null;
+  if (tab?.id) {
+    await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+    if (!existing.isWizard && jobId && /dice\.com/i.test(tab.url || href)) {
+      await chrome.tabs.update(tab.id, { url: diceWizardUrl(jobId) });
+      await waitForTabComplete(tab.id, 35000).catch(() => {});
+    }
+  } else {
+    const startUrl = jobId && /dice\.com/i.test(href) ? diceWizardUrl(jobId) : href;
+    tab = await chrome.tabs.create({ url: startUrl, active: true });
+    try {
+      await waitForTabComplete(tab.id, 35000);
+    } catch {
+      /* fill anyway */
+    }
   }
   await sleep(APPLY_SETTLE_MS);
+  const live = await chrome.tabs.get(tab.id).catch(() => null);
+  if (jobId && /dice\.com/i.test(live?.url || href)) {
+    await ensureAutofillScript(tab.id).catch(() => {});
+    const probe = await getApplyActionFromTab(tab.id).catch(() => null);
+    if (!probe?.anyForm && !probe?.best?.action) {
+      await chrome.tabs.update(tab.id, { url: href });
+      await waitForTabComplete(tab.id, 35000).catch(() => {});
+      await sleep(APPLY_SETTLE_MS);
+    }
+  }
   if (multiStep) return startMultiStepApplyOnTab(tab.id, { applyHint });
   return startAutofillOnTab(tab.id, applyHint);
 }

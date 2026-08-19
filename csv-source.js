@@ -93,15 +93,20 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
     }
     if (!id) continue;
     const prev = statusById.get(id);
-    // Prefer richer status records (done/running over bare pending)
-    if (!prev || rankStatus(j.status) >= rankStatus(prev.status)) {
-      statusById.set(id, {
-        status: j.status || "pending",
-        attempts: j.attempts || 0,
-        jobDir: j.jobDir,
-        error: j.error || ""
-      });
-    }
+    const richer = !prev || rankStatus(j.status) >= rankStatus(prev.status);
+    const base = richer ? j : prev;
+    const other = richer ? prev : j;
+    statusById.set(id, {
+      status: base.status || "pending",
+      attempts: base.attempts || other?.attempts || 0,
+      jobDir: base.jobDir || other?.jobDir,
+      error: base.error || other?.error || "",
+      applied: Boolean(j.applied || prev?.applied),
+      appliedDate: j.appliedDate || prev?.appliedDate || "",
+      resumeName: j.resumeName || prev?.resumeName || "",
+      coverName: j.coverName || prev?.coverName || "",
+      hasFiles: Boolean(j.hasFiles || prev?.hasFiles || j.jobDir || prev?.jobDir)
+    });
   }
 
   let added = 0;
@@ -115,7 +120,13 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
     if (!prev) {
       added += 1;
       newIdentities.push(id);
-      return { ...j, status: "pending", attempts: 0, error: "", jobDir: dirByRow.get(Number(j.csvRow)) || "" };
+      return {
+        ...j,
+        status: "pending",
+        attempts: 0,
+        error: "",
+        jobDir: dirByRow.get(Number(j.csvRow)) || ""
+      };
     }
     const status = prev.status || "pending";
     if (status === "pending" || status === "error" || status === "failed") updated += 1;
@@ -125,7 +136,12 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       status,
       attempts: prev.attempts || 0,
       jobDir: prev.jobDir || dirByRow.get(Number(j.csvRow)) || "",
-      error: prev.error || ""
+      error: prev.error || "",
+      applied: Boolean(prev.applied),
+      appliedDate: prev.appliedDate || "",
+      resumeName: prev.resumeName || "",
+      coverName: prev.coverName || "",
+      hasFiles: Boolean(prev.hasFiles || prev.jobDir)
     };
   });
 

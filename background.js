@@ -3469,15 +3469,29 @@ async function rememberApplyHistory(csvRow, entry) {
   await chrome.storage.local.set({ [APPLY_HISTORY_KEY]: map });
 }
 
+function mergeApplyHistoryIntoJobs(jobs, hist = {}) {
+  return (Array.isArray(jobs) ? jobs : []).map((job) => {
+    const remembered = hist[String(job.csvRow)] || {};
+    return {
+      ...job,
+      resumeName: job.resumeName || remembered.resumeName || "",
+      coverName: job.coverName || remembered.coverName || ""
+    };
+  });
+}
+
 async function hydrateQueueFromDisk() {
   const data = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY, APPLY_HISTORY_KEY]);
   const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
   const allUs = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
-  const nextQueue = await hydrateJobsWithFolders(queue);
-  const nextAll = await hydrateJobsWithFolders(allUs);
+  const hist = data[APPLY_HISTORY_KEY] && typeof data[APPLY_HISTORY_KEY] === "object" ? data[APPLY_HISTORY_KEY] : {};
+  const nextQueue = mergeApplyHistoryIntoJobs(await hydrateJobsWithFolders(queue), hist);
+  const nextAll = mergeApplyHistoryIntoJobs(await hydrateJobsWithFolders(allUs), hist);
   const changed =
     nextQueue.some((j, i) => j.jobDir && j.jobDir !== queue[i]?.jobDir) ||
-    nextAll.some((j, i) => j.jobDir && j.jobDir !== allUs[i]?.jobDir);
+    nextAll.some((j, i) => j.jobDir && j.jobDir !== allUs[i]?.jobDir) ||
+    nextQueue.some((j, i) => (j.resumeName || "") !== (queue[i]?.resumeName || "")) ||
+    nextQueue.some((j, i) => (j.coverName || "") !== (queue[i]?.coverName || ""));
   if (changed) {
     await chrome.storage.local.set({
       [QUEUE_KEY]: nextQueue,
@@ -3485,7 +3499,12 @@ async function hydrateQueueFromDisk() {
     });
     for (const job of nextQueue) {
       if (job?.csvRow != null && job.jobDir) {
-        await rememberApplyHistory(job.csvRow, { jobDir: job.jobDir, jdLink: job.jdLink || "" });
+        await rememberApplyHistory(job.csvRow, {
+          jobDir: job.jobDir,
+          jdLink: job.jdLink || "",
+          resumeName: job.resumeName || "",
+          coverName: job.coverName || ""
+        });
       }
     }
   }
@@ -4685,7 +4704,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "autofill_multi_step") {
     (async () => {
       try {
-        const result = await startMultiStepApplyOnTab(message.tabId || null);
+        const stored = await chrome.storage.local.get([
+          "last_apply_csv_row",
+          "last_apply_job_dir",
+          "last_apply_jd_link"
+        ]);
+        const result = await startMultiStepApplyOnTab(message.tabId || null, {
+          applyHint: {
+            csvRow: stored.last_apply_csv_row,
+            jobDir: stored.last_apply_job_dir,
+            jdLink: stored.last_apply_jd_link
+          }
+        });
         const filled = Number(result.filled || result.filledCount || 0);
         const msg =
           result.detail ||
@@ -4756,11 +4786,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           jobDir: jobMeta.jobDir || "",
           jdLink: jobMeta.jdLink || message.url || ""
         });
+        if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+          const docsPatch = {
+            jobDir: result.uploadFolder || jobMeta.jobDir || "",
+            hasFiles: true
+          };
+          if (result.uploadResumeName) docsPatch.resumeName = result.uploadResumeName;
+          if (result.uploadCoverName) docsPatch.coverName = result.uploadCoverName;
+          await rememberApplyHistory(jobMeta.csvRow, {
+            ...docsPatch,
+            jdLink: jobMeta.jdLink || ""
+          }).catch(() => {});
+          await updateQueueJob(jobMeta.csvRow, docsPatch).catch(() => {});
+        }
         const filled = Number(result.filled || result.filledCount || 0);
+        const files = [result.uploadResumeName, result.uploadCoverName].filter(Boolean).join(" + ");
         let msg =
           result.detail ||
           `Apply assist: filled ${filled} field(s)` +
-            (result.uploaded ? `, uploaded ${result.uploaded} file(s)` : "") +
+            (result.uploaded
+              ? `, uploaded ${files || `${result.uploaded} file(s)`}`
+              : "") +
             `. Review and submit.`;
         if (sheetLabel) msg = `${msg} ${sheetLabel}.`;
         await setStatus(msg);
