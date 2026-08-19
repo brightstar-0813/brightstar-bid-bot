@@ -2,6 +2,7 @@ import {
   appendJobToSpreadsheet,
   markJobAppliedOnSpreadsheet,
   formatAppliedStatus,
+  formatApplicationDateTime,
   fetchExistingJobLinks,
   buildKnownLinkSet,
   normalizeJobLink
@@ -4762,11 +4763,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         await persistJobContextForAutofill(jobMeta);
         const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+        const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
         const sheetLabel = sheet?.error
           ? `Sheet Applied failed: ${sheet.error}`
           : sheet?.skipped
             ? ""
-            : `Sheet: ${sheet.status || (sheet.appliedDate ? `Applied ${sheet.appliedDate}` : "Applied")}`;
+            : `Sheet: ${sheet.status || (appliedDate ? `Applied ${appliedDate}` : "Applied")}`;
+        if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+          await updateQueueJob(jobMeta.csvRow, {
+            applied: true,
+            appliedDate,
+            jobDir: jobMeta.jobDir || "",
+            hasFiles: Boolean(jobMeta.jobDir)
+          }).catch(() => {});
+        }
         await setStatus(
           sheetLabel ? `${sheetLabel}. Opening job and running Auto Apply…` : "Opening job and running Auto Apply…"
         );
@@ -4774,7 +4784,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ok: true,
           started: true,
           applied: true,
-          appliedDate: sheet?.appliedDate || "",
+          appliedDate,
+          jobDir: jobMeta.jobDir || "",
           status: sheetLabel
             ? `${sheetLabel}. Opening job and running Auto Apply…`
             : "Opening job and running Auto Apply…"
@@ -4813,7 +4824,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } catch (err) {
         const msg = `Apply assist failed: ${String(err?.message || err)}`;
         await setStatus(msg);
-        reply({ ok: false, applied: true, appliedDate: "", error: msg });
+        reply({ ok: false, applied: false, appliedDate: "", error: msg });
       } finally {
         if (!isRunning) stopKeepAlive();
       }

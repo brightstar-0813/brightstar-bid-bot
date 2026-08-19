@@ -19,7 +19,7 @@ import {
   requiredExperienceToText
 } from "./experience-rules.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
-import { extractSpreadsheetId, buildSheetRowTsv, formatApplicationDate } from "./sheets.js";
+import { extractSpreadsheetId, buildSheetRowTsv, formatApplicationDate, formatApplicationDateTime } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { parseJobsCsv, filterJobsByChannel, isLinkedInJob } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
@@ -1434,7 +1434,7 @@ async function applyAssist(job) {
     setStatus("No JD link for this job.");
     return;
   }
-  setStatus("Opening job link and running Auto Apply…");
+  setStatus("Looking up this row’s files and marking Applied on the Google Sheet…");
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
@@ -1450,9 +1450,12 @@ async function applyAssist(job) {
       salary: job.salary || ""
     }
   });
-  if (res?.applied || res?.started) {
+  if (res?.applied) {
     job.applied = true;
-    job.appliedDate = res.appliedDate || formatApplicationDate();
+    job.appliedDate = res.appliedDate || formatApplicationDateTime();
+    if (res.jobDir) job.jobDir = res.jobDir;
+    if (res.resumeName) job.resumeName = res.resumeName;
+    if (res.coverName) job.coverName = res.coverName;
     await persistQueue();
   }
   if (!res?.ok) {
@@ -2364,7 +2367,17 @@ setInterval(async () => {
     allUsJobsCache = data[ALL_US_JOBS_KEY];
   }
   if (Array.isArray(data[QUEUE_KEY])) {
-    queueCache = data[QUEUE_KEY];
+    const prevByRow = new Map(queueCache.map((j) => [Number(j.csvRow), j]));
+    queueCache = data[QUEUE_KEY].map((j) => {
+      const prev = prevByRow.get(Number(j.csvRow));
+      return {
+        ...j,
+        applied: Boolean(j.applied || prev?.applied),
+        appliedDate: j.appliedDate || prev?.appliedDate || "",
+        resumeName: j.resumeName || prev?.resumeName || "",
+        coverName: j.coverName || prev?.coverName || ""
+      };
+    });
     renderQueue();
     updateCsvSummaryFromQueue();
   }
