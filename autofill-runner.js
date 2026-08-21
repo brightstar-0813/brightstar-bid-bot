@@ -1559,6 +1559,20 @@ export async function startMultiStepApplyOnTab(
       return summary;
     }
 
+    // Dice review step paints sticky footer Submit slightly after fill completes.
+    if (!probe.best && probe.anyForm) {
+      for (let retry = 0; retry < 4 && !probe.best; retry += 1) {
+        await sleep(500);
+        probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+        if (probe.applySuccess) {
+          summary.status = "submitted";
+          summary.detail = probe.applySuccessText || "Your application is on its way";
+          summary.tabId = currentTabId;
+          return summary;
+        }
+      }
+    }
+
     if (!probe.best) {
       summary.status = probe.anyForm ? "ready_for_review" : "needs_review";
       const files = [fillRes?.uploadResumeName, fillRes?.uploadCoverName].filter(Boolean).join(" + ");

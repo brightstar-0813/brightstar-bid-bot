@@ -4270,8 +4270,11 @@
    * Pick the forward action.
    * If Next/Continue exists, advance; only treat Submit/Apply as final when
    * there is no Next button (final page of a multi-step form).
-   * Dice keeps Submit in a sticky footer outside the densest form scope — always
-   * also scan document when the scoped search finds nothing useful.
+   *
+   * Dice keeps Submit in a sticky footer outside the densest form card.
+   * getApplyScope() often picks that card (lots of inputs/buttons) and excludes
+   * the footer — so we ALWAYS also scan document unless the caller already
+   * passed document as the scope.
    */
   function findActionButton(scope) {
     function collectFrom(scopeEl) {
@@ -4284,8 +4287,10 @@
       let review = null;
       let submit = null;
       for (const btn of buttons) {
-        if (!isElEnabled(btn) && !EASY_SUBMIT_RE.test(elActionText(btn))) continue;
         const text = elActionText(btn);
+        // Keep disabled Submit visible in the snapshot (Dice enables it late);
+        // skip other disabled controls.
+        if (!isElEnabled(btn) && !EASY_SUBMIT_RE.test(text)) continue;
         if (!text && btn.getAttribute?.("type") === "submit") {
           if (!submit) submit = { type: "submit", el: btn, text: "Submit" };
           continue;
@@ -4301,8 +4306,11 @@
       return { next, review, submit };
     }
 
-    const primary = collectFrom(scope || getApplyScope());
-    const docWide = scope && scope !== document ? collectFrom(document) : primary;
+    const scopedRoot = scope || getApplyScope();
+    const primary = collectFrom(scopedRoot);
+    // Bug fix: previously `scope && …` meant the no-arg call never left the
+    // dense card, so sticky footer Submit was invisible to the runner.
+    const docWide = scopedRoot === document ? primary : collectFrom(document);
     // Prefer scoped Next/Continue, but never miss a document-level Submit on Dice.
     if (primary.next) return primary.next;
     if (docWide.next) return docWide.next;
@@ -4427,17 +4435,29 @@
       };
     }
     if (preferredType) {
+      // Search dense scope first, then full document (Dice footer Submit).
+      const roots = [];
       const scopeEl = getApplyScope();
-      const buttons = queryAllDeep(
-        'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
-        scopeEl
-      ).filter((el) => isElVisible(el) && isElEnabled(el));
-      const match = buttons.find((btn) => {
-        const text = elActionText(btn);
-        const cls = classifyActionButton(text);
-        if (preferredType === "entry") return EASY_ENTRY_RE.test(text);
-        return cls === preferredType;
-      });
+      if (scopeEl) roots.push(scopeEl);
+      if (scopeEl !== document) roots.push(document);
+      let match = null;
+      for (const root of roots) {
+        const buttons = queryAllDeep(
+          'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
+          root
+        ).filter((el) => {
+          const text = elActionText(el);
+          if (preferredType === "submit" && EASY_SUBMIT_RE.test(text)) return isElVisible(el);
+          return isElVisible(el) && isElEnabled(el);
+        });
+        match = buttons.find((btn) => {
+          const text = elActionText(btn);
+          const cls = classifyActionButton(text);
+          if (preferredType === "entry") return EASY_ENTRY_RE.test(text);
+          return cls === preferredType;
+        });
+        if (match) break;
+      }
       if (match) {
         action = {
           type: preferredType,
