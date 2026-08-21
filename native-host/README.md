@@ -7,7 +7,7 @@
 #
 # Windows native host:
 #   cd native-host
-#   .\install-windows.ps1 -ExtensionId <chrome-extension-id> -CsvPath "D:\path\jobs_latest.csv"
+#   .\install-windows.ps1 -ExtensionId <chrome-extension-id> -CsvPath "D:\Work\JobHunting\Prompts\Bots\sf-job-capture\download\jobs_latest.csv"
 #
 # Then in the bot UI: enable Native watcher, Save source settings.
 

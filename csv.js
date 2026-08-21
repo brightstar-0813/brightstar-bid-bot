@@ -1,5 +1,5 @@
 /**
- * Parse Fantastic Jobs / LinkedIn-style job CSVs, assign 1-based csvRow,
+ * Parse job CSVs (sf-job-capture Dice export and similar), assign 1-based csvRow,
  * and keep only United States jobs.
  */
 
@@ -366,21 +366,38 @@ export function isDiceJob({ jdLink = "", source = "" } = {}) {
 }
 
 /**
- * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"dice"} filter
+ * Normalize legacy channel keys (e.g. "general" → "etc").
+ * @param {string} filter
+ * @returns {"all"|"dice"|"linkedin"|"etc"}
  */
-export function filterJobsByChannel(jobs, filter = "general") {
+export function normalizeChannelFilter(filter) {
+  const mode = String(filter || "dice").toLowerCase();
+  if (mode === "all") return "all";
+  if (mode === "linkedin" || mode === "li") return "linkedin";
+  if (mode === "dice") return "dice";
+  // Legacy "general" and unknown → Etc (not Dice, not LI)
+  if (mode === "etc" || mode === "general" || mode === "other") return "etc";
+  return "dice";
+}
+
+/**
+ * @param {Array} jobs
+ * @param {"all"|"general"|"linkedin"|"dice"|"etc"} filter
+ */
+export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
-  const mode = String(filter || "general").toLowerCase();
+  const mode = normalizeChannelFilter(filter);
   if (mode === "all") return list.slice();
-  if (mode === "linkedin" || mode === "li") {
+  if (mode === "linkedin") {
     return list.filter((j) => j.isLinkedIn || isLinkedInJob(j));
   }
   if (mode === "dice") {
     return list.filter((j) => j.isDice || isDiceJob(j));
   }
-  // general = non-LinkedIn (ATS / company career pages; may include Dice)
-  return list.filter((j) => !(j.isLinkedIn || isLinkedInJob(j)));
+  // etc = not Dice and not LinkedIn
+  return list.filter(
+    (j) => !(j.isDice || isDiceJob(j)) && !(j.isLinkedIn || isLinkedInJob(j))
+  );
 }
 
 /**
@@ -403,7 +420,8 @@ export function filterJobsByChannel(jobs, filter = "general") {
  *   droppedNonUs: number,
  *   linkedInCount: number,
  *   generalCount: number,
- *   diceCount: number
+ *   diceCount: number,
+ *   etcCount: number
  * }}
  */
 export function parseJobsCsv(csvText) {
@@ -471,6 +489,8 @@ export function parseJobsCsv(csvText) {
     droppedNonUs,
     linkedInCount: usJobs.filter((j) => j.isLinkedIn).length,
     diceCount: usJobs.filter((j) => j.isDice).length,
-    generalCount: usJobs.filter((j) => !j.isLinkedIn).length
+    etcCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice).length,
+    /** @deprecated use etcCount — kept for older UI strings */
+    generalCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice).length
   };
 }

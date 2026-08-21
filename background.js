@@ -54,7 +54,7 @@ import {
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
-import { parseJobsCsv, filterJobsByChannel } from "./csv.js";
+import { parseJobsCsv, filterJobsByChannel, normalizeChannelFilter } from "./csv.js";
 import {
   CSV_SOURCE_ALARM,
   NATIVE_HOST_NAME,
@@ -70,7 +70,7 @@ const BATCH_STATE_KEY = "batch_state";
 const APPLY_HISTORY_KEY = "apply_history";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
-const DEFAULT_CHANNEL_FILTER = "general";
+const DEFAULT_CHANNEL_FILTER = "dice";
 
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
@@ -849,6 +849,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
   if (!jdLink) {
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
+      applyAttempted: true,
       error: "Generated files, but missing job URL for Dice auto-apply"
     });
     await setStatus(
@@ -887,6 +888,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     await closeApplyTab(applyResult?.tabId).catch(() => false);
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
+      applyAttempted: true,
       error: "Skipped during Dice auto-apply"
     });
     return { ...applyResult, status: "skipped", detail: "Skipped during apply" };
@@ -907,6 +909,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
     const docsPatch = {
       applied: !sheet?.error,
+      applyAttempted: true,
       appliedDate: sheet?.error ? "" : appliedDate,
       jobDir: applyResult?.uploadFolder || jobMeta.jobDir || "",
       hasFiles: true,
@@ -932,6 +935,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
       (status === "unavailable" ? "Job unavailable" : "Apply needs review (login, CAPTCHA, or form blocker)");
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
+      applyAttempted: true,
       error: reviewMsg.slice(0, 240)
     }).catch(() => {});
     await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}. Continuing to next job…`);
@@ -3942,7 +3946,53 @@ async function runBatchLoop(outputDir) {
         return;
       }
 
+      const channelData = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
+      const channel = normalizeChannelFilter(
+        channelData[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER
+      );
       const queue = await getQueue();
+
+      // Dice mode: apply already-built rows that are not Applied yet (no ChatGPT).
+      if (channel === "dice") {
+        const backlog = queue.find(
+          (j) =>
+            j.status === "done" &&
+            !j.applied &&
+            !j.applyAttempted &&
+            Boolean(j.jobDir || j.hasFiles) &&
+            String(j.jdLink || "").trim()
+        );
+        if (backlog) {
+          if (batchControl.skipCurrent) {
+            batchControl.skipCurrent = false;
+            await updateQueueJob(backlog.csvRow, {
+              applied: false,
+              error: "Skipped during Dice apply backlog"
+            });
+            continue;
+          }
+          await setStatus(
+            `Dice apply backlog: row ${backlog.csvRow} — ${backlog.company} / ${backlog.title}`
+          );
+          await runDiceInterleavedApply({
+            csvRow: backlog.csvRow,
+            jobTitle: backlog.title,
+            companyName: backlog.company,
+            company: backlog.company,
+            title: backlog.title,
+            jdLink: backlog.jdLink || "",
+            salary: backlog.salary || "",
+            jobDir: backlog.jobDir || ""
+          });
+          if (batchControl.stop) break;
+          await setStatus(
+            `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job…`
+          );
+          await sleep(currentJobGapMs());
+          continue;
+        }
+      }
+
       // Fresh rows first, then rows that errored but still have retries left.
       // Rows at the attempt ceiling become "failed" and are never re-picked, so
       // the loop always terminates.
@@ -4063,9 +4113,11 @@ async function runBatchLoop(outputDir) {
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
         // Dice channel: generate → auto-apply+submit → close tab → next build.
-        const channelData = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
-        const channel = String(channelData[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER).toLowerCase();
-        if (channel === "dice" && !batchControl.stop) {
+        const channelAfter = normalizeChannelFilter(
+          (await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]))[JOB_CHANNEL_FILTER_KEY] ||
+            DEFAULT_CHANNEL_FILTER
+        );
+        if (channelAfter === "dice" && !batchControl.stop) {
           await runDiceInterleavedApply({
             csvRow: next.csvRow,
             jobTitle: next.title,
@@ -4412,12 +4464,13 @@ async function ingestCsvText({
   const previousAll = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
   const previousQueue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
   const merged = mergeParsedJobs(previousAll, previousQueue, parsed.usJobs);
-  const channel = data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER;
+  const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
   const filtered = filterJobsByChannel(merged.allUsJobs, channel);
 
   await chrome.storage.local.set({
     [ALL_US_JOBS_KEY]: merged.allUsJobs,
     [QUEUE_KEY]: filtered,
+    [JOB_CHANNEL_FILTER_KEY]: channel,
     csv_file_name: fileName,
     csv_total_rows: parsed.totalRows,
     csv_dropped_non_us: parsed.droppedNonUs

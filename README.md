@@ -7,7 +7,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
-- **CSV batch**: upload LinkedIn / Fantastic Jobs / Dice / Jobright CSV → keep **US jobs only** → **auto-starts file generation** (Start / Pause / Skip / Stop still available). **Dice** filter runs interleaved generate → auto-apply+submit per job.
+- **CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / LI / Etc / All**. **Dice** (default) runs interleaved generate → auto-apply+submit (and applies already-built not-Applied rows on Start).
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Saves under `Downloads / [output folder] / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
@@ -36,7 +36,7 @@ The batch is designed to finish a whole CSV without supervision:
 ```mermaid
 flowchart TD
   setup[Edit person: master resume text/PDF/DOCX + resume prompt + cover letter prompt] --> savePerson[Save person once]
-  savePerson --> uploadCsv[Upload LinkedIn or Fantastic Jobs CSV]
+  savePerson --> uploadCsv[Upload sf-job-capture jobs_latest.csv]
   uploadCsv --> filterUs[Keep US jobs only assign CSV row N]
   filterUs --> queue[Job queue pending]
   queue --> startBatch[Auto-start file generation]
@@ -73,27 +73,25 @@ flowchart TD
 
 ## CSV batch
 
-1. Upload a CSV with columns like `title`, `organization`, `location`, `remote_restricted_to`, `url`, `description` (LinkedIn, Fantastic Jobs, Dice, Jobright, …)
-2. Choose **Apply source** filter:
-   - **General** (default) — non-LinkedIn / ATS jobs (easier to apply)
-   - **LI** — LinkedIn-hosted jobs only
-   - **Dice** — Dice.com jobs only; **interleaved** generate → auto-apply+submit → close tab → next job
-   - **All** — every US job
-3. Confirm summary counts (General vs LI vs Dice)
-4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows
+1. Upload a CSV with columns like `title`, `organization`, `location`, `remote_restricted_to`, `url`, `description` (typical path: `sf-job-capture/download/jobs_latest.csv`)
+2. Choose **Apply source** filter (default **Dice**):
+   - **Dice** — Dice.com jobs; **interleaved** generate → auto-apply+submit → close tab → next job. Start also applies already-built rows that are not Applied yet
+   - **LI** — LinkedIn-hosted jobs only (generate only; manual Apply stops before Submit)
+   - **Etc** — not Dice and not LinkedIn (generate only)
+   - **All** — every US job (generate only)
+3. Confirm summary counts (Dice / LI / Etc)
+4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows / apply backlog
 5. Use **Pause** / **Skip** / **Stop** as needed
-6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill)
+6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill; stops before Submit)
 
 ### Dice interleaved auto-apply
 
-With the **Dice** filter selected, each queue row runs end-to-end:
+With the **Dice** filter selected:
 
-1. ChatGPT builds resume + cover letter PDFs (Sheet status **Ready**)
-2. Bot opens the Dice wizard (or external ATS apply URL), fills, uploads that row’s PDFs, walks Next/Continue, and **clicks Submit**
-3. On success, Sheet status becomes **Applied**; the apply tab closes
-4. Cooldown, then the next pending Dice job builds
-
-Blockers (login, CAPTCHA, missing form) mark the row with an error and **continue** the batch — generation is not re-run. Manual **Apply** / **Auto Apply** still stop before Submit for every channel.
+1. **Start** first drains already-built (`done`) rows that are not Applied yet — opens wizard/ATS, fills, submits, closes tab
+2. Then each pending row: ChatGPT builds resume + cover letter PDFs (Sheet **Ready**) → auto-apply+submit → Sheet **Applied** → close tab → cooldown → next
+3. Blockers (login, CAPTCHA, missing form) mark the row with an error (`applyAttempted`) and **continue** — that row is not auto-retried in the same batch
+4. Manual **Apply** / **Auto Apply** still stop before Submit for every channel
 
 ### CSV auto-source (cron / 12h updates)
 
@@ -110,7 +108,7 @@ Use these when `jobs_latest.csv` is rewritten on a schedule:
 
 ```powershell
 cd native-host
-.\install-windows.ps1 -ExtensionId <id-from-chrome-extensions> -CsvPath "D:\path\jobs_latest.csv"
+.\install-windows.ps1 -ExtensionId <id-from-chrome-extensions> -CsvPath "D:\Work\JobHunting\Prompts\Bots\sf-job-capture\download\jobs_latest.csv"
 ```
 
 Then enable **Native OS watcher** in Auto-source settings and **Save**. Refreshes **merge** by job link (keep done/skipped; add new pending), sheet-dedupe, and auto-start generation when new jobs appear.
@@ -126,7 +124,7 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 - Queue **Apply** / **Autofill this page** / **Auto Apply** (`Ctrl+Shift+Y` / `Ctrl+Shift+U`)
 - Fills name/email/phone/LinkedIn from the active person, then extras + saved Q&A
 - Manual Auto Apply **stops before Submit** so you can review
-- **Dice** channel batch mode auto-submits after each build (see Dice interleaved above)
+- **Dice** channel batch mode: Start applies already-built not-Applied rows, then auto-submits after each new build (see Dice interleaved above)
 - Leftover questions go to **OpenAI** if `.env` has `OPENAI_API_KEY` (copy `.env.example` → `.env`, then reload the extension). Do not commit `.env`.
 - **Q&A bank** (Apply section): Open editor, **Load bundled bank** (`qa-bank-custom-steven-avon.json`), or Import JSON. Imports are assigned to the **active person** so autofill can match them. Learn mode saves answers you type on forms.
 

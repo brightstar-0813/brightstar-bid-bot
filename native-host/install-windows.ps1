@@ -1,6 +1,6 @@
 # Install Brightstar CSV native messaging host (Windows)
 # Usage (PowerShell as current user):
-#   .\install-windows.ps1 -ExtensionId <id-from-chrome-extensions> -CsvPath "D:\path\jobs_latest.csv"
+#   .\install-windows.ps1 -ExtensionId <id-from-chrome-extensions> -CsvPath "D:\Work\JobHunting\Prompts\Bots\sf-job-capture\download\jobs_latest.csv"
 #
 # Get Extension ID: chrome://extensions → Brightstar Bid bot → Developer mode → ID
 

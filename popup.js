@@ -21,7 +21,7 @@ import {
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { extractSpreadsheetId, buildSheetRowTsv, formatApplicationDate, formatApplicationDateTime } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
-import { parseJobsCsv, filterJobsByChannel, isLinkedInJob, isDiceJob } from "./csv.js";
+import { parseJobsCsv, filterJobsByChannel, isLinkedInJob, isDiceJob, normalizeChannelFilter } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
   extractProfileFromResumeText,
@@ -48,7 +48,7 @@ const QUEUE_KEY = "job_queue";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const BATCH_STATE_KEY = "batch_state";
-const DEFAULT_CHANNEL_FILTER = "general";
+const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
 const DETACHED_WINDOW_KEY = "detached_window_id";
 const PREVIEW_WINDOW_KEY = "template_preview_window_id";
@@ -361,9 +361,9 @@ const forceSaveChatgptBtn = document.getElementById("forceSaveChatgpt");
 const batchStopBtn = document.getElementById("batchStop");
 const clearJobsBtn = document.getElementById("clearJobs");
 const retryErrorsBtn = document.getElementById("retryErrors");
-const filterGeneralBtn = document.getElementById("filterGeneral");
-const filterLinkedInBtn = document.getElementById("filterLinkedIn");
 const filterDiceBtn = document.getElementById("filterDice");
+const filterLinkedInBtn = document.getElementById("filterLinkedIn");
+const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
 const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
 
@@ -849,7 +849,7 @@ async function loadSettings() {
   setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
   setStatus(data.generation_status || "");
 
-  channelFilter = data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER;
+  channelFilter = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
   allUsJobsCache = Array.isArray(data[ALL_US_JOBS_KEY])
     ? data[ALL_US_JOBS_KEY].map((j) => ({
         ...j,
@@ -905,7 +905,9 @@ function updateCsvSummaryFromQueue() {
   }
   const liTotal = allUsJobsCache.filter((j) => j.isLinkedIn || isLinkedInJob(j)).length;
   const diceTotal = allUsJobsCache.filter((j) => j.isDice || isDiceJob(j)).length;
-  const genTotal = allUsJobsCache.length - liTotal;
+  const etcTotal = allUsJobsCache.filter(
+    (j) => !(j.isDice || isDiceJob(j)) && !(j.isLinkedIn || isLinkedInJob(j))
+  ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
   const errors = queueCache.filter((j) => j.status === "error" || j.status === "failed").length;
@@ -915,9 +917,11 @@ function updateCsvSummaryFromQueue() {
       ? "LI only"
       : channelFilter === "dice"
         ? "Dice only"
-        : channelFilter === "all"
-          ? "All"
-          : "General only";
+        : channelFilter === "etc"
+          ? "Etc only"
+          : channelFilter === "all"
+            ? "All"
+            : "Dice only";
   csvSummaryEl.classList.remove("is-idle");
   csvSummaryEl.innerHTML = `
     <div class="stat-grid">
@@ -927,16 +931,16 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · General ${genTotal} · LI ${liTotal} · Dice ${diceTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
 
 function syncChannelFilterButtons() {
   const map = {
-    general: filterGeneralBtn,
-    linkedin: filterLinkedInBtn,
     dice: filterDiceBtn,
+    linkedin: filterLinkedInBtn,
+    etc: filterEtcBtn,
     all: filterAllBtn
   };
   for (const [key, btn] of Object.entries(map)) {
@@ -963,13 +967,14 @@ function mergeStatusFromQueue(jobs, previousQueue) {
       coverName: prev.coverName || j.coverName || "",
       applied: Boolean(prev.applied || j.applied),
       appliedDate: prev.appliedDate || j.appliedDate || "",
+      applyAttempted: Boolean(prev.applyAttempted || j.applyAttempted),
       error: prev.error
     };
   });
 }
 
 async function applyChannelFilter(nextFilter, { persist = true } = {}) {
-  channelFilter = nextFilter || DEFAULT_CHANNEL_FILTER;
+  channelFilter = normalizeChannelFilter(nextFilter || DEFAULT_CHANNEL_FILTER);
   syncChannelFilterButtons();
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   queueCache = mergeStatusFromQueue(filtered, queueCache);
@@ -983,12 +988,12 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   updateCsvSummaryFromQueue();
   renderQueue();
   setStatus(
-    channelFilter === "general"
-      ? `Showing General (non-LinkedIn) jobs — ${queueCache.length} in queue.`
+    channelFilter === "dice"
+      ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
       : channelFilter === "linkedin"
         ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
-        : channelFilter === "dice"
-          ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+        : channelFilter === "etc"
+          ? `Showing Etc (not Dice, not LI) — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
   );
 }
@@ -1388,7 +1393,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (General ${result.generalCount} / LI ${result.linkedInCount} / Dice ${result.diceCount || 0}). Filter: ${channelFilter}.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Filter: ${channelFilter}.${dedupeNote}`
     );
 
     try {
@@ -2263,14 +2268,14 @@ csvClearPinBtn?.addEventListener("click", () => {
   clearPinnedCsv().catch((e) => setStatus(String(e.message || e)));
 });
 
-filterGeneralBtn?.addEventListener("click", () => {
-  applyChannelFilter("general").catch((e) => setStatus(String(e.message || e)));
+filterDiceBtn?.addEventListener("click", () => {
+  applyChannelFilter("dice").catch((e) => setStatus(String(e.message || e)));
 });
 filterLinkedInBtn?.addEventListener("click", () => {
   applyChannelFilter("linkedin").catch((e) => setStatus(String(e.message || e)));
 });
-filterDiceBtn?.addEventListener("click", () => {
-  applyChannelFilter("dice").catch((e) => setStatus(String(e.message || e)));
+filterEtcBtn?.addEventListener("click", () => {
+  applyChannelFilter("etc").catch((e) => setStatus(String(e.message || e)));
 });
 filterAllBtn?.addEventListener("click", () => {
   applyChannelFilter("all").catch((e) => setStatus(String(e.message || e)));
