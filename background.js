@@ -840,16 +840,20 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}) {
   }
 }
 
+const MAX_DICE_APPLY_ATTEMPTS = 3;
+
 /**
- * Dice interleaved mode: after resume/CL generation, auto-apply (with submit),
- * mark Applied only on success, then close the apply tab.
+ * Dice interleaved: auto-apply with submit after files exist.
+ * On incomplete apply, pause (keep tab open) so Start can retry.
  */
 async function runDiceInterleavedApply(jobMeta = {}) {
   const jdLink = String(jobMeta.jdLink || "").trim();
+  const prevAttempts = Number(jobMeta.applyAttempts || 0);
   if (!jdLink) {
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
       applyAttempted: true,
+      applyAttempts: prevAttempts + 1,
       error: "Generated files, but missing job URL for Dice auto-apply"
     });
     await setStatus(
@@ -889,6 +893,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
       applyAttempted: true,
+      applyAttempts: prevAttempts + 1,
       error: "Skipped during Dice auto-apply"
     });
     return { ...applyResult, status: "skipped", detail: "Skipped during apply" };
@@ -896,6 +901,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
 
   const status = String(applyResult?.status || "");
   const detail = String(applyResult?.detail || "").slice(0, 240);
+  const nextAttempts = prevAttempts + 1;
 
   if (status === "submitted") {
     const sheet = await markQueueJobAppliedOnSheet({
@@ -910,6 +916,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     const docsPatch = {
       applied: !sheet?.error,
       applyAttempted: true,
+      applyAttempts: nextAttempts,
       appliedDate: sheet?.error ? "" : appliedDate,
       jobDir: applyResult?.uploadFolder || jobMeta.jobDir || "",
       hasFiles: true,
@@ -929,31 +936,68 @@ async function runDiceInterleavedApply(jobMeta = {}) {
         ? `Row ${jobMeta.csvRow}: submitted, but sheet mark failed (${sheet.error}). Continuing…`
         : `Row ${jobMeta.csvRow}: submitted and marked Applied. Closing tab…`
     );
-  } else {
-    const reviewMsg =
-      detail ||
-      (status === "unavailable" ? "Job unavailable" : "Apply needs review (login, CAPTCHA, or form blocker)");
-    await updateQueueJob(jobMeta.csvRow, {
-      applied: false,
-      applyAttempted: true,
-      error: reviewMsg.slice(0, 240)
-    }).catch(() => {});
-    await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}. Continuing to next job…`);
-    await trySlackJobStatus({
-      outcome: "error",
-      csvRow: jobMeta.csvRow,
-      company: jobMeta.companyName || jobMeta.company || "",
-      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
-      jdLink,
-      message: `Dice auto-apply: ${reviewMsg}`,
-      attempts: 1,
-      maxAttempts: 1,
-      progress: await queueSlackProgress().catch(() => null)
-    }).catch(() => {});
+    await closeApplyTab(applyResult?.tabId).catch(() => false);
+    return applyResult;
   }
 
-  await closeApplyTab(applyResult?.tabId).catch(() => false);
+  const reviewMsg =
+    detail ||
+    (status === "unavailable" ? "Job unavailable" : "Apply needs review (login, CAPTCHA, or form blocker)");
+  const exhausted = nextAttempts >= MAX_DICE_APPLY_ATTEMPTS;
+  await updateQueueJob(jobMeta.csvRow, {
+    applied: false,
+    applyAttempted: exhausted,
+    applyAttempts: nextAttempts,
+    error: reviewMsg.slice(0, 240)
+  }).catch(() => {});
+  await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}`);
+  await trySlackJobStatus({
+    outcome: "error",
+    csvRow: jobMeta.csvRow,
+    company: jobMeta.companyName || jobMeta.company || "",
+    jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+    jdLink,
+    message: `Dice auto-apply: ${reviewMsg}`,
+    attempts: nextAttempts,
+    maxAttempts: MAX_DICE_APPLY_ATTEMPTS,
+    progress: await queueSlackProgress().catch(() => null)
+  }).catch(() => {});
+
+  // Keep the tab open for review when submit did not finish.
+  applyResult = {
+    ...applyResult,
+    status: status || "needs_review",
+    detail: reviewMsg,
+    needsPause: !exhausted && status !== "unavailable"
+  };
   return applyResult;
+}
+
+async function pauseAfterFailedDiceApply(applyResult, jobLabel = "") {
+  const detail = String(applyResult?.detail || "Dice apply needs review");
+  await setBatchState("paused");
+  await setStatus(
+    `${jobLabel ? `Row ${jobLabel}: ` : ""}${detail}. Batch paused — fix the form (login/CAPTCHA/Next), then click Start to retry apply.`
+  );
+  await chrome.storage.local.set({ generation_running: false });
+}
+
+function diceApplyAttemptCount(j) {
+  const n = Number(j.applyAttempts || 0);
+  if (n > 0) return n;
+  // Legacy rows only had applyAttempted — count as one try so Start can still retry.
+  return j.applyAttempted ? 1 : 0;
+}
+
+function isDiceApplyBacklogJob(j) {
+  return (
+    (j.isDice || isDiceJob(j)) &&
+    j.status === "done" &&
+    !j.applied &&
+    diceApplyAttemptCount(j) < MAX_DICE_APPLY_ATTEMPTS &&
+    Boolean(j.jobDir || j.hasFiles) &&
+    String(j.jdLink || "").trim()
+  );
 }
 
 /**
@@ -3950,21 +3994,14 @@ async function runBatchLoop(outputDir) {
 
       // Dice jobs: apply already-built rows that are not Applied yet (no ChatGPT).
       // Gated by job type (isDice), not Apply-source filter — so All/Dice both auto-apply.
-      const backlog = queue.find(
-        (j) =>
-          (j.isDice || isDiceJob(j)) &&
-          j.status === "done" &&
-          !j.applied &&
-          !j.applyAttempted &&
-          Boolean(j.jobDir || j.hasFiles) &&
-          String(j.jdLink || "").trim()
-      );
+      const backlog = queue.find((j) => isDiceApplyBacklogJob(j));
       if (backlog) {
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
             applied: false,
             applyAttempted: true,
+            applyAttempts: Number(backlog.applyAttempts || 0) + 1,
             error: "Skipped during Dice apply backlog"
           });
           continue;
@@ -3972,7 +4009,7 @@ async function runBatchLoop(outputDir) {
         await setStatus(
           `Dice auto-apply: row ${backlog.csvRow} — ${backlog.company} / ${backlog.title}`
         );
-        await runDiceInterleavedApply({
+        const applyRes = await runDiceInterleavedApply({
           csvRow: backlog.csvRow,
           jobTitle: backlog.title,
           companyName: backlog.company,
@@ -3980,9 +4017,22 @@ async function runBatchLoop(outputDir) {
           title: backlog.title,
           jdLink: backlog.jdLink || "",
           salary: backlog.salary || "",
-          jobDir: backlog.jobDir || ""
+          jobDir: backlog.jobDir || "",
+          applyAttempts: diceApplyAttemptCount(backlog)
         });
         if (batchControl.stop) break;
+        if (applyRes?.needsPause) {
+          await pauseAfterFailedDiceApply(applyRes, backlog.csvRow);
+          return;
+        }
+        if (String(applyRes?.status || "") !== "submitted") {
+          // Exhausted or unavailable — continue to next work item.
+          await setStatus(
+            `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job…`
+          );
+          await sleep(currentJobGapMs());
+          continue;
+        }
         await setStatus(
           `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job…`
         );
@@ -4112,7 +4162,7 @@ async function runBatchLoop(outputDir) {
         // Dice jobs always: generate → auto-apply+submit → close tab → next.
         // Non-Dice jobs stop after files (manual Apply remains stop-before-submit).
         if ((next.isDice || isDiceJob(next)) && !batchControl.stop) {
-          await runDiceInterleavedApply({
+          const applyRes = await runDiceInterleavedApply({
             csvRow: next.csvRow,
             jobTitle: next.title,
             companyName: next.company,
@@ -4120,8 +4170,13 @@ async function runBatchLoop(outputDir) {
             title: next.title,
             jdLink: next.jdLink || "",
             salary: next.salary || "",
-            jobDir: result.savedDir || ""
+            jobDir: result.savedDir || "",
+            applyAttempts: diceApplyAttemptCount(next)
           });
+          if (applyRes?.needsPause) {
+            await pauseAfterFailedDiceApply(applyRes, next.csvRow);
+            return;
+          }
         }
 
         if (batchControl.stop) break;

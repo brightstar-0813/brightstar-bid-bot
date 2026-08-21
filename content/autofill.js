@@ -4018,6 +4018,29 @@
     return "";
   }
 
+  // Dice confirmation after successful Easy Apply submit.
+  const DICE_APPLY_SUCCESS_RE =
+    /hooray!\s*your application is on its way|your application is on its way|find the job listing for this role in your\s+applied jobs/i;
+
+  /**
+   * @returns {{ ok: boolean, text?: string }} when Dice shows the post-submit success screen
+   */
+  function detectDiceApplySuccess() {
+    const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    if (!bodyText) return { ok: false };
+    const match = bodyText.match(DICE_APPLY_SUCCESS_RE);
+    if (!match) return { ok: false };
+    // Prefer heading text when present.
+    const headings = queryAllDeep("h1, h2, [role='heading']")
+      .map((el) => cleanLabelText(el.textContent))
+      .filter(Boolean);
+    const headingHit = headings.find((t) => DICE_APPLY_SUCCESS_RE.test(t));
+    return {
+      ok: true,
+      text: (headingHit || match[0] || "Your application is on its way").slice(0, 160)
+    };
+  }
+
   /**
    * Decide whether this page is really an application form. Job search / listing
    * pages also contain inputs (search boxes, filters), so field count alone is
@@ -4238,6 +4261,7 @@
 
   function getApplyActionSnapshot() {
     const probe = probeApplicationForm();
+    const success = detectDiceApplySuccess();
     let action = findActionButton();
     // On a job listing (not the form yet), "Apply" / "Apply now" is an entry
     // control — not the final submit. Remap so the SW can click through.
@@ -4254,6 +4278,8 @@
       isApplicationForm: Boolean(probe.isApplicationForm),
       blockedReason: probe.blockedReason || "",
       jobUnavailable: probe.jobUnavailable || "",
+      applySuccess: Boolean(success.ok),
+      applySuccessText: success.text || "",
       action: describeAction(action),
       applyUrls: probe.applyUrls || []
     };
@@ -4421,6 +4447,12 @@
       summary.detail = goneAtStart;
       return summary;
     }
+    const successAtStart = detectDiceApplySuccess();
+    if (successAtStart.ok) {
+      summary.status = "submitted";
+      summary.detail = successAtStart.text || "Your application is on its way";
+      return summary;
+    }
     if (detectPageBlocker()) {
       summary.status = "needs_review";
       summary.detail = detectPageBlocker();
@@ -4498,8 +4530,20 @@
         if (autoSubmit) {
           scrollElIntoView(action.el);
           safeClick(action.el);
-          summary.status = "submitted";
-          summary.detail = "Submitted the application.";
+          await sleep(800);
+          const start = Date.now();
+          while (Date.now() - start < 20000) {
+            const success = detectDiceApplySuccess();
+            if (success.ok) {
+              summary.status = "submitted";
+              summary.detail = success.text || "Your application is on its way";
+              return summary;
+            }
+            await sleep(400);
+          }
+          summary.status = "needs_review";
+          summary.detail =
+            "Submit was clicked but the Dice success screen was not detected. Confirm in the tab, then retry.";
           return summary;
         }
         summary.status = "ready_for_review";

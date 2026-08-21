@@ -969,6 +969,7 @@ function mergeStatusFromQueue(jobs, previousQueue) {
       applied: Boolean(prev.applied || j.applied),
       appliedDate: prev.appliedDate || j.appliedDate || "",
       applyAttempted: Boolean(prev.applyAttempted || j.applyAttempted),
+      applyAttempts: Number(prev.applyAttempts || j.applyAttempts || 0),
       error: prev.error
     };
   });

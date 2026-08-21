@@ -984,6 +984,9 @@ function pickBestApplyAction(frameResults = []) {
     anyForm: frameResults.some((f) => f?.isApplicationForm),
     blockedReason: frameResults.find((f) => f?.blockedReason)?.blockedReason || "",
     jobUnavailable: frameResults.find((f) => f?.jobUnavailable)?.jobUnavailable || "",
+    applySuccess: frameResults.some((f) => f?.applySuccess),
+    applySuccessText:
+      frameResults.find((f) => f?.applySuccess && f?.applySuccessText)?.applySuccessText || "",
     applyUrls: [...new Set(frameResults.flatMap((f) => f?.applyUrls || []).filter(Boolean))],
     signature: best?.signature || frameResults[0]?.signature || "",
     href: best?.href || frameResults[0]?.href || ""
@@ -996,12 +999,42 @@ async function getApplyActionFromTab(tabId) {
   return pickBestApplyAction(frames);
 }
 
+async function waitForDiceApplySuccess(tabId, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await sleep(450);
+    const probe = await getApplyActionFromTab(tabId).catch(() => null);
+    if (probe?.applySuccess) {
+      return {
+        ok: true,
+        tabId,
+        text: probe.applySuccessText || "Your application is on its way"
+      };
+    }
+    // Also treat URL/DOM advance into a success-looking page via probe after navigation.
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab?.id) return { ok: false, tabId, reason: "tab_gone" };
+  }
+  return { ok: false, tabId, reason: "timeout" };
+}
+
 async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
   const start = Date.now();
   const knownTabIds = new Set((await chrome.tabs.query({})).map((t) => t.id));
 
   while (Date.now() - start < timeoutMs) {
     await sleep(400);
+
+    const successProbe = await getApplyActionFromTab(tabId).catch(() => null);
+    if (successProbe?.applySuccess) {
+      return {
+        advanced: true,
+        tabId,
+        reason: "apply_success",
+        applySuccess: true,
+        applySuccessText: successProbe.applySuccessText || ""
+      };
+    }
 
     const tabs = await chrome.tabs.query({});
     for (const t of tabs) {
@@ -1016,6 +1049,16 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
       const fresh = await chrome.tabs.get(t.id).catch(() => null);
       if (fresh?.id && /^https?:\/\//i.test(fresh.url || "")) {
         await chrome.tabs.update(fresh.id, { active: true }).catch(() => {});
+        const newProbe = await getApplyActionFromTab(fresh.id).catch(() => null);
+        if (newProbe?.applySuccess) {
+          return {
+            advanced: true,
+            tabId: fresh.id,
+            reason: "apply_success",
+            applySuccess: true,
+            applySuccessText: newProbe.applySuccessText || ""
+          };
+        }
         return { advanced: true, tabId: fresh.id, reason: "new_tab" };
       }
     }
@@ -1032,12 +1075,31 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
         }
       }
       await sleep(500);
+      const afterNav = await getApplyActionFromTab(tabId).catch(() => null);
+      if (afterNav?.applySuccess) {
+        return {
+          advanced: true,
+          tabId,
+          reason: "apply_success",
+          applySuccess: true,
+          applySuccessText: afterNav.applySuccessText || ""
+        };
+      }
       return { advanced: true, tabId, reason: "url_change" };
     }
 
     try {
       await ensureAutofillScript(tabId);
       const all = await getApplyActionFromTab(tabId);
+      if (all.applySuccess) {
+        return {
+          advanced: true,
+          tabId,
+          reason: "apply_success",
+          applySuccess: true,
+          applySuccessText: all.applySuccessText || ""
+        };
+      }
       if (all.signature && prevSig && all.signature !== prevSig) {
         await sleep(300);
         return { advanced: true, tabId, reason: "dom_change" };
@@ -1394,6 +1456,13 @@ export async function startMultiStepApplyOnTab(
       return summary;
     }
 
+    if (probe.applySuccess) {
+      summary.status = "submitted";
+      summary.detail = probe.applySuccessText || "Your application is on its way";
+      summary.tabId = currentTabId;
+      return summary;
+    }
+
     if (!probe.anyForm && (!probe.best || probe.best.action.type === "entry")) {
       const live = await chrome.tabs.get(currentTabId).catch(() => null);
       const prevUrl = live?.url || "";
@@ -1429,11 +1498,30 @@ export async function startMultiStepApplyOnTab(
 
       if (alreadyOpen) {
         probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+        if (probe.applySuccess) {
+          summary.status = "submitted";
+          summary.detail = probe.applySuccessText || "Your application is on its way";
+          summary.tabId = currentTabId;
+          return summary;
+        }
       }
       if (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry"))) {
         const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000);
         currentTabId = advanced.tabId;
+        if (advanced.applySuccess) {
+          summary.status = "submitted";
+          summary.detail = advanced.applySuccessText || "Your application is on its way";
+          summary.tabId = currentTabId;
+          return summary;
+        }
         probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+      }
+
+      if (probe.applySuccess) {
+        summary.status = "submitted";
+        summary.detail = probe.applySuccessText || "Your application is on its way";
+        summary.tabId = currentTabId;
+        return summary;
       }
 
       if (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry")) {
@@ -1464,6 +1552,13 @@ export async function startMultiStepApplyOnTab(
 
     probe = await getApplyActionFromTab(currentTabId).catch(() => ({ best: null, anyForm: false }));
 
+    if (probe.applySuccess) {
+      summary.status = "submitted";
+      summary.detail = probe.applySuccessText || "Your application is on its way";
+      summary.tabId = currentTabId;
+      return summary;
+    }
+
     if (!probe.best) {
       summary.status = probe.anyForm ? "ready_for_review" : "needs_review";
       const files = [fillRes?.uploadResumeName, fillRes?.uploadCoverName].filter(Boolean).join(" + ");
@@ -1488,9 +1583,23 @@ export async function startMultiStepApplyOnTab(
         ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
 
         if (clickRes?.clicked || clickRes?.submitted) {
-          await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000).catch(() => null);
-          summary.status = "submitted";
-          summary.detail = "Submitted the application.";
+          const confirmed = await waitForDiceApplySuccess(currentTabId, 20000);
+          if (confirmed.ok) {
+            summary.status = "submitted";
+            summary.detail = confirmed.text || "Your application is on its way";
+            summary.tabId = currentTabId;
+            return summary;
+          }
+          const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 8000).catch(() => null);
+          if (advanced?.applySuccess) {
+            summary.status = "submitted";
+            summary.detail = advanced.applySuccessText || "Your application is on its way";
+            summary.tabId = advanced.tabId || currentTabId;
+            return summary;
+          }
+          summary.status = "needs_review";
+          summary.detail =
+            "Submit was clicked but the Dice success screen was not detected. Confirm in the tab, then click Start.";
           summary.tabId = currentTabId;
           return summary;
         }
@@ -1530,10 +1639,23 @@ export async function startMultiStepApplyOnTab(
           { attempts: 2, frameId: probe.best.frameId }
         ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
         if (submitRes?.clicked || submitRes?.submitted) {
-          await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000).catch(() => null);
-          summary.status = "submitted";
-          summary.detail = "Submitted the application.";
-          summary.tabId = currentTabId;
+          const confirmed = await waitForDiceApplySuccess(currentTabId, 20000);
+          if (confirmed.ok) {
+            summary.status = "submitted";
+            summary.detail = confirmed.text || "Your application is on its way";
+            summary.tabId = currentTabId;
+            return summary;
+          }
+          const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 8000).catch(() => null);
+          if (advanced?.applySuccess) {
+            summary.status = "submitted";
+            summary.detail = advanced.applySuccessText || "Your application is on its way";
+            summary.tabId = advanced.tabId || currentTabId;
+            return summary;
+          }
+          summary.status = "needs_review";
+          summary.detail =
+            "Submit was clicked but the Dice success screen was not detected. Confirm in the tab, then click Start.";
           return summary;
         }
         summary.status = "needs_review";
@@ -1550,6 +1672,12 @@ export async function startMultiStepApplyOnTab(
     const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 15000);
     currentTabId = advanced.tabId;
     summary.tabId = currentTabId;
+
+    if (advanced.applySuccess) {
+      summary.status = "submitted";
+      summary.detail = advanced.applySuccessText || "Your application is on its way";
+      return summary;
+    }
 
     if (advanced.advanced) {
       noAdvance = 0;
