@@ -1451,7 +1451,7 @@ export async function startMultiStepApplyOnTab(
 
     if (probe.jobUnavailable) {
       summary.status = "unavailable";
-      summary.detail = probe.jobUnavailable;
+      summary.detail = probe.jobUnavailable || "inactive job";
       summary.tabId = currentTabId;
       return summary;
     }
@@ -1817,11 +1817,30 @@ export async function openJobAndApply(
   const live = await chrome.tabs.get(tab.id).catch(() => null);
   if (jobId && /dice\.com/i.test(live?.url || href)) {
     await ensureAutofillScript(tab.id).catch(() => {});
-    const probe = await getApplyActionFromTab(tab.id).catch(() => null);
+    let probe = await getApplyActionFromTab(tab.id).catch(() => null);
+    if (probe?.jobUnavailable) {
+      return {
+        status: "unavailable",
+        detail: probe.jobUnavailable || "inactive job",
+        tabId: tab.id,
+        filled: 0,
+        uploaded: 0
+      };
+    }
     if (!probe?.anyForm && !probe?.best?.action) {
       await chrome.tabs.update(tab.id, { url: href });
       await waitForTabComplete(tab.id, 35000).catch(() => {});
       await sleep(APPLY_SETTLE_MS);
+      probe = await getApplyActionFromTab(tab.id).catch(() => null);
+      if (probe?.jobUnavailable) {
+        return {
+          status: "unavailable",
+          detail: probe.jobUnavailable || "inactive job",
+          tabId: tab.id,
+          filled: 0,
+          uploaded: 0
+        };
+      }
     }
   }
   if (multiStep) {

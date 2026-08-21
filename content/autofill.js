@@ -4086,6 +4086,7 @@
   // Phrases that mean the posting is gone (expired / filled / removed / 404).
   const JOB_GONE_RE = new RegExp(
     [
+      "sorry[, ]*this job is no longer available",
       "no longer (available|accepting applications|active|open|exists)",
       "(job|position|posting|listing|role|opening|opportunity) (is |has been )?(no longer|not) (available|active|open)",
       "(position|role|job) (has been |is )?(filled|closed)",
@@ -4106,22 +4107,43 @@
     const title = String(document.title || "");
     if (title) parts.push(title);
     const nodes = document.querySelectorAll(
-      'h1, h2, [role="heading"], .error, [class*="error"], [class*="not-found"], [class*="notFound"], [class*="expired"], [class*="unavailable"], [class*="empty-state"]'
+      [
+        "h1",
+        "h2",
+        "[role='heading']",
+        "[role='alert']",
+        ".error",
+        "[class*='error']",
+        "[class*='alert']",
+        "[class*='Alert']",
+        "[class*='banner']",
+        "[class*='Banner']",
+        "[class*='not-found']",
+        "[class*='notFound']",
+        "[class*='expired']",
+        "[class*='unavailable']",
+        "[class*='empty-state']",
+        "[data-testid*='unavailable']",
+        "[data-cy*='unavailable']"
+      ].join(", ")
     );
     let count = 0;
     for (const el of nodes) {
       const t = cleanLabelText(el.textContent);
-      if (t && t.length <= 300) parts.push(t);
-      if (++count > 40) break;
+      if (t && t.length <= 400) parts.push(t);
+      if (++count > 60) break;
     }
-    return parts.join("  ").slice(0, 4000);
+    // Dice inactive jobs put the message in a plain alert div — also scan body.
+    const body = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    if (body) parts.push(body.slice(0, 6000));
+    return parts.join("  ").slice(0, 8000);
   }
 
   /** @returns {string} a short reason when the job is gone, else "" */
   function detectJobUnavailable() {
     const match = unavailableTextSnippet().match(JOB_GONE_RE);
     if (match) {
-      return cleanLabelText(match[0]).slice(0, 140) || "This job is no longer available.";
+      return "inactive job";
     }
     return "";
   }

@@ -812,12 +812,13 @@ async function persistJobContextForAutofill(job = {}) {
   await setActiveApplyJob({ csvRow, jobDir, jdLink });
 }
 
-/** Mark the sheet row Applied after the queue Apply button is clicked. */
-async function markQueueJobAppliedOnSheet(jobMeta = {}) {
+/** Mark the sheet row Applied (or a custom Status) after apply / inactive detection. */
+async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
   const jdLink = String(jobMeta.jdLink || jobMeta.url || "").trim();
   if (!jdLink) return { skipped: true, reason: "no-link" };
   const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
   if (!spreadsheetUrl || !webAppUrl) return { skipped: true, reason: "no-sheet" };
+  const statusText = String(statusOverride || "").trim();
   try {
     const result = await markJobAppliedOnSpreadsheet({
       spreadsheetUrl,
@@ -826,9 +827,10 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}) {
       jobTitle: jobMeta.jobTitle || jobMeta.title || "",
       companyName: jobMeta.companyName || jobMeta.company || "",
       jdLink,
-      salary: jobMeta.salary || ""
+      salary: jobMeta.salary || "",
+      ...(statusText ? { status: statusText } : {})
     });
-    if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+    if (jobMeta.csvRow != null && jobMeta.csvRow !== "" && !statusText) {
       await updateQueueJob(jobMeta.csvRow, {
         applied: true,
         appliedDate: result.appliedDate || ""
@@ -902,6 +904,41 @@ async function runDiceInterleavedApply(jobMeta = {}) {
   const status = String(applyResult?.status || "");
   const detail = String(applyResult?.detail || "").slice(0, 240);
   const nextAttempts = prevAttempts + 1;
+
+  if (status === "unavailable") {
+    const sheetStatus = "inactive job";
+    const sheet = await markQueueJobAppliedOnSheet(
+      {
+        csvRow: jobMeta.csvRow,
+        jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+        companyName: jobMeta.companyName || jobMeta.company || "",
+        jdLink,
+        salary: jobMeta.salary || "",
+        jobDir: jobMeta.jobDir || applyResult?.uploadFolder || ""
+      },
+      sheetStatus
+    );
+    await updateQueueJob(jobMeta.csvRow, {
+      applied: false,
+      inactive: true,
+      applyAttempted: true,
+      applyAttempts: MAX_DICE_APPLY_ATTEMPTS,
+      error: sheetStatus,
+      jobDir: applyResult?.uploadFolder || jobMeta.jobDir || ""
+    }).catch(() => {});
+    await setStatus(
+      sheet?.error
+        ? `Row ${jobMeta.csvRow}: inactive job (sheet update failed: ${sheet.error}). Closing tab…`
+        : `Row ${jobMeta.csvRow}: inactive job — marked on sheet. Closing tab…`
+    );
+    await closeApplyTab(applyResult?.tabId).catch(() => false);
+    return {
+      ...applyResult,
+      status: "unavailable",
+      detail: sheetStatus,
+      needsPause: false
+    };
+  }
 
   if (status === "submitted") {
     const sheet = await markQueueJobAppliedOnSheet({
@@ -994,6 +1031,7 @@ function isDiceApplyBacklogJob(j) {
     (j.isDice || isDiceJob(j)) &&
     j.status === "done" &&
     !j.applied &&
+    !j.inactive &&
     diceApplyAttemptCount(j) < MAX_DICE_APPLY_ATTEMPTS &&
     Boolean(j.jobDir || j.hasFiles) &&
     String(j.jdLink || "").trim()

@@ -170,7 +170,8 @@ export async function markJobAppliedOnSpreadsheet({
   jobTitle,
   companyName,
   jdLink,
-  salary
+  salary,
+  status
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
@@ -178,6 +179,7 @@ export async function markJobAppliedOnSpreadsheet({
   }
 
   const appliedDate = formatApplicationDateTime();
+  const statusValue = String(status || "").trim() || formatAppliedStatus();
   const payload = {
     action: "markApplied",
     spreadsheetId,
@@ -187,7 +189,7 @@ export async function markJobAppliedOnSpreadsheet({
     companyName: companyName || "",
     jobLink: jdLink || "",
     salary: salary || "",
-    status: formatAppliedStatus()
+    status: statusValue
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);

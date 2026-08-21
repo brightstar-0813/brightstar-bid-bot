@@ -970,6 +970,7 @@ function mergeStatusFromQueue(jobs, previousQueue) {
       appliedDate: prev.appliedDate || j.appliedDate || "",
       applyAttempted: Boolean(prev.applyAttempted || j.applyAttempted),
       applyAttempts: Number(prev.applyAttempts || j.applyAttempts || 0),
+      inactive: Boolean(prev.inactive || j.inactive),
       error: prev.error
     };
   });
@@ -1086,6 +1087,12 @@ function renderQueue() {
       appliedBadge.textContent = "Applied";
       appliedBadge.title = appliedDocsTitle(job);
       badges.appendChild(appliedBadge);
+    } else if (job.inactive) {
+      const inactiveBadge = document.createElement("span");
+      inactiveBadge.className = "badge badge-inactive";
+      inactiveBadge.textContent = "Inactive";
+      inactiveBadge.title = "Job no longer available on Dice";
+      badges.appendChild(inactiveBadge);
     }
     meta.appendChild(title);
     meta.appendChild(sub);

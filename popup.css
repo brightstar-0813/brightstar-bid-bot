@@ -786,6 +786,11 @@ input[type="file"]::file-selector-button {
   cursor: help;
 }
 
+.badge-inactive {
+  background: rgba(248, 113, 113, 0.16);
+  color: #fca5a5;
+}
+
 .person-save-status {
   margin: 0 0 8px;
   padding: 8px 10px;
