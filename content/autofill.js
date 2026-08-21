@@ -2507,8 +2507,22 @@
   function zoneLooksOccupied(el) {
     const t = normalize(el?.innerText || "");
     if (!t) return false;
+    // Dice Easy Apply often pre-selects the profile resume and only shows the filename.
     if (/\buploaded to profile\b/.test(t)) return true;
-    return /\.(pdf|docx?|txt)\b/.test(t) && /\b(replace|remove|delete|attached|uploaded)\b/.test(t);
+    if (/\b(use my (dice )?profile|profile resume|from (your )?profile|saved resume)\b/.test(t)) {
+      return true;
+    }
+    if (/\.(pdf|docx?|txt)\b/.test(t)) return true;
+    return /\b(replace|remove|delete|attached|uploaded)\b/.test(t);
+  }
+
+  function zoneShowsExpectedFile(el, fileName) {
+    const expected = String(fileName || "").trim().toLowerCase();
+    if (!expected || !el) return false;
+    const t = String(el.innerText || el.textContent || "").toLowerCase();
+    if (t.includes(expected)) return true;
+    const stem = expected.replace(/\.(pdf|docx?|txt)$/i, "");
+    return Boolean(stem) && t.includes(stem);
   }
 
   function clickTextIn(el, re) {
@@ -2524,8 +2538,23 @@
 
   async function clickReplaceInZone(zone) {
     if (!zone) return false;
-    if (clickTextIn(zone, /^(replace|change|update|re-?upload|upload new)$/i)) {
-      await sleep(350);
+    // Prefer an explicit Replace / Upload new control (Dice profile prefill).
+    if (
+      clickTextIn(
+        zone,
+        /^(replace|change|update|re-?upload|upload new|upload different|choose (a )?different|use (a )?different|remove|delete)$/i
+      )
+    ) {
+      await sleep(400);
+      return true;
+    }
+    if (
+      clickTextIn(
+        zone,
+        /\b(replace|change file|upload new|re-?upload|remove file|delete file|use a different)\b/i
+      )
+    ) {
+      await sleep(400);
       return true;
     }
     const menuBtn = queryAllDeep("button, [role='button'], [aria-haspopup]", zone).find((el) => {
@@ -2546,11 +2575,13 @@
     }
     const items = queryAllDeep('[role="menuitem"], button, a, li, span').filter((el) => isElVisible(el));
     const replace = items.find((el) =>
-      /^(replace|change|update)$/i.test(cleanLabelText(el.textContent || elActionText(el)))
+      /\b(replace|change|update|remove|delete|upload new|re-?upload)\b/i.test(
+        cleanLabelText(el.textContent || elActionText(el))
+      )
     );
     if (replace) {
       safeClick(replace);
-      await sleep(350);
+      await sleep(400);
       return true;
     }
     return Boolean(menuBtn);
@@ -2745,39 +2776,59 @@
       if (!file || !zone || used.has(zone) || zoneIsBusy(zone)) return false;
       pendingUploadFile = file;
       pendingUploadKind = kind || "";
+
+      // Dice / ATS often preselect profile or prior-job files — Replace first for resume AND cover.
+      if (zoneLooksOccupied(zone) && !zoneShowsExpectedFile(zone, file.name)) {
+        await clickReplaceInZone(zone);
+        await sleep(450);
+        try {
+          zone.removeAttribute?.("data-brightstar-uploaded");
+        } catch {
+          /* ignore */
+        }
+      }
+
       let input = findFileInputNear(zone, kind);
       if (input && setFileOnInput(input, file)) {
-        used.add(zone);
-        used.add(input);
-        markUploaded(input);
-        markUploaded(zone);
-        return true;
-      }
-      if (kind === "resume" && zoneLooksOccupied(zone)) {
-        await clickReplaceInZone(zone);
-        input = findFileInputNear(zone, kind);
-        if (input && setFileOnInput(input, file)) {
+        await sleep(500);
+        if (zoneShowsExpectedFile(zone, file.name) || input.files?.[0]?.name === file.name) {
           used.add(zone);
           used.add(input);
           markUploaded(input);
           markUploaded(zone);
           return true;
         }
+        // UI still shows the old profile file — force Replace and retry once.
+        await clickReplaceInZone(zone);
+        await sleep(450);
+        input = findFileInputNear(zone, kind);
+        if (input && setFileOnInput(input, file)) {
+          await sleep(500);
+          used.add(zone);
+          used.add(input);
+          markUploaded(input);
+          markUploaded(zone);
+          return zoneShowsExpectedFile(zone, file.name) || input.files?.[0]?.name === file.name;
+        }
       }
       if (dispatchFileDrop(zone, file)) {
-        used.add(zone);
-        markUploaded(zone);
-        return true;
+        await sleep(500);
+        if (zoneShowsExpectedFile(zone, file.name)) {
+          used.add(zone);
+          markUploaded(zone);
+          return true;
+        }
       }
       if (clickTextIn(zone, /^(browse|upload|select file|choose file|attach)$/i)) {
         await sleep(250);
         input = findFileInputNear(zone, kind);
         if (input && setFileOnInput(input, file)) {
+          await sleep(500);
           used.add(zone);
           used.add(input);
           markUploaded(input);
           markUploaded(zone);
-          return true;
+          return zoneShowsExpectedFile(zone, file.name) || input.files?.[0]?.name === file.name;
         }
       }
       return false;
@@ -2798,20 +2849,30 @@
       if (!file) continue;
       pendingUploadFile = file;
       pendingUploadKind = kind;
-      const zone = input.closest("div, section, label, form") || input.parentElement;
+      const zone = input.closest("div, section, label, form, article, aside") || input.parentElement;
       if (used.has(zone) || zoneIsBusy(zone)) continue;
-      if (kind === "resume" && zoneLooksOccupied(zone)) {
+      if (zoneLooksOccupied(zone) && !zoneShowsExpectedFile(zone, file.name)) {
         await clickReplaceInZone(zone);
+        await sleep(450);
       }
       const ok = setFileOnInput(input, file);
       if (ok) {
+        await sleep(500);
+        if (!zoneShowsExpectedFile(zone, file.name) && input.files?.[0]?.name !== file.name) {
+          await clickReplaceInZone(zone);
+          await sleep(450);
+          const again = findFileInputNear(zone, kind) || input;
+          setFileOnInput(again, file);
+          await sleep(500);
+        }
         used.add(input);
         markUploaded(input);
         markUploaded(zone);
         uploaded.push({
           kind,
           fileName: file.name,
-          label: labelTextForControl(input)
+          label: labelTextForControl(input),
+          verified: zoneShowsExpectedFile(zone, file.name) || input.files?.[0]?.name === file.name
         });
       }
     }
@@ -2819,13 +2880,22 @@
     for (const { kind, el } of findUploadCards()) {
       const file = kind === "coverLetter" ? coverFile : resumeFile;
       if (!file) continue;
-      if (uploaded.some((row) => row.kind === kind)) continue;
+      if (uploaded.some((row) => row.kind === kind && row.verified !== false)) continue;
+      // Always try occupied Dice/profile cards — even if a prior unverified attempt exists.
       const ok = await attachToZone(kind, file, el);
       if (ok) {
         uploaded.push({
           kind,
           fileName: file.name,
-          label: cleanLabelText(el.innerText || "").slice(0, 80)
+          label: cleanLabelText(el.innerText || "").slice(0, 80),
+          verified: zoneShowsExpectedFile(el, file.name)
+        });
+      } else if (zoneLooksOccupied(el) && !zoneShowsExpectedFile(el, file.name)) {
+        skipped.push({
+          reason: "could-not-replace-profile-file",
+          kind,
+          label: cleanLabelText(el.innerText || "").slice(0, 80),
+          expected: file.name
         });
       }
     }
@@ -2836,7 +2906,7 @@
         if (used.has(zone) || zoneIsBusy(zone)) continue;
         let kind = classifyFileInput(zone) || uploadKindFromText(zone.innerText || "");
         if (!kind) continue;
-        if (uploaded.some((row) => row.kind === kind)) continue;
+        if (uploaded.some((row) => row.kind === kind && row.verified !== false)) continue;
         const file = kind === "coverLetter" && coverFile ? coverFile : kind === "resume" ? resumeFile : null;
         if (!file) continue;
         const ok = await attachToZone(kind, file, zone);
@@ -2845,17 +2915,32 @@
             kind,
             fileName: file.name,
             label: cleanLabelText(zone.innerText || "").slice(0, 80),
-            via: "dropzone"
+            via: "dropzone",
+            verified: zoneShowsExpectedFile(zone, file.name)
           });
         }
       }
     }
 
-    if (!inputs.length && !uploaded.length) {
+    // Prefer verified uploads when summarizing — drop stale unverified duplicates.
+    const preferred = [];
+    for (const kind of ["resume", "coverLetter"]) {
+      const rows = uploaded.filter((r) => r.kind === kind);
+      const verified = rows.find((r) => r.verified);
+      if (verified) preferred.push(verified);
+      else if (rows[0]) preferred.push(rows[0]);
+    }
+    for (const row of uploaded) {
+      if (!preferred.includes(row) && row.kind !== "resume" && row.kind !== "coverLetter") {
+        preferred.push(row);
+      }
+    }
+
+    if (!inputs.length && !preferred.length) {
       skipped.push({ reason: "no-file-inputs" });
     }
 
-    return { uploadedCount: uploaded.length, uploaded, skipped };
+    return { uploadedCount: preferred.length, uploaded: preferred, skipped };
     } finally {
       pendingUploadFile = null;
       pendingUploadKind = "";
