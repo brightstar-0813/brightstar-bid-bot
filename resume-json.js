@@ -527,11 +527,23 @@ export function sanitizeResumeData(data) {
       if (Array.isArray(job.bullets)) {
         next.bullets = job.bullets.map((b) => stripDisqualifyingClaims(b)).filter(Boolean);
       }
-      return next;
+      return enforceKnownInternTitle(next);
     });
   }
 
   return out;
+}
+
+/** Force early internship employers to their canonical Intern titles. */
+function enforceKnownInternTitle(job) {
+  const company = String(job?.company || "").toLowerCase();
+  if (/bostwick lake congregation/.test(company)) {
+    return { ...job, title: "IT Team Intern" };
+  }
+  if (/wolverine world wide/.test(company)) {
+    return { ...job, title: "IT Project Management Intern" };
+  }
+  return job;
 }
 
 /**

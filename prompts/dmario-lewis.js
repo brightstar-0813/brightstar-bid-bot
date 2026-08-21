@@ -350,7 +350,7 @@ Bullet counts (HARD REQUIREMENTS):
 - Wolverine World Wide (May 2014 - Aug 2014): 2-3 bullets
 
 Set "location" for each role to the exact "City, State, Country | Mode" string from FIXED COMPANY HISTORY.
-NEVER append an employment type. Full-Time, Part-Time, Contract, Contract-to-Hire, Temporary, Intern, Freelance, W2, C2C and every variant are banned from the location line and from every other field. Work mode (Hybrid / Remote / On-Site) stays.
+NEVER append an employment type to the location line. Full-Time, Part-Time, Contract, Contract-to-Hire, Temporary, Intern, Freelance, W2, C2C and every variant are banned from the location line only. Work mode (Hybrid / Remote / On-Site) stays. Job titles for the 2014 roles must stay exactly "IT Team Intern" (Bostwick Lake Congregation UCC) and "IT Project Management Intern" (Wolverine World Wide) — the word Intern is required in those titles and must never be stripped.
 Set "project" to a realistic descriptive engagement name for that employer's actual business (for example "Water Services Field Service Platform" or "Admissions and Enrollment CRM Architecture"). Never invent a branded internal project codename and never use the target company's product names.
 
 Do not remove roles, invent employers, or reorder the history.
@@ -593,7 +593,7 @@ FINAL SILENT QUALITY CONTROL (run before output; never print)
 0. THE SEVEN GATES — re-read the gate block at the top of this prompt and verify all seven. Gates 2 and 3 are absolute: search your JSON for "clearance", "citizen", "visa", "authorization" and delete any sentence containing them.
 0g. CLOUD SWEEP — list every Salesforce cloud and product named in the JD, then confirm each one appears in the first skills row AND in Professional Experience. Any miss means rewrite.
 0g2. RECENT-ROLE PROOF — count, per role, how many Culligan International bullets and how many Fusion Academy bullets name a required skill. Both counts must be 3 or more, and every scarce required product must appear in at least one recent-role bullet. If either count is short, add bullets until it is met before returning.
-0h. NO EMPLOYMENT TYPE — search every experience location for "Full-Time", "Full Time", "Part-Time", "Contract", "Temporary", "Intern", "Freelance", "W2", "C2C" and remove it. Each location reads "City, State, Country | Mode" and nothing more.
+0h. NO EMPLOYMENT TYPE IN LOCATION — search every experience location for "Full-Time", "Full Time", "Part-Time", "Contract", "Temporary", "Intern", "Freelance", "W2", "C2C" and remove it from location only. Each location reads "City, State, Country | Mode" and nothing more. Keep titles exactly "IT Team Intern" for Bostwick Lake Congregation UCC and "IT Project Management Intern" for Wolverine World Wide.
 0a. TIER 0 ROLL CALL — write out the Tier 0 list internally and check each item one by one: is it in the skills array with its exact industry name, in two or more experience bullets, and (for the top two or three) in the profile summary? Any miss means rewrite before returning. This check runs first and fails loudest.
 0e. CREDENTIAL-FREE PROSE — search the JSON for "certification", "certified", "credential". They may appear ONLY inside the certifications array. Any hit in profile, skills, or a bullet means rewrite that line around the work instead.
 0f. CONCRETENESS — every bullet names at least two real Salesforce artifacts. Any bullet built from "knowledge", "concepts", "capabilities", "approaches", or "considerations" gets rewritten.

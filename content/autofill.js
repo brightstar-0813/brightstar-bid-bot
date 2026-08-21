@@ -2404,6 +2404,9 @@
     if (cover && resume) {
       if (/use (your |my )?resume (as|for) (a |my )?cover/.test(n)) return "coverLetter";
       if (/cover letter (is )?(optional|not required)/.test(n)) return "resume";
+      // Prefer the section label: "Cover Letter" + leftover "Lewis_Resume.pdf" is still cover.
+      if (/^cover\s*letter\b/.test(n) || /\bcover\s*letter\b/.test(n.slice(0, 40))) return "coverLetter";
+      if (/^resume\b/.test(n) || /\bresume\b/.test(n.slice(0, 40))) return "resume";
       return "";
     }
     if (cover && !/not required/.test(n)) return "coverLetter";
@@ -2416,10 +2419,30 @@
     for (let i = 0; i < 8 && node && node !== document.body; i += 1) {
       const fromAttrs = uploadKindFromText(uploadAttrBlob(node));
       if (fromAttrs) return fromAttrs;
+      // Dice / ATS section headings often sit as siblings above the dropzone.
+      const heading = node.querySelector?.(
+        "h1, h2, h3, h4, legend, label, [class*='title'], [class*='label'], [data-cy*='label']"
+      );
+      const headingKind = uploadKindFromText(heading?.textContent || "");
+      if (headingKind) return headingKind;
+      const prev = node.previousElementSibling;
+      const prevKind = uploadKindFromText(prev?.textContent || "");
+      if (prevKind) return prevKind;
       node = node.parentElement || node.host || node.getRootNode?.()?.host || null;
     }
     const nearby = localUploadText(el).replace(/a cover letter is not required/gi, " ");
-    return uploadKindFromText(nearby);
+    const nearKind = uploadKindFromText(nearby);
+    if (nearKind) return nearKind;
+    // Last resort: if the nearest section text clearly says Cover Letter, prefer that
+    // even when a leftover resume filename is also shown in the same card.
+    if (/cover\s*letter/i.test(nearby) && !/\bresume\b/i.test(nearby.replace(/lewis_resume\.pdf/gi, ""))) {
+      return "coverLetter";
+    }
+    if (/cover\s*letter/i.test(nearby) && /\.pdf\b/i.test(nearby)) {
+      // Card titled Cover Letter that still shows a prior resume file name.
+      return "coverLetter";
+    }
+    return "";
   }
 
   function setFileOnInput(input, file) {
@@ -4162,30 +4185,46 @@
    * Pick the forward action.
    * If Next/Continue exists, advance; only treat Submit/Apply as final when
    * there is no Next button (final page of a multi-step form).
+   * Dice keeps Submit in a sticky footer outside the densest form scope — always
+   * also scan document when the scoped search finds nothing useful.
    */
   function findActionButton(scope) {
-    const scopeEl = scope || getApplyScope();
-    const buttons = queryAllDeep(
-      'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
-      scopeEl
-    ).filter((el) => isElVisible(el) && isElEnabled(el));
+    function collectFrom(scopeEl) {
+      const buttons = queryAllDeep(
+        'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
+        scopeEl
+      ).filter((el) => isElVisible(el));
 
-    let next = null;
-    let review = null;
-    let submit = null;
-    for (const btn of buttons) {
-      const text = elActionText(btn);
-      if (EASY_BACK_RE.test(text) && !EASY_NEXT_RE.test(text) && !EASY_SUBMIT_RE.test(text)) {
-        continue;
+      let next = null;
+      let review = null;
+      let submit = null;
+      for (const btn of buttons) {
+        if (!isElEnabled(btn) && !EASY_SUBMIT_RE.test(elActionText(btn))) continue;
+        const text = elActionText(btn);
+        if (!text && btn.getAttribute?.("type") === "submit") {
+          if (!submit) submit = { type: "submit", el: btn, text: "Submit" };
+          continue;
+        }
+        if (EASY_BACK_RE.test(text) && !EASY_NEXT_RE.test(text) && !EASY_SUBMIT_RE.test(text)) {
+          continue;
+        }
+        const cls = classifyActionButton(text);
+        if (cls === "next" && !next) next = { type: "next", el: btn, text };
+        else if (cls === "review" && !review) review = { type: "review", el: btn, text };
+        else if (cls === "submit" && !submit) submit = { type: "submit", el: btn, text };
       }
-      const cls = classifyActionButton(text);
-      if (cls === "next" && !next) next = { type: "next", el: btn, text };
-      else if (cls === "review" && !review) review = { type: "review", el: btn, text };
-      else if (cls === "submit" && !submit) submit = { type: "submit", el: btn, text };
+      return { next, review, submit };
     }
-    if (next) return next;
-    if (review) return review;
-    if (submit) return submit;
+
+    const primary = collectFrom(scope || getApplyScope());
+    const docWide = scope && scope !== document ? collectFrom(document) : primary;
+    // Prefer scoped Next/Continue, but never miss a document-level Submit on Dice.
+    if (primary.next) return primary.next;
+    if (docWide.next) return docWide.next;
+    if (primary.review) return primary.review;
+    if (docWide.review) return docWide.review;
+    if (primary.submit) return primary.submit;
+    if (docWide.submit) return docWide.submit;
     return null;
   }
 
