@@ -54,7 +54,7 @@ import {
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
-import { parseJobsCsv, filterJobsByChannel, normalizeChannelFilter } from "./csv.js";
+import { parseJobsCsv, filterJobsByChannel, normalizeChannelFilter, isDiceJob } from "./csv.js";
 import {
   CSV_SOURCE_ALARM,
   NATIVE_HOST_NAME,
@@ -3946,51 +3946,48 @@ async function runBatchLoop(outputDir) {
         return;
       }
 
-      const channelData = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
-      const channel = normalizeChannelFilter(
-        channelData[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER
-      );
       const queue = await getQueue();
 
-      // Dice mode: apply already-built rows that are not Applied yet (no ChatGPT).
-      if (channel === "dice") {
-        const backlog = queue.find(
-          (j) =>
-            j.status === "done" &&
-            !j.applied &&
-            !j.applyAttempted &&
-            Boolean(j.jobDir || j.hasFiles) &&
-            String(j.jdLink || "").trim()
-        );
-        if (backlog) {
-          if (batchControl.skipCurrent) {
-            batchControl.skipCurrent = false;
-            await updateQueueJob(backlog.csvRow, {
-              applied: false,
-              error: "Skipped during Dice apply backlog"
-            });
-            continue;
-          }
-          await setStatus(
-            `Dice apply backlog: row ${backlog.csvRow} — ${backlog.company} / ${backlog.title}`
-          );
-          await runDiceInterleavedApply({
-            csvRow: backlog.csvRow,
-            jobTitle: backlog.title,
-            companyName: backlog.company,
-            company: backlog.company,
-            title: backlog.title,
-            jdLink: backlog.jdLink || "",
-            salary: backlog.salary || "",
-            jobDir: backlog.jobDir || ""
+      // Dice jobs: apply already-built rows that are not Applied yet (no ChatGPT).
+      // Gated by job type (isDice), not Apply-source filter — so All/Dice both auto-apply.
+      const backlog = queue.find(
+        (j) =>
+          (j.isDice || isDiceJob(j)) &&
+          j.status === "done" &&
+          !j.applied &&
+          !j.applyAttempted &&
+          Boolean(j.jobDir || j.hasFiles) &&
+          String(j.jdLink || "").trim()
+      );
+      if (backlog) {
+        if (batchControl.skipCurrent) {
+          batchControl.skipCurrent = false;
+          await updateQueueJob(backlog.csvRow, {
+            applied: false,
+            applyAttempted: true,
+            error: "Skipped during Dice apply backlog"
           });
-          if (batchControl.stop) break;
-          await setStatus(
-            `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job…`
-          );
-          await sleep(currentJobGapMs());
           continue;
         }
+        await setStatus(
+          `Dice auto-apply: row ${backlog.csvRow} — ${backlog.company} / ${backlog.title}`
+        );
+        await runDiceInterleavedApply({
+          csvRow: backlog.csvRow,
+          jobTitle: backlog.title,
+          companyName: backlog.company,
+          company: backlog.company,
+          title: backlog.title,
+          jdLink: backlog.jdLink || "",
+          salary: backlog.salary || "",
+          jobDir: backlog.jobDir || ""
+        });
+        if (batchControl.stop) break;
+        await setStatus(
+          `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job…`
+        );
+        await sleep(currentJobGapMs());
+        continue;
       }
 
       // Fresh rows first, then rows that errored but still have retries left.
@@ -4112,12 +4109,9 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Dice channel: generate → auto-apply+submit → close tab → next build.
-        const channelAfter = normalizeChannelFilter(
-          (await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]))[JOB_CHANNEL_FILTER_KEY] ||
-            DEFAULT_CHANNEL_FILTER
-        );
-        if (channelAfter === "dice" && !batchControl.stop) {
+        // Dice jobs always: generate → auto-apply+submit → close tab → next.
+        // Non-Dice jobs stop after files (manual Apply remains stop-before-submit).
+        if ((next.isDice || isDiceJob(next)) && !batchControl.stop) {
           await runDiceInterleavedApply({
             csvRow: next.csvRow,
             jobTitle: next.title,

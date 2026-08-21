@@ -948,7 +948,8 @@ function syncChannelFilterButtons() {
     btn.classList.toggle("active", key === channelFilter);
   }
   if (diceInterleaveHintEl) {
-    diceInterleaveHintEl.hidden = channelFilter !== "dice";
+    // Always visible — auto-apply is per Dice job, not only when Dice filter is selected.
+    diceInterleaveHintEl.hidden = false;
   }
 }
 

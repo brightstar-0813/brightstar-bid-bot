@@ -7,7 +7,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
-- **CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / LI / Etc / All**. **Dice** (default) runs interleaved generate → auto-apply+submit (and applies already-built not-Applied rows on Start).
+- **CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / LI / Etc / All**. **Dice jobs** always interleaved generate → auto-apply+submit (Start also applies already-built not-Applied Dice rows); non-Dice jobs only build files.
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Saves under `Downloads / [output folder] / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
@@ -74,24 +74,24 @@ flowchart TD
 ## CSV batch
 
 1. Upload a CSV with columns like `title`, `organization`, `location`, `remote_restricted_to`, `url`, `description` (typical path: `sf-job-capture/download/jobs_latest.csv`)
-2. Choose **Apply source** filter (default **Dice**):
-   - **Dice** — Dice.com jobs; **interleaved** generate → auto-apply+submit → close tab → next job. Start also applies already-built rows that are not Applied yet
-   - **LI** — LinkedIn-hosted jobs only (generate only; manual Apply stops before Submit)
-   - **Etc** — not Dice and not LinkedIn (generate only)
-   - **All** — every US job (generate only)
+2. Choose **Apply source** filter (default **Dice**) to choose which jobs appear in the queue:
+   - **Dice** — Dice.com jobs only
+   - **LI** — LinkedIn-hosted jobs only
+   - **Etc** — not Dice and not LinkedIn
+   - **All** — every US job
 3. Confirm summary counts (Dice / LI / Etc)
 4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows / apply backlog
 5. Use **Pause** / **Skip** / **Stop** as needed
-6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill; stops before Submit)
+6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (manual assist; stops before Submit)
 
 ### Dice interleaved auto-apply
 
-With the **Dice** filter selected:
+**Per job type** (not only when the Dice filter is selected):
 
-1. **Start** first drains already-built (`done`) rows that are not Applied yet — opens wizard/ATS, fills, submits, closes tab
-2. Then each pending row: ChatGPT builds resume + cover letter PDFs (Sheet **Ready**) → auto-apply+submit → Sheet **Applied** → close tab → cooldown → next
-3. Blockers (login, CAPTCHA, missing form) mark the row with an error (`applyAttempted`) and **continue** — that row is not auto-retried in the same batch
-4. Manual **Apply** / **Auto Apply** still stop before Submit for every channel
+- **Dice job** after files are built: open wizard/ATS → autofill + upload that row’s PDFs → **Submit** → close tab → cooldown → next job
+- **Start** also drains already-built Dice rows that are not Applied yet
+- **Non-Dice job**: build files only; use manual Apply if you want assist (stops before Submit)
+- Blockers mark `applyAttempted` and continue — that row is not auto-retried in the same batch
 
 ### CSV auto-source (cron / 12h updates)
 

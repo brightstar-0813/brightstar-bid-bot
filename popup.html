@@ -397,7 +397,7 @@
             </div>
           </div>
           <p class="hint" id="diceInterleaveHint">
-            Dice: after each build (and for already-built rows on Start), Auto Apply runs including Submit, then the next job.
+            Dice jobs: after each build (and for already-built rows on Start), open wizard → autofill/upload → Submit → close → next. Non-Dice jobs only build files.
           </p>
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No CSV loaded</span>
@@ -492,7 +492,7 @@
               <kbd>Ctrl+Shift+U</kbd>
             </button>
           </div>
-          <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads that queue row's resume and cover letter (replacing a profile resume if needed), and stops before Submit. With <strong>Dice</strong> selected, batch Start auto-applies (including Submit) for already-built rows first, then after each new build. Leftover questions use extras + the Q&amp;A bank, then OpenAI if the extension <code>.env</code> has <code>OPENAI_API_KEY</code>.</p>
+          <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads that queue row's resume and cover letter (replacing a profile resume if needed), and stops before Submit. <strong>Dice jobs</strong> in a batch auto-apply (including Submit) right after files are built; non-Dice jobs only build files. Leftover questions use extras + the Q&amp;A bank, then OpenAI if the extension <code>.env</code> has <code>OPENAI_API_KEY</code>.</p>
 
           <div class="qa-bank-block">
             <div class="qa-bank-head">
