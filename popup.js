@@ -452,6 +452,11 @@ const sheetsWebAppUrlEl = document.getElementById("sheetsWebAppUrl");
 const copyAppsScriptBtn = document.getElementById("copyAppsScript");
 const slackWebhookUrlEl = document.getElementById("slackWebhookUrl");
 const testSlackBtn = document.getElementById("testSlack");
+const chatgptJobGapSecEl = document.getElementById("chatgptJobGapSec");
+const chatgptHardPauseHitsEl = document.getElementById("chatgptHardPauseHits");
+const CHATGPT_PACING_KEY = "chatgpt_pacing";
+const DEFAULT_CHATGPT_GAP_SEC = 45;
+const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const copySheetRowBtn = document.getElementById("copySheetRow");
 const keepOpenBtn = document.getElementById("keepOpen");
 const previewTemplateBtn = document.getElementById("previewTemplate");
@@ -882,6 +887,33 @@ async function persistJobFields() {
     sheets_web_app_url: sheetsWebAppUrlEl.value.trim(),
     slack_webhook_url: slackWebhookUrlEl.value.trim()
   });
+  await persistChatGptPacing();
+}
+
+function clampPacingNumber(n, min, max, fallback) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+}
+
+async function persistChatGptPacing() {
+  const jobGapSeconds = clampPacingNumber(
+    chatgptJobGapSecEl?.value,
+    15,
+    180,
+    DEFAULT_CHATGPT_GAP_SEC
+  );
+  const hardPauseAfterHits = clampPacingNumber(
+    chatgptHardPauseHitsEl?.value,
+    2,
+    10,
+    DEFAULT_CHATGPT_HARD_PAUSE
+  );
+  if (chatgptJobGapSecEl) chatgptJobGapSecEl.value = String(jobGapSeconds);
+  if (chatgptHardPauseHitsEl) chatgptHardPauseHitsEl.value = String(hardPauseAfterHits);
+  await chrome.storage.local.set({
+    [CHATGPT_PACING_KEY]: { jobGapSeconds, hardPauseAfterHits }
+  });
 }
 
 async function loadSettings() {
@@ -897,6 +929,7 @@ async function loadSettings() {
     "spreadsheet_url",
     "sheets_web_app_url",
     "slack_webhook_url",
+    CHATGPT_PACING_KEY,
     MANUAL_PANEL_OPEN_KEY,
     "generation_status",
     "generation_running",
@@ -919,6 +952,17 @@ async function loadSettings() {
   spreadsheetUrlEl.value = data.spreadsheet_url || "";
   sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
+  const pacing = data[CHATGPT_PACING_KEY] || {};
+  if (chatgptJobGapSecEl) {
+    chatgptJobGapSecEl.value = String(
+      clampPacingNumber(pacing.jobGapSeconds, 15, 180, DEFAULT_CHATGPT_GAP_SEC)
+    );
+  }
+  if (chatgptHardPauseHitsEl) {
+    chatgptHardPauseHitsEl.value = String(
+      clampPacingNumber(pacing.hardPauseAfterHits, 2, 10, DEFAULT_CHATGPT_HARD_PAUSE)
+    );
+  }
   setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
   setStatus(data.generation_status || "");
 
@@ -2430,8 +2474,10 @@ for (const el of [
   outputDirEl,
   spreadsheetUrlEl,
   sheetsWebAppUrlEl,
-  slackWebhookUrlEl
-]) {
+  slackWebhookUrlEl,
+  chatgptJobGapSecEl,
+  chatgptHardPauseHitsEl
+].filter(Boolean)) {
   el.addEventListener("change", () => {
     persistJobFields().catch(() => {});
   });

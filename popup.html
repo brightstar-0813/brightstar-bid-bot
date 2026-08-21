@@ -542,6 +542,47 @@
           </div>
         </section>
 
+        <!-- ChatGPT pacing -->
+        <section class="section section-muted" id="chatgptPacingSection">
+          <header class="section-header">
+            <span class="step step-muted" aria-hidden="true">6b</span>
+            <div class="section-copy">
+              <p class="section-title">ChatGPT pacing</p>
+              <p class="section-sub">Cooldown downs to avoid freezes / rate limits</p>
+            </div>
+          </header>
+          <p class="hint">
+            Each job opens a new chat and sends resume + cover letter. Longer gaps reduce “Too many requests” freezes.
+            After too many rate limits in one batch, the bot pauses so you can wait and Start again.
+          </p>
+          <div class="row-split">
+            <label class="field grow">
+              <span>Seconds between jobs</span>
+              <input
+                id="chatgptJobGapSec"
+                type="number"
+                min="15"
+                max="180"
+                step="5"
+                value="45"
+                title="Base wait after each job finishes (15–180). Default 45."
+              />
+            </label>
+            <label class="field grow">
+              <span>Hard-pause after N rate limits</span>
+              <input
+                id="chatgptHardPauseHits"
+                type="number"
+                min="2"
+                max="10"
+                step="1"
+                value="3"
+                title="Pause the batch after this many ChatGPT rate limits in one run (2–10). Default 3."
+              />
+            </label>
+          </div>
+        </section>
+
         <!-- Slack -->
         <section class="section section-muted" id="slackSection">
           <header class="section-header">

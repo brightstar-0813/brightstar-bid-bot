@@ -1961,25 +1961,67 @@ async function autoDownloadCoverLetterPdf(
 }
 
 /** Pause between finished jobs so ChatGPT is less likely to rate-limit.
- * Each job = new chat + resume + cover letter (2–3 sends). */
-const JOB_GAP_MS = 20 * 1000;
+ * Each job = new chat + resume + cover letter (2–3 sends). Overridable via storage. */
+const DEFAULT_JOB_GAP_SEC = 45;
+const MIN_JOB_GAP_SEC = 15;
+const MAX_JOB_GAP_SEC = 180;
+const DEFAULT_HARD_PAUSE_HITS = 3;
+const CHATGPT_PACING_KEY = "chatgpt_pacing";
+
 /** Minimum wait after a rate-limit modal before we probe “cleared”. */
-const RATE_LIMIT_BASE_WAIT_MS = 45 * 1000;
+const RATE_LIMIT_BASE_WAIT_MS = 60 * 1000;
 /** Cap how long we sit on one rate-limit encounter. */
-const RATE_LIMIT_MAX_WAIT_MS = 5 * 60 * 1000;
+const RATE_LIMIT_MAX_WAIT_MS = 8 * 60 * 1000;
 /** Quiet time after a hit before the next Send (overlaps with the wait above). */
-const RATE_LIMIT_AFTER_HIT_MS = 35 * 1000;
+const RATE_LIMIT_AFTER_HIT_MS = 45 * 1000;
 /** How often to re-check whether the rate-limit UI is gone. */
 const RATE_LIMIT_PROBE_MS = 12 * 1000;
 /** Brief settle after the UI clears before sending again. */
-const RATE_LIMIT_CLEAR_SETTLE_MS = 3 * 1000;
+const RATE_LIMIT_CLEAR_SETTLE_MS = 4 * 1000;
 /** Gap before cover-letter send in the same chat. */
-const COVER_LETTER_GAP_MS = 3 * 1000;
+const COVER_LETTER_GAP_MS = 6 * 1000;
 
 /** Timestamp of the last ChatGPT rate-limit detection (ms). */
 let lastRateLimitHitAt = 0;
 /** Escalate job gaps after repeated rate limits in one batch. */
 let rateLimitHitsThisBatch = 0;
+/** Cached pacing prefs (refreshed at batch start). */
+let pacingCache = {
+  jobGapSeconds: DEFAULT_JOB_GAP_SEC,
+  hardPauseAfterHits: DEFAULT_HARD_PAUSE_HITS
+};
+
+function clampNumber(n, min, max, fallback) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+}
+
+async function getChatGptPacing() {
+  try {
+    const data = await chrome.storage.local.get(CHATGPT_PACING_KEY);
+    const raw = data[CHATGPT_PACING_KEY] || {};
+    return {
+      jobGapSeconds: clampNumber(
+        raw.jobGapSeconds,
+        MIN_JOB_GAP_SEC,
+        MAX_JOB_GAP_SEC,
+        DEFAULT_JOB_GAP_SEC
+      ),
+      hardPauseAfterHits: clampNumber(raw.hardPauseAfterHits, 2, 10, DEFAULT_HARD_PAUSE_HITS)
+    };
+  } catch {
+    return {
+      jobGapSeconds: DEFAULT_JOB_GAP_SEC,
+      hardPauseAfterHits: DEFAULT_HARD_PAUSE_HITS
+    };
+  }
+}
+
+async function refreshPacingCache() {
+  pacingCache = await getChatGptPacing();
+  return pacingCache;
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1992,11 +2034,34 @@ function formatWaitLeft(ms) {
   return `${Math.ceil(s / 60)}m`;
 }
 
+/**
+ * Gap between jobs: user base + escalate after rate-limit hits + ±15% jitter
+ * so sends are less metronomic.
+ */
 function currentJobGapMs() {
-  // 20s → 40s → 75s after repeated hits
-  if (rateLimitHitsThisBatch >= 3) return Math.max(JOB_GAP_MS, 75 * 1000);
-  if (rateLimitHitsThisBatch >= 1) return Math.max(JOB_GAP_MS, 40 * 1000);
-  return JOB_GAP_MS;
+  const hits = rateLimitHitsThisBatch;
+  let base = (pacingCache.jobGapSeconds || DEFAULT_JOB_GAP_SEC) * 1000;
+  if (hits >= 3) base = Math.max(base, 90 * 1000);
+  else if (hits >= 1) base = Math.max(base, Math.round(base * 1.75));
+  const factor = 0.85 + Math.random() * 0.3;
+  return Math.round(base * factor);
+}
+
+/** After too many ChatGPT rate limits in one batch, pause for a human cool-down. */
+async function maybeHardPauseForRateLimit(detail = "") {
+  const limit = pacingCache.hardPauseAfterHits || DEFAULT_HARD_PAUSE_HITS;
+  if (rateLimitHitsThisBatch < limit) return false;
+  const msg =
+    `ChatGPT rate-limited ${rateLimitHitsThisBatch}× this batch — paused so the account can cool down. ` +
+    `Wait a few minutes, then click Start.${detail ? ` (${detail})` : ""}`;
+  await setBatchState("paused");
+  await setStatus(msg);
+  await chrome.storage.local.set({ generation_running: false });
+  await trySlackAlert({
+    title: "Batch paused — ChatGPT rate limit ⛔",
+    message: msg
+  }).catch(() => {});
+  return true;
 }
 
 /**
@@ -2082,6 +2147,10 @@ async function waitOutChatGptRateLimit(tabId, { maxWaitMs = RATE_LIMIT_MAX_WAIT_
 
   lastRateLimitHitAt = Date.now();
   rateLimitHitsThisBatch += 1;
+
+  if (await maybeHardPauseForRateLimit("detected while waiting for ChatGPT")) {
+    throw new Error("__RATE_LIMIT_PAUSE__");
+  }
 
   const started = Date.now();
   await setStatus(
@@ -4086,6 +4155,7 @@ async function runAutoJob(jobMeta) {
 async function runBatchLoop(outputDir) {
   batchControl = { pauseAfterCurrent: false, skipCurrent: false, stop: false, forceProceed: false };
   rateLimitHitsThisBatch = 0;
+  await refreshPacingCache();
   await setBatchState("running");
   await chrome.storage.local.set({
     generation_running: true,
@@ -4095,6 +4165,9 @@ async function runBatchLoop(outputDir) {
   startKeepAlive();
 
   try {
+    await setStatus(
+      `ChatGPT pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
+    );
     const dedupe = await dedupeQueueAgainstSheet({ notifySlack: true });
     if (dedupe.checked && dedupe.skipped > 0) {
       await setStatus(
@@ -4224,12 +4297,20 @@ async function runBatchLoop(outputDir) {
         const tab = await ensureChatGptTab();
         if (tab?.id) await waitOutChatGptRateLimit(tab.id);
       } catch (preErr) {
-        if (String(preErr?.message || preErr) === "__SKIP__") {
+        const preMsg = String(preErr?.message || preErr);
+        if (preMsg === "__RATE_LIMIT_PAUSE__") {
+          await updateQueueJob(next.csvRow, {
+            status: "pending",
+            error: "ChatGPT rate limit — batch paused for cool-down"
+          });
+          return;
+        }
+        if (preMsg === "__SKIP__") {
           batchControl.skipCurrent = false;
           await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
           continue;
         }
-        if (/rate limit/i.test(String(preErr?.message || preErr))) {
+        if (/rate limit/i.test(preMsg)) {
           await updateQueueJob(next.csvRow, {
             status: "pending",
             error: "Waiting for ChatGPT rate limit to clear"
@@ -4310,6 +4391,13 @@ async function runBatchLoop(outputDir) {
         await sleep(currentJobGapMs());
       } catch (err) {
         const msg = String(err?.message || err);
+        if (msg === "__RATE_LIMIT_PAUSE__") {
+          await updateQueueJob(next.csvRow, {
+            status: "pending",
+            error: "ChatGPT rate limit — batch paused for cool-down"
+          });
+          return;
+        }
         if (msg === "__SKIP__" || batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
@@ -4345,6 +4433,9 @@ async function runBatchLoop(outputDir) {
             status: "pending",
             error: "ChatGPT rate limit — will retry after cooldown"
           });
+          if (await maybeHardPauseForRateLimit(msg.slice(0, 120))) {
+            return;
+          }
           await setStatus(
             `Row ${next.csvRow}: ChatGPT rate limit. Waiting ~${formatWaitLeft(RATE_LIMIT_BASE_WAIT_MS)}, then continuing…`
           );
