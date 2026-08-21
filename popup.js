@@ -78,6 +78,7 @@ const APPS_SCRIPT_SOURCE = `/**
  *
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
+ * Dedup: same job link OR same company (normalized) is treated as duplicate.
  */
 function doPost(e) {
   try {
@@ -92,10 +93,18 @@ function doPost(e) {
 
     if (action === "listlinks" || action === "list_links") {
       const links = collectJobLinks_(sheet);
-      return json_({ ok: true, links: links, count: links.length });
+      const companies = collectCompanies_(sheet);
+      return json_({
+        ok: true,
+        links: links,
+        companies: companies,
+        count: links.length,
+        companyCount: companies.length
+      });
     }
 
     const jobLink = String(data.jobLink || "").trim();
+    const companyName = String(data.companyName || "").trim();
 
     if (action === "markapplied" || action === "mark_applied" || action === "applied") {
       ensureStatusHeader_(sheet);
@@ -111,7 +120,7 @@ function doPost(e) {
         data.jobNo || "",
         data.applicationDate || "",
         data.jobTitle || "",
-        data.companyName || "",
+        companyName,
         jobLink,
         data.salary || "",
         status
@@ -120,14 +129,17 @@ function doPost(e) {
     }
 
     if (jobLink && linkExists_(sheet, jobLink)) {
-      return json_({ ok: true, duplicate: true });
+      return json_({ ok: true, duplicate: true, reason: "link" });
+    }
+    if (companyName && companyExists_(sheet, companyName)) {
+      return json_({ ok: true, duplicate: true, reason: "company" });
     }
 
     sheet.appendRow([
       data.jobNo || "",
       data.applicationDate || "",
       data.jobTitle || "",
-      data.companyName || "",
+      companyName,
       jobLink,
       data.salary || "",
       data.status || "Ready"
@@ -251,6 +263,67 @@ function statusColumnForRow_(sheet, row) {
     if (String(values[i] || "").trim()) last = i + 1;
   }
   return Math.max(7, last + 1);
+}
+
+function companyColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["company", "company name", "employer", "organization", "org"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return 3; // column D
+}
+
+function normalizeCompanyName_(name) {
+  var s = String(name || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(
+      /\b(incorporated|inc|llc|corp|corporation|company|co|ltd|limited|plc|gmbh|ag|pvt|private)\b/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  return s;
+}
+
+function collectCompanies_(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return [];
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var col = hasHeader ? companyColumnIndex_(values[0]) : 3;
+  var out = [];
+  var seen = {};
+  for (var r = start; r < values.length; r++) {
+    var raw = String((values[r] || [])[col] || "").trim();
+    var n = normalizeCompanyName_(raw);
+    if (!n || seen[n]) continue;
+    seen[n] = true;
+    out.push(raw);
+  }
+  return out;
+}
+
+function companyExists_(sheet, companyName) {
+  var target = normalizeCompanyName_(companyName);
+  if (!target) return false;
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return false;
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var col = hasHeader ? companyColumnIndex_(values[0]) : 3;
+  for (var r = start; r < values.length; r++) {
+    var n = normalizeCompanyName_((values[r] || [])[col]);
+    if (n && n === target) return true;
+  }
+  return false;
 }
 
 function collectJobLinks_(sheet) {

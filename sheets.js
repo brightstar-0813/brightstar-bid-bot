@@ -31,6 +31,24 @@ export function formatAppliedStatus(date = new Date()) {
 }
 
 /**
+ * Normalize employer names so "Google LLC" and "Google, Inc." match.
+ */
+export function normalizeCompanyName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(
+      /\b(incorporated|inc|llc|corp|corporation|company|co|ltd|limited|plc|gmbh|ag|pvt|private)\b/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Normalize job URLs so sheet vs CSV links still match when tracking
  * params / trailing slashes differ.
  */
@@ -203,10 +221,10 @@ export async function markJobAppliedOnSpreadsheet({
 }
 
 /**
- * Fetch all job links already recorded on the sheet (column Link / E).
- * @returns {Promise<string[]>}
+ * Fetch job links + companies already on the sheet (for link and company dedupe).
+ * @returns {Promise<{ links: string[], companies: string[] }>}
  */
-export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl }) {
+export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
     throw new Error("Invalid Google Spreadsheet link.");
@@ -218,7 +236,20 @@ export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl }) {
   });
 
   const links = Array.isArray(parsed?.links) ? parsed.links : [];
-  return links.map((l) => String(l || "").trim()).filter(Boolean);
+  const companies = Array.isArray(parsed?.companies) ? parsed.companies : [];
+  return {
+    links: links.map((l) => String(l || "").trim()).filter(Boolean),
+    companies: companies.map((c) => String(c || "").trim()).filter(Boolean)
+  };
+}
+
+/**
+ * Fetch all job links already recorded on the sheet (column Link / E).
+ * @returns {Promise<string[]>}
+ */
+export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl }) {
+  const { links } = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
+  return links;
 }
 
 /**
@@ -229,6 +260,19 @@ export function buildKnownLinkSet(links) {
   const set = new Set();
   for (const link of links || []) {
     const n = normalizeJobLink(link);
+    if (n) set.add(n);
+  }
+  return set;
+}
+
+/**
+ * @param {string[]} companies
+ * @returns {Set<string>}
+ */
+export function buildKnownCompanySet(companies) {
+  const set = new Set();
+  for (const name of companies || []) {
+    const n = normalizeCompanyName(name);
     if (n) set.add(n);
   }
   return set;
