@@ -388,11 +388,17 @@
               <button type="button" class="channel-btn" id="filterLinkedIn" data-filter="linkedin" title="LinkedIn-hosted jobs">
                 LI
               </button>
+              <button type="button" class="channel-btn" id="filterDice" data-filter="dice" title="Dice only — generate then auto-apply+submit each job">
+                Dice
+              </button>
               <button type="button" class="channel-btn" id="filterAll" data-filter="all" title="All US jobs">
                 All
               </button>
             </div>
           </div>
+          <p class="hint" id="diceInterleaveHint" hidden>
+            Dice filter: after each resume/CL build, Auto Apply runs (including Submit), then the wizard closes and the next job builds.
+          </p>
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No CSV loaded</span>
           </div>
@@ -486,7 +492,7 @@
               <kbd>Ctrl+Shift+U</kbd>
             </button>
           </div>
-          <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads that queue row's resume and cover letter (replacing a profile resume if needed), and stops before Submit. Leftover questions use extras + the Q&amp;A bank, then OpenAI if the extension <code>.env</code> has <code>OPENAI_API_KEY</code>.</p>
+          <p class="hint">Autofill fills the current step. Auto Apply walks Next/Continue, uploads that queue row's resume and cover letter (replacing a profile resume if needed), and stops before Submit. With the <strong>Dice</strong> channel filter, batch Start instead auto-applies and submits after each build. Leftover questions use extras + the Q&amp;A bank, then OpenAI if the extension <code>.env</code> has <code>OPENAI_API_KEY</code>.</p>
 
           <div class="qa-bank-block">
             <div class="qa-bank-head">

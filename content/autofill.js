@@ -4172,9 +4172,12 @@
   }
 
   async function clickEasyApplyEntry() {
+    // Dice / DHI web components first (stable hosts), then generic Easy Apply labels.
     const hosts = [
-      ...queryAllDeep("apply-button-wc, dhi-apply-button"),
-      ...queryAllDeep("[class*='apply-button-wc'], [class*='easy-apply']")
+      ...queryAllDeep("apply-button-wc, dhi-apply-button, dice-apply-button"),
+      ...queryAllDeep(
+        "[class*='apply-button-wc'], [class*='easy-apply'], [data-cy*='apply'], [data-testid*='apply']"
+      )
     ];
     const seenHosts = new Set();
     for (const host of hosts) {
@@ -4198,6 +4201,16 @@
         safeClick(host);
         await sleep(1200);
         return { ok: true, clicked: true, text: "Easy Apply" };
+      }
+    }
+    // On Dice wizard pages, a primary CTA may already be Next/Continue rather than Apply.
+    if (/dice\.com\/job-applications\//i.test(location.href)) {
+      const wizardAction = findActionButton();
+      if (wizardAction && wizardAction.type !== "submit") {
+        return { ok: true, clicked: false, text: wizardAction.text || "", alreadyOpen: true };
+      }
+      if (probeApplicationForm().isApplicationForm) {
+        return { ok: true, clicked: false, text: "wizard", alreadyOpen: true };
       }
     }
     const controls = queryAllDeep("button, a, [role='button']").filter(
@@ -4246,17 +4259,19 @@
     };
   }
 
-  async function clickApplyAction(preferredType = "") {
+  async function clickApplyAction(preferredType = "", { autoSubmit = false } = {}) {
     const before = getApplyActionSnapshot();
     let action = findActionButton();
     if (preferredType === "entry") {
       const entryRes = await clickEasyApplyEntry();
       await sleep(400);
       return {
-        ok: Boolean(entryRes?.clicked),
+        ok: Boolean(entryRes?.clicked || entryRes?.alreadyOpen),
         clicked: Boolean(entryRes?.clicked),
         isSubmit: false,
-        action: entryRes?.clicked ? { type: "entry", text: entryRes.text || "" } : null,
+        action: entryRes?.clicked || entryRes?.alreadyOpen
+          ? { type: "entry", text: entryRes.text || "" }
+          : null,
         before,
         after: getApplyActionSnapshot()
       };
@@ -4291,15 +4306,30 @@
     if (!action) {
       return { ok: false, clicked: false, before, after: before };
     }
-    // Never auto-click final submit — SW stops for user review.
+    // Final submit: only click when autoSubmit is explicitly enabled.
     if (action.type === "submit") {
+      if (!autoSubmit) {
+        return {
+          ok: true,
+          clicked: false,
+          isSubmit: true,
+          submitted: false,
+          action: describeAction(action),
+          before,
+          after: before
+        };
+      }
+      scrollElIntoView(action.el);
+      safeClick(action.el);
+      await sleep(800);
       return {
         ok: true,
-        clicked: false,
+        clicked: true,
         isSubmit: true,
+        submitted: true,
         action: describeAction(action),
         before,
-        after: before
+        after: getApplyActionSnapshot()
       };
     }
     scrollElIntoView(action.el);
@@ -5426,7 +5456,7 @@
       return true;
     }
     if (message?.type === "click_apply_action") {
-      clickApplyAction(message.preferredType || "")
+      clickApplyAction(message.preferredType || "", { autoSubmit: Boolean(message.autoSubmit) })
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;

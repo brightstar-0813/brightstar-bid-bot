@@ -354,18 +354,33 @@ export function isLinkedInJob({ jdLink = "", source = "" } = {}) {
 }
 
 /**
+ * Dice.com Easy Apply / Dice-hosted postings (interleaved generate → apply path).
+ */
+export function isDiceJob({ jdLink = "", source = "" } = {}) {
+  const link = String(jdLink || "").toLowerCase();
+  const src = String(source || "").toLowerCase();
+  if (src.includes("dice") || src === "dice") return true;
+  if (/dice\.com/i.test(link)) return true;
+  if (/^dice[_-]/i.test(String(source || ""))) return true;
+  return false;
+}
+
+/**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"} filter
+ * @param {"all"|"general"|"linkedin"|"dice"} filter
  */
 export function filterJobsByChannel(jobs, filter = "general") {
   const list = Array.isArray(jobs) ? jobs : [];
   const mode = String(filter || "general").toLowerCase();
   if (mode === "all") return list.slice();
   if (mode === "linkedin" || mode === "li") {
-    return list.filter((j) => j.isLinkedIn);
+    return list.filter((j) => j.isLinkedIn || isLinkedInJob(j));
   }
-  // general = non-LinkedIn (ATS / company career pages)
-  return list.filter((j) => !j.isLinkedIn);
+  if (mode === "dice") {
+    return list.filter((j) => j.isDice || isDiceJob(j));
+  }
+  // general = non-LinkedIn (ATS / company career pages; may include Dice)
+  return list.filter((j) => !(j.isLinkedIn || isLinkedInJob(j)));
 }
 
 /**
@@ -382,11 +397,13 @@ export function filterJobsByChannel(jobs, filter = "general") {
  *     remoteRestrictedTo: string,
  *     source: string,
  *     isLinkedIn: boolean,
+ *     isDice: boolean,
  *     status: string
  *   }>,
  *   droppedNonUs: number,
  *   linkedInCount: number,
- *   generalCount: number
+ *   generalCount: number,
+ *   diceCount: number
  * }}
  */
 export function parseJobsCsv(csvText) {
@@ -428,7 +445,9 @@ export function parseJobsCsv(csvText) {
       continue;
     }
 
-    const linkedIn = isLinkedInJob({ jdLink, source: source || id });
+    const srcKey = source || id;
+    const linkedIn = isLinkedInJob({ jdLink, source: srcKey });
+    const dice = isDiceJob({ jdLink, source: srcKey });
 
     usJobs.push({
       csvRow,
@@ -439,8 +458,9 @@ export function parseJobsCsv(csvText) {
       location,
       remoteRestrictedTo,
       salary,
-      source: source || (linkedIn ? "linkedin" : "general"),
+      source: source || (linkedIn ? "linkedin" : dice ? "dice" : "general"),
       isLinkedIn: linkedIn,
+      isDice: dice,
       status: "pending"
     });
   }
@@ -450,6 +470,7 @@ export function parseJobsCsv(csvText) {
     usJobs,
     droppedNonUs,
     linkedInCount: usJobs.filter((j) => j.isLinkedIn).length,
+    diceCount: usJobs.filter((j) => j.isDice).length,
     generalCount: usJobs.filter((j) => !j.isLinkedIn).length
   };
 }

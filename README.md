@@ -7,7 +7,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
-- **CSV batch**: upload LinkedIn / Fantastic Jobs CSV → keep **US jobs only** → **auto-starts file generation** (Start / Pause / Skip / Stop still available)
+- **CSV batch**: upload LinkedIn / Fantastic Jobs / Dice / Jobright CSV → keep **US jobs only** → **auto-starts file generation** (Start / Pause / Skip / Stop still available). **Dice** filter runs interleaved generate → auto-apply+submit per job.
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Saves under `Downloads / [output folder] / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
@@ -73,15 +73,27 @@ flowchart TD
 
 ## CSV batch
 
-1. Upload a CSV with columns like `title`, `organization`, `location`, `remote_restricted_to`, `url`, `description`
+1. Upload a CSV with columns like `title`, `organization`, `location`, `remote_restricted_to`, `url`, `description` (LinkedIn, Fantastic Jobs, Dice, Jobright, …)
 2. Choose **Apply source** filter:
    - **General** (default) — non-LinkedIn / ATS jobs (easier to apply)
    - **LI** — LinkedIn-hosted jobs only
+   - **Dice** — Dice.com jobs only; **interleaved** generate → auto-apply+submit → close tab → next job
    - **All** — every US job
-3. Confirm summary counts (General vs LI)
+3. Confirm summary counts (General vs LI vs Dice)
 4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows
 5. Use **Pause** / **Skip** / **Stop** as needed
 6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (open + reveal + autofill)
+
+### Dice interleaved auto-apply
+
+With the **Dice** filter selected, each queue row runs end-to-end:
+
+1. ChatGPT builds resume + cover letter PDFs (Sheet status **Ready**)
+2. Bot opens the Dice wizard (or external ATS apply URL), fills, uploads that row’s PDFs, walks Next/Continue, and **clicks Submit**
+3. On success, Sheet status becomes **Applied**; the apply tab closes
+4. Cooldown, then the next pending Dice job builds
+
+Blockers (login, CAPTCHA, missing form) mark the row with an error and **continue** the batch — generation is not re-run. Manual **Apply** / **Auto Apply** still stop before Submit for every channel.
 
 ### CSV auto-source (cron / 12h updates)
 
@@ -113,6 +125,8 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 
 - Queue **Apply** / **Autofill this page** / **Auto Apply** (`Ctrl+Shift+Y` / `Ctrl+Shift+U`)
 - Fills name/email/phone/LinkedIn from the active person, then extras + saved Q&A
+- Manual Auto Apply **stops before Submit** so you can review
+- **Dice** channel batch mode auto-submits after each build (see Dice interleaved above)
 - Leftover questions go to **OpenAI** if `.env` has `OPENAI_API_KEY` (copy `.env.example` → `.env`, then reload the extension). Do not commit `.env`.
 - **Q&A bank** (Apply section): Open editor, **Load bundled bank** (`qa-bank-custom-steven-avon.json`), or Import JSON. Imports are assigned to the **active person** so autofill can match them. Learn mode saves answers you type on forms.
 
@@ -144,7 +158,7 @@ After each job’s files finish (batch or one-off), the extension can append a r
 |----|------|-------|---------|------|--------|--------|
 | CSV row # | M/D/YYYY | job title | company | JD URL | (optional) | Ready, then Applied M/D/YYYY |
 
-**Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). Duplicate-by-link still skips jobs that are already on the sheet.
+**Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). On the **Dice** interleaved path, **Applied** is set only after a successful Submit. Duplicate-by-link still skips jobs that are already on the sheet.
 
 **Duplicate prevention:** when you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
 

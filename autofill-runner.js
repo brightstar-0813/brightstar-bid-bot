@@ -2,7 +2,8 @@
  * Application autofill orchestrator.
  * Injects content/autofill.js into all frames, fills from the active person,
  * then answers leftover questions from extras + the Q&A bank, then OpenAI.
- * Multi-step Apply clicks Next/Continue but never auto-submits.
+ * Multi-step Apply clicks Next/Continue but never auto-submits unless
+ * autoSubmit is explicitly enabled (Dice interleaved batch only).
  */
 
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson } from "./profiles.js";
@@ -1336,9 +1337,12 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
 
 /**
  * Multi-step apply: fill → click Next/Continue → wait → refill.
- * Stops before Submit so the user can review.
+ * Stops before Submit unless autoSubmit is true (Dice interleaved batch).
  */
-export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, applyHint = {} } = {}) {
+export async function startMultiStepApplyOnTab(
+  tabId = null,
+  { maxSteps = 12, applyHint = {}, autoSubmit = false } = {}
+) {
   const tab = tabId
     ? await chrome.tabs.get(tabId).catch(() => null)
     : await getCurrentApplicationTab();
@@ -1363,7 +1367,8 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
     status: "",
     detail: "",
     tabId: currentTabId,
-    tabUrl: tab.url || ""
+    tabUrl: tab.url || "",
+    autoSubmit: Boolean(autoSubmit)
   };
 
   let noAdvance = 0;
@@ -1393,11 +1398,12 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
       const live = await chrome.tabs.get(currentTabId).catch(() => null);
       const prevUrl = live?.url || "";
       const prevSig = probe.signature || "";
+      let alreadyOpen = false;
 
       if (probe.best?.action?.type === "entry") {
         await sendMessageToTab(
           currentTabId,
-          { type: "click_apply_action", preferredType: "entry" },
+          { type: "click_apply_action", preferredType: "entry", autoSubmit: false },
           { attempts: 2, frameId: probe.best.frameId }
         ).catch(() => null);
       } else {
@@ -1406,13 +1412,14 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
           { type: "click_easy_apply_entry" },
           { attempts: 2 }
         ).catch(() => null);
-        if (!entry?.clicked && probe.applyUrls?.length) {
+        alreadyOpen = Boolean(entry?.alreadyOpen);
+        if (!entry?.clicked && !alreadyOpen && probe.applyUrls?.length) {
           const nextUrl = String(probe.applyUrls[0] || "").trim();
           if (nextUrl) {
             await chrome.tabs.update(currentTabId, { url: nextUrl });
             await waitForTabComplete(currentTabId, 30000).catch(() => {});
           }
-        } else if (!entry?.clicked && probe.blockedReason) {
+        } else if (!entry?.clicked && !alreadyOpen && probe.blockedReason) {
           summary.status = "needs_review";
           summary.detail = probe.blockedReason;
           summary.tabId = currentTabId;
@@ -1420,9 +1427,14 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
         }
       }
 
-      const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000);
-      currentTabId = advanced.tabId;
-      probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+      if (alreadyOpen) {
+        probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+      }
+      if (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry"))) {
+        const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000);
+        currentTabId = advanced.tabId;
+        probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+      }
 
       if (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry")) {
         summary.status = "needs_review";
@@ -1464,6 +1476,31 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
     }
 
     if (probe.best.action.type === "submit") {
+      if (autoSubmit) {
+        await setApplyStatus(`Apply: submitting (${probe.best.action.text || "Submit"})...`);
+        const live = await chrome.tabs.get(currentTabId).catch(() => null);
+        const prevUrl = live?.url || "";
+        const prevSig = probe.signature || "";
+        const clickRes = await sendMessageToTab(
+          currentTabId,
+          { type: "click_apply_action", preferredType: "submit", autoSubmit: true },
+          { attempts: 2, frameId: probe.best.frameId }
+        ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
+
+        if (clickRes?.clicked || clickRes?.submitted) {
+          await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000).catch(() => null);
+          summary.status = "submitted";
+          summary.detail = "Submitted the application.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
+        summary.status = "needs_review";
+        summary.detail =
+          clickRes?.error ||
+          "Reached Submit but could not click it (a required field or CAPTCHA likely needs your input).";
+        summary.tabId = currentTabId;
+        return summary;
+      }
       summary.status = "ready_for_review";
       const files = [fillRes?.uploadResumeName, fillRes?.uploadCoverName].filter(Boolean).join(" + ");
       summary.detail = files
@@ -1480,11 +1517,31 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
     await setApplyStatus(`Apply: clicking ${probe.best.action.text || actionType}...`);
     const clickRes = await sendMessageToTab(
       currentTabId,
-      { type: "click_apply_action", preferredType: actionType },
+      { type: "click_apply_action", preferredType: actionType, autoSubmit: false },
       { attempts: 2, frameId: probe.best.frameId }
     ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
 
     if (clickRes?.isSubmit) {
+      if (autoSubmit) {
+        await setApplyStatus("Apply: submitting...");
+        const submitRes = await sendMessageToTab(
+          currentTabId,
+          { type: "click_apply_action", preferredType: "submit", autoSubmit: true },
+          { attempts: 2, frameId: probe.best.frameId }
+        ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
+        if (submitRes?.clicked || submitRes?.submitted) {
+          await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000).catch(() => null);
+          summary.status = "submitted";
+          summary.detail = "Submitted the application.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
+        summary.status = "needs_review";
+        summary.detail =
+          submitRes?.error ||
+          "Reached Submit but could not click it (a required field or CAPTCHA likely needs your input).";
+        return summary;
+      }
       summary.status = "ready_for_review";
       summary.detail = "Reached the final Submit step. Stopped so you can review and submit.";
       return summary;
@@ -1511,6 +1568,7 @@ export async function startMultiStepApplyOnTab(tabId = null, { maxSteps = 12, ap
   summary.detail = "Reached the step limit; please review the remaining steps.";
   return summary;
 }
+
 
 function diceJobIdFromUrl(url) {
   const match = String(url || "").match(
@@ -1583,7 +1641,10 @@ async function findExistingApplyTab(jdLink) {
   return null;
 }
 
-export async function openJobAndApply(url, { multiStep = true, csvRow, jobDir, jdLink } = {}) {
+export async function openJobAndApply(
+  url,
+  { multiStep = true, csvRow, jobDir, jdLink, autoSubmit = false } = {}
+) {
   const href = String(url || "").trim();
   if (!href) throw new Error("Missing job URL.");
   const applyHint = {
@@ -1621,8 +1682,22 @@ export async function openJobAndApply(url, { multiStep = true, csvRow, jobDir, j
       await sleep(APPLY_SETTLE_MS);
     }
   }
-  if (multiStep) return startMultiStepApplyOnTab(tab.id, { applyHint });
+  if (multiStep) {
+    return startMultiStepApplyOnTab(tab.id, { applyHint, autoSubmit: Boolean(autoSubmit) });
+  }
   return startAutofillOnTab(tab.id, applyHint);
+}
+
+/** Close a tab opened for apply (Dice wizard / external ATS). Ignores missing tabs. */
+export async function closeApplyTab(tabId) {
+  const id = Number(tabId);
+  if (!Number.isFinite(id) || id <= 0) return false;
+  try {
+    await chrome.tabs.remove(id);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function handleProfileLearnCapture(message) {

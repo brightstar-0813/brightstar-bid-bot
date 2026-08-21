@@ -21,7 +21,7 @@ import {
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { extractSpreadsheetId, buildSheetRowTsv, formatApplicationDate, formatApplicationDateTime } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
-import { parseJobsCsv, filterJobsByChannel, isLinkedInJob } from "./csv.js";
+import { parseJobsCsv, filterJobsByChannel, isLinkedInJob, isDiceJob } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
   extractProfileFromResumeText,
@@ -363,7 +363,9 @@ const clearJobsBtn = document.getElementById("clearJobs");
 const retryErrorsBtn = document.getElementById("retryErrors");
 const filterGeneralBtn = document.getElementById("filterGeneral");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
+const filterDiceBtn = document.getElementById("filterDice");
 const filterAllBtn = document.getElementById("filterAll");
+const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
 
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
@@ -851,7 +853,8 @@ async function loadSettings() {
   allUsJobsCache = Array.isArray(data[ALL_US_JOBS_KEY])
     ? data[ALL_US_JOBS_KEY].map((j) => ({
         ...j,
-        isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j)
+        isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j),
+        isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -880,7 +883,8 @@ async function hydrateJobDirsInUi() {
   if (Array.isArray(res.allUsJobs)) {
     allUsJobsCache = res.allUsJobs.map((j) => ({
       ...j,
-      isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j)
+      isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j),
+      isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -900,13 +904,20 @@ function updateCsvSummaryFromQueue() {
     return;
   }
   const liTotal = allUsJobsCache.filter((j) => j.isLinkedIn || isLinkedInJob(j)).length;
+  const diceTotal = allUsJobsCache.filter((j) => j.isDice || isDiceJob(j)).length;
   const genTotal = allUsJobsCache.length - liTotal;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
   const errors = queueCache.filter((j) => j.status === "error" || j.status === "failed").length;
   const skipped = queueCache.filter((j) => j.status === "skipped").length;
   const filterLabel =
-    channelFilter === "linkedin" ? "LI only" : channelFilter === "all" ? "All" : "General only";
+    channelFilter === "linkedin"
+      ? "LI only"
+      : channelFilter === "dice"
+        ? "Dice only"
+        : channelFilter === "all"
+          ? "All"
+          : "General only";
   csvSummaryEl.classList.remove("is-idle");
   csvSummaryEl.innerHTML = `
     <div class="stat-grid">
@@ -916,7 +927,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · General ${genTotal} · LI ${liTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · General ${genTotal} · LI ${liTotal} · Dice ${diceTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -925,11 +936,15 @@ function syncChannelFilterButtons() {
   const map = {
     general: filterGeneralBtn,
     linkedin: filterLinkedInBtn,
+    dice: filterDiceBtn,
     all: filterAllBtn
   };
   for (const [key, btn] of Object.entries(map)) {
     if (!btn) continue;
     btn.classList.toggle("active", key === channelFilter);
+  }
+  if (diceInterleaveHintEl) {
+    diceInterleaveHintEl.hidden = channelFilter !== "dice";
   }
 }
 
@@ -972,7 +987,9 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
       ? `Showing General (non-LinkedIn) jobs — ${queueCache.length} in queue.`
       : channelFilter === "linkedin"
         ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
-        : `Showing all US jobs — ${queueCache.length} in queue.`
+        : channelFilter === "dice"
+          ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+          : `Showing all US jobs — ${queueCache.length} in queue.`
   );
 }
 
@@ -1049,6 +1066,12 @@ function renderQueue() {
       liBadge.className = "badge badge-li";
       liBadge.textContent = "LI";
       badges.appendChild(liBadge);
+    }
+    if (job.isDice || isDiceJob(job)) {
+      const diceBadge = document.createElement("span");
+      diceBadge.className = "badge badge-dice";
+      diceBadge.textContent = "Dice";
+      badges.appendChild(diceBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
@@ -1365,7 +1388,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (General ${result.generalCount} / LI ${result.linkedInCount}). Filter: ${channelFilter}.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (General ${result.generalCount} / LI ${result.linkedInCount} / Dice ${result.diceCount || 0}). Filter: ${channelFilter}.${dedupeNote}`
     );
 
     try {
@@ -2245,6 +2268,9 @@ filterGeneralBtn?.addEventListener("click", () => {
 });
 filterLinkedInBtn?.addEventListener("click", () => {
   applyChannelFilter("linkedin").catch((e) => setStatus(String(e.message || e)));
+});
+filterDiceBtn?.addEventListener("click", () => {
+  applyChannelFilter("dice").catch((e) => setStatus(String(e.message || e)));
 });
 filterAllBtn?.addEventListener("click", () => {
   applyChannelFilter("all").catch((e) => setStatus(String(e.message || e)));

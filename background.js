@@ -20,6 +20,7 @@ import {
   startAutofillOnTab,
   startMultiStepApplyOnTab,
   openJobAndApply,
+  closeApplyTab,
   resolveUploadDocs,
   setActiveApplyJob,
   hydrateJobsWithFolders,
@@ -837,6 +838,118 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}) {
   } catch (err) {
     return { skipped: false, error: String(err?.message || err) };
   }
+}
+
+/**
+ * Dice interleaved mode: after resume/CL generation, auto-apply (with submit),
+ * mark Applied only on success, then close the apply tab.
+ */
+async function runDiceInterleavedApply(jobMeta = {}) {
+  const jdLink = String(jobMeta.jdLink || "").trim();
+  if (!jdLink) {
+    await updateQueueJob(jobMeta.csvRow, {
+      applied: false,
+      error: "Generated files, but missing job URL for Dice auto-apply"
+    });
+    await setStatus(
+      `Row ${jobMeta.csvRow}: files ready, but no JD link — skipping apply and continuing…`
+    );
+    return { status: "needs_review", detail: "Missing job URL", tabId: null };
+  }
+
+  if (batchControl.skipCurrent || batchControl.stop) {
+    return { status: "skipped", detail: "Skipped before apply", tabId: null };
+  }
+
+  await setStatus(
+    `Dice auto-apply: row ${jobMeta.csvRow} — ${jobMeta.companyName || jobMeta.company} / ${jobMeta.jobTitle || jobMeta.title}`
+  );
+
+  let applyResult;
+  try {
+    applyResult = await openJobAndApply(jdLink, {
+      multiStep: true,
+      autoSubmit: true,
+      csvRow: jobMeta.csvRow,
+      jobDir: jobMeta.jobDir || "",
+      jdLink
+    });
+  } catch (err) {
+    applyResult = {
+      status: "needs_review",
+      detail: String(err?.message || err).slice(0, 240),
+      tabId: null
+    };
+  }
+
+  if (batchControl.skipCurrent) {
+    batchControl.skipCurrent = false;
+    await closeApplyTab(applyResult?.tabId).catch(() => false);
+    await updateQueueJob(jobMeta.csvRow, {
+      applied: false,
+      error: "Skipped during Dice auto-apply"
+    });
+    return { ...applyResult, status: "skipped", detail: "Skipped during apply" };
+  }
+
+  const status = String(applyResult?.status || "");
+  const detail = String(applyResult?.detail || "").slice(0, 240);
+
+  if (status === "submitted") {
+    const sheet = await markQueueJobAppliedOnSheet({
+      csvRow: jobMeta.csvRow,
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      companyName: jobMeta.companyName || jobMeta.company || "",
+      jdLink,
+      salary: jobMeta.salary || "",
+      jobDir: jobMeta.jobDir || applyResult?.uploadFolder || ""
+    });
+    const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
+    const docsPatch = {
+      applied: !sheet?.error,
+      appliedDate: sheet?.error ? "" : appliedDate,
+      jobDir: applyResult?.uploadFolder || jobMeta.jobDir || "",
+      hasFiles: true,
+      error: sheet?.error ? `Submitted; sheet mark failed: ${sheet.error}` : ""
+    };
+    if (applyResult?.uploadResumeName) docsPatch.resumeName = applyResult.uploadResumeName;
+    if (applyResult?.uploadCoverName) docsPatch.coverName = applyResult.uploadCoverName;
+    await updateQueueJob(jobMeta.csvRow, docsPatch).catch(() => {});
+    await rememberApplyHistory(jobMeta.csvRow, {
+      jobDir: docsPatch.jobDir,
+      jdLink,
+      applied: docsPatch.applied,
+      appliedDate: docsPatch.appliedDate
+    }).catch(() => {});
+    await setStatus(
+      sheet?.error
+        ? `Row ${jobMeta.csvRow}: submitted, but sheet mark failed (${sheet.error}). Continuing…`
+        : `Row ${jobMeta.csvRow}: submitted and marked Applied. Closing tab…`
+    );
+  } else {
+    const reviewMsg =
+      detail ||
+      (status === "unavailable" ? "Job unavailable" : "Apply needs review (login, CAPTCHA, or form blocker)");
+    await updateQueueJob(jobMeta.csvRow, {
+      applied: false,
+      error: reviewMsg.slice(0, 240)
+    }).catch(() => {});
+    await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}. Continuing to next job…`);
+    await trySlackJobStatus({
+      outcome: "error",
+      csvRow: jobMeta.csvRow,
+      company: jobMeta.companyName || jobMeta.company || "",
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      jdLink,
+      message: `Dice auto-apply: ${reviewMsg}`,
+      attempts: 1,
+      maxAttempts: 1,
+      progress: await queueSlackProgress().catch(() => null)
+    }).catch(() => {});
+  }
+
+  await closeApplyTab(applyResult?.tabId).catch(() => false);
+  return applyResult;
 }
 
 /**
@@ -3948,6 +4061,25 @@ async function runBatchLoop(outputDir) {
           company: next.company
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
+
+        // Dice channel: generate → auto-apply+submit → close tab → next build.
+        const channelData = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
+        const channel = String(channelData[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER).toLowerCase();
+        if (channel === "dice" && !batchControl.stop) {
+          await runDiceInterleavedApply({
+            csvRow: next.csvRow,
+            jobTitle: next.title,
+            companyName: next.company,
+            company: next.company,
+            title: next.title,
+            jdLink: next.jdLink || "",
+            salary: next.salary || "",
+            jobDir: result.savedDir || ""
+          });
+        }
+
+        if (batchControl.stop) break;
+
         await setStatus(
           `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job (rate-limit protection)…`
         );

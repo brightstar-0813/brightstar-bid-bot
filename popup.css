@@ -775,6 +775,11 @@ input[type="file"]::file-selector-button {
   color: #7dd3fc;
 }
 
+.badge-dice {
+  background: #422006;
+  color: #fdba74;
+}
+
 .badge-applied {
   background: rgba(34, 197, 94, 0.16);
   color: #86efac;
