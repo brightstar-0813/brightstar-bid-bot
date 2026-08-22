@@ -7,6 +7,7 @@
  */
 
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson } from "./profiles.js";
+import { outputDirFromPerson } from "./resume-profile.js";
 import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
 import { getEnv } from "./env.js";
@@ -110,15 +111,19 @@ function folderSegment(jobDir) {
   return parts.length ? parts[parts.length - 1] : "";
 }
 
-function toStoredJobDir(absPath) {
+function toStoredJobDir(absPath, appsDir = "") {
   const n = String(absPath || "").replace(/\\/g, "/");
   if (!n) return "";
-  const marker = "/Resume Applications/";
+  const apps = String(appsDir || "").trim() || "Applications";
+  const marker = `/${apps}/`;
   const lower = n.toLowerCase();
   const i = lower.lastIndexOf(marker.toLowerCase());
-  if (i >= 0) return `Resume Applications/${n.slice(i + marker.length)}`;
+  if (i >= 0) return `${apps}/${n.slice(i + marker.length)}`;
+  // Legacy / alternate Applications-* folders
+  const m = n.match(/\/((?:Resume Applications|Applications-[^/]+))\/(.+)$/i);
+  if (m) return `${m[1]}/${m[2]}`;
   const segment = folderSegment(n);
-  return segment ? `Resume Applications/${segment}` : n;
+  return segment ? `${apps}/${segment}` : n;
 }
 
 function folderFitsJob(jobDir, job = {}) {
@@ -131,12 +136,31 @@ function folderFitsJob(jobDir, job = {}) {
   return !token || name.includes(token.slice(0, 24));
 }
 
+async function resolveAppsOutputDir() {
+  try {
+    const data = await chrome.storage.local.get(["output_dir", "batch_output_dir"]);
+    const stored = String(data.output_dir || data.batch_output_dir || "").trim();
+    if (stored) return stored;
+  } catch {
+    // ignore
+  }
+  try {
+    const person = await getActivePerson();
+    return outputDirFromPerson(person);
+  } catch {
+    return "Applications";
+  }
+}
+
 async function listJobFoldersFromDownloads() {
   if (!chrome.downloads?.search) return [];
+  const appsDir = await resolveAppsOutputDir();
+  const escaped = appsDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const folderAlt = `(?:${escaped}|Resume Applications|Applications-[^\\\\/]+)`;
   let results = [];
   try {
     results = await chrome.downloads.search({
-      filenameRegex: "Resume Applications[\\\\/]\\d+\\s+-\\s+",
+      filenameRegex: `${folderAlt}[\\\\/]\\d+\\s+-\\s+`,
       limit: 1000,
       orderBy: ["-startTime"]
     });
@@ -144,43 +168,59 @@ async function listJobFoldersFromDownloads() {
     results = [];
   }
   const byRow = new Map();
+  const pathRe = new RegExp(
+    `(?:${escaped}|Resume Applications|Applications-[^/]+)\\/(\\d+)\\s+-\\s+[^/]+`,
+    "i"
+  );
   for (const row of results || []) {
     const path = String(row?.filename || "").replace(/\\/g, "/");
-    const match = path.match(/Resume Applications\/(\d+)\s+-\s+[^/]+/i);
+    const match = path.match(pathRe);
     if (!match) continue;
     const csvRow = Number(match[1]);
-    const folder = match[0].replace(/\//g, "/");
-    const name = folder.split("/").pop();
-    const prev = byRow.get(csvRow) || {
-      csvRow,
-      jobDir: `Resume Applications/${name}`,
-      name,
-      hasResume: false,
-      hasCover: false,
-      resumeName: "",
-      coverName: ""
-    };
+    const folder = match[0].replace(/\\/g, "/");
+    const parts = folder.split("/");
+    const name = parts.pop() || "";
+    const appsName = parts.pop() || appsDir;
+    const jobDir = `${appsName}/${name}`;
+    const isActiveApps = appsName.toLowerCase() === appsDir.toLowerCase();
+    const prev = byRow.get(csvRow);
+    if (prev && !isActiveApps) {
+      const prevIsActive = String(prev.jobDir || "").toLowerCase().startsWith(`${appsDir.toLowerCase()}/`);
+      if (prevIsActive) continue;
+    }
+    const next = prev && String(prev.jobDir) === jobDir
+      ? prev
+      : {
+          csvRow,
+          jobDir,
+          name,
+          hasResume: false,
+          hasCover: false,
+          resumeName: "",
+          coverName: ""
+        };
     const fileName = path.split("/").pop() || "";
     if (isResumeDownload(path)) {
-      prev.hasResume = true;
-      prev.resumeName = prev.resumeName || fileName;
+      next.hasResume = true;
+      next.resumeName = next.resumeName || fileName;
     }
     if (isCoverLetterDownload(path)) {
-      prev.hasCover = true;
-      prev.coverName = prev.coverName || fileName;
+      next.hasCover = true;
+      next.coverName = next.coverName || fileName;
     }
-    byRow.set(csvRow, prev);
+    byRow.set(csvRow, next);
   }
   return [...byRow.values()];
 }
 
 export async function listJobFoldersFromDisk() {
   try {
-    const res = await sendNativeMessage({ type: "list_job_folders" });
+    const appsDir = await resolveAppsOutputDir();
+    const res = await sendNativeMessage({ type: "list_job_folders", outputDir: appsDir });
     if (res?.ok && Array.isArray(res.folders)) {
       return res.folders.map((f) => ({
         csvRow: Number(f.csvRow),
-        jobDir: toStoredJobDir(f.folder || f.name),
+        jobDir: toStoredJobDir(f.folder || f.name, appsDir),
         absPath: f.folder || "",
         name: f.name || folderSegment(f.folder),
         hasResume: Boolean(f.hasResume),
@@ -446,10 +486,12 @@ async function readPdfViaNative(absPath, fallbackName) {
 
 async function loadDocsFromNativeHost({ csvRow, jobDir } = {}) {
   try {
+    const appsDir = await resolveAppsOutputDir();
     const found = await sendNativeMessage({
       type: "read_job_docs",
       csvRow: hasCsvRow(csvRow) ? Number(csvRow) : "",
-      jobDir: String(jobDir || "").trim()
+      jobDir: String(jobDir || "").trim(),
+      outputDir: appsDir
     });
     if (!found?.ok) return null;
     const resume =

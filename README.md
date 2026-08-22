@@ -9,7 +9,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
 - **CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / LI / Etc / All**. **Dice jobs** always interleaved generate → auto-apply+submit (Start also applies already-built not-Applied Dice rows); non-Dice jobs only build files.
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
-- Saves under `Downloads / [output folder] / [N] - [Company] - [Title] /` (only these three files):
+- Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
   - `[Name]_Resume.pdf` (US senior templates — ATS, Silicon Valley, consulting, NYC finance, executive)
   - `[Name]_Cover Letter.pdf` (body + signature only — no top header block)
@@ -131,13 +131,13 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 ## Output folder naming
 
 ```
-Downloads / Resume Applications / 12 - Acme Inc - Senior Salesforce Developer /
+Downloads / Applications-Lewis / 12 - Acme Inc - Senior Salesforce Developer /
   jd.txt
-  Sandeep_Resume.pdf
-  Sandeep_Cover Letter.pdf
+  Lewis_Resume.pdf
+  Lewis_Cover Letter.pdf
 ```
 
-Manual one-off jobs (no CSV row) still use `Company - Title` without the numeric prefix.
+The output folder follows the active person (`Applications-{ResumePrefix}` from the PDF prefix, e.g. `Lewis_Resume` → `Applications-Lewis`). Legacy `Resume Applications` folders are still found for Apply.
 
 ## Notes
 

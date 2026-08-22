@@ -107,7 +107,13 @@ def is_allowed_pdf(path: Path) -> bool:
         return False
     parts = [p.lower() for p in resolved.parts]
     blob = " ".join(parts)
-    return "downloads" in parts or "download" in parts or "resume applications" in blob
+    return (
+        "downloads" in parts
+        or "download" in parts
+        or "resume applications" in blob
+        or any(p.startswith("applications-") for p in parts)
+        or any(p.startswith("applications-") for p in blob.split())
+    )
 
 
 def pick_pdfs(folder: Path) -> tuple:
@@ -131,9 +137,43 @@ def pick_pdfs(folder: Path) -> tuple:
     return resume, cover
 
 
-def find_job_folder(csv_row, job_dir: str):
+def apps_search_roots(output_dir: str = ""):
+    """Prefer the active output folder, then legacy Resume Applications and any Applications-*."""
     downloads = downloads_root()
-    apps = downloads / "Resume Applications"
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        try:
+            key = str(path.resolve()).lower()
+        except OSError:
+            key = str(path).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        if path.is_dir():
+            roots.append(path)
+
+    od = str(output_dir or "").strip().replace("/", os.sep).replace("\\", os.sep)
+    if od:
+        candidate = Path(od)
+        if not candidate.is_absolute():
+            candidate = downloads / od
+        add(candidate)
+
+    add(downloads / "Resume Applications")
+    if downloads.is_dir():
+        try:
+            for child in downloads.iterdir():
+                if child.is_dir() and child.name.lower().startswith("applications-"):
+                    add(child)
+        except OSError:
+            pass
+    return roots
+
+
+def find_job_folder(csv_row, job_dir: str, output_dir: str = ""):
+    downloads = downloads_root()
     prefix = ""
     try:
         if csv_row is not None and str(csv_row).strip() != "":
@@ -158,10 +198,8 @@ def find_job_folder(csv_row, job_dir: str):
         if candidate and candidate.is_dir() and matches_row(candidate):
             return candidate
 
-    search_roots = []
-    if apps.is_dir():
-        search_roots.append(apps)
-    if downloads.is_dir():
+    search_roots = apps_search_roots(output_dir)
+    if downloads.is_dir() and downloads not in search_roots:
         search_roots.append(downloads)
 
     matches = []
@@ -231,14 +269,15 @@ def pdf_to_doc(path):
     }
 
 
-def handle_read_job_docs(csv_row, job_dir: str) -> None:
-    folder = find_job_folder(csv_row, job_dir)
+def handle_read_job_docs(csv_row, job_dir: str, output_dir: str = "") -> None:
+    folder = find_job_folder(csv_row, job_dir, output_dir)
     if not folder:
+        label = str(output_dir or "").strip() or "Applications-*"
         send_message(
             {
                 "type": "job_docs",
                 "ok": False,
-                "error": f"No folder for row {csv_row or '?'} under Downloads / Resume Applications.",
+                "error": f"No folder for row {csv_row or '?'} under Downloads / {label}.",
             }
         )
         return
@@ -271,10 +310,16 @@ def handle_read_job_docs(csv_row, job_dir: str) -> None:
     send_message(payload)
 
 
-def handle_list_job_folders() -> None:
-    apps = downloads_root() / "Resume Applications"
+def handle_list_job_folders(output_dir: str = "") -> None:
     folders = []
-    if apps.is_dir():
+    roots = apps_search_roots(output_dir)
+    # Prefer the active person folder only when it exists, so row numbers don't collide across people.
+    od = str(output_dir or "").strip()
+    if od:
+        preferred = roots[0] if roots else None
+        if preferred and preferred.is_dir():
+            roots = [preferred]
+    for apps in roots:
         try:
             children = list(apps.iterdir())
         except OSError:
@@ -366,9 +411,13 @@ def main() -> int:
         elif mtype == "read_file":
             handle_read_file(str(msg.get("path") or ""))
         elif mtype == "read_job_docs":
-            handle_read_job_docs(msg.get("csvRow"), str(msg.get("jobDir") or ""))
+            handle_read_job_docs(
+                msg.get("csvRow"),
+                str(msg.get("jobDir") or ""),
+                str(msg.get("outputDir") or ""),
+            )
         elif mtype == "list_job_folders":
-            handle_list_job_folders()
+            handle_list_job_folders(str(msg.get("outputDir") or ""))
         elif mtype == "stop":
             break
         else:

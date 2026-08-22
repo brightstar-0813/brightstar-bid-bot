@@ -18,6 +18,7 @@ import {
   getAutofillContact,
   resolveExperienceRulesForPerson
 } from "./profiles.js";
+import { outputDirFromPerson } from "./resume-profile.js";
 import {
   setLastGeneratedDocs,
   startAutofillOnTab,
@@ -528,7 +529,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         generation_running: true,
         generation_heartbeat: Date.now()
       });
-      const outputDir = data.batch_output_dir || "Resume Applications";
+      const outputDir = await resolveOutputDir(data.batch_output_dir);
       isRunning = true;
       runBatchLoop(outputDir).catch(async (err) => {
         isRunning = false;
@@ -631,7 +632,7 @@ async function resumeBatchIfInterrupted(wasRunning) {
 
   isRunning = true;
   await setStatus("Resuming interrupted batch…");
-  runBatchLoop(data.batch_output_dir || "Resume Applications").catch(async (err) => {
+  runBatchLoop(await resolveOutputDir(data.batch_output_dir)).catch(async (err) => {
     isRunning = false;
     await setStatus(`Auto-resume failed: ${String(err?.message || err)}`);
     await chrome.storage.local.set({ generation_running: false });
@@ -1301,6 +1302,25 @@ function sanitizePathSegment(value, fallback = "untitled") {
   return cleaned || fallback;
 }
 
+/** Prefer explicit dir, then stored settings, then Applications-{person}. */
+async function resolveOutputDir(explicit = "") {
+  const fromArg = String(explicit || "").trim();
+  if (fromArg) return sanitizePathSegment(fromArg, fromArg);
+  try {
+    const data = await chrome.storage.local.get(["output_dir", "batch_output_dir"]);
+    const stored = String(data.output_dir || data.batch_output_dir || "").trim();
+    if (stored) return sanitizePathSegment(stored, stored);
+  } catch {
+    // ignore
+  }
+  try {
+    const person = await getActivePerson();
+    return sanitizePathSegment(outputDirFromPerson(person), "Applications");
+  } catch {
+    return "Applications";
+  }
+}
+
 function joinDownloadPath(...parts) {
   return parts
     .map((part) => String(part || "").replace(/^\/+|\/+$/g, "").replace(/\\/g, "/"))
@@ -1670,7 +1690,7 @@ function outputNameToken(jobMeta = {}, resumeData = {}) {
 async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
   // Style comes from the selected Brightstar template; content comes from resume JSON.
   const templateId = jobMeta.templateId || "times-classic";
-  const outputDir = sanitizePathSegment(jobMeta.outputDir || "Resume Applications", "Resume Applications");
+  const outputDir = await resolveOutputDir(jobMeta.outputDir);
   const jobFolder = buildJobFolderName(jobMeta);
   const jobDir = joinDownloadPath(outputDir, jobFolder);
   const nameToken = outputNameToken(jobMeta, resumeData);
@@ -4159,7 +4179,7 @@ async function runBatchLoop(outputDir) {
   await setBatchState("running");
   await chrome.storage.local.set({
     generation_running: true,
-    batch_output_dir: outputDir || "Resume Applications",
+    batch_output_dir: outputDir || (await resolveOutputDir()),
     generation_heartbeat: Date.now()
   });
   startKeepAlive();
@@ -4261,7 +4281,7 @@ async function runBatchLoop(outputDir) {
               failed,
               skipped,
               total: queue.length,
-              outputDir: outputDir || "Resume Applications",
+              outputDir: outputDir || (await resolveOutputDir()),
               errors: failedJobs.map((j) => ({
                 csvRow: j.csvRow,
                 company: j.company,
@@ -4331,7 +4351,7 @@ async function runBatchLoop(outputDir) {
         jdLink: next.jdLink || "",
         jdText: next.jdText || "",
         salary: next.salary || "",
-        outputDir: outputDir || "Resume Applications"
+        outputDir: outputDir || (await resolveOutputDir())
       };
 
       try {
@@ -4772,7 +4792,7 @@ async function ingestCsvText({
     if (person?.promptTemplate?.includes("{JD}")) {
       isRunning = true;
       started = true;
-      const outputDir = data.batch_output_dir || "Resume Applications";
+      const outputDir = await resolveOutputDir(data.batch_output_dir);
       (async () => {
         await recoverInterruptedBatch("CSV auto-source starting batch…", {
           retryFailed: true
@@ -5434,7 +5454,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             jdLink: job.jdLink || "",
             jdText: job.jdText || "",
             salary: job.salary || "",
-            outputDir: "Resume Applications",
+            outputDir: outputDirFromPerson(person),
             templateId: await pickTemplateId({}, person),
             resumeFilePrefix: person.resumeFilePrefix
           },
@@ -5492,7 +5512,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           error: "",
           jobDir: job.jobDir || ""
         });
-        const outputDir = message.outputDir || "Resume Applications";
+        const outputDir = await resolveOutputDir(message.outputDir);
         if (isRunning) {
           safeSendResponse(sendResponse, {
             ok: true,
@@ -5537,7 +5557,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             : j
         );
         await setQueue(next);
-        const outputDir = message.outputDir || "Resume Applications";
+        const outputDir = await resolveOutputDir(message.outputDir);
         if (isRunning) {
           safeSendResponse(sendResponse, {
             ok: true,
@@ -5577,7 +5597,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // rows that hit the attempt ceiling a fresh set of attempts.
       await recoverInterruptedBatch("Starting batch…", { retryFailed: true }).catch(() => {});
       isRunning = true;
-      await runBatchLoop(message.outputDir || "Resume Applications");
+      await runBatchLoop(await resolveOutputDir(message.outputDir));
     })().catch(async (err) => {
       isRunning = false;
       stopKeepAlive();

@@ -351,6 +351,24 @@ export function resumeFilePrefixFromName(name) {
   return first ? `${first}_Resume` : "Resume";
 }
 
+/** Downloads subfolder for a person, e.g. Lewis_Resume / "D'mario Lewis" → Applications-Lewis */
+export function outputDirFromPerson(person = {}) {
+  const prefix = String(person?.resumeFilePrefix || "").trim();
+  let token = prefix
+    .replace(/_?(Resume|resume)$/i, "")
+    .replace(/_+$/, "")
+    .replace(/[^A-Za-z0-9]+/g, "");
+  if (!token) {
+    const parts = String(person?.name || person?.label || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const last = parts.length ? parts[parts.length - 1] : "";
+    token = last.replace(/[^A-Za-z0-9]+/g, "");
+  }
+  return `Applications-${token || "Applicant"}`;
+}
+
 export function namesLikelyDifferent(a, b) {
   const norm = (v) =>
     String(v || "")

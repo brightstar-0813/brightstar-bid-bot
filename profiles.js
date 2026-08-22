@@ -1,4 +1,5 @@
 import { PROMPT as dmarioLewisPrompt } from "./prompts/dmario-lewis.js";
+import { PROMPT as edrwinRevolorioPrompt } from "./prompts/edrwin-revolorio.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
@@ -47,6 +48,41 @@ export const BUILTIN_PROFILES = [
       "Christian Reformed Church in North America",
       "Bostwick Lake Congregation UCC",
       "Wolverine World Wide"
+    ]
+  },
+  {
+    id: "edrwin-revolorio",
+    label: "Edrwin Revolorio (Salesforce)",
+    promptTemplate: edrwinRevolorioPrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Revolorio_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "Edrwin Revolorio",
+    email: "edrwin.revolorio1996@outlook.com",
+    phone: "+1 (713) 659-9480",
+    linkedin: "https://www.linkedin.com/in/edwin-revolorio/",
+    location: "Indianapolis, Indiana, United States",
+    address: "1633 Deloss St",
+    zip: "46201",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Engineer | Technical Lead",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Accenture",
+      "Capgemini",
+      "Appirio",
+      "Innoit",
+      "Indiana University Serve IT Clinic"
     ]
   },
   {

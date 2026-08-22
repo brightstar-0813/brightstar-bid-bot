@@ -8,7 +8,7 @@
  */
 (() => {
   const DOUBLE_TAP_MS = 500;
-  const DEFAULT_OUTPUT_DIR = "Resume Applications";
+  const DEFAULT_OUTPUT_DIR = "Applications";
   const DEFAULT_TEMPLATE_ID = "times-classic";
 
   let lastCtrlTap = 0;

@@ -27,6 +27,7 @@ import {
   extractProfileFromResumeText,
   parseEmployersFromResume,
   resumeFilePrefixFromName,
+  outputDirFromPerson,
   namesLikelyDifferent
 } from "./resume-profile.js";
 import {
@@ -43,7 +44,7 @@ import {
   loadBundledQaBank
 } from "./qa-store.js";
 
-const DEFAULT_OUTPUT_DIR = "Resume Applications";
+const DEFAULT_OUTPUT_DIR = "Applications";
 const QUEUE_KEY = "job_queue";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
@@ -869,11 +870,19 @@ async function refreshTemplates(selectedId) {
   populateTemplateSelect(preferred);
 }
 
+async function syncOutputDirFromPerson(person) {
+  const next = outputDirFromPerson(person);
+  if (outputDirEl) outputDirEl.value = next;
+  await chrome.storage.local.set({ output_dir: next, batch_output_dir: next });
+  return next;
+}
+
 async function loadActivePersonIntoForm() {
   const person = await getActivePerson();
   fillPersonForm(person);
   syncSaveButtonLabels();
   syncActivePersonChip();
+  await syncOutputDirFromPerson(person);
 }
 
 async function persistJobFields() {
@@ -948,7 +957,10 @@ async function loadSettings() {
   companyNameEl.value = data.last_company_name || "";
   jdLinkEl.value = data.last_jd_link || "";
   jdTextEl.value = data.last_jd_text || "";
-  outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
+  // Output folder follows the active person (Applications-Lewis, …); loadActivePersonIntoForm already synced it.
+  if (!String(outputDirEl.value || "").trim()) {
+    outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
+  }
   spreadsheetUrlEl.value = data.spreadsheet_url || "";
   sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
@@ -1813,6 +1825,7 @@ async function savePerson({ asNew = false, successMessage = "" } = {}) {
       }),
       experience_validation_person: saved.name || saved.label || ""
     });
+    await syncOutputDirFromPerson(saved);
     await refreshProfiles(saved.id);
     fillPersonForm({ ...saved, builtin: false });
 
