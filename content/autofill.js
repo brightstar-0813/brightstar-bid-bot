@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-19.03";
+  const SCRIPT_BUILD = "2026-08-23.01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -4234,10 +4234,48 @@
   const EASY_ENTRY_RE =
     /\b(easy apply|1-?click apply|one-?click apply|quick apply|apply with|apply now|apply)\b/i;
 
+  const ACTION_CONTROL_SEL =
+    'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"], a[class*="btn"], a[class*="button"], [class*="btn"][class*="submit"], [data-testid*="submit"], [data-cy*="submit"], [data-qa*="submit"]';
+
   function elActionText(el) {
-    return cleanLabelText(
-      el.textContent || el.value || el.getAttribute?.("aria-label") || ""
+    if (!el) return "";
+    const aria = cleanLabelText(
+      el.getAttribute?.("aria-label") || el.getAttribute?.("title") || ""
     );
+    const value = cleanLabelText(el.value || "");
+    // innerText prefers visible text; textContent alone often is whitespace/SVG junk
+    // which blocked falling through to aria-label ( falsy "" after trim never ran).
+    const inner = cleanLabelText(el.innerText || "");
+    const raw = cleanLabelText(el.textContent || "");
+    const testId = cleanLabelText(
+      el.getAttribute?.("data-testid") ||
+        el.getAttribute?.("data-cy") ||
+        el.getAttribute?.("data-qa") ||
+        ""
+    );
+    if (aria && aria.length <= 100) return aria;
+    if (value && value.length <= 100) return value;
+    if (inner && inner.length <= 140) return inner;
+    if (raw && raw.length <= 140) return raw;
+    if (/submit|next|continue|apply|review/i.test(testId)) return testId.replace(/[-_]/g, " ");
+    return aria || value || inner || raw.slice(0, 80) || "";
+  }
+
+  function looksLikeSubmitControl(el, text = "") {
+    const t = text || elActionText(el);
+    if (EASY_SUBMIT_RE.test(t)) return true;
+    if (String(el?.getAttribute?.("type") || "").toLowerCase() === "submit") return true;
+    const blob = [
+      el?.getAttribute?.("aria-label"),
+      el?.getAttribute?.("data-testid"),
+      el?.getAttribute?.("data-cy"),
+      el?.getAttribute?.("data-qa"),
+      el?.id,
+      el?.className
+    ]
+      .map((x) => String(x || ""))
+      .join(" ");
+    return /\bsubmit\b/i.test(blob);
   }
 
   function isElVisible(el) {
@@ -4247,7 +4285,9 @@
       return false;
     }
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    // Sticky footers can briefly report 0 height while painting; allow type=submit / aria Submit.
+    if (rect.width > 0 && rect.height > 0) return true;
+    return looksLikeSubmitControl(el);
   }
 
   function isElEnabled(el) {
@@ -4300,10 +4340,21 @@
    */
   function findActionButton(scope) {
     function collectFrom(scopeEl) {
-      const buttons = queryAllDeep(
-        'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
-        scopeEl
-      ).filter((el) => isElVisible(el));
+      const seen = new Set();
+      const buttons = [];
+      for (const el of queryAllDeep(ACTION_CONTROL_SEL, scopeEl)) {
+        if (seen.has(el) || !isElVisible(el)) continue;
+        seen.add(el);
+        buttons.push(el);
+      }
+      // Catch plain links labeled Submit/Next that lack role=button / btn classes.
+      for (const el of queryAllDeep("a", scopeEl)) {
+        if (seen.has(el) || !isElVisible(el)) continue;
+        const text = elActionText(el);
+        if (!classifyActionButton(text) && !looksLikeSubmitControl(el, text)) continue;
+        seen.add(el);
+        buttons.push(el);
+      }
 
       let next = null;
       let review = null;
@@ -4312,8 +4363,8 @@
         const text = elActionText(btn);
         // Keep disabled Submit visible in the snapshot (Dice enables it late);
         // skip other disabled controls.
-        if (!isElEnabled(btn) && !EASY_SUBMIT_RE.test(text)) continue;
-        if (!text && btn.getAttribute?.("type") === "submit") {
+        if (!isElEnabled(btn) && !looksLikeSubmitControl(btn, text)) continue;
+        if (!text && looksLikeSubmitControl(btn, text)) {
           if (!submit) submit = { type: "submit", el: btn, text: "Submit" };
           continue;
         }
@@ -4323,7 +4374,9 @@
         const cls = classifyActionButton(text);
         if (cls === "next" && !next) next = { type: "next", el: btn, text };
         else if (cls === "review" && !review) review = { type: "review", el: btn, text };
-        else if (cls === "submit" && !submit) submit = { type: "submit", el: btn, text };
+        else if ((cls === "submit" || looksLikeSubmitControl(btn, text)) && !submit) {
+          submit = { type: "submit", el: btn, text: text || "Submit" };
+        }
       }
       return { next, review, submit };
     }
@@ -4464,18 +4517,16 @@
       if (scopeEl !== document) roots.push(document);
       let match = null;
       for (const root of roots) {
-        const buttons = queryAllDeep(
-          'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"]',
-          root
-        ).filter((el) => {
+        const buttons = queryAllDeep(ACTION_CONTROL_SEL, root).filter((el) => {
           const text = elActionText(el);
-          if (preferredType === "submit" && EASY_SUBMIT_RE.test(text)) return isElVisible(el);
+          if (preferredType === "submit" && looksLikeSubmitControl(el, text)) return isElVisible(el);
           return isElVisible(el) && isElEnabled(el);
         });
         match = buttons.find((btn) => {
           const text = elActionText(btn);
           const cls = classifyActionButton(text);
           if (preferredType === "entry") return EASY_ENTRY_RE.test(text);
+          if (preferredType === "submit") return cls === "submit" || looksLikeSubmitControl(btn, text);
           return cls === preferredType;
         });
         if (match) break;

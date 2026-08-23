@@ -670,6 +670,11 @@ input[type="file"]::file-selector-button {
   background: rgba(245, 197, 66, 0.04);
 }
 
+.queue-item.is-current {
+  background: rgba(245, 197, 66, 0.1);
+  box-shadow: inset 3px 0 0 var(--gold-bright);
+}
+
 .queue-item .csv-row {
   color: var(--gold);
   font-weight: 800;

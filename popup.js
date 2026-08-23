@@ -478,6 +478,8 @@ const qaImportInput = document.getElementById("qaImportInput");
 let profilesCache = [];
 let templatesCache = [];
 let queueCache = [];
+let lastStatusText = "";
+let lastQueueFollowRow = null;
 let allUsJobsCache = [];
 let channelFilter = DEFAULT_CHANNEL_FILTER;
 let batchState = "idle";
@@ -489,6 +491,7 @@ if (personResumeFileEl) {
 
 function setStatus(message) {
   const text = String(message || "").trim();
+  lastStatusText = text;
   statusEl.textContent = text || "Ready";
   statusEl.classList.remove("is-idle", "is-ok", "is-warn", "is-err");
   if (!text) {
@@ -1204,6 +1207,34 @@ function badgeClass(status) {
   return "badge badge-pending";
 }
 
+/** CSV row the batch is actively generating or Dice-applying (status line or running badge). */
+function resolveCurrentWorkCsvRow() {
+  const running = queueCache.find((j) => j.status === "running");
+  if (running?.csvRow != null && running.csvRow !== "") return Number(running.csvRow);
+  const m = String(lastStatusText || "").match(/\brow\s+(\d+)\b/i);
+  return m ? Number(m[1]) : null;
+}
+
+/** Keep the queue list scrolled to the job currently being worked. */
+function followQueueToCurrentWork({ force = false } = {}) {
+  if (!queueListEl) return;
+  const row = resolveCurrentWorkCsvRow();
+  if (row == null || !Number.isFinite(row)) {
+    lastQueueFollowRow = null;
+    return;
+  }
+  const el = queueListEl.querySelector(`.queue-item[data-csv-row="${row}"]`);
+  if (!el) return;
+  const busy = batchState === "running" || document.body.classList.contains("is-busy");
+  if (!busy && !force) return;
+  const rowChanged = lastQueueFollowRow !== row;
+  lastQueueFollowRow = row;
+  // Re-render rebuilds the list (scroll resets); nearest is a no-op when already visible.
+  requestAnimationFrame(() => {
+    el.scrollIntoView({ block: "nearest", behavior: rowChanged ? "smooth" : "auto" });
+  });
+}
+
 function renderQueue() {
   queueListEl.innerHTML = "";
   if (!queueCache.length) {
@@ -1211,13 +1242,19 @@ function renderQueue() {
     empty.className = "queue-empty";
     empty.innerHTML = "<p>Queue is empty</p><span>Upload a jobs CSV to start a batch</span>";
     queueListEl.appendChild(empty);
+    lastQueueFollowRow = null;
     return;
   }
+
+  const currentRow = resolveCurrentWorkCsvRow();
 
   for (const job of queueCache) {
     const item = document.createElement("div");
     item.className = "queue-item";
     item.dataset.csvRow = String(job.csvRow);
+    if (currentRow != null && Number(job.csvRow) === currentRow) {
+      item.classList.add("is-current");
+    }
 
     const rowEl = document.createElement("div");
     rowEl.className = "csv-row";
@@ -1330,6 +1367,8 @@ function renderQueue() {
     item.appendChild(actions);
     queueListEl.appendChild(item);
   }
+
+  followQueueToCurrentWork();
 }
 
 async function persistQueue() {
@@ -2572,6 +2611,8 @@ setInterval(async () => {
     BATCH_STATE_KEY,
     "csv_source_settings"
   ]);
+  batchState = data[BATCH_STATE_KEY] || "idle";
+  setBusy(Boolean(data.generation_running) || batchState === "running");
   if (typeof data.generation_status === "string") {
     setStatus(data.generation_status);
   }
@@ -2592,9 +2633,9 @@ setInterval(async () => {
     });
     renderQueue();
     updateCsvSummaryFromQueue();
+  } else {
+    followQueueToCurrentWork();
   }
-  batchState = data[BATCH_STATE_KEY] || "idle";
-  setBusy(Boolean(data.generation_running) || batchState === "running");
   if (data.csv_source_settings && csvSourceStatusEl) {
     const s = data.csv_source_settings;
     const when = s.lastIngestAt ? new Date(s.lastIngestAt).toLocaleString() : "";

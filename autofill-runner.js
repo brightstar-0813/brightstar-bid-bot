@@ -35,8 +35,9 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-19.03";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-23.01";
 const APPLY_SETTLE_MS = 2200;
+const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
 let lastFocusedNormalWindowId = null;
 
@@ -668,6 +669,20 @@ export function waitForTabComplete(tabId, timeoutMs = 30000) {
 }
 
 export async function getCurrentApplicationTab() {
+  // Prefer the tab we last opened/used for apply (side panel / popup focus steals "active").
+  try {
+    const stored = await chrome.storage.local.get(LAST_APPLY_TAB_KEY);
+    const rememberedId = Number(stored[LAST_APPLY_TAB_KEY]);
+    if (Number.isFinite(rememberedId) && rememberedId > 0) {
+      const remembered = await chrome.tabs.get(rememberedId).catch(() => null);
+      if (remembered?.id != null && /^https?:\/\//i.test(remembered.url || "")) {
+        return remembered;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   const normalWindows = await chrome.windows.getAll({
     populate: true,
     windowTypes: ["normal"]
@@ -697,7 +712,21 @@ export async function getCurrentApplicationTab() {
   }
 
   const httpTabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+  const applyLike =
+    httpTabs.find((t) => t.active && looksLikeApplicationUrl(t.url)) ||
+    httpTabs.find((t) => looksLikeApplicationUrl(t.url));
+  if (applyLike) return applyLike;
   return httpTabs.find((t) => t.active) || httpTabs[0] || null;
+}
+
+async function rememberApplyTab(tabId) {
+  const id = Number(tabId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  try {
+    await chrome.storage.local.set({ [LAST_APPLY_TAB_KEY]: id });
+  } catch {
+    /* ignore */
+  }
 }
 
 async function ensureAutofillScript(tabId) {
@@ -1018,6 +1047,14 @@ function pickBestApplyAction(frameResults = []) {
     }
     const br = rank[best.action.type] ?? 9;
     const cr = rank[cand.action.type] ?? 9;
+    // Prefer advancing (next/review) over submit, but once a form is open prefer Submit over leftover Apply.
+    if (best.action.type === "entry" && cand.action.type === "submit") {
+      best = cand;
+      continue;
+    }
+    if (cand.action.type === "entry" && best.action.type === "submit") {
+      continue;
+    }
     if (cr < br) best = cand;
     else if (cr === br && cand.isApplicationForm && !best.isApplicationForm) best = cand;
   }
@@ -1385,6 +1422,8 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     throw new Error("Cannot autofill Chrome system pages. Focus the job application tab.");
   }
 
+  await rememberApplyTab(tab.id);
+
   if (tab.status === "loading") {
     try {
       await waitForTabComplete(tab.id, 25000);
@@ -1456,6 +1495,8 @@ export async function startMultiStepApplyOnTab(
   if (!/^https?:\/\//i.test(tab.url || "")) {
     throw new Error("The current tab is not a web page. Open the application form, then click Apply.");
   }
+
+  await rememberApplyTab(tab.id);
 
   let currentTabId = tab.id;
   const summary = {
@@ -1550,6 +1591,7 @@ export async function startMultiStepApplyOnTab(
       if (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry"))) {
         const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000);
         currentTabId = advanced.tabId;
+        await rememberApplyTab(currentTabId);
         if (advanced.applySuccess) {
           summary.status = "submitted";
           summary.detail = advanced.applySuccessText || "Your application is on its way";
@@ -1603,8 +1645,8 @@ export async function startMultiStepApplyOnTab(
 
     // Dice review step paints sticky footer Submit slightly after fill completes.
     if (!probe.best && probe.anyForm) {
-      for (let retry = 0; retry < 4 && !probe.best; retry += 1) {
-        await sleep(500);
+      for (let retry = 0; retry < 8 && !probe.best; retry += 1) {
+        await sleep(450 + retry * 100);
         probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
         if (probe.applySuccess) {
           summary.status = "submitted";
@@ -1727,6 +1769,7 @@ export async function startMultiStepApplyOnTab(
 
     const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 15000);
     currentTabId = advanced.tabId;
+    await rememberApplyTab(currentTabId);
     summary.tabId = currentTabId;
 
     if (advanced.applySuccess) {
@@ -1841,6 +1884,7 @@ export async function openJobAndApply(
   const existing = await findExistingApplyTab(href);
   let tab = existing?.tab || null;
   if (tab?.id) {
+    await rememberApplyTab(tab.id);
     await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
     if (!existing.isWizard && jobId && /dice\.com/i.test(tab.url || href)) {
       await chrome.tabs.update(tab.id, { url: diceWizardUrl(jobId) });
@@ -1849,6 +1893,7 @@ export async function openJobAndApply(
   } else {
     const startUrl = jobId && /dice\.com/i.test(href) ? diceWizardUrl(jobId) : href;
     tab = await chrome.tabs.create({ url: startUrl, active: true });
+    await rememberApplyTab(tab.id);
     try {
       await waitForTabComplete(tab.id, 35000);
     } catch {
