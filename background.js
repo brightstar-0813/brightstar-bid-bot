@@ -878,12 +878,17 @@ function jobBelongsToPerson(job, person) {
   return person.id === DEFAULT_PROFILE_ID;
 }
 
-/** True when this employer was already built/applied/inactive for the SAME person. */
-async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, profileId } = {}) {
+/**
+ * True when this employer was already built/applied/inactive for the SAME person.
+ * The job's own Google Sheet "Ready" row must not count as a duplicate — generate
+ * appends that row before Dice interleaved apply runs.
+ */
+async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, excludeJdLink } = {}) {
   const companyKey = normalizeCompanyName(companyName);
   if (!companyKey) return { covered: false };
 
   const person = await getActivePerson().catch(() => null);
+  const selfLink = normalizeJobLink(excludeJdLink || "");
 
   const queue = await getQueue();
   for (const j of queue) {
@@ -902,10 +907,27 @@ async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, profileId }
   const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
   if (!spreadsheetUrl || !webAppUrl) return { covered: false };
   try {
-    const { companies } = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
-    if (buildKnownCompanySet(companies).has(companyKey)) {
-      return { covered: true, reason: "same company already on Google Sheet" };
+    const { companies, links, companyRows } = await fetchExistingSheetDedupKeys({
+      spreadsheetUrl,
+      webAppUrl
+    });
+
+    // Prefer company↔link pairs (redeployed web app): ignore this job's own sheet row.
+    if (Array.isArray(companyRows) && companyRows.length) {
+      for (const row of companyRows) {
+        if (normalizeCompanyName(row.company) !== companyKey) continue;
+        const rowLink = normalizeJobLink(row.link || "");
+        if (selfLink && rowLink && rowLink === selfLink) continue;
+        return { covered: true, reason: "same company already on Google Sheet" };
+      }
+      return { covered: false };
     }
+
+    // Legacy web app: company list only. If our JD link is already on the sheet,
+    // that company hit is almost certainly our own Ready row from generate — do not skip.
+    if (!buildKnownCompanySet(companies).has(companyKey)) return { covered: false };
+    if (selfLink && buildKnownLinkSet(links).has(selfLink)) return { covered: false };
+    return { covered: true, reason: "same company already on Google Sheet" };
   } catch {
     /* sheet check optional at apply time */
   }
@@ -923,13 +945,18 @@ async function runDiceInterleavedApply(jobMeta = {}) {
 
   const companyDup = await isCompanyAlreadyCovered(companyName, {
     excludeCsvRow: jobMeta.csvRow,
-    profileId: jobMeta.profileId
+    excludeJdLink: jdLink
   });
   if (companyDup.covered) {
+    const queueSnap = await getQueue().catch(() => []);
+    const prior = (queueSnap || []).find((j) => Number(j.csvRow) === Number(jobMeta.csvRow));
+    const recheckAfterReadySkip = isRetriableReadyRowCompanySkip(prior);
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
       applyAttempted: true,
       applyAttempts: MAX_DICE_APPLY_ATTEMPTS,
+      // Lock only when a Ready-row skip was retried and still looks like a real company dup.
+      companySheetSkipLocked: recheckAfterReadySkip || Boolean(prior?.companySheetSkipLocked),
       error: `Skipped — ${companyDup.reason}`
     }).catch(() => {});
     await setStatus(
@@ -941,6 +968,15 @@ async function runDiceInterleavedApply(jobMeta = {}) {
       tabId: null,
       needsPause: false
     };
+  }
+
+  // Clearing a prior false-positive Ready-row company skip so apply can proceed.
+  if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+    await updateQueueJob(jobMeta.csvRow, {
+      error: "",
+      companySheetSkipLocked: false,
+      applyAttempts: prevAttempts < MAX_DICE_APPLY_ATTEMPTS ? prevAttempts : 0
+    }).catch(() => {});
   }
 
   if (!jdLink) {
@@ -1118,16 +1154,28 @@ function diceApplyAttemptCount(j) {
   return j.applyAttempted ? 1 : 0;
 }
 
+/** Prior skip from treating this job's own Ready sheet row as a company duplicate. */
+function isRetriableReadyRowCompanySkip(j) {
+  return (
+    Boolean(j) &&
+    !j.companySheetSkipLocked &&
+    /^Skipped — same company already on Google Sheet/i.test(String(j.error || ""))
+  );
+}
+
 function isDiceApplyBacklogJob(j, person = null) {
   if (
     !(j.isDice || isDiceJob(j)) ||
     j.status !== "done" ||
     j.applied ||
     j.inactive ||
-    diceApplyAttemptCount(j) >= MAX_DICE_APPLY_ATTEMPTS ||
     !Boolean(j.jobDir || j.hasFiles) ||
     !String(j.jdLink || "").trim()
   ) {
+    return false;
+  }
+  const attempts = diceApplyAttemptCount(j);
+  if (attempts >= MAX_DICE_APPLY_ATTEMPTS && !isRetriableReadyRowCompanySkip(j)) {
     return false;
   }
   if (person) return jobBelongsToPerson(j, person);

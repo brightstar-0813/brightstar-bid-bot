@@ -17,6 +17,7 @@
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
  * Dedup: same job link OR same company (normalized) is treated as duplicate.
+ * Apply-time company check ignores this job's own Ready row (companyRows / matching link).
  */
 function doPost(e) {
   try {
@@ -32,10 +33,12 @@ function doPost(e) {
     if (action === "listlinks" || action === "list_links") {
       const links = collectJobLinks_(sheet);
       const companies = collectCompanies_(sheet);
+      const companyRows = collectCompanyLinkPairs_(sheet);
       return json_({
         ok: true,
         links: links,
         companies: companies,
+        companyRows: companyRows,
         count: links.length,
         companyCount: companies.length
       });
@@ -146,7 +149,7 @@ function rowLooksLikeHeader_(row) {
     .join(" ");
   if (!joined) return false;
   if (/https?:\/\//i.test(joined)) return false;
-  return /\b(link|title|company|status|date|salary)\b/.test(joined);
+  return /\b(link|title|company|compay|status|date|salary)\b/.test(joined);
 }
 
 function cellLooksLikeUrl_(value) {
@@ -209,7 +212,8 @@ function companyColumnIndex_(headerRow) {
       .trim()
       .toLowerCase();
   });
-  var names = ["company", "company name", "employer", "organization", "org"];
+  // Include common typo "compay" (seen on some bid-tracking sheets).
+  var names = ["company", "compay", "company name", "employer", "organization", "org"];
   for (var i = 0; i < names.length; i++) {
     var idx = headers.indexOf(names[i]);
     if (idx >= 0) return idx;
@@ -245,6 +249,34 @@ function collectCompanies_(sheet) {
     if (!n || seen[n]) continue;
     seen[n] = true;
     out.push(raw);
+  }
+  return out;
+}
+
+/** Company + link pairs so apply-time dedupe can ignore this job's own Ready row. */
+function collectCompanyLinkPairs_(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return [];
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var companyCol = hasHeader ? companyColumnIndex_(values[0]) : 3;
+  var linkCol = hasHeader ? linkColumnIndex_(values[0]) : 4;
+  var out = [];
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    var company = String(row[companyCol] || "").trim();
+    if (!normalizeCompanyName_(company)) continue;
+    var link = String(row[linkCol] || "").trim();
+    if (!link) {
+      for (var c = 0; c < row.length; c++) {
+        var cell = String(row[c] || "").trim();
+        if (cellLooksLikeUrl_(cell)) {
+          link = cell;
+          break;
+        }
+      }
+    }
+    out.push({ company: company, link: link });
   }
   return out;
 }

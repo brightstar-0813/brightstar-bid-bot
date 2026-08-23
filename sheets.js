@@ -237,9 +237,16 @@ export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl })
 
   const links = Array.isArray(parsed?.links) ? parsed.links : [];
   const companies = Array.isArray(parsed?.companies) ? parsed.companies : [];
+  const companyRows = Array.isArray(parsed?.companyRows) ? parsed.companyRows : [];
   return {
     links: links.map((l) => String(l || "").trim()).filter(Boolean),
-    companies: companies.map((c) => String(c || "").trim()).filter(Boolean)
+    companies: companies.map((c) => String(c || "").trim()).filter(Boolean),
+    companyRows: companyRows
+      .map((row) => ({
+        company: String(row?.company || "").trim(),
+        link: String(row?.link || "").trim()
+      }))
+      .filter((row) => row.company)
   };
 }
 
