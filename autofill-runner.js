@@ -35,7 +35,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-23.01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-23.02";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -1097,9 +1097,59 @@ async function waitForDiceApplySuccess(tabId, timeoutMs = 20000) {
   return { ok: false, tabId, reason: "timeout" };
 }
 
+function looksLikeApplicationUrl(url) {
+  return /\b(apply|application|job-applications|easy-apply|jobapp|gh_jid)\b/i.test(String(url || ""));
+}
+
+function isDiceJobDetailUrl(url) {
+  return /dice\.com\/job-detail\//i.test(String(url || ""));
+}
+
+function isDiceWizardUrl(url) {
+  return /dice\.com\/job-applications\//i.test(String(url || ""));
+}
+
+/**
+ * Dice often opens a duplicate /job-detail/ tab with "Continue Application" while
+ * the real wizard (/job-applications/.../wizard) is already on Review + Submit.
+ * Adopting that tab looks like progress, then the batch dies with "could not advance".
+ */
+function shouldAdoptNewApplyTab(originUrl, newUrl, newProbe) {
+  if (newProbe?.applySuccess) return true;
+
+  const origin = String(originUrl || "");
+  const next = String(newUrl || "");
+
+  // Never leave an in-progress Dice wizard for a job-detail listing.
+  if (isDiceWizardUrl(origin) && isDiceJobDetailUrl(next)) return false;
+  if (isDiceJobDetailUrl(next) && !newProbe?.anyForm) return false;
+
+  const actionType = newProbe?.best?.action?.type || "";
+  if (newProbe?.anyForm && actionType && actionType !== "entry") return true;
+  if (isDiceWizardUrl(next)) return true;
+  if (looksLikeApplicationUrl(next) && (newProbe?.anyForm || Boolean(actionType))) return true;
+  return false;
+}
+
+async function maybeCloseSpuriousDiceDetailTab(originUrl, tab) {
+  if (!tab?.id) return;
+  const originId = diceJobIdFromUrl(originUrl);
+  const newId = diceJobIdFromUrl(tab.url || "");
+  if (
+    originId &&
+    newId &&
+    originId === newId &&
+    isDiceWizardUrl(originUrl) &&
+    isDiceJobDetailUrl(tab.url || "")
+  ) {
+    await chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
 async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
   const start = Date.now();
   const knownTabIds = new Set((await chrome.tabs.query({})).map((t) => t.id));
+  const originUrl = String(prevUrl || (await chrome.tabs.get(tabId).catch(() => null))?.url || "");
 
   while (Date.now() - start < timeoutMs) {
     await sleep(400);
@@ -1126,26 +1176,45 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
         /* continue */
       }
       const fresh = await chrome.tabs.get(t.id).catch(() => null);
-      if (fresh?.id && /^https?:\/\//i.test(fresh.url || "")) {
-        await chrome.tabs.update(fresh.id, { active: true }).catch(() => {});
-        const newProbe = await getApplyActionFromTab(fresh.id).catch(() => null);
-        if (newProbe?.applySuccess) {
-          return {
-            advanced: true,
-            tabId: fresh.id,
-            reason: "apply_success",
-            applySuccess: true,
-            applySuccessText: newProbe.applySuccessText || ""
-          };
-        }
-        return { advanced: true, tabId: fresh.id, reason: "new_tab" };
+      if (!(fresh?.id && /^https?:\/\//i.test(fresh.url || ""))) continue;
+
+      const newProbe = await getApplyActionFromTab(fresh.id).catch(() => null);
+      if (!shouldAdoptNewApplyTab(originUrl, fresh.url || "", newProbe)) {
+        // Mark seen so we don't keep re-probing; close same-job detail noise.
+        knownTabIds.add(fresh.id);
+        await maybeCloseSpuriousDiceDetailTab(originUrl, fresh);
+        // Keep focus on the wizard / original apply tab.
+        await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+        continue;
       }
+
+      await chrome.tabs.update(fresh.id, { active: true }).catch(() => {});
+      if (newProbe?.applySuccess) {
+        return {
+          advanced: true,
+          tabId: fresh.id,
+          reason: "apply_success",
+          applySuccess: true,
+          applySuccessText: newProbe.applySuccessText || ""
+        };
+      }
+      return { advanced: true, tabId: fresh.id, reason: "new_tab" };
     }
 
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab?.id) return { advanced: false, tabId, reason: "tab_gone" };
 
     if (tab.url && prevUrl && tab.url !== prevUrl) {
+      // Wizard → job-detail in the SAME tab is not useful progress.
+      if (isDiceWizardUrl(prevUrl) && isDiceJobDetailUrl(tab.url)) {
+        const wizard = diceWizardUrl(diceJobIdFromUrl(prevUrl) || diceJobIdFromUrl(tab.url));
+        if (wizard) {
+          await chrome.tabs.update(tabId, { url: wizard }).catch(() => {});
+          await waitForTabComplete(tabId, 20000).catch(() => {});
+          await sleep(500);
+        }
+        continue;
+      }
       if (tab.status === "loading") {
         try {
           await waitForTabComplete(tabId, 20000);
@@ -1783,6 +1852,29 @@ export async function startMultiStepApplyOnTab(
     } else {
       noAdvance += 1;
       if (noAdvance >= 2) {
+        // Still on the wizard with Submit visible — try final submit once before pausing.
+        if (autoSubmit) {
+          const lastProbe = await getApplyActionFromTab(currentTabId).catch(() => null);
+          if (lastProbe?.best?.action?.type === "submit") {
+            await setApplyStatus(
+              `Apply: retrying Submit (${lastProbe.best.action.text || "Submit"})...`
+            );
+            const submitRes = await sendMessageToTab(
+              currentTabId,
+              { type: "click_apply_action", preferredType: "submit", autoSubmit: true },
+              { attempts: 2, frameId: lastProbe.best.frameId }
+            ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
+            if (submitRes?.clicked || submitRes?.submitted) {
+              const confirmed = await waitForDiceApplySuccess(currentTabId, 20000);
+              if (confirmed.ok) {
+                summary.status = "submitted";
+                summary.detail = confirmed.text || "Your application is on its way";
+                summary.tabId = currentTabId;
+                return summary;
+              }
+            }
+          }
+        }
         summary.status = "needs_review";
         summary.detail =
           "Could not advance past this step (a required field or CAPTCHA likely needs your input).";
@@ -1822,10 +1914,6 @@ async function findExistingDiceApplyTab(jdLink) {
   const detail = tabs.find((t) => (t.url || "").includes(`/job-detail/${id}`));
   if (detail) return { tab: detail, isWizard: false };
   return null;
-}
-
-function looksLikeApplicationUrl(url) {
-  return /\b(apply|application|job-applications|easy-apply|jobapp|gh_jid)\b/i.test(String(url || ""));
 }
 
 async function findExistingApplyTab(jdLink) {

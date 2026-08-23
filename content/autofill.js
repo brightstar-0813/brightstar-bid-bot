@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-23.01";
+  const SCRIPT_BUILD = "2026-08-23.02";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -4232,7 +4232,7 @@
     /\b(submit(\s+application)?|send(\s+application)?|finish(\s+application)?|complete(\s+application)?|apply\s+now|confirm\s+(and\s+)?submit)\b/i;
   const EASY_BACK_RE = /\b(back|previous|cancel|close|dismiss|return)\b/i;
   const EASY_ENTRY_RE =
-    /\b(easy apply|1-?click apply|one-?click apply|quick apply|apply with|apply now|apply)\b/i;
+    /\b(easy apply|1-?click apply|one-?click apply|quick apply|continue(\s+your)?\s+application|apply with|apply now|apply)\b/i;
 
   const ACTION_CONTROL_SEL =
     'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"], a[class*="btn"], a[class*="button"], [class*="btn"][class*="submit"], [data-testid*="submit"], [data-cy*="submit"], [data-qa*="submit"]';
