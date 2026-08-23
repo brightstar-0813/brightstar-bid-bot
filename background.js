@@ -16,7 +16,8 @@ import {
   buildPrompt,
   getActivePerson,
   getAutofillContact,
-  resolveExperienceRulesForPerson
+  resolveExperienceRulesForPerson,
+  DEFAULT_PROFILE_ID
 } from "./profiles.js";
 import { outputDirFromPerson } from "./resume-profile.js";
 import {
@@ -773,10 +774,17 @@ async function trySlackDuplicates(duplicates, sheetLinkCount) {
 }
 
 async function getSheetConfig() {
+  const person = await getActivePerson().catch(() => null);
+  const fromPerson = {
+    spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
+    webAppUrl: String(person?.sheetsWebAppUrl || "").trim()
+  };
+  if (fromPerson.spreadsheetUrl && fromPerson.webAppUrl) return fromPerson;
+
   const data = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
   return {
-    spreadsheetUrl: String(data.spreadsheet_url || "").trim(),
-    webAppUrl: String(data.sheets_web_app_url || "").trim()
+    spreadsheetUrl: fromPerson.spreadsheetUrl || String(data.spreadsheet_url || "").trim(),
+    webAppUrl: fromPerson.webAppUrl || String(data.sheets_web_app_url || "").trim()
   };
 }
 
@@ -848,14 +856,39 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
 
 const MAX_DICE_APPLY_ATTEMPTS = 3;
 
-/** True when this employer was already built/applied/inactive in queue or on the sheet. */
-async function isCompanyAlreadyCovered(companyName, { excludeCsvRow } = {}) {
+/** Queue rows belong to a person via profileId, or via Applications-* jobDir for legacy rows. */
+function jobBelongsToPerson(job, person) {
+  if (!person?.id) return true;
+  const pid = String(job?.profileId || "").trim();
+  if (pid) return pid === person.id;
+  const apps = String(outputDirFromPerson(person) || "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+  const dir = String(job?.jobDir || "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+  if (apps && dir) {
+    if (dir === apps || dir.startsWith(`${apps}/`) || dir.includes(`/${apps}/`)) return true;
+    // Built for a different person's Applications-* folder.
+    if (/\/applications-[^/]+\//i.test(`/${dir}/`) || /^applications-[^/]+\//i.test(dir)) {
+      return false;
+    }
+  }
+  // Untagged legacy rows with no jobDir: only the default person owns them.
+  return person.id === DEFAULT_PROFILE_ID;
+}
+
+/** True when this employer was already built/applied/inactive for the SAME person. */
+async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, profileId } = {}) {
   const companyKey = normalizeCompanyName(companyName);
   if (!companyKey) return { covered: false };
+
+  const person = await getActivePerson().catch(() => null);
 
   const queue = await getQueue();
   for (const j of queue) {
     if (excludeCsvRow != null && Number(j.csvRow) === Number(excludeCsvRow)) continue;
+    if (person && !jobBelongsToPerson(j, person)) continue;
     if (normalizeCompanyName(j.company || j.companyName || "") !== companyKey) continue;
     // Don't treat "skipped" siblings as coverage — they may be the company-dup skips of this row.
     if (j.applied || j.inactive || j.status === "done") {
@@ -889,7 +922,8 @@ async function runDiceInterleavedApply(jobMeta = {}) {
   const companyName = jobMeta.companyName || jobMeta.company || "";
 
   const companyDup = await isCompanyAlreadyCovered(companyName, {
-    excludeCsvRow: jobMeta.csvRow
+    excludeCsvRow: jobMeta.csvRow,
+    profileId: jobMeta.profileId
   });
   if (companyDup.covered) {
     await updateQueueJob(jobMeta.csvRow, {
@@ -1084,16 +1118,20 @@ function diceApplyAttemptCount(j) {
   return j.applyAttempted ? 1 : 0;
 }
 
-function isDiceApplyBacklogJob(j) {
-  return (
-    (j.isDice || isDiceJob(j)) &&
-    j.status === "done" &&
-    !j.applied &&
-    !j.inactive &&
-    diceApplyAttemptCount(j) < MAX_DICE_APPLY_ATTEMPTS &&
-    Boolean(j.jobDir || j.hasFiles) &&
-    String(j.jdLink || "").trim()
-  );
+function isDiceApplyBacklogJob(j, person = null) {
+  if (
+    !(j.isDice || isDiceJob(j)) ||
+    j.status !== "done" ||
+    j.applied ||
+    j.inactive ||
+    diceApplyAttemptCount(j) >= MAX_DICE_APPLY_ATTEMPTS ||
+    !Boolean(j.jobDir || j.hasFiles) ||
+    !String(j.jdLink || "").trim()
+  ) {
+    return false;
+  }
+  if (person) return jobBelongsToPerson(j, person);
+  return true;
 }
 
 /**
@@ -1130,12 +1168,14 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   const knownLinks = buildKnownLinkSet(links);
   const knownCompanies = buildKnownCompanySet(companies);
   const queue = await getQueue();
+  const person = await getActivePerson().catch(() => null);
   const duplicates = [];
   const seenLinks = new Set(knownLinks);
   const seenCompanies = new Set(knownCompanies);
 
-  // Seed company set from queue rows already kept (done / applied / inactive / skipped).
+  // Seed company set from THIS person's queue rows already kept (done / applied / inactive / skipped).
   for (const job of queue) {
+    if (person && !jobBelongsToPerson(job, person)) continue;
     if (!(job.status === "done" || job.status === "skipped" || job.applied || job.inactive)) {
       continue;
     }
@@ -1148,6 +1188,8 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   const next = queue.map((job) => {
     // Leave finished / already-skipped rows alone.
     if (job.status === "done" || job.status === "skipped") return job;
+    // Other person's rows are not part of this person's sheet dedupe pass.
+    if (person && job.profileId && !jobBelongsToPerson(job, person)) return job;
     const linkKey = normalizeJobLink(job.jdLink || "");
     const companyKey = normalizeCompanyName(job.company || job.companyName || "");
 
@@ -1170,7 +1212,7 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
 
     if (linkKey) seenLinks.add(linkKey);
     if (companyKey) seenCompanies.add(companyKey);
-    return job;
+    return person?.id ? { ...job, profileId: job.profileId || person.id } : job;
   });
 
   if (duplicates.length) {
@@ -3758,9 +3800,9 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
   let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
   let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
   if (!spreadsheetUrl || !sheetsWebAppUrl) {
-    const sheetCfg = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
-    if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheet_url || "").trim();
-    if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.sheets_web_app_url || "").trim();
+    const sheetCfg = await getSheetConfig();
+    if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheetUrl || "").trim();
+    if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.webAppUrl || "").trim();
   }
   if (spreadsheetUrl && sheetsWebAppUrl) {
     const manualBid = jobMeta.bidSource === "one-off" || jobMeta.oneOff === true;
@@ -4207,10 +4249,12 @@ async function runBatchLoop(outputDir) {
       }
 
       const queue = await getQueue();
+      const activePerson = await getActivePerson().catch(() => null);
 
       // Dice jobs: apply already-built rows that are not Applied yet (no ChatGPT).
       // Gated by job type (isDice), not Apply-source filter — so All/Dice both auto-apply.
-      const backlog = queue.find((j) => isDiceApplyBacklogJob(j));
+      // Only the active person's rows (profileId / Applications-* folder).
+      const backlog = queue.find((j) => isDiceApplyBacklogJob(j, activePerson));
       if (backlog) {
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
@@ -4234,6 +4278,7 @@ async function runBatchLoop(outputDir) {
           jdLink: backlog.jdLink || "",
           salary: backlog.salary || "",
           jobDir: backlog.jobDir || "",
+          profileId: activePerson?.id || backlog.profileId || "",
           applyAttempts: diceApplyAttemptCount(backlog)
         });
         if (batchControl.stop) break;
@@ -4372,6 +4417,7 @@ async function runBatchLoop(outputDir) {
         await updateQueueJob(next.csvRow, {
           status: "done",
           jobDir: result.savedDir,
+          profileId: activePerson?.id || next.profileId || "",
           error: ""
         });
         await rememberApplyHistory(next.csvRow, {
@@ -4395,6 +4441,7 @@ async function runBatchLoop(outputDir) {
             jdLink: next.jdLink || "",
             salary: next.salary || "",
             jobDir: result.savedDir || "",
+            profileId: activePerson?.id || next.profileId || "",
             applyAttempts: diceApplyAttemptCount(next)
           });
           if (applyRes?.needsPause) {

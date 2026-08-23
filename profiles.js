@@ -103,6 +103,39 @@ export const PROFILES = BUILTIN_PROFILES;
 
 const CUSTOM_PROFILES_KEY = "custom_profiles";
 const ACTIVE_PERSON_ID_KEY = "active_person_id";
+/** Per-person Google Sheet URLs (works for built-ins without saving a custom copy). */
+const PERSON_SHEET_KEY = "person_sheet_config";
+
+export async function getPersonSheetConfig(personId) {
+  const id = String(personId || "").trim();
+  if (!id) return { spreadsheetUrl: "", sheetsWebAppUrl: "" };
+  const data = await chrome.storage.local.get(PERSON_SHEET_KEY);
+  const map =
+    data[PERSON_SHEET_KEY] && typeof data[PERSON_SHEET_KEY] === "object" && !Array.isArray(data[PERSON_SHEET_KEY])
+      ? data[PERSON_SHEET_KEY]
+      : {};
+  const row = map[id] && typeof map[id] === "object" ? map[id] : {};
+  return {
+    spreadsheetUrl: String(row.spreadsheetUrl || "").trim(),
+    sheetsWebAppUrl: String(row.sheetsWebAppUrl || "").trim()
+  };
+}
+
+export async function setPersonSheetConfig(personId, { spreadsheetUrl = "", sheetsWebAppUrl = "" } = {}) {
+  const id = String(personId || "").trim();
+  if (!id) return;
+  const data = await chrome.storage.local.get(PERSON_SHEET_KEY);
+  const map = {
+    ...(data[PERSON_SHEET_KEY] && typeof data[PERSON_SHEET_KEY] === "object" && !Array.isArray(data[PERSON_SHEET_KEY])
+      ? data[PERSON_SHEET_KEY]
+      : {})
+  };
+  map[id] = {
+    spreadsheetUrl: String(spreadsheetUrl || "").trim(),
+    sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim()
+  };
+  await chrome.storage.local.set({ [PERSON_SHEET_KEY]: map });
+}
 
 function slugify(name) {
   const base = name
@@ -215,8 +248,13 @@ export async function setActivePersonId(profileId) {
 /** Active person used for prompts, contact autofill, and cover letter. */
 export async function getActivePerson() {
   const id = await getActivePersonId();
-  const person = await getProfileById(id);
-  return normalizePerson(person);
+  const person = normalizePerson(await getProfileById(id));
+  const sheet = await getPersonSheetConfig(person.id);
+  return {
+    ...person,
+    spreadsheetUrl: sheet.spreadsheetUrl || person.spreadsheetUrl || "",
+    sheetsWebAppUrl: sheet.sheetsWebAppUrl || person.sheetsWebAppUrl || ""
+  };
 }
 
 function normalizePerson(p) {
@@ -246,6 +284,8 @@ function normalizePerson(p) {
     signatureTitle: "",
     autofillExtras: {},
     requiredExperience: [],
+    spreadsheetUrl: "",
+    sheetsWebAppUrl: "",
     builtin: false,
     kind: "resume"
   };
@@ -286,6 +326,8 @@ function normalizePerson(p) {
     signatureTitle: p.signatureTitle || p.headline || "",
     autofillExtras: extras,
     requiredExperience,
+    spreadsheetUrl: p.spreadsheetUrl || "",
+    sheetsWebAppUrl: p.sheetsWebAppUrl || "",
     builtin: Boolean(p.builtin),
     kind: p.kind || "resume"
   };
@@ -405,7 +447,9 @@ export async function addCustomProfile({
   templateId = "",
   signatureTitle = "",
   autofillExtras = {},
-  requiredExperience = []
+  requiredExperience = [],
+  spreadsheetUrl = "",
+  sheetsWebAppUrl = ""
 } = {}) {
   const displayName = String(label || name || "").trim();
   const prompt = String(promptTemplate || "").trim();
@@ -472,10 +516,18 @@ export async function addCustomProfile({
     templateId: String(templateId || "times-classic").trim(),
     signatureTitle: String(signatureTitle || "").trim(),
     autofillExtras: extras,
-    requiredExperience: employers
+    requiredExperience: employers,
+    spreadsheetUrl: String(spreadsheetUrl || "").trim(),
+    sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim()
   };
   custom.push(profile);
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: custom });
+  if (profile.spreadsheetUrl || profile.sheetsWebAppUrl) {
+    await setPersonSheetConfig(profile.id, {
+      spreadsheetUrl: profile.spreadsheetUrl,
+      sheetsWebAppUrl: profile.sheetsWebAppUrl
+    });
+  }
   return profile;
 }
 
@@ -534,6 +586,8 @@ export async function savePersonProfile(person) {
       }
       return employers;
     })(),
+    spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
+    sheetsWebAppUrl: String(person?.sheetsWebAppUrl || "").trim(),
     kind: "resume"
   };
 
@@ -546,6 +600,10 @@ export async function savePersonProfile(person) {
     const next = custom.map((p) => (p.id === existingId ? { ...p, ...payload, id: existingId, builtin: false } : p));
     await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: next });
     await setActivePersonId(existingId);
+    await setPersonSheetConfig(existingId, {
+      spreadsheetUrl: payload.spreadsheetUrl,
+      sheetsWebAppUrl: payload.sheetsWebAppUrl
+    });
     const profile = next.find((p) => p.id === existingId);
     return { profile, created: false, fromBuiltin: false };
   }

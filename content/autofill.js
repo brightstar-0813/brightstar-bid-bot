@@ -2404,7 +2404,7 @@
     if (cover && resume) {
       if (/use (your |my )?resume (as|for) (a |my )?cover/.test(n)) return "coverLetter";
       if (/cover letter (is )?(optional|not required)/.test(n)) return "resume";
-      // Prefer the section label: "Cover Letter" + leftover "Lewis_Resume.pdf" is still cover.
+      // Prefer the section label: "Cover Letter" + leftover "Name_Resume.pdf" is still cover.
       if (/^cover\s*letter\b/.test(n) || /\bcover\s*letter\b/.test(n.slice(0, 40))) return "coverLetter";
       if (/^resume\b/.test(n) || /\bresume\b/.test(n.slice(0, 40))) return "resume";
       return "";
@@ -2435,7 +2435,7 @@
     if (nearKind) return nearKind;
     // Last resort: if the nearest section text clearly says Cover Letter, prefer that
     // even when a leftover resume filename is also shown in the same card.
-    if (/cover\s*letter/i.test(nearby) && !/\bresume\b/i.test(nearby.replace(/lewis_resume\.pdf/gi, ""))) {
+    if (/cover\s*letter/i.test(nearby) && !/\bresume\b/i.test(nearby.replace(/[a-z0-9._-]*resume\.pdf/gi, ""))) {
       return "coverLetter";
     }
     if (/cover\s*letter/i.test(nearby) && /\.pdf\b/i.test(nearby)) {

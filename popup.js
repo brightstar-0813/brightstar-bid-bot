@@ -13,7 +13,8 @@ import {
   GENERIC_COVER_LETTER_PROMPT,
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
-  resolveExperienceRulesForPerson
+  resolveExperienceRulesForPerson,
+  setPersonSheetConfig
 } from "./profiles.js";
 import {
   requiredExperienceToText
@@ -846,7 +847,9 @@ function readPersonForm({ asNew = false } = {}) {
     requiredExperience: normalizeRequiredExperienceInput(personRequiredExperienceEl.value),
     promptTemplate: personResumePromptEl.value,
     coverLetterPrompt: personCoverPromptEl.value,
-    templateId: templateSelectEl.value || DEFAULT_TEMPLATE_ID
+    templateId: templateSelectEl.value || DEFAULT_TEMPLATE_ID,
+    spreadsheetUrl: spreadsheetUrlEl?.value?.trim() || "",
+    sheetsWebAppUrl: sheetsWebAppUrlEl?.value?.trim() || ""
   };
 }
 
@@ -877,12 +880,41 @@ async function syncOutputDirFromPerson(person) {
   return next;
 }
 
+/** Load this person's Google Sheet URLs into the UI + global keys used by the batch worker. */
+async function syncSheetConfigFromPerson(person) {
+  const spreadsheetUrl = String(person?.spreadsheetUrl || "").trim();
+  const sheetsWebAppUrl = String(person?.sheetsWebAppUrl || "").trim();
+  if (spreadsheetUrlEl) spreadsheetUrlEl.value = spreadsheetUrl;
+  if (sheetsWebAppUrlEl) sheetsWebAppUrlEl.value = sheetsWebAppUrl;
+  await chrome.storage.local.set({
+    spreadsheet_url: spreadsheetUrl,
+    sheets_web_app_url: sheetsWebAppUrl
+  });
+  if (person?.id) {
+    await setPersonSheetConfig(person.id, { spreadsheetUrl, sheetsWebAppUrl });
+  }
+}
+
+async function persistActivePersonSheetFromUi() {
+  const person = await getActivePerson().catch(() => null);
+  const spreadsheetUrl = spreadsheetUrlEl?.value?.trim() || "";
+  const sheetsWebAppUrl = sheetsWebAppUrlEl?.value?.trim() || "";
+  await chrome.storage.local.set({
+    spreadsheet_url: spreadsheetUrl,
+    sheets_web_app_url: sheetsWebAppUrl
+  });
+  if (person?.id) {
+    await setPersonSheetConfig(person.id, { spreadsheetUrl, sheetsWebAppUrl });
+  }
+}
+
 async function loadActivePersonIntoForm() {
   const person = await getActivePerson();
   fillPersonForm(person);
   syncSaveButtonLabels();
   syncActivePersonChip();
   await syncOutputDirFromPerson(person);
+  await syncSheetConfigFromPerson(person);
 }
 
 async function persistJobFields() {
@@ -892,10 +924,9 @@ async function persistJobFields() {
     last_jd_link: jdLinkEl.value,
     last_jd_text: jdTextEl.value,
     output_dir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR,
-    spreadsheet_url: spreadsheetUrlEl.value.trim(),
-    sheets_web_app_url: sheetsWebAppUrlEl.value.trim(),
     slack_webhook_url: slackWebhookUrlEl.value.trim()
   });
+  await persistActivePersonSheetFromUi();
   await persistChatGptPacing();
 }
 
@@ -957,12 +988,16 @@ async function loadSettings() {
   companyNameEl.value = data.last_company_name || "";
   jdLinkEl.value = data.last_jd_link || "";
   jdTextEl.value = data.last_jd_text || "";
-  // Output folder follows the active person (Applications-Lewis, …); loadActivePersonIntoForm already synced it.
+  // Output folder + Google Sheet follow the active person (synced in loadActivePersonIntoForm).
   if (!String(outputDirEl.value || "").trim()) {
     outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
   }
-  spreadsheetUrlEl.value = data.spreadsheet_url || "";
-  sheetsWebAppUrlEl.value = data.sheets_web_app_url || "";
+  if (!String(spreadsheetUrlEl.value || "").trim() && data.spreadsheet_url) {
+    spreadsheetUrlEl.value = data.spreadsheet_url;
+  }
+  if (!String(sheetsWebAppUrlEl.value || "").trim() && data.sheets_web_app_url) {
+    sheetsWebAppUrlEl.value = data.sheets_web_app_url;
+  }
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
   const pacing = data[CHATGPT_PACING_KEY] || {};
   if (chatgptJobGapSecEl) {
@@ -1082,11 +1117,14 @@ function syncChannelFilterButtons() {
   }
 }
 
-function mergeStatusFromQueue(jobs, previousQueue) {
+function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
   const prevByRow = new Map((previousQueue || []).map((j) => [Number(j.csvRow), j]));
+  const pid = String(profileId || "").trim();
   return jobs.map((j) => {
     const prev = prevByRow.get(Number(j.csvRow));
-    if (!prev) return { ...j, status: j.status || "pending" };
+    if (!prev) {
+      return { ...j, status: j.status || "pending", ...(pid ? { profileId: j.profileId || pid } : {}) };
+    }
     return {
       ...j,
       status: prev.status || "pending",
@@ -1100,6 +1138,7 @@ function mergeStatusFromQueue(jobs, previousQueue) {
       applyAttempted: Boolean(prev.applyAttempted || j.applyAttempted),
       applyAttempts: Number(prev.applyAttempts || j.applyAttempts || 0),
       inactive: Boolean(prev.inactive || j.inactive),
+      profileId: prev.profileId || j.profileId || pid || "",
       error: prev.error
     };
   });
@@ -1109,7 +1148,8 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   channelFilter = normalizeChannelFilter(nextFilter || DEFAULT_CHANNEL_FILTER);
   syncChannelFilterButtons();
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
-  queueCache = mergeStatusFromQueue(filtered, queueCache);
+  const person = await getActivePerson().catch(() => null);
+  queueCache = mergeStatusFromQueue(filtered, queueCache, person?.id || "");
   if (persist) {
     await chrome.storage.local.set({
       [JOB_CHANNEL_FILTER_KEY]: channelFilter,
