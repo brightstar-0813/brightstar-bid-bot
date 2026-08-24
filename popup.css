@@ -508,6 +508,9 @@ button.primary:hover,
 
 .status-bar {
   flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
   margin: 0;
   padding: 9px 14px;
   min-height: 38px;
@@ -522,6 +525,7 @@ button.primary:hover,
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .status-bar::before {
@@ -793,6 +797,75 @@ input[type="file"]::file-selector-button {
 .badge-ats {
   text-transform: none;
   font-variant-numeric: tabular-nums;
+}
+
+.ats-score {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 7px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-weight: 800;
+  line-height: 1.2;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.ats-score-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.88;
+}
+
+.ats-score-value {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.ats-score-max {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.ats-score-grade {
+  margin-left: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ats-score.is-excellent {
+  background: rgba(20, 83, 45, 0.55);
+  border-color: rgba(134, 239, 172, 0.45);
+  color: #bbf7d0;
+}
+
+.ats-score.is-good {
+  background: rgba(30, 64, 175, 0.5);
+  border-color: rgba(147, 197, 253, 0.45);
+  color: #bfdbfe;
+}
+
+.ats-score.is-fair {
+  background: rgba(133, 77, 14, 0.55);
+  border-color: rgba(253, 230, 138, 0.45);
+  color: #fde68a;
+}
+
+.ats-score.is-low {
+  background: rgba(127, 29, 29, 0.55);
+  border-color: rgba(252, 165, 165, 0.45);
+  color: #fecaca;
 }
 
 .badge-ats.is-excellent {
@@ -1261,7 +1334,9 @@ body.ctx-window .app-body {
 }
 
 body.ctx-panel .topbar,
-body.ctx-window .topbar {
+body.ctx-window .topbar,
+body.ctx-panel .status-bar,
+body.ctx-window .status-bar {
   padding-left: 16px;
   padding-right: 16px;
 }

@@ -1365,7 +1365,7 @@ function renderQueue() {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
     empty.innerHTML =
-      "<p>Queue is empty</p><span>Capture from Indeed or upload a CSV, then review before Start</span>";
+      "<p>Queue is empty</p><span>Grab a job from Indeed or upload a CSV, then review before Start</span>";
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     return;
@@ -1400,15 +1400,21 @@ function renderQueue() {
     badge.className = badgeClass(job.status);
     badge.textContent = job.status || "pending";
     badges.appendChild(badge);
+    let atsScoreEl = null;
     if (job.atsScore != null && Number.isFinite(Number(job.atsScore))) {
       const score = Number(job.atsScore);
-      const atsBadge = document.createElement("span");
-      atsBadge.className =
-        "badge badge-ats " +
-        (score >= 85 ? "is-excellent" : score >= 70 ? "is-good" : score >= 55 ? "is-fair" : "is-low");
-      atsBadge.textContent = `ATS ${score}`;
-      atsBadge.title = atsScoreTitle(job);
-      badges.appendChild(atsBadge);
+      const grade = String(job.atsGrade || "").trim();
+      const tier =
+        score >= 85 ? "is-excellent" : score >= 70 ? "is-good" : score >= 55 ? "is-fair" : "is-low";
+      atsScoreEl = document.createElement("div");
+      atsScoreEl.className = `ats-score ${tier}`;
+      atsScoreEl.title = atsScoreTitle(job);
+      atsScoreEl.setAttribute("aria-label", `ATS match ${score} out of 100${grade ? `, grade ${grade}` : ""}`);
+      atsScoreEl.innerHTML =
+        `<span class="ats-score-label">ATS match</span>` +
+        `<span class="ats-score-value">${score}</span>` +
+        `<span class="ats-score-max">/100</span>` +
+        (grade ? `<span class="ats-score-grade">${grade}</span>` : "");
     }
     if (isLinkedInJob(job)) {
       const liBadge = document.createElement("span");
@@ -1444,6 +1450,7 @@ function renderQueue() {
     meta.appendChild(title);
     meta.appendChild(sub);
     meta.appendChild(badges);
+    if (atsScoreEl) meta.appendChild(atsScoreEl);
     if (job.error) {
       const err = document.createElement("div");
       err.className = "sub";

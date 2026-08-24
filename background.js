@@ -2491,13 +2491,35 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
     needsInPageNewChat = !(await ensureFreshChat(tabId));
   }
-  await focusTabForInput(tabId);
-  // Do not send while ChatGPT is rate-limiting — wait it out first.
-  await enforcePostRateLimitCooldown();
-  await waitOutChatGptRateLimit(tabId);
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await focusTabForInput(tabId);
+    // Do not send while ChatGPT is rate-limiting — wait it out first.
+    await enforcePostRateLimitCooldown();
+    await waitOutChatGptRateLimit(tabId);
+    if (attempt > 0) {
+      await setStatus("Retrying ChatGPT Send…");
+      // Fresh focus + short pause helps when the first click hit mic instead of Send.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    try {
+      return await chatgptSendPromptOnce(tabId, prompt, attempt === 0 ? needsInPageNewChat : false);
+    } catch (err) {
+      lastError = err;
+      const msg = String(err?.message || err);
+      if (!/did not accept Send|did not appear in the ChatGPT input/i.test(msg) || attempt === 1) {
+        throw err;
+      }
+    }
+  }
+  throw lastError || new Error("ChatGPT Send failed.");
+}
+
+async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    args: [prompt, needsInPageNewChat],
+    args: [prompt, Boolean(needsInPageNewChat)],
     func: async (fullPrompt, shouldStartNewChat) => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -2653,58 +2675,81 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
         return (el.innerText || el.textContent || "").trim().length > 0;
       };
 
+      const buttonMeta = (btn) => {
+        const testid = String(btn.getAttribute("data-testid") || "").toLowerCase();
+        const label = `${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""} ${btn.textContent || ""}`.toLowerCase();
+        return { testid, label, blob: `${testid} ${label}` };
+      };
+
+      const isNonSendControl = (btn) => {
+        const { blob } = buttonMeta(btn);
+        return /stop|speech|speak|dictat|voice|mic|audio|listen|record|attach|upload|photo|image|file|plus|model|search|tool|gpt|canvas|deep.?research/.test(
+          blob
+        );
+      };
+
+      const looksLikeSendControl = (btn) => {
+        if (!(btn instanceof HTMLButtonElement) || isNonSendControl(btn)) return false;
+        const { testid, label } = buttonMeta(btn);
+        if (/send/.test(testid) || /send/.test(label)) return true;
+        // Up-arrow send glyph (exclude paperclip / plus / mic paths when labeled).
+        const path = Array.from(btn.querySelectorAll("path"))
+          .map((p) => p.getAttribute("d") || "")
+          .join(" ")
+          .toLowerCase();
+        if (path && /m12\s+5|m4\s+12|l12\s+5|arrow/.test(path) && /send|submit|arrow/.test(`${label} ${testid} arrow`)) {
+          return true;
+        }
+        return false;
+      };
+
       const findSendButton = () => {
         const selectors = [
           "button[data-testid='send-button']",
           "button[data-testid='composer-send-button']",
+          "button[data-testid*='send']",
           "#composer-submit-button",
+          "button[aria-label='Send prompt']",
+          "button[aria-label*='Send prompt']",
           "button[aria-label='Send message']",
           "button[aria-label*='Send message']",
           "button[aria-label='Send']",
-          "button[aria-label*='Send']",
-          "button[aria-label*='send']",
-          "form button[type='submit']"
+          "button[aria-label*='Send']"
         ];
         for (const selector of selectors) {
           const btn = document.querySelector(selector);
-          if (btn instanceof HTMLButtonElement) return btn;
+          if (btn instanceof HTMLButtonElement && !isNonSendControl(btn)) return btn;
         }
 
-        // Composer area: nearest button with an upward arrow SVG after the prompt box.
         const composer =
           document.querySelector("#prompt-textarea")?.closest("form") ||
-          document.querySelector("form") ||
+          document.querySelector("form:has(#prompt-textarea)") ||
+          document.querySelector("form:has(div.ProseMirror)") ||
           document.querySelector("[class*='composer']") ||
           document.body;
 
-        const buttons = Array.from(composer.querySelectorAll("button"));
-        const byAria = buttons.find((b) => {
-          const label = `${b.getAttribute("aria-label") || ""} ${b.getAttribute("title") || ""}`.toLowerCase();
-          return label.includes("send") && !label.includes("stop");
-        });
-        if (byAria instanceof HTMLButtonElement) return byAria;
+        const buttons = Array.from(composer.querySelectorAll("button")).filter(
+          (b) => b instanceof HTMLButtonElement
+        );
+        const byLook = buttons.find((b) => looksLikeSendControl(b));
+        if (byLook) return byLook;
 
-        // Black circular send control is usually the last enabled-looking icon button in the composer.
+        // Last resort: enabled icon button in the composer that is not speech/attach.
+        // Do NOT pick the last SVG blindly — ChatGPT often shows mic there until Send enables.
         const iconButtons = buttons.filter((b) => {
-          const label = `${b.getAttribute("aria-label") || ""}`.toLowerCase();
-          if (label.includes("stop") || label.includes("attach") || label.includes("dictat") || label.includes("voice") || label.includes("mic")) {
-            return false;
-          }
-          return Boolean(b.querySelector("svg"));
+          if (isNonSendControl(b)) return false;
+          if (!b.querySelector("svg")) return false;
+          return !b.disabled && b.getAttribute("aria-disabled") !== "true";
         });
-        const lastIcon = iconButtons[iconButtons.length - 1];
-        if (lastIcon instanceof HTMLButtonElement) return lastIcon;
-
-        return null;
+        return iconButtons.length === 1 ? iconButtons[0] : null;
       };
 
       const isSendEnabled = (btn) => {
         if (!(btn instanceof HTMLButtonElement)) return false;
+        if (isNonSendControl(btn)) return false;
         if (btn.disabled) return false;
         if (btn.getAttribute("aria-disabled") === "true") return false;
         if (btn.hasAttribute("disabled")) return false;
-        const cls = btn.className || "";
-        if (/\bdisabled\b/i.test(cls) && btn.disabled) return false;
         return true;
       };
 
@@ -2712,14 +2757,32 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
         const btn = findSendButton();
         if (!btn) return false;
         if (!force && !isSendEnabled(btn)) return false;
-        // Remove disabled briefly if force (last resort after text is clearly present).
-        if (force && btn.disabled) {
+        if (force && (btn.disabled || btn.getAttribute("aria-disabled") === "true")) {
           btn.disabled = false;
           btn.removeAttribute("disabled");
           btn.setAttribute("aria-disabled", "false");
         }
         firePointerClick(btn);
         return true;
+      };
+
+      const submitComposerForm = (el) => {
+        const form = el?.closest?.("form");
+        if (!(form instanceof HTMLFormElement)) return false;
+        try {
+          if (typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+            return true;
+          }
+        } catch {
+          // fall through
+        }
+        try {
+          form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+          return true;
+        } catch {
+          return false;
+        }
       };
 
       const pressEnterToSend = (el) => {
@@ -2739,9 +2802,9 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
 
       const sendMessage = (el, { force = false } = {}) => {
         if (clickSendButton({ force })) return true;
+        if (submitComposerForm(el)) return true;
         pressEnterToSend(el);
         if (clickSendButton({ force })) return true;
-        // Some ChatGPT builds send on Ctrl/Meta+Enter
         el.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "Enter",
@@ -2758,10 +2821,27 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
         return clickSendButton({ force });
       };
 
-      const composerLooksIdleAfterSend = (el) => {
-        // After a successful send, the composer usually clears (or shrinks a lot).
-        const text = (el.innerText || el.textContent || el.value || "").trim();
-        return text.length < 30;
+      const countUserBlocks = () =>
+        document.querySelectorAll("[data-message-author-role='user']").length;
+
+      const isGenerating = () => {
+        const stopBtn =
+          document.querySelector("button[data-testid='stop-button']") ||
+          document.querySelector("button[aria-label='Stop streaming']") ||
+          document.querySelector("button[aria-label='Stop generating']") ||
+          document.querySelector("button[aria-label*='Stop']");
+        return Boolean(stopBtn && stopBtn.offsetParent !== null);
+      };
+
+      const promptWasSent = (el, usersBefore) => {
+        if (isGenerating()) return true;
+        if (countUserBlocks() > usersBefore) return true;
+        return false;
+      };
+
+      const composerLooksCleared = (el) => {
+        const text = (el?.innerText || el?.textContent || el?.value || "").trim();
+        return text.length < 40;
       };
 
       const getAssistantBlocks = () =>
@@ -2806,6 +2886,7 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
       const blocks = getAssistantBlocks();
       const blocksBefore = blocks.length;
       const latestBefore = blocks.length ? readAssistantBlock(blocks[blocks.length - 1]) : "";
+      const usersBefore = countUserBlocks();
 
       let input = null;
       for (let i = 0; i < 40; i += 1) {
@@ -2835,52 +2916,69 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
         );
       }
 
-      // Wait for Send to enable (ProseMirror needs a moment after paste).
+      // Wait for the real Send control (not the mic) to enable after ProseMirror paste.
       let sent = false;
-      for (let i = 0; i < 40; i += 1) {
+      let clickedSend = false;
+      for (let i = 0; i < 48; i += 1) {
+        input = findInput() || input;
+        if (promptWasSent(input, usersBefore) || (clickedSend && composerLooksCleared(input))) {
+          sent = true;
+          break;
+        }
         const btn = findSendButton();
         if (btn && isSendEnabled(btn)) {
-          sent = sendMessage(input, { force: false });
-          if (sent) {
-            await sleep(400);
-            if (composerLooksIdleAfterSend(findInput() || input)) break;
-            // Click registered but composer still full — try again / force.
-            sent = false;
+          if (sendMessage(input, { force: false })) clickedSend = true;
+          await sleep(500);
+          if (promptWasSent(findInput() || input, usersBefore) || composerLooksCleared(findInput() || input)) {
+            sent = true;
+            break;
           }
         } else {
-          // Nudge the editor so ChatGPT enables Send.
-          input = findInput() || input;
+          // Nudge the editor so ChatGPT swaps mic → Send.
           input.focus();
           input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " }));
-          await sleep(250);
+          await sleep(200);
+          // Re-assert prompt if ChatGPT wiped/partialled the composer.
+          if (!inputHasText(input) || (input.innerText || input.textContent || "").trim().length < 40) {
+            setInputValue(input, fullPrompt);
+            await sleep(350);
+          }
         }
-        if (i > 0 && i % 8 === 0) {
-          sent = sendMessage(input, { force: false });
-          if (sent) {
-            await sleep(400);
-            if (composerLooksIdleAfterSend(findInput() || input)) break;
-            sent = false;
+        if (i > 0 && i % 10 === 0) {
+          if (sendMessage(input, { force: false })) clickedSend = true;
+          await sleep(450);
+          if (promptWasSent(findInput() || input, usersBefore) || (clickedSend && composerLooksCleared(findInput() || input))) {
+            sent = true;
+            break;
           }
         }
         await sleep(250);
       }
 
-      // Last resort: force-click the send control even if still marked disabled.
-      if (!sent || !composerLooksIdleAfterSend(findInput() || input)) {
-        input = findInput() || input;
-        sent = sendMessage(input, { force: true });
-        await sleep(600);
-        if (!composerLooksIdleAfterSend(findInput() || input)) {
-          // One more hard click on whatever send-looking button we find.
-          clickSendButton({ force: true });
-          await sleep(500);
+      // Last resorts: form submit + force-click Send (never speech).
+      if (!sent) {
+        for (let round = 0; round < 3; round += 1) {
+          input = findInput() || input;
+          if (!inputHasText(input)) {
+            setInputValue(input, fullPrompt);
+            await sleep(400);
+          }
+          input.focus();
+          if (submitComposerForm(input)) clickedSend = true;
+          if (sendMessage(input, { force: true })) clickedSend = true;
+          await sleep(700);
+          const afterRound = findInput() || input;
+          if (promptWasSent(afterRound, usersBefore) || (clickedSend && composerLooksCleared(afterRound))) {
+            sent = true;
+            break;
+          }
         }
       }
 
       const after = findInput() || input;
-      if (!composerLooksIdleAfterSend(after) && !document.querySelector("button[data-testid='stop-button']")) {
+      if (!(promptWasSent(after, usersBefore) || (clickedSend && composerLooksCleared(after)))) {
         throw new Error(
-          "Prompt was typed but ChatGPT did not accept Send. Keep the ChatGPT tab focused (close/minimize the extension popup) and click Start again."
+          "Prompt was typed but ChatGPT did not accept Send. Keep the ChatGPT tab focused (close/minimize the extension popup) and try again."
         );
       }
 
