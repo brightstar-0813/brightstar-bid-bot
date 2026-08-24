@@ -2045,7 +2045,16 @@ async function readLatestAssistantPlainText(tabId) {
       target: { tabId },
       func: () => {
         const blocks = document.querySelectorAll(
-          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
+          [
+            "[data-message-author-role='assistant']",
+            "[data-message-author-role=assistant]",
+            "[data-turn='assistant']",
+            "section[data-turn='assistant']",
+            '[data-testid="assistant-message"]',
+            '[data-testid="assistant"]',
+            '[class*="assistant-message"]',
+            '[class*="font-claude-message"]'
+          ].join(", ")
         );
         if (!blocks.length) return "";
         const last = blocks[blocks.length - 1];
@@ -3715,7 +3724,16 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
 
       const blocks = Array.from(
         document.querySelectorAll(
-          "[data-message-author-role='assistant'], [data-turn='assistant'], section[data-turn='assistant']"
+          [
+            "[data-message-author-role='assistant']",
+            "[data-turn='assistant']",
+            "section[data-turn='assistant']",
+            '[data-testid="assistant-message"]',
+            '[data-testid="assistant"]',
+            '[data-is-streaming]',
+            '[class*="assistant-message"]',
+            '[class*="font-claude-message"]'
+          ].join(", ")
         )
       );
       if (blocks.length) {
@@ -3724,11 +3742,16 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
 
       let latest = "";
       if (blocks.length) {
-        // Score many assistant blocks — retries push the good JSON out of last-3.
-        const start = Math.max(0, blocks.length - 20);
-        for (let bi = start; bi < blocks.length; bi += 1) {
-          const text = readAssistantBlock(blocks[bi]);
-          if (scorePayload(text) > scorePayload(latest)) latest = text;
+        if (shouldHarvestJson) {
+          // Resume mode: score many assistant blocks — retries push the good JSON out of last-3.
+          const start = Math.max(0, blocks.length - 20);
+          for (let bi = start; bi < blocks.length; bi += 1) {
+            const text = readAssistantBlock(blocks[bi]);
+            if (scorePayload(text) > scorePayload(latest)) latest = text;
+          }
+        } else {
+          // Cover-letter mode: ALWAYS take the newest assistant turn (never prefer older JSON).
+          latest = (blocks[blocks.length - 1].innerText || blocks[blocks.length - 1].textContent || "").trim();
         }
       }
       if (shouldHarvestJson) {
@@ -4135,8 +4158,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     // Nothing arrived at all: Send never registered. Fail fast instead of
     // burning the whole timeout — the caller retries with a fresh chat.
-    if (!sawGeneration && !state.generating && state.blockCount <= blocksBefore && elapsedSec > 120) {
-      throw new Error("ChatGPT never started a reply (Send did not register).");
+    // Cover letters should fail even sooner (same-chat follow-up).
+    const sendFailSec = expectResumeJson ? 120 : 45;
+    if (!sawGeneration && !state.generating && state.blockCount <= blocksBefore && elapsedSec > sendFailSec) {
+      throw new Error(
+        `${providerLabel} never started a reply (Send did not register). Keep that tab focused and retry.`
+      );
     }
 
     // Recognized resume JSON → generate files (jd + resume PDF + cover letter).
@@ -4244,11 +4271,27 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     if (!expectResumeJson) {
+      // Prefer the newest assistant turn — poller used to keep returning resume JSON.
+      const plain = await readLatestAssistantPlainText(tabId);
+      if (plain && looksLikeCoverLetterBody(plain)) return plain;
+      if (
+        plain &&
+        plain.length > 120 &&
+        !/"experience"\s*:/.test(plain) &&
+        (sawGeneration || state.blockCount > blocksBefore || elapsedSec > 20)
+      ) {
+        if (stableHits >= 2 || looksSettledAssistantText(plain, { expectResumeJson: false })) {
+          return plain;
+        }
+      }
+
       // Still stuck on the previous resume JSON turn — keep waiting for the letter.
       if (/"experience"\s*:/.test(lastText) && /"name"\s*:/.test(lastText)) {
-        if (state.blockCount > blocksBefore) {
-          const plain = await readLatestAssistantPlainText(tabId);
-          if (plain && looksLikeCoverLetterBody(plain)) return plain;
+        if (state.blockCount > blocksBefore && plain && looksLikeCoverLetterBody(plain)) return plain;
+        if (elapsedSec > 90 && !state.generating) {
+          throw new Error(
+            "Cover letter reply did not appear after the resume JSON. Prompt may still be sitting in the composer — focus the AI tab and click Send, or Skip/Retry."
+          );
         }
         continue;
       }
@@ -4326,10 +4369,13 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
 
   if (runCoverLetter && typeof tabId === "number") {
     try {
-      // Brief pause so ChatGPT finishes any post-JSON UI before the CL prompt.
+      // Brief pause so the AI finishes any post-JSON UI before the CL prompt.
       await sleep(COVER_LETTER_GAP_MS);
-      await waitOutChatGptRateLimit(tabId).catch(() => {});
-      await setStatus("Same chat: sending cover letter prompt…");
+      const provider = await getStoredAiProvider();
+      if (provider === AI_PROVIDERS.CHATGPT) {
+        await waitOutChatGptRateLimit(tabId).catch(() => {});
+      }
+      await setStatus(`Same chat: sending cover letter prompt (${aiProviderLabel(provider)})…`);
       const coverPrompt = await buildCoverLetterPrompt({
         jdText: jobMeta.jdText || "",
         jobTitle: jobMeta.jobTitle || "",
@@ -4407,7 +4453,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       status = `${status}; cover letter failed: ${String(coverErr?.message || coverErr)}`;
     }
   } else if (runCoverLetter) {
-    status = `${status}. Cover letter skipped: open a ChatGPT tab.`;
+    status = `${status}. Cover letter skipped: open a ChatGPT or Claude tab.`;
   }
 
   let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
