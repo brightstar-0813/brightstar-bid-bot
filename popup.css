@@ -656,7 +656,7 @@ input[type="file"]::file-selector-button {
 
 .queue-item {
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 34px 1fr auto auto;
   gap: 8px;
   align-items: start;
   padding: 8px 10px;
@@ -713,7 +713,15 @@ input[type="file"]::file-selector-button {
   gap: 4px;
 }
 
-.queue-item .actions button {
+.queue-item .apply-action {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  min-width: 64px;
+}
+
+.queue-item .actions button,
+.queue-item .apply-action button {
   width: auto;
   min-width: 56px;
   padding: 4px 7px;
@@ -1172,6 +1180,11 @@ body.ctx-window .queue-item .actions {
   flex-wrap: wrap;
   justify-content: flex-end;
   width: auto;
+}
+
+body.ctx-panel .queue-item .apply-action,
+body.ctx-window .queue-item .apply-action {
+  min-width: 72px;
 }
 
 body.ctx-panel .app-body,

@@ -1346,7 +1346,6 @@ function badgeClass(status) {
 const ACTION_ICON_PATHS = {
   open: '<path d="M14 3h7v7m0-7-9 9"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
-  apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
   retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>'
 };
@@ -1530,15 +1529,6 @@ function renderQueue() {
         : "Generate this job first to create files";
     revealBtn.addEventListener("click", () => revealJobFiles(job));
 
-    const applyBtn = document.createElement("button");
-    applyBtn.type = "button";
-    applyBtn.className = job.applied ? "secondary" : "primary";
-    setIconButton(applyBtn, "apply", job.applied ? "Apply again" : "Apply to job");
-    applyBtn.title = job.applied
-      ? `${appliedDocsTitle(job)}\nClick to apply again.`
-      : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
-    applyBtn.addEventListener("click", () => applyAssist(job));
-
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "secondary danger";
@@ -1550,7 +1540,6 @@ function renderQueue() {
 
     actions.appendChild(openBtn);
     actions.appendChild(revealBtn);
-    actions.appendChild(applyBtn);
     actions.appendChild(removeBtn);
 
     if (job.status === "error" || job.status === "failed") {
@@ -1563,9 +1552,22 @@ function renderQueue() {
       actions.appendChild(retryBtn);
     }
 
+    const applyWrap = document.createElement("div");
+    applyWrap.className = "apply-action";
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = job.applied ? "secondary" : "primary";
+    applyBtn.textContent = job.applied ? "Applied" : "Apply";
+    applyBtn.title = job.applied
+      ? `${appliedDocsTitle(job)}\nClick to apply again.`
+      : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
+    applyBtn.addEventListener("click", () => applyAssist(job));
+    applyWrap.appendChild(applyBtn);
+
     item.appendChild(rowEl);
     item.appendChild(meta);
     item.appendChild(actions);
+    item.appendChild(applyWrap);
     queueListEl.appendChild(item);
   }
 
