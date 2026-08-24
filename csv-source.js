@@ -105,6 +105,9 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       appliedDate: j.appliedDate || prev?.appliedDate || "",
       resumeName: j.resumeName || prev?.resumeName || "",
       coverName: j.coverName || prev?.coverName || "",
+      atsScore: j.atsScore ?? prev?.atsScore ?? null,
+      atsGrade: j.atsGrade || prev?.atsGrade || "",
+      atsEvaluation: j.atsEvaluation || prev?.atsEvaluation || null,
       hasFiles: Boolean(j.hasFiles || prev?.hasFiles || j.jobDir || prev?.jobDir)
     });
   }
@@ -141,6 +144,9 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       appliedDate: prev.appliedDate || "",
       resumeName: prev.resumeName || "",
       coverName: prev.coverName || "",
+      atsScore: prev.atsScore ?? null,
+      atsGrade: prev.atsGrade || "",
+      atsEvaluation: prev.atsEvaluation || null,
       hasFiles: Boolean(prev.hasFiles || prev.jobDir)
     };
   });

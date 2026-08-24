@@ -1267,6 +1267,9 @@ function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
       hasFiles: Boolean(prev.hasFiles || j.hasFiles || prev.jobDir || j.jobDir),
       resumeName: prev.resumeName || j.resumeName || "",
       coverName: prev.coverName || j.coverName || "",
+      atsScore: prev.atsScore ?? j.atsScore ?? null,
+      atsGrade: prev.atsGrade || j.atsGrade || "",
+      atsEvaluation: prev.atsEvaluation || j.atsEvaluation || null,
       applied: Boolean(prev.applied || j.applied),
       appliedDate: prev.appliedDate || j.appliedDate || "",
       applyAttempted: Boolean(prev.applyAttempted || j.applyAttempted),
@@ -1340,6 +1343,44 @@ function badgeClass(status) {
   return "badge badge-pending";
 }
 
+const ACTION_ICON_PATHS = {
+  open: '<path d="M14 3h7v7m0-7-9 9"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
+  apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
+  retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>'
+};
+
+function setIconButton(button, icon, label) {
+  button.classList.add("icon-button");
+  button.setAttribute("aria-label", label);
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICON_PATHS[icon] || ""}</svg>`;
+}
+
+function atsScoreTitle(job) {
+  const evaluation = job?.atsEvaluation || {};
+  const components = evaluation.components || {};
+  const lines = [`ATS match: ${job.atsScore}/100${job.atsGrade ? ` · ${job.atsGrade}` : ""}`];
+  const labels = {
+    keywordMatch: "Keywords",
+    titleAlignment: "Title",
+    salesforceProducts: "Salesforce products",
+    experienceEvidence: "Experience",
+    atsStructure: "Structure"
+  };
+  for (const [key, label] of Object.entries(labels)) {
+    const item = components[key];
+    if (item && Number(item.max) > 0) lines.push(`${label}: ${item.score}/${item.max}`);
+  }
+  if (evaluation.missingProducts?.length) {
+    lines.push(`Missing products: ${evaluation.missingProducts.join(", ")}`);
+  }
+  if (evaluation.missingKeywords?.length) {
+    lines.push(`Missing keywords: ${evaluation.missingKeywords.slice(0, 8).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
 /** CSV row the batch is actively generating or Dice-applying (status line or running badge). */
 function resolveCurrentWorkCsvRow() {
   const running = queueCache.find((j) => j.status === "running");
@@ -1408,6 +1449,16 @@ function renderQueue() {
     badge.className = badgeClass(job.status);
     badge.textContent = job.status || "pending";
     badges.appendChild(badge);
+    if (job.atsScore != null && Number.isFinite(Number(job.atsScore))) {
+      const score = Number(job.atsScore);
+      const atsBadge = document.createElement("span");
+      atsBadge.className =
+        "badge badge-ats " +
+        (score >= 85 ? "is-excellent" : score >= 70 ? "is-good" : score >= 55 ? "is-fair" : "is-low");
+      atsBadge.textContent = `ATS ${score}`;
+      atsBadge.title = atsScoreTitle(job);
+      badges.appendChild(atsBadge);
+    }
     if (job.isLinkedIn || isLinkedInJob(job)) {
       const liBadge = document.createElement("span");
       liBadge.className = "badge badge-li";
@@ -1456,14 +1507,15 @@ function renderQueue() {
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "secondary";
-    openBtn.textContent = "Open";
+    setIconButton(openBtn, "open", "Open job");
+    openBtn.title = "Open job";
     openBtn.disabled = !job.jdLink;
     openBtn.addEventListener("click", () => openJob(job));
 
     const revealBtn = document.createElement("button");
     revealBtn.type = "button";
     revealBtn.className = "secondary";
-    revealBtn.textContent = "Files";
+    setIconButton(revealBtn, "files", "Open generated files");
     revealBtn.disabled = !job.jobDir && job.status !== "done" && !job.hasFiles;
     revealBtn.title = job.jobDir
       ? [
@@ -1481,7 +1533,7 @@ function renderQueue() {
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = job.applied ? "secondary" : "primary";
-    applyBtn.textContent = job.applied ? "Applied" : "Apply";
+    setIconButton(applyBtn, "apply", job.applied ? "Apply again" : "Apply to job");
     applyBtn.title = job.applied
       ? `${appliedDocsTitle(job)}\nClick to apply again.`
       : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
@@ -1490,7 +1542,7 @@ function renderQueue() {
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "secondary danger";
-    removeBtn.textContent = "Remove";
+    setIconButton(removeBtn, "remove", "Remove unsuitable job");
     removeBtn.title = "Remove this unsuitable job from the batch and future CSV refreshes";
     removeBtn.disabled =
       batchState === "running" || job.status === "running" || job.status === "done" || job.applied;
@@ -1505,7 +1557,7 @@ function renderQueue() {
       const retryBtn = document.createElement("button");
       retryBtn.type = "button";
       retryBtn.className = "secondary";
-      retryBtn.textContent = "Retry";
+      setIconButton(retryBtn, "retry", "Retry job");
       retryBtn.title = "Reset this job and run it again";
       retryBtn.addEventListener("click", () => retryOneJob(job));
       actions.appendChild(retryBtn);
@@ -2796,7 +2848,10 @@ setInterval(async () => {
         applied: Boolean(j.applied || prev?.applied),
         appliedDate: j.appliedDate || prev?.appliedDate || "",
         resumeName: j.resumeName || prev?.resumeName || "",
-        coverName: j.coverName || prev?.coverName || ""
+        coverName: j.coverName || prev?.coverName || "",
+        atsScore: j.atsScore ?? prev?.atsScore ?? null,
+        atsGrade: j.atsGrade || prev?.atsGrade || "",
+        atsEvaluation: j.atsEvaluation || prev?.atsEvaluation || null
       };
     });
     renderQueue();

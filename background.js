@@ -85,6 +85,7 @@ import {
   mergeIndeedApplyEvidence,
   normalizeIndeedCapturedJob
 } from "./indeed.js";
+import { evaluateAtsScore } from "./ats-score.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
@@ -4252,7 +4253,20 @@ async function runAutoJob(jobMeta) {
     }
   }
 
-  await setStatus(`JSON accepted (${resumeData.name || "ok"}). Saving jd.txt + PDF…`);
+  const atsEvaluation = evaluateAtsScore(resumeData, {
+    jdText: jobMeta.jdText || "",
+    jobTitle: jobMeta.jobTitle || jobMeta.title || ""
+  });
+  if (jobMeta.csvRow != null) {
+    await updateQueueJob(jobMeta.csvRow, {
+      atsScore: atsEvaluation.score,
+      atsGrade: atsEvaluation.grade,
+      atsEvaluation
+    });
+  }
+  await setStatus(
+    `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
+  );
 
   // Save JD + resume immediately (before cover letter), same chat continues after.
   const enrichedMeta = {
@@ -4285,7 +4299,7 @@ async function runAutoJob(jobMeta) {
     // ignore
   }
 
-  return result;
+  return { ...result, atsEvaluation };
 }
 
 async function runBatchLoop(outputDir) {
@@ -4496,6 +4510,9 @@ async function runBatchLoop(outputDir) {
           status: "done",
           jobDir: result.savedDir,
           profileId: activePerson?.id || next.profileId || "",
+          atsScore: result.atsEvaluation?.score ?? null,
+          atsGrade: result.atsEvaluation?.grade || "",
+          atsEvaluation: result.atsEvaluation || null,
           error: ""
         });
         await rememberApplyHistory(next.csvRow, {
@@ -6101,6 +6118,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         await updateQueueJob(job.csvRow, {
           status: "done",
           jobDir: result.savedDir,
+          atsScore: result.atsEvaluation?.score ?? null,
+          atsGrade: result.atsEvaluation?.grade || "",
+          atsEvaluation: result.atsEvaluation || null,
           error: ""
         });
         batchControl.forceProceed = false;

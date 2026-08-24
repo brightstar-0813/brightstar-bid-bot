@@ -9,6 +9,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
 - **Job capture / CSV batch**: scan Salesforce jobs from a signed-in Indeed search or upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / Indeed / LI / Etc / All**. Hosted Dice and Indeed jobs interleave generate → auto-apply+submit; external Indeed applications are never submitted.
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
+- After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, Salesforce products, experience evidence, and resume structure; hover its queue badge for the breakdown
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
   - `[Name]_Resume.pdf` (US senior templates — ATS, Silicon Valley, consulting, NYC finance, executive)
@@ -81,7 +82,7 @@ flowchart TD
    - **Etc** — not Dice, Indeed, or LinkedIn
    - **All** — every US job
 3. Confirm summary counts (Dice / Indeed / LI / Etc)
-4. Review the queue before generation. Use **Open** to verify relevance and **Remove** to exclude unsuitable jobs from this and future refreshes.
+4. Review the queue before generation. Use the external-link icon to verify relevance and the trash icon to exclude unsuitable jobs from this and future refreshes.
 5. Click **Start** only after the queue is approved; CSV upload and refresh never start generation automatically.
 6. Use **Pause** / **Skip** / **Stop** as needed. Per row, **Files** reveals downloads and **Apply** runs manual assistance.
 

@@ -706,7 +706,10 @@ input[type="file"]::file-selector-button {
 
 .queue-item .actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: 68px;
   gap: 4px;
 }
 
@@ -717,6 +720,27 @@ input[type="file"]::file-selector-button {
   font-size: 10.5px;
   height: auto;
   box-shadow: none;
+}
+
+.queue-item .actions button.icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .queue-item .queue-badges {
@@ -755,6 +779,31 @@ input[type="file"]::file-selector-button {
 .badge-done {
   background: #14532d;
   color: #86efac;
+}
+
+.badge-ats {
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge-ats.is-excellent {
+  background: rgba(20, 83, 45, 0.8);
+  color: #bbf7d0;
+}
+
+.badge-ats.is-good {
+  background: rgba(30, 64, 175, 0.65);
+  color: #bfdbfe;
+}
+
+.badge-ats.is-fair {
+  background: rgba(133, 77, 14, 0.7);
+  color: #fde68a;
+}
+
+.badge-ats.is-low {
+  background: rgba(127, 29, 29, 0.7);
+  color: #fecaca;
 }
 
 .badge-skipped {
@@ -1122,6 +1171,7 @@ body.ctx-window .queue-item .actions {
   flex-direction: row;
   flex-wrap: wrap;
   justify-content: flex-end;
+  width: auto;
 }
 
 body.ctx-panel .app-body,
