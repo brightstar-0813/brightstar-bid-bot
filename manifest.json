@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Brightstar Bid bot",
-  "description": "CSV batch resume & cover letters via ChatGPT — Brightstar Bid bot.",
-  "version": "1.7.0",
+  "description": "CSV batch resume & cover letters via ChatGPT or Claude — Brightstar Bid bot.",
+  "version": "1.8.0",
   "permissions": [
     "storage",
     "unlimitedStorage",
@@ -20,6 +20,7 @@
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://claude.ai/*",
     "https://script.google.com/*",
     "https://script.googleusercontent.com/*",
     "http://*/*",

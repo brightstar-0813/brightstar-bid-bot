@@ -2,13 +2,14 @@
 
 > Formerly developed as Resume GPT Builder.
 
-Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) by driving your open ChatGPT tab. Each person sets a **master resume** (text / PDF / DOCX — not JSON) and prompts once, then reuses them.
+Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) by driving your open **ChatGPT or Claude** tab. Each person sets a **master resume** (text / PDF / DOCX — not JSON) and prompts once, then reuses them.
 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
 - **Job capture / CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv`, or **grab a selected Indeed job** → keep **US jobs only** → filter by **Dice / Indeed / LI / Etc / All** using the **job link host**. Hosted Dice and Indeed jobs interleave generate → auto-apply+submit; external Indeed applications are never submitted.
-- For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
+- For each job: **one new chat** on the selected AI engine (ChatGPT or Claude) → resume JSON (JD auto-injected) → save files → **same chat** cover letter → **delete that job’s chat** → next job
+- Toggle **AI engine** in the bot UI anytime before Start / Grab (stay logged in on that site)
 - After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, Salesforce products, experience evidence, and resume structure; hover its queue badge for the breakdown
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
@@ -63,7 +64,7 @@ flowchart TD
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select this extension folder
-5. Open `https://chatgpt.com` and stay logged in
+5. Open `https://chatgpt.com` or `https://claude.ai` (match the AI engine toggle) and stay logged in
 
 ## First-time person setup
 
@@ -99,11 +100,11 @@ flowchart TD
 
 1. Sign in to Indeed in the same Chrome profile that has the unpacked extension installed.
 2. Filter search results yourself and select a job so the detail pane is visible.
-3. Click **Grab & auto-apply** in the bot. It scrapes title / company / JD / link / salary, generates files, appends the Google Sheet, and submits Apply-on-Indeed applications only.
+3. Choose **ChatGPT** or **Claude** under **AI engine**, then click **Grab & auto-apply**. It scrapes title / company / JD / link / salary, generates files on that AI tab, appends the Google Sheet, removes that job’s AI chat, and submits Apply-on-Indeed applications only.
 4. Use **Grab to queue only** if you want review before Start.
 5. Sign-in screens, CAPTCHA/rate limits, unanswered required fields, external company links, and unconfirmed submissions stop or pause safely with the application tab left open.
 
-Capture uses the browser's existing Indeed cookies; the extension does not read or store them. Keep the scan bounded (the default is 5 pages). Large or rapid scans are more likely to trigger Indeed's anti-automation controls.
+Keep the scan bounded. Large or rapid Indeed activity is more likely to trigger anti-automation controls.
 
 ### CSV auto-source (cron / 12h updates)
 
@@ -164,8 +165,8 @@ The output folder follows the active person (`Applications-{ResumePrefix}` from 
 
 ## Notes
 
-- Keep the ChatGPT tab open while the batch runs
-- Resume prompts must ask ChatGPT for **JSON only** (the extension polls and parses it — you do not paste JSON)
+- Keep the selected AI tab (ChatGPT or Claude) open while the batch runs
+- Resume prompts must ask for **JSON only** (the extension polls and parses it — you do not paste JSON)
 - Master resume is **plain text / PDF / DOCX**, never the ChatGPT JSON output
 - Output path is relative to Chrome's **Downloads** folder
 - After code changes, click **Reload** on the extension card in `chrome://extensions`

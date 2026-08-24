@@ -341,10 +341,33 @@
           <p id="indeedGrabStatus" class="hint">Select a job on Indeed, then grab it.</p>
         </section>
 
+        <!-- AI engine -->
+        <section class="section" id="aiProviderSection">
+          <header class="section-header">
+            <span class="step" aria-hidden="true">4</span>
+            <div class="section-copy">
+              <p class="section-title">AI engine</p>
+              <p class="section-sub">ChatGPT or Claude — switch anytime before Start / Grab</p>
+            </div>
+            <span id="aiProviderState" class="state-pill" data-state="chatgpt">ChatGPT</span>
+          </header>
+          <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine">
+            <button type="button" class="ai-provider-btn is-active" id="aiProviderChatgpt" data-provider="chatgpt" aria-pressed="true">
+              ChatGPT
+            </button>
+            <button type="button" class="ai-provider-btn" id="aiProviderClaude" data-provider="claude" aria-pressed="false">
+              Claude
+            </button>
+          </div>
+          <p class="hint">
+            Stay logged in on the selected site. After each job’s files are saved, that job’s chat is removed so history stays clean.
+          </p>
+        </section>
+
         <!-- Jobs queue (CSV + shared batch) -->
         <section class="section section-hero" id="jobsSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">4</span>
+            <span class="step" aria-hidden="true">5</span>
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
               <p class="section-sub">CSV or Indeed grab → review/remove → Start</p>
@@ -466,7 +489,7 @@
         <!-- Manual one-off -->
         <section class="section">
           <header class="section-header">
-            <span class="step" aria-hidden="true">5</span>
+            <span class="step" aria-hidden="true">6</span>
             <div class="section-copy">
               <p class="section-title">Manual one-off</p>
               <p class="section-sub">Single JD without a CSV row</p>
@@ -503,14 +526,14 @@
               <button type="button" id="pasteJd" class="ghost">Paste JD</button>
               <button type="button" id="runOneOff" class="primary">Generate (auto)</button>
             </div>
-            <p class="hint">Sends prompt to ChatGPT, waits for JSON automatically, then saves resume + cover letter.</p>
+            <p class="hint">Sends prompt to the selected AI engine, waits for JSON automatically, then saves resume + cover letter.</p>
           </div>
         </section>
 
         <!-- Apply -->
         <section class="section section-apply">
           <header class="section-header">
-            <span class="step" aria-hidden="true">6</span>
+            <span class="step" aria-hidden="true">7</span>
             <div class="section-copy">
               <p class="section-title">Apply assist</p>
               <p class="section-sub">Fill the open application tab</p>
@@ -553,10 +576,10 @@
         <!-- Integrations (collapsed by default) -->
         <section class="section section-muted" id="integrationsSection">
           <header class="section-header">
-            <span class="step step-muted" aria-hidden="true">7</span>
+            <span class="step step-muted" aria-hidden="true">8</span>
             <div class="section-copy">
               <p class="section-title">Integrations</p>
-              <p class="section-sub">Google Sheet · ChatGPT pacing · Slack</p>
+              <p class="section-sub">Google Sheet · AI pacing · Slack</p>
             </div>
           </header>
           <button type="button" class="panel-toggle" id="toggleIntegrationsPanel" aria-expanded="false">
@@ -581,8 +604,8 @@
               </div>
             </div>
             <div class="subblock" id="chatgptPacingSection">
-              <p class="subsection-title">ChatGPT pacing</p>
-              <p class="hint">Longer gaps reduce rate limits. Hard-pause after too many hits in one batch.</p>
+              <p class="subsection-title">AI pacing</p>
+              <p class="hint">Longer gaps reduce rate limits (especially ChatGPT). Hard-pause after too many hits in one batch.</p>
               <div class="row-split">
                 <label class="field grow">
                   <span>Seconds between jobs</span>

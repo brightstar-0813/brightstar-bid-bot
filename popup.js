@@ -32,6 +32,12 @@ import {
 } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
+  AI_PROVIDER_KEY,
+  AI_PROVIDERS,
+  aiProviderLabel,
+  normalizeAiProvider
+} from "./ai-provider.js";
+import {
   extractProfileFromResumeText,
   parseEmployersFromResume,
   resumeFilePrefixFromName,
@@ -479,6 +485,10 @@ const testSlackBtn = document.getElementById("testSlack");
 const chatgptJobGapSecEl = document.getElementById("chatgptJobGapSec");
 const chatgptHardPauseHitsEl = document.getElementById("chatgptHardPauseHits");
 const CHATGPT_PACING_KEY = "chatgpt_pacing";
+const aiProviderChatgptBtn = document.getElementById("aiProviderChatgpt");
+const aiProviderClaudeBtn = document.getElementById("aiProviderClaude");
+const aiProviderStateEl = document.getElementById("aiProviderState");
+let aiProviderCache = AI_PROVIDERS.CHATGPT;
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const copySheetRowBtn = document.getElementById("copySheetRow");
@@ -982,6 +992,28 @@ async function persistChatGptPacing() {
   });
 }
 
+function renderAiProvider(provider) {
+  aiProviderCache = normalizeAiProvider(provider);
+  const label = aiProviderLabel(aiProviderCache);
+  if (aiProviderStateEl) {
+    aiProviderStateEl.textContent = label;
+    aiProviderStateEl.dataset.state = aiProviderCache;
+  }
+  for (const btn of [aiProviderChatgptBtn, aiProviderClaudeBtn]) {
+    if (!btn) continue;
+    const active = btn.dataset.provider === aiProviderCache;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+async function setAiProvider(provider) {
+  const next = normalizeAiProvider(provider);
+  renderAiProvider(next);
+  await chrome.storage.local.set({ [AI_PROVIDER_KEY]: next });
+  setStatus(`AI engine: ${aiProviderLabel(next)}. Stay logged in on that site.`);
+}
+
 function renderIndeedGrabState(state) {
   const current = state && typeof state === "object" ? state : {};
   const status = String(current.status || "idle");
@@ -1043,6 +1075,7 @@ async function loadSettings() {
     "sheets_web_app_url",
     "slack_webhook_url",
     CHATGPT_PACING_KEY,
+    AI_PROVIDER_KEY,
     MANUAL_PANEL_OPEN_KEY,
     "generation_status",
     "generation_running",
@@ -1084,6 +1117,7 @@ async function loadSettings() {
       clampPacingNumber(pacing.hardPauseAfterHits, 2, 10, DEFAULT_CHATGPT_HARD_PAUSE)
     );
   }
+  renderAiProvider(data[AI_PROVIDER_KEY]);
   setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
   setStatus(data.generation_status || "");
 
@@ -1892,7 +1926,7 @@ async function sendBatch(type) {
   }
   if (type === "batch_start" || type === "batch_resume") {
     setStatus(
-      `${res.status || "Batch started."} Tip: leave ChatGPT visible/focused — closing this popup helps auto-Send.`
+      `${res.status || "Batch started."} Tip: leave ${aiProviderLabel(aiProviderCache)} visible/focused — closing this popup helps auto-Send.`
     );
     return;
   }
@@ -2751,6 +2785,13 @@ qaLearnToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ qa_learn_enabled: Boolean(qaLearnToggleEl.checked) }).catch(() => {});
 });
 
+aiProviderChatgptBtn?.addEventListener("click", () => {
+  setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));
+});
+aiProviderClaudeBtn?.addEventListener("click", () => {
+  setAiProvider(AI_PROVIDERS.CLAUDE).catch((e) => setStatus(String(e.message || e)));
+});
+
 for (const el of [
   jobTitleEl,
   companyNameEl,
@@ -2801,6 +2842,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[INDEED_GRAB_STATUS_KEY]) {
     renderIndeedGrabState(changes[INDEED_GRAB_STATUS_KEY].newValue);
+  }
+  if (changes[AI_PROVIDER_KEY] && changes[AI_PROVIDER_KEY].newValue !== undefined) {
+    renderAiProvider(changes[AI_PROVIDER_KEY].newValue);
   }
 });
 

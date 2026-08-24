@@ -83,6 +83,15 @@ import {
   normalizeIndeedCapturedJob
 } from "./indeed.js";
 import { evaluateAtsScore } from "./ats-score.js";
+import {
+  AI_PROVIDER_KEY,
+  AI_PROVIDERS,
+  aiProviderHomeUrl,
+  aiProviderLabel,
+  aiProviderNewChatUrl,
+  isAiProviderUrl,
+  normalizeAiProvider
+} from "./ai-provider.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
@@ -730,20 +739,17 @@ async function resumeBatchIfInterrupted(wasRunning) {
   });
 }
 
-function isChatGptUrl(url) {
-  return (
-    typeof url === "string" &&
-    (url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/"))
-  );
+async function getStoredAiProvider() {
+  const data = await chrome.storage.local.get([AI_PROVIDER_KEY]);
+  return normalizeAiProvider(data[AI_PROVIDER_KEY]);
 }
 
-async function getOpenChatGptTab() {
+async function getOpenAiTab(provider) {
+  const p = normalizeAiProvider(provider);
   const tabs = await chrome.tabs.query({});
-  const chatTabs = tabs.filter((tab) => isChatGptUrl(tab.url) && typeof tab.id === "number");
+  const chatTabs = tabs.filter((tab) => isAiProviderUrl(tab.url, p) && typeof tab.id === "number");
   if (!chatTabs.length) return null;
 
-  // Prefer the ChatGPT tab the user is actually looking at, then the most
-  // recently used one, so the prompt lands in the expected tab.
   chatTabs.sort((a, b) => {
     if (!!b.active !== !!a.active) return (b.active ? 1 : 0) - (a.active ? 1 : 0);
     return (b.lastAccessed || 0) - (a.lastAccessed || 0);
@@ -752,29 +758,40 @@ async function getOpenChatGptTab() {
 }
 
 /**
- * Full automation must not stall on a missing tab: open ChatGPT ourselves when
- * none is present. Signed-out users still get a clear error from the send step.
+ * Full automation must not stall on a missing tab: open the selected AI site
+ * when none is present. Signed-out users still get a clear error from send.
  */
-async function ensureChatGptTab() {
-  const existing = await getOpenChatGptTab();
+async function ensureAiTab(provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  const label = aiProviderLabel(p);
+  const existing = await getOpenAiTab(p);
   if (existing && typeof existing.id === "number") return existing;
 
-  await setStatus("No ChatGPT tab open — opening one…");
-  const tab = await chrome.tabs.create({ url: "https://chatgpt.com/", active: true });
+  await setStatus(`No ${label} tab open — opening one…`);
+  const tab = await chrome.tabs.create({ url: aiProviderHomeUrl(p), active: true });
   if (typeof tab?.id !== "number") {
-    throw new Error("Open ChatGPT in a browser tab first.");
+    throw new Error(`Open ${label} in a browser tab first.`);
   }
   try {
-    await withTimeout(waitForTabComplete(tab.id, 30000), 32000, "Timed out opening ChatGPT.");
+    await withTimeout(waitForTabComplete(tab.id, 30000), 32000, `Timed out opening ${label}.`);
   } catch {
     // Slow load is fine — the composer wait below covers it.
   }
   for (let i = 0; i < 40; i += 1) {
-    const state = await readChatReadiness(tab.id);
+    const state = await readChatReadiness(tab.id, p);
     if (state.hasInput) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return chrome.tabs.get(tab.id);
+}
+
+/** @deprecated Prefer ensureAiTab — kept for older call sites during transition. */
+async function ensureChatGptTab() {
+  return ensureAiTab(await getStoredAiProvider());
+}
+
+async function getOpenChatGptTab() {
+  return getOpenAiTab(AI_PROVIDERS.CHATGPT);
 }
 
 async function setStatus(status) {
@@ -2428,19 +2445,33 @@ async function focusTabForInput(tabId) {
 }
 
 /** True when the tab shows an empty composer and zero assistant messages. */
-async function readChatReadiness(tabId) {
+async function readChatReadiness(tabId, provider) {
+  const p = normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT);
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const input =
-          document.querySelector("#prompt-textarea") ||
-          document.querySelector("div.ProseMirror[contenteditable='true']") ||
-          document.querySelector("textarea[placeholder*='Message']");
+      args: [p],
+      func: (site) => {
+        const claude = site === "claude";
+        const input = claude
+          ? document.querySelector('div[contenteditable="true"][data-testid]') ||
+            document.querySelector("div.ProseMirror[contenteditable='true']") ||
+            document.querySelector('div[contenteditable="true"]')
+          : document.querySelector("#prompt-textarea") ||
+            document.querySelector("div.ProseMirror[contenteditable='true']") ||
+            document.querySelector("textarea[placeholder*='Message']");
+        const assistantBlocks = claude
+          ? document.querySelectorAll(
+              '[data-testid="assistant-message"], [data-testid="assistant"], [data-is-streaming="true"]'
+            ).length
+          : document.querySelectorAll("[data-message-author-role='assistant']").length;
+        const userBlocks = claude
+          ? document.querySelectorAll('[data-testid="user-message"], [data-testid="user"]').length
+          : document.querySelectorAll("[data-message-author-role='user']").length;
         return {
           hasInput: Boolean(input && input.offsetParent !== null),
-          assistantBlocks: document.querySelectorAll("[data-message-author-role='assistant']").length,
-          userBlocks: document.querySelectorAll("[data-message-author-role='user']").length
+          assistantBlocks,
+          userBlocks
         };
       }
     });
@@ -2451,32 +2482,26 @@ async function readChatReadiness(tabId) {
 }
 
 /**
- * Hard-guarantee a blank chat before each job. Clicking ChatGPT's "New chat"
+ * Hard-guarantee a blank chat before each job. Clicking "New chat"
  * control silently no-ops on some builds, and the poller then harvests the
  * PREVIOUS job's resume JSON — wrong resume, saved under the new company.
  * Navigating the tab is deterministic; the in-page click stays as a fallback.
  */
-async function ensureFreshChat(tabId) {
-  let base = "https://chatgpt.com/";
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (typeof tab?.url === "string" && tab.url.startsWith("https://chat.openai.com")) {
-      base = "https://chat.openai.com/";
-    }
-  } catch {
-    // default to chatgpt.com
-  }
+async function ensureFreshChat(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  const label = aiProviderLabel(p);
+  const base = aiProviderNewChatUrl(p);
 
   try {
     await chrome.tabs.update(tabId, { url: base });
-    await withTimeout(waitForTabComplete(tabId, 30000), 32000, "Timed out loading a new ChatGPT chat.");
+    await withTimeout(waitForTabComplete(tabId, 30000), 32000, `Timed out loading a new ${label} chat.`);
   } catch {
     return false;
   }
 
   // The composer mounts after load; assistant blocks must be gone.
   for (let i = 0; i < 40; i += 1) {
-    const state = await readChatReadiness(tabId);
+    const state = await readChatReadiness(tabId, p);
     if (state.hasInput && state.assistantBlocks === 0) return true;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -2489,7 +2514,7 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
-    needsInPageNewChat = !(await ensureFreshChat(tabId));
+    needsInPageNewChat = !(await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT));
   }
 
   let lastError = null;
@@ -2993,6 +3018,343 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
   return results[0].result || { blocksBefore: 0, latestBefore: "" };
 }
 
+async function claudeSendPrompt(tabId, prompt, startNewChat) {
+  let needsInPageNewChat = Boolean(startNewChat);
+  if (startNewChat) {
+    await setStatus("Opening a fresh Claude chat…");
+    needsInPageNewChat = !(await ensureFreshChat(tabId, AI_PROVIDERS.CLAUDE));
+  }
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await focusTabForInput(tabId);
+    if (attempt > 0) {
+      await setStatus("Retrying Claude Send…");
+      await sleep(400);
+    }
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        args: [prompt, attempt === 0 ? needsInPageNewChat : false],
+        func: async (fullPrompt, shouldStartNewChat) => {
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          const firePointerClick = (el) => {
+            if (!(el instanceof HTMLElement)) return false;
+            const opts = { bubbles: true, cancelable: true, view: window };
+            el.dispatchEvent(new PointerEvent("pointerdown", { ...opts, pointerId: 1, pointerType: "mouse" }));
+            el.dispatchEvent(new MouseEvent("mousedown", opts));
+            el.dispatchEvent(new PointerEvent("pointerup", { ...opts, pointerId: 1, pointerType: "mouse" }));
+            el.dispatchEvent(new MouseEvent("mouseup", opts));
+            el.dispatchEvent(new MouseEvent("click", opts));
+            if (typeof el.click === "function") el.click();
+            return true;
+          };
+
+          const findInput = () =>
+            document.querySelector('div[contenteditable="true"][data-testid]') ||
+            document.querySelector("div.ProseMirror[contenteditable='true']") ||
+            document.querySelector('div[contenteditable="true"][enterkeyhint]') ||
+            document.querySelector('div[contenteditable="true"]');
+
+          const setInputValue = (el, text) => {
+            if (!(el instanceof HTMLElement)) return;
+            el.focus();
+            try {
+              document.execCommand("selectAll", false);
+              document.execCommand("delete", false);
+            } catch {
+              // ignore
+            }
+            let inserted = false;
+            try {
+              const dt = new DataTransfer();
+              dt.setData("text/plain", text);
+              el.dispatchEvent(
+                new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
+              );
+              inserted = (el.innerText || el.textContent || "").trim().length > 20;
+            } catch {
+              inserted = false;
+            }
+            if (!inserted) {
+              try {
+                inserted = document.execCommand("insertText", false, text);
+              } catch {
+                inserted = false;
+              }
+              inserted = inserted || (el.innerText || el.textContent || "").trim().length > 20;
+            }
+            if (!inserted) {
+              el.innerHTML = "";
+              for (const line of String(text).split("\n")) {
+                const p = document.createElement("p");
+                p.textContent = line || "\u00a0";
+                el.appendChild(p);
+              }
+              el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+            }
+          };
+
+          const findSendButton = () => {
+            const selectors = [
+              'button[aria-label="Send Message"]',
+              'button[aria-label*="Send Message"]',
+              'button[aria-label="Send message"]',
+              'button[aria-label*="Send message"]',
+              'button[data-testid="send-button"]',
+              'button[aria-label="Send"]',
+              'button[aria-label*="Send"]'
+            ];
+            for (const selector of selectors) {
+              const btn = document.querySelector(selector);
+              if (!(btn instanceof HTMLButtonElement)) continue;
+              const label = `${btn.getAttribute("aria-label") || ""}`.toLowerCase();
+              if (/stop|mic|voice|attach|upload/.test(label)) continue;
+              return btn;
+            }
+            return null;
+          };
+
+          const isSendEnabled = (btn) =>
+            btn instanceof HTMLButtonElement &&
+            !btn.disabled &&
+            btn.getAttribute("aria-disabled") !== "true";
+
+          const countUser = () =>
+            document.querySelectorAll(
+              '[data-testid="user-message"], [data-testid="user"], [data-role="user"]'
+            ).length;
+
+          const isGenerating = () => {
+            const stop =
+              document.querySelector('button[aria-label*="Stop"]') ||
+              document.querySelector('button[aria-label*="stop"]') ||
+              document.querySelector('[data-is-streaming="true"]');
+            return Boolean(stop && (stop.offsetParent !== null || stop.getAttribute?.("data-is-streaming") === "true"));
+          };
+
+          if (shouldStartNewChat) {
+            const newBtn = Array.from(document.querySelectorAll("a, button")).find((el) =>
+              /new chat/i.test(`${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`)
+            );
+            if (newBtn instanceof HTMLElement) {
+              firePointerClick(newBtn);
+              await sleep(1200);
+            }
+          }
+
+          let input = null;
+          for (let i = 0; i < 40; i += 1) {
+            input = findInput();
+            if (input) break;
+            await sleep(500);
+          }
+          if (!input) throw new Error("Cannot find Claude message input box.");
+
+          const usersBefore = countUser();
+          let filled = false;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            input.focus();
+            await sleep(120);
+            setInputValue(input, fullPrompt);
+            await sleep(450);
+            input = findInput() || input;
+            if ((input.innerText || input.textContent || "").trim().length > 20) {
+              filled = true;
+              break;
+            }
+          }
+          if (!filled) {
+            throw new Error("Prompt text did not appear in the Claude input. Keep the Claude tab visible and try again.");
+          }
+
+          let sent = false;
+          for (let i = 0; i < 40; i += 1) {
+            if (isGenerating() || countUser() > usersBefore) {
+              sent = true;
+              break;
+            }
+            const btn = findSendButton();
+            if (btn && isSendEnabled(btn)) {
+              firePointerClick(btn);
+              await sleep(500);
+              if (isGenerating() || countUser() > usersBefore || (input.innerText || "").trim().length < 40) {
+                sent = true;
+                break;
+              }
+            } else {
+              input = findInput() || input;
+              input.focus();
+              input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " }));
+              await sleep(250);
+            }
+            await sleep(250);
+          }
+
+          if (!sent) {
+            const btn = findSendButton();
+            if (btn) {
+              btn.disabled = false;
+              btn.removeAttribute("disabled");
+              firePointerClick(btn);
+              await sleep(700);
+            }
+          }
+
+          if (!(isGenerating() || countUser() > usersBefore || (findInput()?.innerText || "").trim().length < 40)) {
+            throw new Error(
+              "Prompt was typed but Claude did not accept Send. Keep the Claude tab focused and try again."
+            );
+          }
+
+          return {
+            blocksBefore: document.querySelectorAll(
+              '[data-testid="assistant-message"], [data-testid="assistant"]'
+            ).length,
+            latestBefore: ""
+          };
+        }
+      });
+      if (!results?.length) throw new Error("No response from Claude page script.");
+      if (results[0].result === undefined && results[0].error) {
+        throw new Error(String(results[0].error.message || results[0].error));
+      }
+      return results[0].result || { blocksBefore: 0, latestBefore: "" };
+    } catch (err) {
+      lastError = err;
+      const msg = String(err?.message || err);
+      if (!/did not accept Send|did not appear in the Claude input/i.test(msg) || attempt === 1) {
+        throw err;
+      }
+    }
+  }
+  throw lastError || new Error("Claude Send failed.");
+}
+
+async function aiSendPrompt(tabId, prompt, startNewChat) {
+  const provider = await getStoredAiProvider();
+  if (provider === AI_PROVIDERS.CLAUDE) {
+    return claudeSendPrompt(tabId, prompt, startNewChat);
+  }
+  return chatgptSendPrompt(tabId, prompt, startNewChat);
+}
+
+/**
+ * Remove the conversation used for the just-finished job so history stays clean.
+ * Best-effort: API when possible, UI confirm as fallback, then open a blank chat.
+ */
+async function deleteCurrentAiConversation(tabId) {
+  const provider = await getStoredAiProvider();
+  const label = aiProviderLabel(provider);
+  await focusTabForInput(tabId);
+  await setStatus(`Removing finished ${label} chat…`);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [provider],
+    func: async (site) => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      const clickMatching = (re) => {
+        const nodes = Array.from(document.querySelectorAll("button, a, [role='menuitem'], div[role='button']"));
+        const hit = nodes.find((el) => re.test(`${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`.trim()));
+        if (hit instanceof HTMLElement) {
+          hit.click();
+          return true;
+        }
+        return false;
+      };
+
+      if (site === "claude") {
+        const chatId = (location.pathname.match(/\/chat\/([a-f0-9-]+)/i) || [])[1];
+        if (chatId) {
+          try {
+            const orgs = await fetch("/api/organizations", { credentials: "include" }).then((r) => r.json());
+            const orgId = Array.isArray(orgs) ? orgs[0]?.uuid || orgs[0]?.id : orgs?.uuid || orgs?.id;
+            if (orgId) {
+              const res = await fetch(`/api/organizations/${orgId}/chat_conversations/${chatId}`, {
+                method: "DELETE",
+                credentials: "include"
+              });
+              if (res.ok || res.status === 204 || res.status === 404) {
+                return { ok: true, via: "api" };
+              }
+            }
+          } catch {
+            // fall through to UI
+          }
+        }
+
+        clickMatching(/chat menu|more options|conversation options|^\s*⋯\s*$|^\s*\.\.\.\s*$/i);
+        await sleep(400);
+        clickMatching(/^delete$/i);
+        await sleep(350);
+        clickMatching(/^delete$/i);
+        return { ok: true, via: "ui" };
+      }
+
+      // ChatGPT — hide conversation via backend API when session token is available.
+      const convId = (location.pathname.match(/\/c\/([^/?#]+)/i) || [])[1];
+      if (convId) {
+        try {
+          const session = await fetch("/api/auth/session", { credentials: "include" }).then((r) => r.json());
+          const token = session?.accessToken || session?.access_token;
+          if (token) {
+            const res = await fetch(`/backend-api/conversation/${convId}`, {
+              method: "PATCH",
+              credentials: "include",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ is_visible: false })
+            });
+            if (res.ok || res.status === 204 || res.status === 404) {
+              return { ok: true, via: "api" };
+            }
+          }
+        } catch {
+          // fall through to UI
+        }
+      }
+
+      const menuSelectors = [
+        'button[data-testid="conversation-options-button"]',
+        'button[aria-label*="Open conversation options"]',
+        'button[aria-label*="Conversation options"]',
+        'button[aria-label*="More actions"]',
+        'button[aria-label*="More options"]'
+      ];
+      for (const selector of menuSelectors) {
+        const btn = document.querySelector(selector);
+        if (btn instanceof HTMLElement) {
+          btn.click();
+          break;
+        }
+      }
+      await sleep(450);
+      clickMatching(/delete chat|delete conversation|^delete$/i);
+      await sleep(400);
+      clickMatching(/^delete$/i);
+      return { ok: true, via: "ui" };
+    }
+  });
+
+  const detail = results?.[0]?.result || { ok: false };
+  // Leave a blank chat so the next job does not reopen the deleted URL.
+  try {
+    await ensureFreshChat(tabId, provider);
+  } catch {
+    // ignore
+  }
+  if (!detail?.ok) {
+    throw new Error(`${label} chat cleanup did not confirm.`);
+  }
+  await setStatus(`Removed finished ${label} chat (${detail.via || "ok"}).`);
+  return detail;
+}
+
 async function chatgptPollState(tabId, { harvestJson = false } = {}) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
@@ -3002,8 +3364,12 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         const stopBtn =
           document.querySelector("button[data-testid='stop-button']") ||
           document.querySelector("button[aria-label='Stop streaming']") ||
-          document.querySelector("button[aria-label='Stop generating']");
-        if (stopBtn && stopBtn.offsetParent !== null) return true;
+          document.querySelector("button[aria-label='Stop generating']") ||
+          document.querySelector('button[aria-label*="Stop"]') ||
+          document.querySelector('[data-is-streaming="true"]');
+        if (stopBtn && (stopBtn.offsetParent !== null || stopBtn.getAttribute?.("data-is-streaming") === "true")) {
+          return true;
+        }
         return false;
       };
 
@@ -3038,8 +3404,9 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         };
 
         // Deep scan: last 20 assistant turns (retries push good JSON out of last-3).
+        // Includes ChatGPT + Claude message roots.
         const blocks = document.querySelectorAll(
-          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
+          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [data-is-streaming], [class*='assistant-message'], [class*='font-claude-message']"
         );
         if (blocks.length) {
           const start = Math.max(0, blocks.length - 20);
@@ -3500,11 +3867,13 @@ function looksSettledAssistantText(text, { expectResumeJson = false } = {}) {
 }
 
 async function automateChatGpt(tabId, prompt, options = {}) {
+  const provider = await getStoredAiProvider();
+  const providerLabel = aiProviderLabel(provider);
   const startNewChat = options.newChat !== false;
-  const label = options.statusLabel || "Waiting for ChatGPT response...";
+  const label = options.statusLabel || `Waiting for ${providerLabel} response...`;
   const expectResumeJson = Boolean(options.expectResumeJson);
 
-  const { blocksBefore, latestBefore } = await chatgptSendPrompt(tabId, prompt, startNewChat);
+  const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat);
 
   // Active polling budget (rate-limit cooldowns do NOT count against this).
   const timeoutMs = expectResumeJson ? 12 * 60 * 1000 : 4 * 60 * 1000;
@@ -3545,17 +3914,19 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     // Mid-reply rate-limit banner: cool down, then keep polling for JSON.
-    try {
-      const rate = await detectChatGptRateLimit(tabId);
-      if (rate.limited) {
-        const pauseStart = Date.now();
-        await waitOutChatGptRateLimit(tabId);
-        pausedMs += Date.now() - pauseStart;
-        continue;
+    if (provider === AI_PROVIDERS.CHATGPT) {
+      try {
+        const rate = await detectChatGptRateLimit(tabId);
+        if (rate.limited) {
+          const pauseStart = Date.now();
+          await waitOutChatGptRateLimit(tabId);
+          pausedMs += Date.now() - pauseStart;
+          continue;
+        }
+      } catch (rateErr) {
+        if (String(rateErr?.message || rateErr) === "__SKIP__") throw rateErr;
+        // ignore transient detection errors
       }
-    } catch (rateErr) {
-      if (String(rateErr?.message || rateErr) === "__SKIP__") throw rateErr;
-      // ignore transient detection errors
     }
 
     // Ready flag from content.js = JSON complete on page → generate files now.
@@ -4180,9 +4551,11 @@ async function pickTemplateId(jobMeta = {}, person = {}) {
  * resume (with JD) → save files → cover letter in the same chat → save CL.
  */
 async function runAutoJob(jobMeta) {
-  const tab = await ensureChatGptTab();
+  const provider = await getStoredAiProvider();
+  const providerLabel = aiProviderLabel(provider);
+  const tab = await ensureAiTab(provider);
   if (!tab || typeof tab.id !== "number") {
-    throw new Error("Open ChatGPT in a browser tab first.");
+    throw new Error(`Open ${providerLabel} in a browser tab first.`);
   }
 
   const person = await getActivePerson();
@@ -4205,7 +4578,7 @@ async function runAutoJob(jobMeta) {
   });
 
   await setStatus(
-    `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: opening ONE new chat for this position…`
+    `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: opening ONE new ${providerLabel} chat for this position…`
   );
 
   if (batchControl.skipCurrent || batchControl.stop) {
@@ -4466,6 +4839,15 @@ async function runAutoJob(jobMeta) {
     // ignore
   }
 
+  // Drop the per-job conversation so GPT/Claude history stays tidy.
+  try {
+    await deleteCurrentAiConversation(tab.id);
+  } catch (cleanupErr) {
+    await setStatus(
+      `${result.status} — chat cleanup skipped: ${String(cleanupErr?.message || cleanupErr)}`
+    );
+  }
+
   return { ...result, atsEvaluation };
 }
 
@@ -4483,7 +4865,7 @@ async function runBatchLoop(outputDir) {
 
   try {
     await setStatus(
-      `ChatGPT pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
+      `${aiProviderLabel(await getStoredAiProvider())} pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
     );
     const dedupe = await dedupeQueueAgainstSheet({ notifySlack: true });
     if (dedupe.checked && dedupe.skipped > 0) {
