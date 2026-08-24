@@ -59,16 +59,30 @@ import {
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
-import { parseJobsCsv, filterJobsByChannel, normalizeChannelFilter, isDiceJob } from "./csv.js";
+import {
+  parseJobsCsv,
+  filterJobsByChannel,
+  normalizeChannelFilter,
+  isDiceJob,
+  isIndeedJob
+} from "./csv.js";
 import {
   CSV_SOURCE_ALARM,
   NATIVE_HOST_NAME,
   clampPollMinutes,
   fingerprintText,
   getCsvSourceSettings,
+  jobIdentity,
   mergeParsedJobs,
   saveCsvSourceSettings
 } from "./csv-source.js";
+import {
+  buildIndeedSearchUrl,
+  isExplicitlyHostedIndeedJob,
+  isIndeedUrl,
+  isSalesforceRelevantJob,
+  normalizeIndeedCapturedJob
+} from "./indeed.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
@@ -76,6 +90,8 @@ const APPLY_HISTORY_KEY = "apply_history";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const DEFAULT_CHANNEL_FILTER = "dice";
+const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state";
+const INDEED_CAPTURE_SETTINGS_KEY = "indeed_capture_settings";
 
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
@@ -854,7 +870,7 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
   }
 }
 
-const MAX_DICE_APPLY_ATTEMPTS = 3;
+const MAX_HOSTED_APPLY_ATTEMPTS = 3;
 
 /** Queue rows belong to a person via profileId, or via Applications-* jobDir for legacy rows. */
 function jobBelongsToPerson(job, person) {
@@ -935,10 +951,11 @@ async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, excludeJdLi
 }
 
 /**
- * Dice interleaved: auto-apply with submit after files exist.
+ * Hosted-board interleaved flow: auto-apply with submit after files exist.
  * On incomplete apply, pause (keep tab open) so Start can retry.
  */
-async function runDiceInterleavedApply(jobMeta = {}) {
+async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
+  const boardLabel = board === "Indeed" ? "Indeed" : "Dice";
   const jdLink = String(jobMeta.jdLink || "").trim();
   const prevAttempts = Number(jobMeta.applyAttempts || 0);
   const companyName = jobMeta.companyName || jobMeta.company || "";
@@ -954,7 +971,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     await updateQueueJob(jobMeta.csvRow, {
       applied: false,
       applyAttempted: true,
-      applyAttempts: MAX_DICE_APPLY_ATTEMPTS,
+      applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
       // Lock only when a Ready-row skip was retried and still looks like a real company dup.
       companySheetSkipLocked: recheckAfterReadySkip || Boolean(prior?.companySheetSkipLocked),
       error: `Skipped — ${companyDup.reason}`
@@ -975,7 +992,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     await updateQueueJob(jobMeta.csvRow, {
       error: "",
       companySheetSkipLocked: false,
-      applyAttempts: prevAttempts < MAX_DICE_APPLY_ATTEMPTS ? prevAttempts : 0
+      applyAttempts: prevAttempts < MAX_HOSTED_APPLY_ATTEMPTS ? prevAttempts : 0
     }).catch(() => {});
   }
 
@@ -984,7 +1001,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
       applied: false,
       applyAttempted: true,
       applyAttempts: prevAttempts + 1,
-      error: "Generated files, but missing job URL for Dice auto-apply"
+      error: `Generated files, but missing job URL for ${boardLabel} auto-apply`
     });
     await setStatus(
       `Row ${jobMeta.csvRow}: files ready, but no JD link — skipping apply and continuing…`
@@ -997,7 +1014,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
   }
 
   await setStatus(
-    `Dice auto-apply: row ${jobMeta.csvRow} — ${jobMeta.companyName || jobMeta.company} / ${jobMeta.jobTitle || jobMeta.title}`
+    `${boardLabel} auto-apply: row ${jobMeta.csvRow} — ${jobMeta.companyName || jobMeta.company} / ${jobMeta.jobTitle || jobMeta.title}`
   );
 
   let applyResult;
@@ -1024,7 +1041,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
       applied: false,
       applyAttempted: true,
       applyAttempts: prevAttempts + 1,
-      error: "Skipped during Dice auto-apply"
+      error: `Skipped during ${boardLabel} auto-apply`
     });
     return { ...applyResult, status: "skipped", detail: "Skipped during apply" };
   }
@@ -1050,7 +1067,7 @@ async function runDiceInterleavedApply(jobMeta = {}) {
       applied: false,
       inactive: true,
       applyAttempted: true,
-      applyAttempts: MAX_DICE_APPLY_ATTEMPTS,
+      applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
       error: sheetStatus,
       jobDir: applyResult?.uploadFolder || jobMeta.jobDir || ""
     }).catch(() => {});
@@ -1108,11 +1125,11 @@ async function runDiceInterleavedApply(jobMeta = {}) {
   const reviewMsg =
     detail ||
     (status === "unavailable" ? "Job unavailable" : "Apply needs review (login, CAPTCHA, or form blocker)");
-  const exhausted = nextAttempts >= MAX_DICE_APPLY_ATTEMPTS;
+  const exhausted = status === "skipped" || nextAttempts >= MAX_HOSTED_APPLY_ATTEMPTS;
   await updateQueueJob(jobMeta.csvRow, {
     applied: false,
     applyAttempted: exhausted,
-    applyAttempts: nextAttempts,
+    applyAttempts: status === "skipped" ? MAX_HOSTED_APPLY_ATTEMPTS : nextAttempts,
     error: reviewMsg.slice(0, 240)
   }).catch(() => {});
   await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}`);
@@ -1122,9 +1139,9 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     company: jobMeta.companyName || jobMeta.company || "",
     jobTitle: jobMeta.jobTitle || jobMeta.title || "",
     jdLink,
-    message: `Dice auto-apply: ${reviewMsg}`,
+    message: `${boardLabel} auto-apply: ${reviewMsg}`,
     attempts: nextAttempts,
-    maxAttempts: MAX_DICE_APPLY_ATTEMPTS,
+    maxAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
     progress: await queueSlackProgress().catch(() => null)
   }).catch(() => {});
 
@@ -1133,13 +1150,13 @@ async function runDiceInterleavedApply(jobMeta = {}) {
     ...applyResult,
     status: status || "needs_review",
     detail: reviewMsg,
-    needsPause: !exhausted && status !== "unavailable"
+    needsPause: !exhausted && status !== "unavailable" && status !== "skipped"
   };
   return applyResult;
 }
 
-async function pauseAfterFailedDiceApply(applyResult, jobLabel = "") {
-  const detail = String(applyResult?.detail || "Dice apply needs review");
+async function pauseAfterFailedHostedApply(applyResult, jobLabel = "") {
+  const detail = String(applyResult?.detail || "Application needs review");
   await setBatchState("paused");
   await setStatus(
     `${jobLabel ? `Row ${jobLabel}: ` : ""}${detail}. Batch paused — fix the form (login/CAPTCHA/Next), then click Start to retry apply.`
@@ -1147,7 +1164,7 @@ async function pauseAfterFailedDiceApply(applyResult, jobLabel = "") {
   await chrome.storage.local.set({ generation_running: false });
 }
 
-function diceApplyAttemptCount(j) {
+function hostedApplyAttemptCount(j) {
   const n = Number(j.applyAttempts || 0);
   if (n > 0) return n;
   // Legacy rows only had applyAttempted — count as one try so Start can still retry.
@@ -1163,9 +1180,15 @@ function isRetriableReadyRowCompanySkip(j) {
   );
 }
 
-function isDiceApplyBacklogJob(j, person = null) {
+function isIndeedHostedApplyJob(j) {
+  if (!(j?.isIndeed || isIndeedJob(j || {}))) return false;
+  return isExplicitlyHostedIndeedJob(j);
+}
+
+function isHostedApplyBacklogJob(j, person = null) {
+  const hostedIndeed = isIndeedHostedApplyJob(j);
   if (
-    !(j.isDice || isDiceJob(j)) ||
+    !(j.isDice || isDiceJob(j) || hostedIndeed) ||
     j.status !== "done" ||
     j.applied ||
     j.inactive ||
@@ -1174,8 +1197,8 @@ function isDiceApplyBacklogJob(j, person = null) {
   ) {
     return false;
   }
-  const attempts = diceApplyAttemptCount(j);
-  if (attempts >= MAX_DICE_APPLY_ATTEMPTS && !isRetriableReadyRowCompanySkip(j)) {
+  const attempts = hostedApplyAttemptCount(j);
+  if (attempts >= MAX_HOSTED_APPLY_ATTEMPTS && !isRetriableReadyRowCompanySkip(j)) {
     return false;
   }
   if (person) return jobBelongsToPerson(j, person);
@@ -4299,25 +4322,26 @@ async function runBatchLoop(outputDir) {
       const queue = await getQueue();
       const activePerson = await getActivePerson().catch(() => null);
 
-      // Dice jobs: apply already-built rows that are not Applied yet (no ChatGPT).
-      // Gated by job type (isDice), not Apply-source filter — so All/Dice both auto-apply.
+      // Hosted Dice/Indeed jobs: apply already-built rows that are not Applied yet (no ChatGPT).
+      // Gated by job type, not the visible source filter.
       // Only the active person's rows (profileId / Applications-* folder).
-      const backlog = queue.find((j) => isDiceApplyBacklogJob(j, activePerson));
+      const backlog = queue.find((j) => isHostedApplyBacklogJob(j, activePerson));
       if (backlog) {
+        const backlogBoard = isIndeedHostedApplyJob(backlog) ? "Indeed" : "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
             applied: false,
             applyAttempted: true,
             applyAttempts: Number(backlog.applyAttempts || 0) + 1,
-            error: "Skipped during Dice apply backlog"
+            error: `Skipped during ${backlogBoard} apply backlog`
           });
           continue;
         }
         await setStatus(
-          `Dice auto-apply: row ${backlog.csvRow} — ${backlog.company} / ${backlog.title}`
+          `${backlogBoard} auto-apply: row ${backlog.csvRow} — ${backlog.company} / ${backlog.title}`
         );
-        const applyRes = await runDiceInterleavedApply({
+        const applyRes = await runHostedInterleavedApply({
           csvRow: backlog.csvRow,
           jobTitle: backlog.title,
           companyName: backlog.company,
@@ -4327,11 +4351,11 @@ async function runBatchLoop(outputDir) {
           salary: backlog.salary || "",
           jobDir: backlog.jobDir || "",
           profileId: activePerson?.id || backlog.profileId || "",
-          applyAttempts: diceApplyAttemptCount(backlog)
-        });
+          applyAttempts: hostedApplyAttemptCount(backlog)
+        }, backlogBoard);
         if (batchControl.stop) break;
         if (applyRes?.needsPause) {
-          await pauseAfterFailedDiceApply(applyRes, backlog.csvRow);
+          await pauseAfterFailedHostedApply(applyRes, backlog.csvRow);
           return;
         }
         if (String(applyRes?.status || "") !== "submitted") {
@@ -4477,10 +4501,14 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Dice jobs always: generate → auto-apply+submit → close tab → next.
-        // Non-Dice jobs stop after files (manual Apply remains stop-before-submit).
-        if ((next.isDice || isDiceJob(next)) && !batchControl.stop) {
-          const applyRes = await runDiceInterleavedApply({
+        // Hosted Dice and Indeed jobs: generate → auto-apply+submit → close tab → next.
+        const hostedApplyBoard = isIndeedHostedApplyJob(next)
+          ? "Indeed"
+          : next.isDice || isDiceJob(next)
+            ? "Dice"
+            : "";
+        if (hostedApplyBoard && !batchControl.stop) {
+          const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,
             jobTitle: next.title,
             companyName: next.company,
@@ -4490,10 +4518,10 @@ async function runBatchLoop(outputDir) {
             salary: next.salary || "",
             jobDir: result.savedDir || "",
             profileId: activePerson?.id || next.profileId || "",
-            applyAttempts: diceApplyAttemptCount(next)
-          });
+            applyAttempts: hostedApplyAttemptCount(next)
+          }, hostedApplyBoard);
           if (applyRes?.needsPause) {
-            await pauseAfterFailedDiceApply(applyRes, next.csvRow);
+            await pauseAfterFailedHostedApply(applyRes, next.csvRow);
             return;
           }
         }
@@ -4660,6 +4688,256 @@ async function revealJobFiles({ csvRow, jobDir, jdLink }) {
 
 async function autofillActiveTab(tabId = null) {
   return startAutofillOnTab(tabId);
+}
+
+const DEFAULT_INDEED_CAPTURE_SETTINGS = {
+  searchUrl: "",
+  query: "Salesforce",
+  maxPages: 5,
+  pageDelayMs: 1800
+};
+
+let indeedCaptureControl = {
+  running: false,
+  stop: false,
+  tabId: null
+};
+
+function clampIndeedPages(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(1, Math.min(25, Math.round(n))) : 5;
+}
+
+async function getIndeedCaptureSettings() {
+  const data = await chrome.storage.local.get(INDEED_CAPTURE_SETTINGS_KEY);
+  return {
+    ...DEFAULT_INDEED_CAPTURE_SETTINGS,
+    ...(data[INDEED_CAPTURE_SETTINGS_KEY] || {})
+  };
+}
+
+async function saveIndeedCaptureState(patch = {}) {
+  const data = await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY);
+  const next = {
+    running: false,
+    status: "idle",
+    page: 0,
+    scanned: 0,
+    captured: 0,
+    qualified: 0,
+    duplicates: 0,
+    external: 0,
+    blocked: 0,
+    message: "",
+    ...(data[INDEED_CAPTURE_STATE_KEY] || {}),
+    ...patch,
+    updatedAt: Date.now()
+  };
+  await chrome.storage.local.set({ [INDEED_CAPTURE_STATE_KEY]: next });
+  return next;
+}
+
+async function sendIndeedCaptureMessage(tabId, payload) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, payload);
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content/indeed-capture.js"]
+    });
+    await sleep(150);
+    return chrome.tabs.sendMessage(tabId, payload);
+  }
+}
+
+async function mergeIndeedCapturedJobs(jobs) {
+  const data = await chrome.storage.local.get([
+    ALL_US_JOBS_KEY,
+    QUEUE_KEY,
+    JOB_CHANNEL_FILTER_KEY
+  ]);
+  const previousAll = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  const previousQueue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  let nextRow = previousAll.reduce(
+    (max, job) => Math.max(max, Number(job?.csvRow || 0)),
+    0
+  ) + 1;
+  const byIdentity = new Map(previousAll.map((job) => [jobIdentity(job), job]));
+  let qualified = 0;
+  let external = 0;
+  let duplicates = 0;
+
+  for (const raw of Array.isArray(jobs) ? jobs : []) {
+    const candidate = normalizeIndeedCapturedJob(raw, nextRow);
+    if (!candidate.title || !candidate.jdLink || !isSalesforceRelevantJob(candidate)) continue;
+    qualified += 1;
+    const id = jobIdentity(candidate);
+    if (byIdentity.has(id)) {
+      duplicates += 1;
+      const prior = byIdentity.get(id);
+      byIdentity.set(id, {
+        ...prior,
+        ...candidate,
+        csvRow: prior.csvRow,
+        status: prior.status || "pending",
+        attempts: prior.attempts || 0,
+        jobDir: prior.jobDir || "",
+        applied: Boolean(prior.applied)
+      });
+      continue;
+    }
+    if (candidate.externalApply) external += 1;
+    byIdentity.set(id, candidate);
+    nextRow += 1;
+  }
+
+  const incoming = [...byIdentity.values()];
+  const merged = mergeParsedJobs(previousAll, previousQueue, incoming);
+  const channel = "indeed";
+  const filtered = filterJobsByChannel(merged.allUsJobs, channel);
+  await chrome.storage.local.set({
+    [ALL_US_JOBS_KEY]: merged.allUsJobs,
+    [QUEUE_KEY]: filtered,
+    [JOB_CHANNEL_FILTER_KEY]: channel,
+    csv_file_name: "Indeed signed-session capture",
+    csv_total_rows: merged.allUsJobs.length
+  });
+  return {
+    added: merged.added,
+    qualified,
+    duplicates,
+    external,
+    total: merged.allUsJobs.length
+  };
+}
+
+async function runIndeedCapture(options = {}) {
+  if (indeedCaptureControl.running) throw new Error("Indeed capture is already running.");
+  if (isRunning) throw new Error("Pause the generation/apply batch before starting Indeed capture.");
+  const previous = await getIndeedCaptureSettings();
+  const settings = {
+    ...previous,
+    searchUrl: String(options.searchUrl ?? previous.searchUrl ?? "").trim(),
+    query: String(options.query ?? previous.query ?? "Salesforce").trim() || "Salesforce",
+    maxPages: clampIndeedPages(options.maxPages ?? previous.maxPages),
+    pageDelayMs: Math.max(800, Math.min(10000, Number(previous.pageDelayMs || 1800)))
+  };
+  await chrome.storage.local.set({ [INDEED_CAPTURE_SETTINGS_KEY]: settings });
+
+  indeedCaptureControl = { running: true, stop: false, tabId: null };
+  startKeepAlive();
+  let tab = null;
+  const totals = {
+    scanned: 0,
+    captured: 0,
+    qualified: 0,
+    duplicates: 0,
+    external: 0,
+    blocked: 0
+  };
+  await saveIndeedCaptureState({
+    running: true,
+    status: "running",
+    page: 0,
+    maxPages: settings.maxPages,
+    query: settings.query,
+    searchUrl: settings.searchUrl,
+    ...totals,
+    message: "Opening Indeed search…"
+  });
+
+  try {
+    const startUrl = buildIndeedSearchUrl(settings);
+    if (Number.isInteger(options.tabId)) {
+      tab = await chrome.tabs.get(options.tabId).catch(() => null);
+    }
+    if (!tab) {
+      const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const active = activeTabs[0];
+      if (active?.id && isIndeedUrl(active.url)) tab = active;
+    }
+    if (!tab) tab = await chrome.tabs.create({ url: startUrl, active: true });
+    else if (!String(tab.url || "").startsWith(startUrl)) {
+      tab = await chrome.tabs.update(tab.id, { url: startUrl, active: true });
+    }
+    indeedCaptureControl.tabId = tab.id;
+    await waitForTabComplete(tab.id, 35000);
+
+    const visited = new Set();
+    for (let page = 1; page <= settings.maxPages && !indeedCaptureControl.stop; page += 1) {
+      const live = await chrome.tabs.get(tab.id);
+      const pageUrl = String(live?.url || "");
+      if (!isIndeedUrl(pageUrl)) {
+        throw new Error("Indeed capture left indeed.com; scan stopped.");
+      }
+      if (visited.has(pageUrl)) break;
+      visited.add(pageUrl);
+      await saveIndeedCaptureState({
+        running: true,
+        status: "running",
+        page,
+        message: `Scanning Indeed page ${page}/${settings.maxPages}…`
+      });
+
+      const result = await sendIndeedCaptureMessage(tab.id, {
+        type: "indeed_capture_scan_page",
+        query: settings.query,
+        page,
+        includeDetails: true
+      });
+      if (!result?.ok) {
+        if (result?.blocked || result?.loginRequired || result?.rateLimited) totals.blocked += 1;
+        throw new Error(result?.error || result?.message || "Indeed page scan failed.");
+      }
+      const pageJobs = Array.isArray(result.jobs) ? result.jobs : [];
+      totals.scanned += Number(result.scannedCount ?? result.allJobs?.length ?? pageJobs.length);
+      totals.captured += Number(result.captured ?? pageJobs.length);
+      const merged = await mergeIndeedCapturedJobs(pageJobs);
+      totals.qualified += merged.qualified;
+      totals.duplicates += merged.duplicates;
+      totals.external += merged.external;
+      await saveIndeedCaptureState({
+        running: true,
+        status: "running",
+        page,
+        ...totals,
+        message: `Page ${page}: ${totals.qualified} Salesforce jobs captured (${totals.duplicates} duplicates).`
+      });
+
+      const nextUrl = String(result.nextUrl || "").trim();
+      if (!nextUrl || page >= settings.maxPages || indeedCaptureControl.stop) break;
+      const next = new URL(nextUrl, pageUrl);
+      if (!/(^|\.)indeed\.com$/i.test(next.hostname)) break;
+      await chrome.tabs.update(tab.id, { url: next.href });
+      await waitForTabComplete(tab.id, 35000);
+      await sleep(settings.pageDelayMs);
+    }
+
+    const stopped = indeedCaptureControl.stop;
+    await dedupeQueueAgainstSheet({ notifySlack: false }).catch(() => {});
+    const finalState = await saveIndeedCaptureState({
+      running: false,
+      status: stopped ? "stopped" : "complete",
+      ...totals,
+      message: stopped
+        ? `Indeed capture stopped — ${totals.qualified} Salesforce listings qualified.`
+        : `Indeed capture complete — ${totals.qualified} Salesforce listings qualified; ${totals.external} external apply.`
+    });
+    return { ok: true, stopped, ...totals, state: finalState };
+  } catch (err) {
+    const message = String(err?.message || err);
+    await saveIndeedCaptureState({
+      running: false,
+      status: "error",
+      ...totals,
+      message
+    });
+    throw err;
+  } finally {
+    indeedCaptureControl.running = false;
+    indeedCaptureControl.tabId = null;
+    stopKeepAlive();
+  }
 }
 
 /** Ensure the CSV poll alarm matches current settings. */
@@ -5006,6 +5284,56 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
 
+  if (type === "indeed_capture_start") {
+    (async () => {
+      try {
+        const result = await runIndeedCapture({
+          searchUrl: message.searchUrl,
+          query: message.query,
+          maxPages: message.maxPages,
+          tabId: message.tabId
+        });
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "indeed_capture_stop") {
+    indeedCaptureControl.stop = true;
+    saveIndeedCaptureState({
+      running: Boolean(indeedCaptureControl.running),
+      status: indeedCaptureControl.running ? "stopping" : "stopped",
+      message: indeedCaptureControl.running
+        ? "Stopping Indeed capture after the current page…"
+        : "Indeed capture is not running."
+    })
+      .then((state) => safeSendResponse(sendResponse, { ok: true, state }))
+      .catch((err) =>
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
+      );
+    return true;
+  }
+
+  if (type === "indeed_capture_get") {
+    (async () => {
+      const [settings, data] = await Promise.all([
+        getIndeedCaptureSettings(),
+        chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY)
+      ]);
+      safeSendResponse(sendResponse, {
+        ok: true,
+        settings,
+        state: data[INDEED_CAPTURE_STATE_KEY] || null
+      });
+    })().catch((err) =>
+      safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
+    );
+    return true;
+  }
+
   if (type === "offscreen_read_pinned_csv") {
     // Handled by offscreen.js when that document is the receiver.
     // If this SW somehow gets it (no offscreen), fall through as not handled.
@@ -5133,7 +5461,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           chatgpt_harvested_resume: null,
           chatgpt_json_ready: false,
           chatgpt_json_ready_at: 0,
-          last_resume_json: null
+          last_resume_json: null,
+          [INDEED_CAPTURE_STATE_KEY]: {
+            running: false,
+            status: "idle",
+            page: 0,
+            scanned: 0,
+            captured: 0,
+            qualified: 0,
+            duplicates: 0,
+            external: 0,
+            blocked: 0,
+            message: "Job list cleared.",
+            updatedAt: Date.now()
+          }
         });
         safeSendResponse(sendResponse, { ok: true });
       } catch (err) {

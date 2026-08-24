@@ -7,7 +7,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
-- **CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / LI / Etc / All**. **Dice jobs** always interleaved generate → auto-apply+submit (Start also applies already-built not-Applied Dice rows); non-Dice jobs only build files.
+- **Job capture / CSV batch**: scan Salesforce jobs from a signed-in Indeed search or upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / Indeed / LI / Etc / All**. Hosted Dice and Indeed jobs interleave generate → auto-apply+submit; external Indeed applications are never submitted.
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
@@ -76,10 +76,11 @@ flowchart TD
 1. Upload a CSV with columns like `title`, `organization`, `location`, `remote_restricted_to`, `url`, `description` (typical path: `sf-job-capture/download/jobs_latest.csv`)
 2. Choose **Apply source** filter (default **Dice**) to choose which jobs appear in the queue:
    - **Dice** — Dice.com jobs only
+   - **Indeed** — Indeed jobs captured from the browser session or CSV
    - **LI** — LinkedIn-hosted jobs only
-   - **Etc** — not Dice and not LinkedIn
+   - **Etc** — not Dice, Indeed, or LinkedIn
    - **All** — every US job
-3. Confirm summary counts (Dice / LI / Etc)
+3. Confirm summary counts (Dice / Indeed / LI / Etc)
 4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows / apply backlog
 5. Use **Pause** / **Skip** / **Stop** as needed
 6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (manual assist; stops before Submit)
@@ -92,6 +93,16 @@ flowchart TD
 - **Start** also drains already-built Dice rows that are not Applied yet
 - **Non-Dice job**: build files only; use manual Apply if you want assist (stops before Submit)
 - Blockers mark `applyAttempted` and continue — that row is not auto-retried in the same batch
+
+### Indeed signed-session capture and auto-apply
+
+1. Sign in to Indeed in the same Chrome profile that has the unpacked extension installed.
+2. In **Indeed capture**, enter an Indeed search URL (or use the Salesforce query), choose a page limit, and click **Start capture**. The scanner follows result pages with a delay and merges jobs by normalized job URL.
+3. Only listings whose title or description contains a Salesforce platform signal are kept. The status reports accepted jobs, duplicates, external applications, and blockers.
+4. Choose the **Indeed** source and start the batch. After each resume and cover letter is generated, the bot fully submits only applications whose flow remains on `indeed.com`.
+5. Sign-in screens, CAPTCHA/rate limits, unanswered required fields, external company links, and unconfirmed submissions stop or pause safely with the application tab left open.
+
+Capture uses the browser's existing Indeed cookies; the extension does not read or store them. Keep the scan bounded (the default is 5 pages). Large or rapid scans are more likely to trigger Indeed's anti-automation controls.
 
 ### CSV auto-source (cron / 12h updates)
 
@@ -124,7 +135,7 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 - Queue **Apply** / **Autofill this page** / **Auto Apply** (`Ctrl+Shift+Y` / `Ctrl+Shift+U`)
 - Fills name/email/phone/LinkedIn from the active person, then extras + saved Q&A
 - Manual Auto Apply **stops before Submit** so you can review
-- **Dice** channel batch mode: Start applies already-built not-Applied rows, then auto-submits after each new build (see Dice interleaved above)
+- **Dice and hosted Indeed** batch modes: Start applies already-built not-Applied rows, then auto-submits after each new build. Indeed jobs that redirect to an external ATS are capture-only and are not submitted.
 - Leftover questions go to **OpenAI** if `.env` has `OPENAI_API_KEY` (copy `.env.example` → `.env`, then reload the extension). Do not commit `.env`.
 - **Q&A bank** (Apply section): Open editor, **Load bundled bank** (`qa-bank-custom-steven-avon.json`), or Import JSON. Imports are assigned to the **active person** so autofill can match them. Learn mode saves answers you type on forms.
 
@@ -156,7 +167,7 @@ After each job’s files finish (batch or one-off), the extension can append a r
 |----|------|-------|---------|------|--------|--------|
 | CSV row # | M/D/YYYY | job title | company | JD URL | (optional) | Ready, then Applied M/D/YYYY |
 
-**Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). On the **Dice** interleaved path, **Applied** is set only after a successful Submit. Duplicate-by-link still skips jobs that are already on the sheet.
+**Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). On the hosted **Dice/Indeed** interleaved paths, **Applied** is set only after a confirmed Submit. Duplicate-by-link still skips jobs that are already on the sheet.
 
 **Duplicate prevention:** when you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
 

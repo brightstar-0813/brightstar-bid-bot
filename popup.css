@@ -413,7 +413,8 @@ button.primary,
 #runOneOff,
 #autoApplyPage,
 #savePerson,
-#csvSourceSave {
+#csvSourceSave,
+#indeedCaptureStart {
   background: linear-gradient(180deg, #ffe08a 0%, var(--gold) 48%, var(--gold-deep) 100%);
   border-color: #e8b423;
   color: var(--gold-ink);
@@ -426,7 +427,8 @@ button.primary:hover,
 #runOneOff:hover,
 #autoApplyPage:hover,
 #savePerson:hover,
-#csvSourceSave:hover {
+#csvSourceSave:hover,
+#indeedCaptureStart:hover {
   background: linear-gradient(180deg, #fff0b3, #f0bc2e);
   color: var(--gold-ink);
 }
@@ -785,6 +787,11 @@ input[type="file"]::file-selector-button {
   color: #fdba74;
 }
 
+.badge-indeed {
+  background: #312e81;
+  color: #c7d2fe;
+}
+
 .badge-applied {
   background: rgba(34, 197, 94, 0.16);
   color: #86efac;
@@ -900,6 +907,34 @@ input[type="file"]::file-selector-button {
 .channel-btn.active:hover {
   background: linear-gradient(180deg, #fff0b3, #f0bc2e);
   color: var(--gold-ink);
+}
+
+.indeed-capture {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 74, 110, 0.12);
+}
+
+.indeed-capture-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.indeed-capture-head .subsection-title {
+  margin: 0;
+}
+
+.indeed-capture .row:last-of-type {
+  margin-bottom: 6px;
+}
+
+.indeed-capture .hint {
+  margin-bottom: 0;
 }
 
 .checkbox-field {

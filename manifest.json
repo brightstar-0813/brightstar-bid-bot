@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Brightstar Bid bot",
   "description": "CSV batch resume & cover letters via ChatGPT — Brightstar Bid bot.",
-  "version": "1.6.10",
+  "version": "1.7.0",
   "permissions": [
     "storage",
     "unlimitedStorage",
@@ -63,6 +63,11 @@
       "js": ["content/autofill.js"],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": ["https://indeed.com/*", "https://*.indeed.com/*"],
+      "js": ["content/indeed-capture.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

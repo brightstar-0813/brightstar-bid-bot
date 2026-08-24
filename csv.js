@@ -366,23 +366,36 @@ export function isDiceJob({ jdLink = "", source = "" } = {}) {
 }
 
 /**
+ * Indeed / Apply-on-Indeed postings.
+ */
+export function isIndeedJob({ jdLink = "", source = "" } = {}) {
+  const link = String(jdLink || "").toLowerCase();
+  const src = String(source || "").toLowerCase();
+  if (src.includes("indeed")) return true;
+  if (/(?:^|\.)indeed\.com/i.test(link)) return true;
+  if (/^indeed[_-]/i.test(String(source || ""))) return true;
+  return false;
+}
+
+/**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
- * @returns {"all"|"dice"|"linkedin"|"etc"}
+ * @returns {"all"|"dice"|"linkedin"|"indeed"|"etc"}
  */
 export function normalizeChannelFilter(filter) {
   const mode = String(filter || "dice").toLowerCase();
   if (mode === "all") return "all";
   if (mode === "linkedin" || mode === "li") return "linkedin";
+  if (mode === "indeed") return "indeed";
   if (mode === "dice") return "dice";
-  // Legacy "general" and unknown → Etc (not Dice, not LI)
+  // Legacy "general" and unknown → Etc (not Dice, LI, or Indeed)
   if (mode === "etc" || mode === "general" || mode === "other") return "etc";
   return "dice";
 }
 
 /**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"dice"|"etc"} filter
+ * @param {"all"|"general"|"linkedin"|"indeed"|"dice"|"etc"} filter
  */
 export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
@@ -394,9 +407,15 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   if (mode === "dice") {
     return list.filter((j) => j.isDice || isDiceJob(j));
   }
-  // etc = not Dice and not LinkedIn
+  if (mode === "indeed") {
+    return list.filter((j) => j.isIndeed || isIndeedJob(j));
+  }
+  // etc = not Dice, LinkedIn, or Indeed
   return list.filter(
-    (j) => !(j.isDice || isDiceJob(j)) && !(j.isLinkedIn || isLinkedInJob(j))
+    (j) =>
+      !(j.isDice || isDiceJob(j)) &&
+      !(j.isLinkedIn || isLinkedInJob(j)) &&
+      !(j.isIndeed || isIndeedJob(j))
   );
 }
 
@@ -415,10 +434,12 @@ export function filterJobsByChannel(jobs, filter = "dice") {
  *     source: string,
  *     isLinkedIn: boolean,
  *     isDice: boolean,
+ *     isIndeed: boolean,
  *     status: string
  *   }>,
  *   droppedNonUs: number,
  *   linkedInCount: number,
+ *   indeedCount: number,
  *   generalCount: number,
  *   diceCount: number,
  *   etcCount: number
@@ -466,6 +487,7 @@ export function parseJobsCsv(csvText) {
     const srcKey = source || id;
     const linkedIn = isLinkedInJob({ jdLink, source: srcKey });
     const dice = isDiceJob({ jdLink, source: srcKey });
+    const indeed = isIndeedJob({ jdLink, source: srcKey });
 
     usJobs.push({
       csvRow,
@@ -476,9 +498,10 @@ export function parseJobsCsv(csvText) {
       location,
       remoteRestrictedTo,
       salary,
-      source: source || (linkedIn ? "linkedin" : dice ? "dice" : "general"),
+      source: source || (linkedIn ? "linkedin" : dice ? "dice" : indeed ? "indeed" : "general"),
       isLinkedIn: linkedIn,
       isDice: dice,
+      isIndeed: indeed,
       status: "pending"
     });
   }
@@ -489,8 +512,9 @@ export function parseJobsCsv(csvText) {
     droppedNonUs,
     linkedInCount: usJobs.filter((j) => j.isLinkedIn).length,
     diceCount: usJobs.filter((j) => j.isDice).length,
-    etcCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice).length,
+    indeedCount: usJobs.filter((j) => j.isIndeed).length,
+    etcCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice && !j.isIndeed).length,
     /** @deprecated use etcCount — kept for older UI strings */
-    generalCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice).length
+    generalCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice && !j.isIndeed).length
   };
 }

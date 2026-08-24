@@ -22,7 +22,14 @@ import {
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { extractSpreadsheetId, buildSheetRowTsv, formatApplicationDate, formatApplicationDateTime } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
-import { parseJobsCsv, filterJobsByChannel, isLinkedInJob, isDiceJob, normalizeChannelFilter } from "./csv.js";
+import {
+  parseJobsCsv,
+  filterJobsByChannel,
+  isLinkedInJob,
+  isDiceJob,
+  isIndeedJob,
+  normalizeChannelFilter
+} from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
   extractProfileFromResumeText,
@@ -54,6 +61,8 @@ const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
 const DETACHED_WINDOW_KEY = "detached_window_id";
 const PREVIEW_WINDOW_KEY = "template_preview_window_id";
+const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state";
+const INDEED_CAPTURE_SETTINGS_KEY = "indeed_capture_settings";
 
 /** "popup" (closes on focus loss), "panel" (docked), or "window" (detached). */
 const UI_CONTEXT = new URLSearchParams(location.search).get("ctx") || "popup";
@@ -438,9 +447,17 @@ const clearJobsBtn = document.getElementById("clearJobs");
 const retryErrorsBtn = document.getElementById("retryErrors");
 const filterDiceBtn = document.getElementById("filterDice");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
+const filterIndeedBtn = document.getElementById("filterIndeed");
 const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
 const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
+const indeedSearchUrlEl = document.getElementById("indeedSearchUrl");
+const indeedSearchQueryEl = document.getElementById("indeedSearchQuery");
+const indeedMaxPagesEl = document.getElementById("indeedMaxPages");
+const indeedCaptureStartBtn = document.getElementById("indeedCaptureStart");
+const indeedCaptureStopBtn = document.getElementById("indeedCaptureStop");
+const indeedCaptureStateEl = document.getElementById("indeedCaptureState");
+const indeedCaptureStatusEl = document.getElementById("indeedCaptureStatus");
 
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
@@ -959,6 +976,94 @@ async function persistChatGptPacing() {
   });
 }
 
+function renderIndeedCaptureState(state) {
+  const current = state && typeof state === "object" ? state : {};
+  const status = String(current.status || "idle");
+  const captured = Number(current.qualified ?? current.capturedCount ?? current.jobs?.length ?? 0);
+  const scanned = Number(current.scanned ?? current.scannedCount ?? current.captured ?? 0);
+  const duplicates = Number(current.duplicates || 0);
+  const external = Number(current.external || 0);
+  const blocked = Number(current.blocked || 0);
+  const page = Number(current.page || 0);
+  const maxPages = Number(current.maxPages || 0);
+  if (indeedCaptureStateEl) {
+    indeedCaptureStateEl.textContent = status;
+    indeedCaptureStateEl.dataset.state = status;
+  }
+  if (indeedCaptureStatusEl) {
+    const pageText = page ? ` · page ${page}${maxPages ? `/${maxPages}` : ""}` : "";
+    const detail = current.message || current.blockReason || "";
+    indeedCaptureStatusEl.textContent =
+      `${status} · ${captured} qualified · ${scanned} scanned · ${duplicates} duplicate · ${external} external · ${blocked} blocked${pageText}` +
+      (detail ? ` · ${detail}` : "");
+  }
+  const busy = status === "running" || status === "stopping";
+  if (indeedCaptureStartBtn) indeedCaptureStartBtn.disabled = busy;
+  if (indeedCaptureStopBtn) indeedCaptureStopBtn.disabled = !busy;
+}
+
+function normalizeIndeedSearchUrl(rawUrl, query) {
+  const raw = String(rawUrl || "").trim();
+  const url = new URL(raw || "https://www.indeed.com/jobs");
+  if (!/(^|\.)indeed\.com$/i.test(url.hostname)) {
+    throw new Error("Indeed search URL must use indeed.com.");
+  }
+  if (query) url.searchParams.set("q", query);
+  return url.toString();
+}
+
+async function startIndeedCapture() {
+  const query = String(indeedSearchQueryEl?.value || "Salesforce").trim() || "Salesforce";
+  const maxPages = Math.min(25, Math.max(1, Number(indeedMaxPagesEl?.value || 5)));
+  const searchUrl = normalizeIndeedSearchUrl(indeedSearchUrlEl?.value, query);
+  const settings = { searchUrl, query, maxPages };
+  const state = {
+    status: "running",
+    searchUrl,
+    query,
+    maxPages,
+    page: 1,
+    scanned: 0,
+    captured: 0,
+    qualified: 0,
+    duplicates: 0,
+    external: 0,
+    blocked: 0,
+    startedAt: Date.now(),
+    message: "Opening Indeed search"
+  };
+  await chrome.storage.local.set({
+    [INDEED_CAPTURE_SETTINGS_KEY]: settings,
+    [INDEED_CAPTURE_STATE_KEY]: state
+  });
+  if (indeedSearchUrlEl) indeedSearchUrlEl.value = searchUrl;
+  if (indeedMaxPagesEl) indeedMaxPagesEl.value = String(maxPages);
+  renderIndeedCaptureState(state);
+
+  chrome.runtime
+    .sendMessage({ type: "indeed_capture_start", ...settings })
+    .then((result) => {
+      if (!result?.ok) {
+        setStatus(`Indeed capture failed: ${String(result?.error || "Unknown error")}`);
+        return;
+      }
+      setStatus(
+        result.stopped
+          ? `Indeed capture stopped — ${Number(result.qualified || 0)} Salesforce job(s) kept.`
+          : `Indeed capture complete — ${Number(result.qualified || 0)} Salesforce job(s) kept.`
+      );
+    })
+    .catch((error) => setStatus(`Indeed capture failed: ${String(error?.message || error)}`));
+  setStatus(`Indeed capture started — scanning up to ${maxPages} page(s).`);
+}
+
+async function stopIndeedCapture() {
+  const result = await chrome.runtime.sendMessage({ type: "indeed_capture_stop" });
+  if (!result?.ok) throw new Error(result?.error || "Could not stop Indeed capture.");
+  renderIndeedCaptureState(result.state);
+  setStatus(result.state?.message || "Stopping Indeed capture…");
+}
+
 async function loadSettings() {
   const data = await chrome.storage.local.get([
     "selected_profile_id",
@@ -980,6 +1085,8 @@ async function loadSettings() {
     ALL_US_JOBS_KEY,
     JOB_CHANNEL_FILTER_KEY,
     BATCH_STATE_KEY,
+    INDEED_CAPTURE_STATE_KEY,
+    INDEED_CAPTURE_SETTINGS_KEY,
     "qa_learn_enabled"
   ]);
 
@@ -1021,11 +1128,17 @@ async function loadSettings() {
     ? data[ALL_US_JOBS_KEY].map((j) => ({
         ...j,
         isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j),
-        isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j)
+        isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j),
+        isIndeed: typeof j.isIndeed === "boolean" ? j.isIndeed : isIndeedJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
   batchState = data[BATCH_STATE_KEY] || "idle";
+  const indeedSettings = data[INDEED_CAPTURE_SETTINGS_KEY] || {};
+  if (indeedSearchUrlEl) indeedSearchUrlEl.value = indeedSettings.searchUrl || "";
+  if (indeedSearchQueryEl) indeedSearchQueryEl.value = indeedSettings.query || "Salesforce";
+  if (indeedMaxPagesEl) indeedMaxPagesEl.value = String(indeedSettings.maxPages || 5);
+  renderIndeedCaptureState(data[INDEED_CAPTURE_STATE_KEY]);
 
   // Re-apply filter if we have the full US list; otherwise keep existing queue.
   if (allUsJobsCache.length) {
@@ -1051,7 +1164,8 @@ async function hydrateJobDirsInUi() {
     allUsJobsCache = res.allUsJobs.map((j) => ({
       ...j,
       isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j),
-      isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j)
+      isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j),
+      isIndeed: typeof j.isIndeed === "boolean" ? j.isIndeed : isIndeedJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -1072,8 +1186,12 @@ function updateCsvSummaryFromQueue() {
   }
   const liTotal = allUsJobsCache.filter((j) => j.isLinkedIn || isLinkedInJob(j)).length;
   const diceTotal = allUsJobsCache.filter((j) => j.isDice || isDiceJob(j)).length;
+  const indeedTotal = allUsJobsCache.filter((j) => j.isIndeed || isIndeedJob(j)).length;
   const etcTotal = allUsJobsCache.filter(
-    (j) => !(j.isDice || isDiceJob(j)) && !(j.isLinkedIn || isLinkedInJob(j))
+    (j) =>
+      !(j.isDice || isDiceJob(j)) &&
+      !(j.isLinkedIn || isLinkedInJob(j)) &&
+      !(j.isIndeed || isIndeedJob(j))
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
@@ -1082,6 +1200,8 @@ function updateCsvSummaryFromQueue() {
   const filterLabel =
     channelFilter === "linkedin"
       ? "LI only"
+      : channelFilter === "indeed"
+        ? "Indeed only"
       : channelFilter === "dice"
         ? "Dice only"
         : channelFilter === "etc"
@@ -1098,7 +1218,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Etc ${etcTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Indeed ${indeedTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -1107,6 +1227,7 @@ function syncChannelFilterButtons() {
   const map = {
     dice: filterDiceBtn,
     linkedin: filterLinkedInBtn,
+    indeed: filterIndeedBtn,
     etc: filterEtcBtn,
     all: filterAllBtn
   };
@@ -1167,8 +1288,10 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
       ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
       : channelFilter === "linkedin"
         ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
+        : channelFilter === "indeed"
+          ? `Showing Indeed jobs — ${queueCache.length} in queue.`
         : channelFilter === "etc"
-          ? `Showing Etc (not Dice, not LI) — ${queueCache.length} in queue.`
+          ? `Showing Etc (not Dice, LI, or Indeed) — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
   );
 }
@@ -1286,6 +1409,12 @@ function renderQueue() {
       diceBadge.className = "badge badge-dice";
       diceBadge.textContent = "Dice";
       badges.appendChild(diceBadge);
+    }
+    if (job.isIndeed || isIndeedJob(job)) {
+      const indeedBadge = document.createElement("span");
+      indeedBadge.className = "badge badge-indeed";
+      indeedBadge.textContent = "Indeed";
+      badges.appendChild(indeedBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
@@ -1610,7 +1739,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Filter: ${channelFilter}.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Indeed ${result.indeedCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Filter: ${channelFilter}.${dedupeNote}`
     );
 
     try {
@@ -2492,11 +2621,20 @@ filterDiceBtn?.addEventListener("click", () => {
 filterLinkedInBtn?.addEventListener("click", () => {
   applyChannelFilter("linkedin").catch((e) => setStatus(String(e.message || e)));
 });
+filterIndeedBtn?.addEventListener("click", () => {
+  applyChannelFilter("indeed").catch((e) => setStatus(String(e.message || e)));
+});
 filterEtcBtn?.addEventListener("click", () => {
   applyChannelFilter("etc").catch((e) => setStatus(String(e.message || e)));
 });
 filterAllBtn?.addEventListener("click", () => {
   applyChannelFilter("all").catch((e) => setStatus(String(e.message || e)));
+});
+indeedCaptureStartBtn?.addEventListener("click", () => {
+  startIndeedCapture().catch((e) => setStatus(`Indeed capture failed: ${String(e.message || e)}`));
+});
+indeedCaptureStopBtn?.addEventListener("click", () => {
+  stopIndeedCapture().catch((e) => setStatus(`Indeed stop failed: ${String(e.message || e)}`));
 });
 
 batchStartBtn.addEventListener("click", () => sendBatch("batch_start"));
@@ -2600,6 +2738,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
       templateSelectEl.value = next;
     }
   }
+  if (changes[INDEED_CAPTURE_STATE_KEY]) {
+    renderIndeedCaptureState(changes[INDEED_CAPTURE_STATE_KEY].newValue);
+  }
 });
 
 setInterval(async () => {
@@ -2609,9 +2750,11 @@ setInterval(async () => {
     QUEUE_KEY,
     ALL_US_JOBS_KEY,
     BATCH_STATE_KEY,
+    INDEED_CAPTURE_STATE_KEY,
     "csv_source_settings"
   ]);
   batchState = data[BATCH_STATE_KEY] || "idle";
+  renderIndeedCaptureState(data[INDEED_CAPTURE_STATE_KEY]);
   setBusy(Boolean(data.generation_running) || batchState === "running");
   if (typeof data.generation_status === "string") {
     setStatus(data.generation_status);

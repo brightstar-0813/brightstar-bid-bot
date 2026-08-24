@@ -388,6 +388,9 @@
               <button type="button" class="channel-btn" id="filterLinkedIn" data-filter="linkedin" title="LinkedIn-hosted jobs">
                 LI
               </button>
+              <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed and Apply-on-Indeed jobs">
+                Indeed
+              </button>
               <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other jobs (not Dice, not LinkedIn)">
                 Etc
               </button>
@@ -397,8 +400,38 @@
             </div>
           </div>
           <p class="hint" id="diceInterleaveHint">
-            Dice jobs: after each build (and for already-built rows on Start), open wizard → autofill/upload → Submit → close → next. Non-Dice jobs only build files.
+            Hosted Dice and Indeed jobs: build → autofill/upload → Submit → confirm → close → next. External Indeed applications are captured but never submitted.
           </p>
+          <div class="indeed-capture">
+            <div class="indeed-capture-head">
+              <p class="subsection-title">Indeed capture</p>
+              <span id="indeedCaptureState" class="state-pill" data-state="idle">idle</span>
+            </div>
+            <label class="field">
+              <span>Indeed search URL</span>
+              <input
+                id="indeedSearchUrl"
+                type="url"
+                placeholder="https://www.indeed.com/jobs?q=salesforce"
+                autocomplete="off"
+              />
+            </label>
+            <div class="grid-2">
+              <label class="field">
+                <span>Search query</span>
+                <input id="indeedSearchQuery" type="text" value="Salesforce" placeholder="Salesforce Developer" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Max pages</span>
+                <input id="indeedMaxPages" type="number" min="1" max="25" step="1" value="5" />
+              </label>
+            </div>
+            <div class="row row-2">
+              <button type="button" id="indeedCaptureStart" class="primary">Start capture</button>
+              <button type="button" id="indeedCaptureStop" class="ghost danger">Stop capture</button>
+            </div>
+            <p id="indeedCaptureStatus" class="hint">Idle · 0 qualified · 0 scanned</p>
+          </div>
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No CSV loaded</span>
           </div>

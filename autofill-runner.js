@@ -3,7 +3,7 @@
  * Injects content/autofill.js into all frames, fills from the active person,
  * then answers leftover questions from extras + the Q&A bank, then OpenAI.
  * Multi-step Apply clicks Next/Continue but never auto-submits unless
- * autoSubmit is explicitly enabled (Dice interleaved batch only).
+ * autoSubmit is explicitly enabled for a supported in-site flow.
  */
 
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson } from "./profiles.js";
@@ -35,7 +35,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-23.02";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-24.01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -857,6 +857,17 @@ function hostnameFromUrl(url) {
   }
 }
 
+function applySiteFromUrl(url) {
+  const host = hostnameFromUrl(url).toLowerCase();
+  if (/(^|\.)dice\.com$/.test(host)) return "dice";
+  if (/(^|\.)indeed\.com$/.test(host)) return "indeed";
+  return "generic";
+}
+
+function isUrlOnApplySite(url, site) {
+  return site !== "generic" && applySiteFromUrl(url) === site;
+}
+
 function matchExtraAnswer(questionLabel, extras = {}, options = []) {
   const qNorm = normalizeQuestion(questionLabel);
   if (!qNorm) return null;
@@ -1062,7 +1073,9 @@ function pickBestApplyAction(frameResults = []) {
     best,
     anyForm: frameResults.some((f) => f?.isApplicationForm),
     blockedReason: frameResults.find((f) => f?.blockedReason)?.blockedReason || "",
+    validationReason: frameResults.find((f) => f?.validationReason)?.validationReason || "",
     jobUnavailable: frameResults.find((f) => f?.jobUnavailable)?.jobUnavailable || "",
+    site: best?.action?.site || frameResults.find((f) => f?.site)?.site || "",
     applySuccess: frameResults.some((f) => f?.applySuccess),
     applySuccessText:
       frameResults.find((f) => f?.applySuccess && f?.applySuccessText)?.applySuccessText || "",
@@ -1078,21 +1091,25 @@ async function getApplyActionFromTab(tabId) {
   return pickBestApplyAction(frames);
 }
 
-async function waitForDiceApplySuccess(tabId, timeoutMs = 20000) {
+async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     await sleep(450);
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab?.id) return { ok: false, tabId, reason: "tab_gone" };
+    if (site === "indeed" && !isUrlOnApplySite(tab.url || "", "indeed")) {
+      return { ok: false, tabId, reason: "external_redirect", url: tab.url || "" };
+    }
     const probe = await getApplyActionFromTab(tabId).catch(() => null);
     if (probe?.applySuccess) {
       return {
         ok: true,
         tabId,
-        text: probe.applySuccessText || "Your application is on its way"
+        text:
+          probe.applySuccessText ||
+          (site === "indeed" ? "Application submitted" : "Your application is on its way")
       };
     }
-    // Also treat URL/DOM advance into a success-looking page via probe after navigation.
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (!tab?.id) return { ok: false, tabId, reason: "tab_gone" };
   }
   return { ok: false, tabId, reason: "timeout" };
 }
@@ -1119,6 +1136,9 @@ function shouldAdoptNewApplyTab(originUrl, newUrl, newProbe) {
 
   const origin = String(originUrl || "");
   const next = String(newUrl || "");
+  if (applySiteFromUrl(origin) === "indeed" && !isUrlOnApplySite(next, "indeed")) {
+    return false;
+  }
 
   // Never leave an in-progress Dice wizard for a job-detail listing.
   if (isDiceWizardUrl(origin) && isDiceJobDetailUrl(next)) return false;
@@ -1180,6 +1200,19 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
 
       const newProbe = await getApplyActionFromTab(fresh.id).catch(() => null);
       if (!shouldAdoptNewApplyTab(originUrl, fresh.url || "", newProbe)) {
+        if (
+          applySiteFromUrl(originUrl) === "indeed" &&
+          !isUrlOnApplySite(fresh.url || "", "indeed")
+        ) {
+          knownTabIds.add(fresh.id);
+          await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+          return {
+            advanced: false,
+            tabId,
+            reason: "external_redirect",
+            externalUrl: fresh.url || ""
+          };
+        }
         // Mark seen so we don't keep re-probing; close same-job detail noise.
         knownTabIds.add(fresh.id);
         await maybeCloseSpuriousDiceDetailTab(originUrl, fresh);
@@ -1203,6 +1236,17 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
 
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab?.id) return { advanced: false, tabId, reason: "tab_gone" };
+    if (
+      applySiteFromUrl(originUrl) === "indeed" &&
+      !isUrlOnApplySite(tab.url || "", "indeed")
+    ) {
+      return {
+        advanced: false,
+        tabId,
+        reason: "external_redirect",
+        externalUrl: tab.url || ""
+      };
+    }
 
     if (tab.url && prevUrl && tab.url !== prevUrl) {
       // Wizard → job-detail in the SAME tab is not useful progress.
@@ -1549,7 +1593,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
 
 /**
  * Multi-step apply: fill → click Next/Continue → wait → refill.
- * Stops before Submit unless autoSubmit is true (Dice interleaved batch).
+ * Stops before Submit unless autoSubmit is true on a supported in-site flow.
  */
 export async function startMultiStepApplyOnTab(
   tabId = null,
@@ -1568,6 +1612,9 @@ export async function startMultiStepApplyOnTab(
   await rememberApplyTab(tab.id);
 
   let currentTabId = tab.id;
+  const initialSite = applySiteFromUrl(tab.url || "");
+  const effectiveAutoSubmit =
+    Boolean(autoSubmit) && (initialSite === "dice" || initialSite === "indeed");
   const summary = {
     ok: true,
     steps: 0,
@@ -1582,12 +1629,25 @@ export async function startMultiStepApplyOnTab(
     detail: "",
     tabId: currentTabId,
     tabUrl: tab.url || "",
-    autoSubmit: Boolean(autoSubmit)
+    autoSubmit: effectiveAutoSubmit,
+    site: initialSite
   };
 
   let noAdvance = 0;
 
   for (let step = 0; step < maxSteps; step += 1) {
+    const currentTab = await chrome.tabs.get(currentTabId).catch(() => null);
+    if (
+      initialSite === "indeed" &&
+      !isUrlOnApplySite(currentTab?.url || "", "indeed")
+    ) {
+      summary.status = "skipped";
+      summary.detail =
+        "Indeed redirected to an external ATS. Automatic filling and submission stopped.";
+      summary.tabId = currentTabId;
+      summary.tabUrl = currentTab?.url || summary.tabUrl;
+      return summary;
+    }
     await setApplyStatus(`Apply: step ${step + 1}/${maxSteps} — checking page...`);
     await ensureAutofillScript(currentTabId);
 
@@ -1608,9 +1668,22 @@ export async function startMultiStepApplyOnTab(
       return summary;
     }
 
+    if (probe.blockedReason) {
+      summary.status = "needs_review";
+      summary.detail = probe.blockedReason;
+      summary.tabId = currentTabId;
+      return summary;
+    }
+
     if (probe.applySuccess) {
       summary.status = "submitted";
       summary.detail = probe.applySuccessText || "Your application is on its way";
+      summary.tabId = currentTabId;
+      return summary;
+    }
+    if (probe.blockedReason) {
+      summary.status = "needs_review";
+      summary.detail = probe.blockedReason;
       summary.tabId = currentTabId;
       return summary;
     }
@@ -1622,11 +1695,18 @@ export async function startMultiStepApplyOnTab(
       let alreadyOpen = false;
 
       if (probe.best?.action?.type === "entry") {
-        await sendMessageToTab(
+        const entryClick = await sendMessageToTab(
           currentTabId,
           { type: "click_apply_action", preferredType: "entry", autoSubmit: false },
           { attempts: 2, frameId: probe.best.frameId }
         ).catch(() => null);
+        if (entryClick?.externalRedirect) {
+          summary.status = "skipped";
+          summary.detail =
+            "Indeed uses an external ATS for this job. Automatic application was not started.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
       } else {
         const entry = await sendMessageToTab(
           currentTabId,
@@ -1634,8 +1714,25 @@ export async function startMultiStepApplyOnTab(
           { attempts: 2 }
         ).catch(() => null);
         alreadyOpen = Boolean(entry?.alreadyOpen);
+        if (entry?.externalRedirect) {
+          summary.status = "skipped";
+          summary.detail =
+            "Indeed uses an external ATS for this job. Automatic application was not started.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
         if (!entry?.clicked && !alreadyOpen && probe.applyUrls?.length) {
-          const nextUrl = String(probe.applyUrls[0] || "").trim();
+          const nextUrl =
+            probe.applyUrls
+              .map((url) => String(url || "").trim())
+              .find((url) => initialSite !== "indeed" || isUrlOnApplySite(url, "indeed")) || "";
+          if (initialSite === "indeed" && !nextUrl) {
+            summary.status = "skipped";
+            summary.detail =
+              "Indeed uses an external ATS for this job. Automatic application was not started.";
+            summary.tabId = currentTabId;
+            return summary;
+          }
           if (nextUrl) {
             await chrome.tabs.update(currentTabId, { url: nextUrl });
             await waitForTabComplete(currentTabId, 30000).catch(() => {});
@@ -1659,6 +1756,13 @@ export async function startMultiStepApplyOnTab(
       }
       if (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry"))) {
         const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000);
+        if (advanced.reason === "external_redirect") {
+          summary.status = "skipped";
+          summary.detail =
+            "Indeed redirected to an external ATS. Automatic application was stopped.";
+          summary.tabId = advanced.tabId || currentTabId;
+          return summary;
+        }
         currentTabId = advanced.tabId;
         await rememberApplyTab(currentTabId);
         if (advanced.applySuccess) {
@@ -1738,7 +1842,13 @@ export async function startMultiStepApplyOnTab(
     }
 
     if (probe.best.action.type === "submit") {
-      if (autoSubmit) {
+      if (effectiveAutoSubmit) {
+        if (probe.validationReason) {
+          summary.status = "needs_review";
+          summary.detail = probe.validationReason;
+          summary.tabId = currentTabId;
+          return summary;
+        }
         await setApplyStatus(`Apply: submitting (${probe.best.action.text || "Submit"})...`);
         const live = await chrome.tabs.get(currentTabId).catch(() => null);
         const prevUrl = live?.url || "";
@@ -1749,11 +1859,25 @@ export async function startMultiStepApplyOnTab(
           { attempts: 2, frameId: probe.best.frameId }
         ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
 
+        if (clickRes?.externalRedirect) {
+          summary.status = "skipped";
+          summary.detail =
+            "Submission would leave Indeed for an external ATS, so it was not clicked.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
         if (clickRes?.clicked || clickRes?.submitted) {
-          const confirmed = await waitForDiceApplySuccess(currentTabId, 20000);
+          const confirmed = await waitForApplySuccess(currentTabId, initialSite, 20000);
           if (confirmed.ok) {
             summary.status = "submitted";
             summary.detail = confirmed.text || "Your application is on its way";
+            summary.tabId = currentTabId;
+            return summary;
+          }
+          if (confirmed.reason === "external_redirect") {
+            summary.status = "skipped";
+            summary.detail =
+              "Indeed redirected to an external ATS after the click. Submission was not confirmed.";
             summary.tabId = currentTabId;
             return summary;
           }
@@ -1764,15 +1888,24 @@ export async function startMultiStepApplyOnTab(
             summary.tabId = advanced.tabId || currentTabId;
             return summary;
           }
+          if (advanced?.reason === "external_redirect") {
+            summary.status = "skipped";
+            summary.detail =
+              "Indeed redirected to an external ATS after the click. Submission was not confirmed.";
+            summary.tabId = advanced.tabId || currentTabId;
+            return summary;
+          }
           summary.status = "needs_review";
           summary.detail =
-            "Submit was clicked but the Dice success screen was not detected. Confirm in the tab, then click Start.";
+            `Submit was clicked but the ${initialSite === "indeed" ? "Indeed" : "Dice"} success screen was not detected. Confirm in the tab, then click Start.`;
           summary.tabId = currentTabId;
           return summary;
         }
         summary.status = "needs_review";
         summary.detail =
           clickRes?.error ||
+          clickRes?.validationReason ||
+          clickRes?.blockedReason ||
           "Reached Submit but could not click it (a required field or CAPTCHA likely needs your input).";
         summary.tabId = currentTabId;
         return summary;
@@ -1798,18 +1931,32 @@ export async function startMultiStepApplyOnTab(
     ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
 
     if (clickRes?.isSubmit) {
-      if (autoSubmit) {
+      if (effectiveAutoSubmit) {
         await setApplyStatus("Apply: submitting...");
         const submitRes = await sendMessageToTab(
           currentTabId,
           { type: "click_apply_action", preferredType: "submit", autoSubmit: true },
           { attempts: 2, frameId: probe.best.frameId }
         ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
+        if (submitRes?.externalRedirect) {
+          summary.status = "skipped";
+          summary.detail =
+            "Submission would leave Indeed for an external ATS, so it was not clicked.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
         if (submitRes?.clicked || submitRes?.submitted) {
-          const confirmed = await waitForDiceApplySuccess(currentTabId, 20000);
+          const confirmed = await waitForApplySuccess(currentTabId, initialSite, 20000);
           if (confirmed.ok) {
             summary.status = "submitted";
             summary.detail = confirmed.text || "Your application is on its way";
+            summary.tabId = currentTabId;
+            return summary;
+          }
+          if (confirmed.reason === "external_redirect") {
+            summary.status = "skipped";
+            summary.detail =
+              "Indeed redirected to an external ATS after the click. Submission was not confirmed.";
             summary.tabId = currentTabId;
             return summary;
           }
@@ -1820,14 +1967,23 @@ export async function startMultiStepApplyOnTab(
             summary.tabId = advanced.tabId || currentTabId;
             return summary;
           }
+          if (advanced?.reason === "external_redirect") {
+            summary.status = "skipped";
+            summary.detail =
+              "Indeed redirected to an external ATS after the click. Submission was not confirmed.";
+            summary.tabId = advanced.tabId || currentTabId;
+            return summary;
+          }
           summary.status = "needs_review";
           summary.detail =
-            "Submit was clicked but the Dice success screen was not detected. Confirm in the tab, then click Start.";
+            `Submit was clicked but the ${initialSite === "indeed" ? "Indeed" : "Dice"} success screen was not detected. Confirm in the tab, then click Start.`;
           return summary;
         }
         summary.status = "needs_review";
         summary.detail =
           submitRes?.error ||
+          submitRes?.validationReason ||
+          submitRes?.blockedReason ||
           "Reached Submit but could not click it (a required field or CAPTCHA likely needs your input).";
         return summary;
       }
@@ -1837,6 +1993,13 @@ export async function startMultiStepApplyOnTab(
     }
 
     const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 15000);
+    if (advanced.reason === "external_redirect") {
+      summary.status = "skipped";
+      summary.detail =
+        "Indeed redirected to an external ATS. Automatic application was stopped.";
+      summary.tabId = advanced.tabId || currentTabId;
+      return summary;
+    }
     currentTabId = advanced.tabId;
     await rememberApplyTab(currentTabId);
     summary.tabId = currentTabId;
@@ -1853,9 +2016,17 @@ export async function startMultiStepApplyOnTab(
       noAdvance += 1;
       if (noAdvance >= 2) {
         // Still on the wizard with Submit visible — try final submit once before pausing.
-        if (autoSubmit) {
+        if (effectiveAutoSubmit) {
           const lastProbe = await getApplyActionFromTab(currentTabId).catch(() => null);
           if (lastProbe?.best?.action?.type === "submit") {
+            if (lastProbe.blockedReason || lastProbe.validationReason) {
+              summary.status = "needs_review";
+              summary.detail =
+                lastProbe.blockedReason ||
+                lastProbe.validationReason ||
+                "A required answer needs review.";
+              return summary;
+            }
             await setApplyStatus(
               `Apply: retrying Submit (${lastProbe.best.action.text || "Submit"})...`
             );
@@ -1865,10 +2036,17 @@ export async function startMultiStepApplyOnTab(
               { attempts: 2, frameId: lastProbe.best.frameId }
             ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
             if (submitRes?.clicked || submitRes?.submitted) {
-              const confirmed = await waitForDiceApplySuccess(currentTabId, 20000);
+              const confirmed = await waitForApplySuccess(currentTabId, initialSite, 20000);
               if (confirmed.ok) {
                 summary.status = "submitted";
                 summary.detail = confirmed.text || "Your application is on its way";
+                summary.tabId = currentTabId;
+                return summary;
+              }
+              if (confirmed.reason === "external_redirect") {
+                summary.status = "skipped";
+                summary.detail =
+                  "Indeed redirected to an external ATS after the click. Submission was not confirmed.";
                 summary.tabId = currentTabId;
                 return summary;
               }

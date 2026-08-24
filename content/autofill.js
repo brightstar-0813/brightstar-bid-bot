@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-23.02";
+  const SCRIPT_BUILD = "2026-08-24.01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -4069,8 +4069,40 @@
     return applyUrls;
   }
 
+  function isIndeedPage(url = location.href) {
+    try {
+      return /(^|\.)indeed\.com$/i.test(new URL(String(url || location.href)).hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function isDicePage(url = location.href) {
+    try {
+      return /(^|\.)dice\.com$/i.test(new URL(String(url || location.href)).hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function isSameSiteApplyUrl(url, site = "") {
+    try {
+      const target = new URL(String(url || ""), location.href);
+      if (!/^https?:$/i.test(target.protocol)) return false;
+      if (site === "indeed") return /(^|\.)indeed\.com$/i.test(target.hostname);
+      if (site === "dice") return /(^|\.)dice\.com$/i.test(target.hostname);
+      return target.origin === location.origin;
+    } catch {
+      return false;
+    }
+  }
+
   function detectPageBlocker() {
-    if (document.querySelector('input[type="password"]')) {
+    const href = String(location.href || "");
+    const loginForm = document.querySelector(
+      'input[type="password"], form[action*="login" i], form[action*="signin" i], [data-testid*="login" i] input'
+    );
+    if (loginForm || (isIndeedPage() && /\/account\/login|\/auth|\/m\/basecamp/i.test(href))) {
       return "A sign-in form is on the page. Log in, then retry.";
     }
     if (
@@ -4081,6 +4113,65 @@
       return "A CAPTCHA is on the page. Solve it, then retry.";
     }
     return "";
+  }
+
+  function requiredControlIsEmpty(el) {
+    if (!el || el.disabled || !isElVisible(el)) return false;
+    const type = String(el.type || "").toLowerCase();
+    if (type === "checkbox" || type === "radio") {
+      const name = el.name;
+      if (name) {
+        const group = queryAllDeep(`input[name="${CSS.escape(name)}"]`);
+        return !group.some((item) => item.checked);
+      }
+      return !el.checked;
+    }
+    if (el.tagName?.toLowerCase() === "select") {
+      const value = cleanLabelText(el.value || "");
+      return !value || /^(select|choose|please select|--)$/i.test(value);
+    }
+    return !String(el.value || "").trim();
+  }
+
+  function detectValidationIssue() {
+    const invalid = queryAllDeep(
+      'input:invalid, textarea:invalid, select:invalid, [aria-invalid="true"]'
+    ).find((el) => isElVisible(el));
+    if (invalid) {
+      const label = cleanLabelText(labelTextForControl(invalid) || questionTextForAi(invalid));
+      return label
+        ? `Required or invalid answer needs review: ${label.slice(0, 120)}`
+        : "A required or invalid answer needs review.";
+    }
+
+    const required = collectFillableControls().find(
+      (el) =>
+        (el.required || el.getAttribute?.("aria-required") === "true") &&
+        requiredControlIsEmpty(el)
+    );
+    if (required) {
+      const label = cleanLabelText(labelTextForControl(required) || questionTextForAi(required));
+      return label
+        ? `Required answer is missing: ${label.slice(0, 120)}`
+        : "A required answer is missing.";
+    }
+
+    const error = queryAllDeep(
+      [
+        '[role="alert"]',
+        '[aria-live="assertive"]',
+        '[data-testid*="error" i]',
+        '[class*="field-error" i]',
+        '[class*="validation" i]',
+        '.icl-Input-errorText',
+        '.ia-Input-error'
+      ].join(", ")
+    ).find((el) => {
+      if (!isElVisible(el)) return false;
+      const text = cleanLabelText(el.textContent || "");
+      return text && text.length <= 300 && /required|invalid|select|enter|answer|missing/i.test(text);
+    });
+    return error ? cleanLabelText(error.textContent).slice(0, 180) : "";
   }
 
   // Phrases that mean the posting is gone (expired / filled / removed / 404).
@@ -4171,6 +4262,46 @@
     };
   }
 
+  const INDEED_APPLY_SUCCESS_RE =
+    /\b(application submitted|your application (?:has been )?(?:submitted|sent)|application (?:has been )?(?:sent|received)|you(?:'|’)ve applied|successfully applied)\b/i;
+
+  /**
+   * Indeed can confirm inline in the apply modal or navigate to a post-apply page.
+   * Keep this detector separate from Dice so generic page copy cannot mark a job submitted.
+   */
+  function detectIndeedApplySuccess() {
+    if (!isIndeedPage()) return { ok: false };
+    const href = String(location.href || "");
+    const successUrl = /\/apply\/(?:complete|success|submitted)|applicationSubmitted/i.test(href);
+    const candidates = queryAllDeep(
+      [
+        '[data-testid*="success" i]',
+        '[data-testid*="confirmation" i]',
+        '[class*="application-success" i]',
+        '[class*="confirmation" i]',
+        '[role="status"]',
+        '[role="alert"]',
+        "h1",
+        "h2",
+        '[role="heading"]'
+      ].join(", ")
+    )
+      .map((el) => cleanLabelText(el.textContent || ""))
+      .filter((text) => text && text.length <= 500);
+    const hit = candidates.find((text) => INDEED_APPLY_SUCCESS_RE.test(text));
+    if (!successUrl && !hit) return { ok: false };
+    return {
+      ok: true,
+      text: (hit || "Application submitted").slice(0, 160)
+    };
+  }
+
+  function detectApplySuccess() {
+    if (isIndeedPage()) return detectIndeedApplySuccess();
+    if (isDicePage()) return detectDiceApplySuccess();
+    return { ok: false };
+  }
+
   /**
    * Decide whether this page is really an application form. Job search / listing
    * pages also contain inputs (search boxes, filters), so field count alone is
@@ -4201,12 +4332,27 @@
       );
       return /appl(y|ication)|candidate|submission/.test(blob);
     });
+    const hasIndeedApplyUi =
+      isIndeedPage() &&
+      Boolean(
+        document.querySelector(
+          [
+            "#indeedApplyButton",
+            "[data-testid='indeedApplyButton']",
+            "[data-testid*='ApplyForm']",
+            "[class*='ia-ApplyForm']",
+            "[class*='ia-BasePage']",
+            "[data-indeed-apply-joburl]"
+          ].join(", ")
+        )
+      );
 
     const isApplicationForm =
       hasFileInput ||
       hasUploadUi ||
       identityFields >= 2 ||
       (hasApplyForm && fillableCount >= 2) ||
+      (hasIndeedApplyUi && fillableCount >= 1) ||
       looksLikeHistoryForm();
 
     return {
@@ -4218,6 +4364,7 @@
       filterFields,
       hasFileInput,
       blockedReason: detectPageBlocker(),
+      validationReason: detectValidationIssue(),
       jobUnavailable: detectJobUnavailable(),
       applyUrls: collectApplyUrlCandidates()
     };
@@ -4235,7 +4382,7 @@
     /\b(easy apply|1-?click apply|one-?click apply|quick apply|continue(\s+your)?\s+application|apply with|apply now|apply)\b/i;
 
   const ACTION_CONTROL_SEL =
-    'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"], a[class*="btn"], a[class*="button"], [class*="btn"][class*="submit"], [data-testid*="submit"], [data-cy*="submit"], [data-qa*="submit"]';
+    'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"], a[class*="btn"], a[class*="button"], [class*="btn"][class*="submit"], [data-testid*="submit"], [data-testid*="continue"], [data-testid*="apply"], [data-cy*="submit"], [data-qa*="submit"], #indeedApplyButton';
 
   function elActionText(el) {
     if (!el) return "";
@@ -4305,7 +4452,7 @@
   /** The most form-dense visible dialog/modal, or the document when none. */
   function getApplyScope() {
     const sel =
-      '[role="dialog"], dialog[open], dialog, [aria-modal="true"], .modal, [class*="modal"], [class*="apply"], [id*="apply"]';
+      '[role="dialog"], dialog[open], dialog, [aria-modal="true"], .modal, [class*="modal"], [class*="apply"], [id*="apply"], [data-testid*="ApplyForm"], [class*="ia-ApplyForm"], [class*="ia-BasePage"]';
     let best = null;
     let bestCount = -1;
     for (const node of queryAllDeep(sel)) {
@@ -4446,6 +4593,32 @@
     const controls = queryAllDeep("button, a, [role='button']").filter(
       (el) => isElVisible(el) && isElEnabled(el)
     );
+    if (isIndeedPage()) {
+      const indeedTarget = controls.find((el) => {
+        const blob = [
+          el.id,
+          el.getAttribute?.("data-testid"),
+          el.getAttribute?.("aria-label"),
+          elActionText(el)
+        ].join(" ");
+        return /indeedApplyButton|apply now|easily apply|continue to apply|apply on indeed/i.test(blob);
+      });
+      if (indeedTarget) {
+        const href = indeedTarget.href || indeedTarget.getAttribute?.("formaction") || "";
+        if (href && !isSameSiteApplyUrl(href, "indeed")) {
+          return {
+            ok: false,
+            clicked: false,
+            externalRedirect: true,
+            externalUrl: new URL(href, location.href).toString()
+          };
+        }
+        scrollElIntoView(indeedTarget);
+        safeClick(indeedTarget);
+        await sleep(1200);
+        return { ok: true, clicked: true, text: elActionText(indeedTarget) || "Apply now" };
+      }
+    }
     const preferred = controls.find((el) =>
       /easy apply|1-?click apply|one-?click apply|quick apply/i.test(elActionText(el))
     );
@@ -4468,7 +4641,7 @@
 
   function getApplyActionSnapshot() {
     const probe = probeApplicationForm();
-    const success = detectDiceApplySuccess();
+    const success = detectApplySuccess();
     let action = findActionButton();
     // On a job listing (not the form yet), "Apply" / "Apply now" is an entry
     // control — not the final submit. Remap so the SW can click through.
@@ -4483,7 +4656,9 @@
       href: location.href,
       signature: stepSignature(),
       isApplicationForm: Boolean(probe.isApplicationForm),
+      site: isIndeedPage() ? "indeed" : isDicePage() ? "dice" : "generic",
       blockedReason: probe.blockedReason || "",
+      validationReason: probe.validationReason || "",
       jobUnavailable: probe.jobUnavailable || "",
       applySuccess: Boolean(success.ok),
       applySuccessText: success.text || "",
@@ -4502,6 +4677,8 @@
         ok: Boolean(entryRes?.clicked || entryRes?.alreadyOpen),
         clicked: Boolean(entryRes?.clicked),
         isSubmit: false,
+        externalRedirect: Boolean(entryRes?.externalRedirect),
+        externalUrl: entryRes?.externalUrl || "",
         action: entryRes?.clicked || entryRes?.alreadyOpen
           ? { type: "entry", text: entryRes.text || "" }
           : null,
@@ -4549,6 +4726,23 @@
     if (!action) {
       return { ok: false, clicked: false, before, after: before };
     }
+    const actionHref =
+      action.el?.href ||
+      action.el?.getAttribute?.("formaction") ||
+      action.el?.closest?.("form")?.getAttribute?.("action") ||
+      "";
+    const pageSite = isIndeedPage() ? "indeed" : isDicePage() ? "dice" : "generic";
+    if (pageSite === "indeed" && actionHref && !isSameSiteApplyUrl(actionHref, "indeed")) {
+      return {
+        ok: false,
+        clicked: false,
+        externalRedirect: true,
+        externalUrl: new URL(actionHref, location.href).toString(),
+        action: describeAction(action),
+        before,
+        after: before
+      };
+    }
     // Final submit: only click when autoSubmit is explicitly enabled.
     if (action.type === "submit") {
       if (!autoSubmit) {
@@ -4557,6 +4751,38 @@
           clicked: false,
           isSubmit: true,
           submitted: false,
+          action: describeAction(action),
+          before,
+          after: before
+        };
+      }
+      // Preserve Dice batch submission. Indeed submission is allowed only while
+      // the live document and the submit target remain on Indeed. Every other
+      // site retains stop-before-submit behavior even if a caller passes true.
+      if (
+        pageSite === "generic" ||
+        (pageSite === "indeed" && !isIndeedPage()) ||
+        (actionHref && !isSameSiteApplyUrl(actionHref, pageSite))
+      ) {
+        return {
+          ok: false,
+          clicked: false,
+          isSubmit: true,
+          submitted: false,
+          blockedReason: "Automatic submission is not allowed on this page.",
+          action: describeAction(action),
+          before,
+          after: before
+        };
+      }
+      const validationReason = detectValidationIssue();
+      if (validationReason) {
+        return {
+          ok: false,
+          clicked: false,
+          isSubmit: true,
+          submitted: false,
+          validationReason,
           action: describeAction(action),
           before,
           after: before
@@ -4664,7 +4890,7 @@
       summary.detail = goneAtStart;
       return summary;
     }
-    const successAtStart = detectDiceApplySuccess();
+    const successAtStart = detectApplySuccess();
     if (successAtStart.ok) {
       summary.status = "submitted";
       summary.detail = successAtStart.text || "Your application is on its way";
@@ -4745,12 +4971,34 @@
 
       if (action.type === "submit") {
         if (autoSubmit) {
+          const liveSite = isIndeedPage() ? "indeed" : isDicePage() ? "dice" : "generic";
+          const actionHref =
+            action.el?.href ||
+            action.el?.getAttribute?.("formaction") ||
+            action.el?.closest?.("form")?.getAttribute?.("action") ||
+            "";
+          if (
+            liveSite === "generic" ||
+            (site === "indeed" && liveSite !== "indeed") ||
+            (actionHref && !isSameSiteApplyUrl(actionHref, liveSite))
+          ) {
+            summary.status = liveSite === "indeed" ? "skipped" : "needs_review";
+            summary.detail =
+              "Automatic submission stopped because the application leaves the supported job site.";
+            return summary;
+          }
+          const validationReason = detectValidationIssue();
+          if (validationReason) {
+            summary.status = "needs_review";
+            summary.detail = validationReason;
+            return summary;
+          }
           scrollElIntoView(action.el);
           safeClick(action.el);
           await sleep(800);
           const start = Date.now();
           while (Date.now() - start < 20000) {
-            const success = detectDiceApplySuccess();
+            const success = detectApplySuccess();
             if (success.ok) {
               summary.status = "submitted";
               summary.detail = success.text || "Your application is on its way";
@@ -4760,7 +5008,7 @@
           }
           summary.status = "needs_review";
           summary.detail =
-            "Submit was clicked but the Dice success screen was not detected. Confirm in the tab, then retry.";
+            "Submit was clicked but the site-specific success screen was not detected. Confirm in the tab, then retry.";
           return summary;
         }
         summary.status = "ready_for_review";
@@ -5309,6 +5557,126 @@
     };
   }
 
+  function indeedJobKey(url = location.href) {
+    try {
+      const u = new URL(String(url || location.href));
+      return (
+        u.searchParams.get("jk") ||
+        u.searchParams.get("vjk") ||
+        u.pathname.match(/\/viewjob\/([A-Za-z0-9]+)/i)?.[1] ||
+        ""
+      );
+    } catch {
+      return "";
+    }
+  }
+
+  function indeedCanonicalLink(jobKey = indeedJobKey()) {
+    if (jobKey) {
+      try {
+        const u = new URL(location.href);
+        return `${u.protocol}//${u.hostname}/viewjob?jk=${encodeURIComponent(jobKey)}`;
+      } catch {
+        /* fall through */
+      }
+    }
+    return canonicalPageUrl();
+  }
+
+  function scrapeIndeedDom(doc = document) {
+    const root =
+      doc.querySelector("#jobsearch-ViewjobPaneWrapper") ||
+      doc.querySelector(".jobsearch-JobComponent") ||
+      doc.querySelector("main") ||
+      doc.body ||
+      doc;
+    const text = (selector) => elementText(root.querySelector(selector));
+    const desc =
+      root.querySelector("#jobDescriptionText") ||
+      root.querySelector('[data-testid="jobDescriptionText"]') ||
+      root.querySelector('[class*="jobsearch-JobComponent-description"]');
+    const meta = Array.from(
+      root.querySelectorAll(
+        '#jobDetailsSection li, [data-testid="job-details-section"] li, [class*="jobsearch-JobDescriptionSection"]'
+      )
+    )
+      .map((el) => elementText(el))
+      .filter(Boolean);
+    const employmentType = meta.find((item) =>
+      /\b(full[- ]time|part[- ]time|contract|temporary|internship|per diem)\b/i.test(item)
+    );
+    const location =
+      text('[data-testid="job-location"]') ||
+      text('[data-testid="inlineHeader-companyLocation"]') ||
+      text(".jobsearch-JobInfoHeader-subtitle > div:nth-child(2)");
+    return {
+      jobTitle:
+        text('[data-testid="jobsearch-JobInfoHeader-title"]') ||
+        text(".jobsearch-JobInfoHeader-title") ||
+        text("h1"),
+      companyName:
+        text('[data-testid="inlineHeader-companyName"]') ||
+        text('[data-company-name="true"]') ||
+        text(".jobsearch-InlineCompanyRating-companyHeader"),
+      jdText: desc
+        ? String(desc.innerText || desc.textContent || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim()
+        : "",
+      jobLocation: location,
+      employmentType: employmentType || "",
+      datePosted:
+        text('[data-testid="myJobsStateDate"]') ||
+        text(".jobsearch-JobMetadataFooter") ||
+        "",
+      workArrangement: /\bremote\b/i.test(location) ? "Remote" : ""
+    };
+  }
+
+  function mergeIndeedScrape(schema, dom) {
+    schema = schema || {};
+    dom = dom || {};
+    const jobKey = indeedJobKey();
+    const jobTitle = dom.jobTitle || schema.jobTitle || "";
+    const jdText = dom.jdText || schema.jdText || "";
+    if (!jobTitle && !jdText) return null;
+    return {
+      ...schema,
+      ...dom,
+      jobId: jobKey,
+      jobTitle,
+      companyName: dom.companyName || schema.companyName || "",
+      jdLink: indeedCanonicalLink(jobKey),
+      jdText,
+      applyLink: indeedCanonicalLink(jobKey),
+      workArrangement: dom.workArrangement || schema.workArrangement || "",
+      employmentType: dom.employmentType || schema.employmentType || "",
+      salaryMin: schema.salaryMin || "",
+      salaryMax: schema.salaryMax || "",
+      datePosted: schema.datePosted || dom.datePosted || "",
+      jobLocation: dom.jobLocation || schema.jobLocation || ""
+    };
+  }
+
+  async function scrapeIndeed() {
+    let data = mergeIndeedScrape(scrapeSchemaOrgJobPosting(), scrapeIndeedDom(document));
+    if (data?.jobTitle && data?.companyName && data?.jdText) return data;
+    for (const waitMs of [400, 900]) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      const next = mergeIndeedScrape(scrapeSchemaOrgJobPosting(), scrapeIndeedDom(document));
+      data = {
+        ...(data || {}),
+        ...(next || {}),
+        jobTitle: next?.jobTitle || data?.jobTitle || "",
+        companyName: next?.companyName || data?.companyName || "",
+        jdText: next?.jdText || data?.jdText || ""
+      };
+      if (data.jobTitle && data.companyName && data.jdText) return data;
+    }
+    return data && (data.jobTitle || data.jdText) ? data : null;
+  }
+
   function diceIdFromUrl(url = location.href) {
     try {
       const u = new URL(String(url || ""), "https://www.dice.com");
@@ -5634,7 +6002,8 @@
   // Registry of site-specific scrapers. Extend this as new sites are supported.
   const JOB_SCRAPERS = [
     { id: "jobright", host: /(^|\.)jobright\.ai$/i, scrape: scrapeJobright },
-    { id: "dice", host: /(^|\.)dice\.com$/i, scrape: scrapeDice }
+    { id: "dice", host: /(^|\.)dice\.com$/i, scrape: scrapeDice },
+    { id: "indeed", host: /(^|\.)indeed\.com$/i, scrape: scrapeIndeed }
   ];
 
   async function scrapeJobPage() {

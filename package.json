@@ -1,0 +1,9 @@
+{
+  "name": "brightstar-auto-apply-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check background.js && node --check autofill-runner.js && node --check popup.js && node --check content/autofill.js && node --check content/indeed-capture.js",
+    "test": "node --test tests"
+  }
+}
