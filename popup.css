@@ -122,7 +122,7 @@ h1 {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 0 0 auto;
 }
 
@@ -717,7 +717,7 @@ input[type="file"]::file-selector-button {
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
-  min-width: 64px;
+  min-width: 30px;
 }
 
 .queue-item .actions button,
@@ -730,7 +730,8 @@ input[type="file"]::file-selector-button {
   box-shadow: none;
 }
 
-.queue-item .actions button.icon-button {
+.queue-item .actions button.icon-button,
+.queue-item .apply-action button.icon-button {
   width: 30px;
   min-width: 30px;
   height: 30px;
@@ -1184,7 +1185,7 @@ body.ctx-window .queue-item .actions {
 
 body.ctx-panel .queue-item .apply-action,
 body.ctx-window .queue-item .apply-action {
-  min-width: 72px;
+  min-width: 30px;
 }
 
 body.ctx-panel .app-body,

@@ -101,6 +101,13 @@
       },
       "description": "Open Brightstar Bid bot"
     },
+    "open-window-app": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "Open Brightstar Bid bot as a window app"
+    },
     "autofill-page": {
       "suggested_key": {
         "default": "Ctrl+Shift+Y",

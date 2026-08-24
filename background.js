@@ -572,6 +572,10 @@ function safeSendResponse(sendResponse, payload) {
   }
 }
 
+const DETACHED_WINDOW_KEY = "detached_window_id";
+const DETACHED_WINDOW_BOUNDS_KEY = "detached_window_bounds";
+const DEFAULT_APP_WINDOW = { width: 580, height: 860 };
+
 /** The docked panel reuses popup.html but needs the full-width layout. */
 function configureSidePanel() {
   try {
@@ -584,7 +588,77 @@ function configureSidePanel() {
   }
 }
 
+function sanitizeWindowBounds(bounds = {}) {
+  const width = Math.min(Math.max(Number(bounds.width) || DEFAULT_APP_WINDOW.width, 420), 1400);
+  const height = Math.min(Math.max(Number(bounds.height) || DEFAULT_APP_WINDOW.height, 560), 1400);
+  const left = Number.isFinite(Number(bounds.left)) ? Math.round(Number(bounds.left)) : undefined;
+  const top = Number.isFinite(Number(bounds.top)) ? Math.round(Number(bounds.top)) : undefined;
+  return { width, height, ...(left != null ? { left } : {}), ...(top != null ? { top } : {}) };
+}
+
+async function rememberAppWindowBounds(windowId) {
+  if (windowId == null) return;
+  try {
+    const win = await chrome.windows.get(windowId);
+    if (!win || win.type !== "popup") return;
+    await chrome.storage.local.set({
+      [DETACHED_WINDOW_BOUNDS_KEY]: sanitizeWindowBounds({
+        width: win.width,
+        height: win.height,
+        left: win.left,
+        top: win.top
+      })
+    });
+  } catch {
+    // Window may already be gone.
+  }
+}
+
+/** Open (or focus) the bot as a dedicated popup app window. */
+async function openBotAppWindow() {
+  const stored = await chrome.storage.local.get([DETACHED_WINDOW_KEY, DETACHED_WINDOW_BOUNDS_KEY]);
+  const existingId = stored[DETACHED_WINDOW_KEY];
+  if (existingId != null) {
+    try {
+      await chrome.windows.update(existingId, { focused: true, drawAttention: true });
+      return { ok: true, focused: true, windowId: existingId };
+    } catch {
+      await chrome.storage.local.remove(DETACHED_WINDOW_KEY).catch(() => {});
+    }
+  }
+
+  const bounds = sanitizeWindowBounds(stored[DETACHED_WINDOW_BOUNDS_KEY] || DEFAULT_APP_WINDOW);
+  const created = await chrome.windows.create({
+    url: chrome.runtime.getURL("popup.html?ctx=window"),
+    type: "popup",
+    focused: true,
+    ...bounds
+  });
+  if (created?.id != null) {
+    await chrome.storage.local.set({ [DETACHED_WINDOW_KEY]: created.id });
+  }
+  return { ok: true, created: true, windowId: created?.id ?? null };
+}
+
 configureSidePanel();
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  chrome.storage.local.get(DETACHED_WINDOW_KEY).then((data) => {
+    if (data[DETACHED_WINDOW_KEY] === windowId) {
+      chrome.storage.local.remove(DETACHED_WINDOW_KEY).catch(() => {});
+    }
+  });
+});
+
+if (chrome.windows.onBoundsChanged) {
+  chrome.windows.onBoundsChanged.addListener((windowId) => {
+    chrome.storage.local.get(DETACHED_WINDOW_KEY).then((data) => {
+      if (data[DETACHED_WINDOW_KEY] === windowId) {
+        rememberAppWindowBounds(windowId).catch(() => {});
+      }
+    });
+  });
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   isRunning = false;
@@ -5434,6 +5508,15 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
 
+  if (type === "open_app_window") {
+    openBotAppWindow()
+      .then((result) => safeSendResponse(sendResponse, result))
+      .catch((err) =>
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
+      );
+    return true;
+  }
+
   if (type === "indeed_capture_start") {
     if (indeedCaptureControl.running || isRunning) {
       safeSendResponse(sendResponse, {
@@ -6396,6 +6479,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 chrome.commands.onCommand.addListener((command) => {
+  if (command === "open-window-app") {
+    openBotAppWindow().catch((err) =>
+      setStatus(`Could not open window app: ${String(err?.message || err)}`)
+    );
+    return;
+  }
   if (command === "autofill-page") {
     autofillActiveTab()
       .then((r) => setStatus(`Autofilled ${r.filled || r.filledCount || 0} field(s).`))

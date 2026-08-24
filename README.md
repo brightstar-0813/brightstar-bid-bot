@@ -127,7 +127,10 @@ Then enable **Native OS watcher** in Auto-source settings and **Save**. Refreshe
 
 ## Keep the bot open while you bid
 
-Chrome always closes an extension popup when you click outside it, so copying a JD or link dismisses it. Click **Keep open** (top-right of the popup) to move the same UI into Chrome's **side panel**, which stays docked while you browse and copy. On Chrome builds without the side panel it opens a detached window instead.
+Chrome always closes an extension popup when you click outside it, so copying a JD or link dismisses it.
+
+- **Open as window** (top-right, or `Ctrl+Shift+A` / `Cmd+Shift+A`) opens the same UI in a dedicated popup **window app** that stays open while you browse. Size and position are remembered. Clicking again focuses the existing window.
+- **Keep open** docks the UI into Chrome's **side panel**. On Chrome builds without the side panel it falls back to the window app.
 
 The **Manual one-off** form also remembers whether it was expanded, and collapses itself once **Generate (auto)** starts.
 

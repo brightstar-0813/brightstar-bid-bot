@@ -65,7 +65,6 @@ const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
-const DETACHED_WINDOW_KEY = "detached_window_id";
 const PREVIEW_WINDOW_KEY = "template_preview_window_id";
 const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state";
 const INDEED_CAPTURE_SETTINGS_KEY = "indeed_capture_settings";
@@ -484,6 +483,7 @@ const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const copySheetRowBtn = document.getElementById("copySheetRow");
 const keepOpenBtn = document.getElementById("keepOpen");
+const openAsWindowBtn = document.getElementById("openAsWindow");
 const previewTemplateBtn = document.getElementById("previewTemplate");
 const pasteJdBtn = document.getElementById("pasteJd");
 const runOneOffBtn = document.getElementById("runOneOff");
@@ -1346,6 +1346,7 @@ function badgeClass(status) {
 const ACTION_ICON_PATHS = {
   open: '<path d="M14 3h7v7m0-7-9 9"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
+  apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
   retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>'
 };
@@ -1557,7 +1558,7 @@ function renderQueue() {
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = job.applied ? "secondary" : "primary";
-    applyBtn.textContent = job.applied ? "Applied" : "Apply";
+    setIconButton(applyBtn, "apply", job.applied ? "Apply again" : "Apply to job");
     applyBtn.title = job.applied
       ? `${appliedDocsTitle(job)}\nClick to apply again.`
       : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
@@ -2321,24 +2322,13 @@ async function openTemplatePreview() {
 }
 
 async function openDetachedWindow() {
-  const stored = (await chrome.storage.local.get(DETACHED_WINDOW_KEY))[DETACHED_WINDOW_KEY];
-  if (stored != null) {
-    try {
-      await chrome.windows.update(stored, { focused: true, drawAttention: true });
-      window.close();
-      return;
-    } catch {
-      // Remembered window was closed — fall through and make a new one.
-    }
+  const res = await chrome.runtime.sendMessage({ type: "open_app_window" });
+  if (!res?.ok) {
+    throw new Error(res?.error || "Could not open window app.");
   }
-  const created = await chrome.windows.create({
-    url: chrome.runtime.getURL("popup.html?ctx=window"),
-    type: "popup",
-    width: 560,
-    height: 780
-  });
-  await chrome.storage.local.set({ [DETACHED_WINDOW_KEY]: created.id });
-  window.close();
+  if (UI_CONTEXT === "popup" || UI_CONTEXT === "panel") {
+    window.close();
+  }
 }
 
 function dockOutOfPopup() {
@@ -2357,6 +2347,14 @@ function dockOutOfPopup() {
   Promise.resolve(chrome.sidePanel.open({ windowId: currentWindowId }))
     .then(() => window.close())
     .catch(detach);
+}
+
+async function openAsWindowApp() {
+  try {
+    await openDetachedWindow();
+  } catch (err) {
+    setStatus(`Could not open window app: ${String(err?.message || err)}`);
+  }
 }
 
 function setBusy(busy) {
@@ -2744,7 +2742,10 @@ forceSaveChatgptBtn.addEventListener("click", async () => {
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 copySheetRowBtn.addEventListener("click", copySheetRow);
-keepOpenBtn.addEventListener("click", dockOutOfPopup);
+keepOpenBtn?.addEventListener("click", dockOutOfPopup);
+openAsWindowBtn?.addEventListener("click", () => {
+  openAsWindowApp().catch((e) => setStatus(String(e.message || e)));
+});
 previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
 });
@@ -2799,8 +2800,11 @@ if (UI_CONTEXT === "popup") {
       currentWindowId = win?.id ?? null;
     })
     .catch(() => {});
+} else if (UI_CONTEXT === "panel") {
+  keepOpenBtn && (keepOpenBtn.hidden = true);
 } else {
-  keepOpenBtn.hidden = true;
+  keepOpenBtn && (keepOpenBtn.hidden = true);
+  openAsWindowBtn && (openAsWindowBtn.hidden = true);
 }
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
