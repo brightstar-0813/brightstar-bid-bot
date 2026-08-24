@@ -81,9 +81,9 @@ flowchart TD
    - **Etc** — not Dice, Indeed, or LinkedIn
    - **All** — every US job
 3. Confirm summary counts (Dice / Indeed / LI / Etc)
-4. File generation **starts automatically** after upload (ChatGPT tab opens if needed). Use **Start** only to resume after Pause / failed rows / apply backlog
-5. Use **Pause** / **Skip** / **Stop** as needed
-6. Per row: **Open** (JD link), **Files** (reveal downloads), **Apply** (manual assist; stops before Submit)
+4. Review the queue before generation. Use **Open** to verify relevance and **Remove** to exclude unsuitable jobs from this and future refreshes.
+5. Click **Start** only after the queue is approved; CSV upload and refresh never start generation automatically.
+6. Use **Pause** / **Skip** / **Stop** as needed. Per row, **Files** reveals downloads and **Apply** runs manual assistance.
 
 ### Dice interleaved auto-apply
 
@@ -122,7 +122,7 @@ cd native-host
 .\install-windows.ps1 -ExtensionId <id-from-chrome-extensions> -CsvPath "D:\Work\JobHunting\Prompts\Bots\sf-job-capture\download\jobs_latest.csv"
 ```
 
-Then enable **Native OS watcher** in Auto-source settings and **Save**. Refreshes **merge** by job link (keep done/skipped; add new pending), sheet-dedupe, and auto-start generation when new jobs appear.
+Then enable **Native OS watcher** in Auto-source settings and **Save**. Refreshes **merge** by job link (keep done/skipped; add new pending) and sheet-dedupe, but wait for queue review and a manual **Start**. Removed jobs stay excluded until the job list is cleared/reset.
 
 ## Keep the bot open while you bid
 

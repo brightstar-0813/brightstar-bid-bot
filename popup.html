@@ -314,7 +314,7 @@
             <span class="step" aria-hidden="true">3</span>
             <div class="section-copy">
               <p class="section-title">CSV batch</p>
-              <p class="section-sub">US jobs — upload once, or auto-refresh from pin / URL / native watcher</p>
+              <p class="section-sub">US jobs — load, review/remove unsuitable roles, then click Start</p>
             </div>
             <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
           </header>
@@ -322,6 +322,7 @@
             <span>Upload jobs CSV (e.g. sf-job-capture jobs_latest.csv)</span>
             <input id="csvFile" type="file" accept=".csv,text/csv" />
           </label>
+          <p class="hint">Loading or refreshing a CSV never starts generation automatically. Open each job, remove unsuitable roles, then click Start.</p>
           <div class="row row-2">
             <button type="button" id="csvRefresh" class="ghost" title="Re-read pinned file, URL, or native watcher">
               Refresh CSV
@@ -336,7 +337,7 @@
           <div class="panel-body" id="csvSourcePanelBody" hidden>
             <p class="hint">
               Cron updates every ~12h: pin the file, set a CSV URL, and/or install the native watcher. Refresh merges
-              <strong>new</strong> jobs (sheet duplicates skipped) and auto-starts generation.
+              <strong>new</strong> jobs (sheet duplicates skipped) for review. Generation starts only when you click Start.
             </p>
             <div class="grid-2">
               <label class="field">

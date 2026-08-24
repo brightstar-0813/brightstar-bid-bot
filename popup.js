@@ -43,7 +43,12 @@ import {
   clearCsvFileHandle,
   readPinnedCsvText
 } from "./file-handle-db.js";
-import { getCsvSourceSettings, fingerprintText, saveCsvSourceSettings } from "./csv-source.js";
+import {
+  getCsvSourceSettings,
+  fingerprintText,
+  jobIdentity,
+  saveCsvSourceSettings
+} from "./csv-source.js";
 import {
   getQaCount,
   exportQa,
@@ -56,6 +61,7 @@ const DEFAULT_OUTPUT_DIR = "Applications";
 const QUEUE_KEY = "job_queue";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
+const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
@@ -1481,9 +1487,19 @@ function renderQueue() {
       : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
     applyBtn.addEventListener("click", () => applyAssist(job));
 
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "secondary danger";
+    removeBtn.textContent = "Remove";
+    removeBtn.title = "Remove this unsuitable job from the batch and future CSV refreshes";
+    removeBtn.disabled =
+      batchState === "running" || job.status === "running" || job.status === "done" || job.applied;
+    removeBtn.addEventListener("click", () => removeJobFromBatch(job));
+
     actions.appendChild(openBtn);
     actions.appendChild(revealBtn);
     actions.appendChild(applyBtn);
+    actions.appendChild(removeBtn);
 
     if (job.status === "error" || job.status === "failed") {
       const retryBtn = document.createElement("button");
@@ -1599,7 +1615,7 @@ async function pinLocalCsvFile() {
     text,
     fileName: file.name,
     source: "pinned",
-    autoStart: true,
+    autoStart: false,
     force: true
   });
   await reloadQueueFromStorage();
@@ -1608,7 +1624,7 @@ async function pinLocalCsvFile() {
   setStatus(
     ingest.unchangedFile
       ? `Pinned ${file.name} (unchanged).`
-      : `Pinned ${file.name} — +${ingest.added || 0} new · ${ingest.pending || 0} pending.`
+      : `Pinned ${file.name} — +${ingest.added || 0} new · ${ingest.pending || 0} pending. Review jobs, then click Start.`
   );
 }
 
@@ -1652,7 +1668,7 @@ async function refreshCsvFromSources() {
         text: pinned.text,
         fileName: pinned.fileName || "jobs.csv",
         source: "pinned",
-        autoStart: true,
+        autoStart: false,
         force: false
       });
       await reloadQueueFromStorage();
@@ -1661,7 +1677,7 @@ async function refreshCsvFromSources() {
         setStatus(
           ingest.unchangedFile
             ? "Pinned CSV unchanged."
-            : `Refreshed pinned CSV — +${ingest.added || 0} new · ${ingest.pending || 0} pending${ingest.started ? " · batch started" : ""}.`
+            : `Refreshed pinned CSV — +${ingest.added || 0} new · ${ingest.pending || 0} pending. Review jobs, then click Start.`
         );
         return;
       }
@@ -1682,7 +1698,7 @@ async function refreshCsvFromSources() {
     setStatus(
       r.unchangedFile
         ? `CSV unchanged (${res.via || "source"}).`
-        : `Refreshed via ${res.via || "source"} — +${r.added || 0} new · ${r.pending || 0} pending${r.started ? " · batch started" : ""}.`
+        : `Refreshed via ${res.via || "source"} — +${r.added || 0} new · ${r.pending || 0} pending. Review jobs, then click Start.`
     );
     return;
   }
@@ -1703,7 +1719,15 @@ async function onCsvSelected(file) {
   try {
     const text = await file.text();
     const result = parseJobsCsv(text);
-    allUsJobsCache = result.usJobs.map((j) => ({ ...j, status: "pending" }));
+    const removedData = await chrome.storage.local.get(REMOVED_JOB_IDENTITIES_KEY);
+    const removedIdentities = new Set(
+      Array.isArray(removedData[REMOVED_JOB_IDENTITIES_KEY])
+        ? removedData[REMOVED_JOB_IDENTITIES_KEY].map(String)
+        : []
+    );
+    allUsJobsCache = result.usJobs
+      .filter((job) => !removedIdentities.has(jobIdentity(job)))
+      .map((j) => ({ ...j, status: "pending" }));
     // Fresh upload: do not carry over done/error from a previous CSV.
     queueCache = [];
     await chrome.storage.local.set({
@@ -1743,7 +1767,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${result.usJobs.length} US (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Indeed ${result.indeedCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Filter: ${channelFilter}.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Indeed ${result.indeedCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
     );
 
     try {
@@ -1758,31 +1782,9 @@ async function onCsvSelected(file) {
       // best-effort fingerprint for later refresh skip
     }
 
-    // File generation is fully automatic after upload — Start is only needed to resume.
-    if (queueCache.some((j) => j.status === "pending" || j.status === "error" || j.status === "failed")) {
-      await autoStartBatchAfterCsv();
-    }
   } catch (err) {
     setStatus(`CSV parse failed: ${String(err.message || err)}`);
   }
-}
-
-async function autoStartBatchAfterCsv() {
-  const person = await getActivePerson();
-  if (!person.promptTemplate?.includes("{JD}")) {
-    setStatus(
-      `CSV loaded (${queueCache.length} in queue). Add {JD} to the tailor prompt, Save person, then click Start.`
-    );
-    return;
-  }
-  if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
-    setStatus(
-      `CSV loaded (${queueCache.length} in queue). Upload/paste master resume, Save person, then click Start.`
-    );
-    return;
-  }
-  setStatus(`CSV loaded — starting file generation for ${queueCache.length} job(s)…`);
-  await sendBatch("batch_start");
 }
 
 async function openJob(job) {
@@ -1791,6 +1793,24 @@ async function openJob(job) {
     return;
   }
   await chrome.runtime.sendMessage({ type: "open_job_url", url: job.jdLink });
+}
+
+async function removeJobFromBatch(job) {
+  const label = `${job?.company || "Unknown company"} — ${job?.title || "Untitled"}`;
+  if (!window.confirm(`Remove this job from the batch?\n\n${label}`)) return;
+  const result = await chrome.runtime.sendMessage({
+    type: "remove_queue_job",
+    csvRow: job.csvRow
+  });
+  if (!result?.ok) {
+    setStatus(`Could not remove row ${job.csvRow}: ${result?.error || "Unknown error"}`);
+    return;
+  }
+  queueCache = Array.isArray(result.queue) ? result.queue : queueCache;
+  allUsJobsCache = Array.isArray(result.allJobs) ? result.allJobs : allUsJobsCache;
+  renderQueue();
+  updateCsvSummaryFromQueue();
+  setStatus(`Removed row ${job.csvRow}: ${label}.`);
 }
 
 async function revealJobFiles(job) {
@@ -2490,6 +2510,7 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
   await chrome.storage.local.set({
     [QUEUE_KEY]: [],
     [ALL_US_JOBS_KEY]: [],
+    [REMOVED_JOB_IDENTITIES_KEY]: [],
     [BATCH_STATE_KEY]: "idle",
     csv_file_name: "",
     csv_total_rows: 0,

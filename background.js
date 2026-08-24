@@ -91,6 +91,7 @@ const BATCH_STATE_KEY = "batch_state";
 const APPLY_HISTORY_KEY = "apply_history";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
+const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state";
 const INDEED_CAPTURE_SETTINGS_KEY = "indeed_capture_settings";
@@ -4770,7 +4771,8 @@ async function mergeIndeedCapturedJobs(jobs) {
   const data = await chrome.storage.local.get([
     ALL_US_JOBS_KEY,
     QUEUE_KEY,
-    JOB_CHANNEL_FILTER_KEY
+    JOB_CHANNEL_FILTER_KEY,
+    REMOVED_JOB_IDENTITIES_KEY
   ]);
   const previousAll = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
   const previousQueue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -4779,6 +4781,11 @@ async function mergeIndeedCapturedJobs(jobs) {
     0
   ) + 1;
   const byIdentity = new Map(previousAll.map((job) => [jobIdentity(job), job]));
+  const removedIdentities = new Set(
+    Array.isArray(data[REMOVED_JOB_IDENTITIES_KEY])
+      ? data[REMOVED_JOB_IDENTITIES_KEY].map(String)
+      : []
+  );
   let qualified = 0;
   let external = 0;
   let duplicates = 0;
@@ -4786,6 +4793,7 @@ async function mergeIndeedCapturedJobs(jobs) {
   for (const raw of Array.isArray(jobs) ? jobs : []) {
     let candidate = normalizeIndeedCapturedJob(raw, nextRow);
     if (!candidate.title || !candidate.jdLink || !isSalesforceRelevantJob(candidate)) continue;
+    if (removedIdentities.has(jobIdentity(candidate))) continue;
     if (
       !isUnitedStatesJob({
         location: candidate.location,
@@ -5146,7 +5154,7 @@ async function handleNativeCsvMessage(msg) {
       text: msg.text,
       fileName: msg.fileName || "jobs_native.csv",
       source: "native",
-      autoStart: true,
+      autoStart: false,
       force: false
     });
     return;
@@ -5176,7 +5184,7 @@ async function ingestCsvText({
   text,
   fileName = "jobs.csv",
   source = "manual",
-  autoStart = true,
+  autoStart = false,
   force = false
 } = {}) {
   if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
@@ -5208,11 +5216,20 @@ async function ingestCsvText({
     ALL_US_JOBS_KEY,
     QUEUE_KEY,
     JOB_CHANNEL_FILTER_KEY,
+    REMOVED_JOB_IDENTITIES_KEY,
     "batch_output_dir"
   ]);
   const previousAll = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
   const previousQueue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
-  const merged = mergeParsedJobs(previousAll, previousQueue, parsed.usJobs);
+  const removedIdentities = new Set(
+    Array.isArray(data[REMOVED_JOB_IDENTITIES_KEY])
+      ? data[REMOVED_JOB_IDENTITIES_KEY].map(String)
+      : []
+  );
+  const reviewableJobs = parsed.usJobs.filter(
+    (job) => !removedIdentities.has(jobIdentity(job))
+  );
+  const merged = mergeParsedJobs(previousAll, previousQueue, reviewableJobs);
   const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
   const filtered = filterJobsByChannel(merged.allUsJobs, channel);
 
@@ -5243,7 +5260,7 @@ async function ingestCsvText({
     (j) => j.status === "pending" || j.status === "error" || j.status === "failed"
   ).length;
 
-  const status = `CSV (${source}): +${merged.added} new · ${pending} pending · sheet skipped ${dedupe.skipped || 0}`;
+  const status = `CSV (${source}): +${merged.added} new · ${pending} pending · sheet skipped ${dedupe.skipped || 0}. Review jobs, then click Start.`;
   await saveCsvSourceSettings({
     lastFingerprint: fp,
     lastIngestAt: Date.now(),
@@ -5302,7 +5319,7 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
         text,
         fileName,
         source: "url",
-        autoStart: true,
+        autoStart: false,
         force
       });
       if (!result.unchangedFile) return { ok: true, via: "url", result, reason };
@@ -5319,7 +5336,7 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
           text: pinned.text,
           fileName: pinned.fileName || settings.pinFileName || "jobs.csv",
           source: "pinned",
-          autoStart: true,
+          autoStart: false,
           force
         });
         if (!result.unchangedFile) return { ok: true, via: "pinned", result, reason };
@@ -5468,7 +5485,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           text: message.text,
           fileName: message.fileName || "jobs.csv",
           source: message.source || "manual",
-          autoStart: message.autoStart !== false,
+          autoStart: message.autoStart === true,
           force: Boolean(message.force)
         });
         safeSendResponse(sendResponse, result);
@@ -5563,6 +5580,59 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (type === "remove_queue_job") {
+    (async () => {
+      try {
+        if (isRunning || indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
+          throw new Error("Pause generation and Indeed capture before removing a job.");
+        }
+        const csvRow = Number(message.csvRow);
+        if (!Number.isFinite(csvRow)) throw new Error("Missing CSV row.");
+        const data = await chrome.storage.local.get([
+          QUEUE_KEY,
+          ALL_US_JOBS_KEY,
+          REMOVED_JOB_IDENTITIES_KEY
+        ]);
+        const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+        const allJobs = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+        const target =
+          queue.find((job) => Number(job.csvRow) === csvRow) ||
+          allJobs.find((job) => Number(job.csvRow) === csvRow);
+        if (!target) throw new Error(`Row ${csvRow} was not found.`);
+        if (target.status === "running" || target.status === "done" || target.applied) {
+          throw new Error("Only unprocessed jobs can be removed from the batch.");
+        }
+        const identity = jobIdentity(target);
+        const removed = new Set(
+          Array.isArray(data[REMOVED_JOB_IDENTITIES_KEY])
+            ? data[REMOVED_JOB_IDENTITIES_KEY].map(String)
+            : []
+        );
+        if (identity) removed.add(identity);
+        const matchesTarget = (job) =>
+          Number(job.csvRow) === csvRow || (identity && jobIdentity(job) === identity);
+        const nextQueue = queue.filter((job) => !matchesTarget(job));
+        const nextAll = allJobs.filter((job) => !matchesTarget(job));
+        await chrome.storage.local.set({
+          [QUEUE_KEY]: nextQueue,
+          [ALL_US_JOBS_KEY]: nextAll,
+          [REMOVED_JOB_IDENTITIES_KEY]: [...removed],
+          generation_status: `Removed row ${csvRow} from the review batch.`
+        });
+        safeSendResponse(sendResponse, {
+          ok: true,
+          csvRow,
+          removedIdentity: identity,
+          queue: nextQueue,
+          allJobs: nextAll
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "clear_job_queue") {
     (async () => {
       try {
@@ -5584,6 +5654,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           chatgpt_json_ready: false,
           chatgpt_json_ready_at: 0,
           last_resume_json: null,
+          [REMOVED_JOB_IDENTITIES_KEY]: [],
           [INDEED_CAPTURE_STATE_KEY]: {
             running: false,
             status: "idle",
@@ -5627,6 +5698,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           csv_file_name: "",
           csv_total_rows: 0,
           csv_dropped_non_us: 0,
+          [REMOVED_JOB_IDENTITIES_KEY]: [],
           [INDEED_CAPTURE_STATE_KEY]: {
             running: false,
             status: "idle",
