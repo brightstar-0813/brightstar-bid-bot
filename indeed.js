@@ -40,9 +40,27 @@ export function isExplicitlyHostedIndeedJob(job) {
   return hosted && job?.externalApply !== true;
 }
 
+export function mergeIndeedApplyEvidence(previous, incoming) {
+  const priorHosted = isExplicitlyHostedIndeedJob(previous);
+  const evidence = String(incoming?.applyEvidence || "").toLowerCase();
+  if (priorHosted && evidence !== "external") {
+    return {
+      ...incoming,
+      applyEvidence: "hosted",
+      applyOnIndeed: true,
+      indeedApplyOnSite: true,
+      hostedApply: true,
+      externalApply: false
+    };
+  }
+  return incoming;
+}
+
 export function normalizeIndeedCapturedJob(job, csvRow) {
   const jdLink = String(job?.jdLink || job?.url || "").trim();
   const hosted = isExplicitlyHostedIndeedJob(job);
+  const explicitlyExternal =
+    String(job?.applyEvidence || "").toLowerCase() === "external" || job?.externalApply === true;
   const capturedValue = job?.capturedAt;
   const capturedAt = Number.isFinite(Number(capturedValue))
     ? Number(capturedValue)
@@ -55,13 +73,13 @@ export function normalizeIndeedCapturedJob(job, csvRow) {
     jdLink,
     jdText: String(job?.jdText || job?.description || "").trim(),
     location: String(job?.location || "").trim(),
-    remoteRestrictedTo: String(job?.remoteRestrictedTo || "United States").trim(),
+    remoteRestrictedTo: String(job?.remoteRestrictedTo || "").trim(),
     source: "indeed",
     isIndeed: true,
     indeedApplyOnSite: hosted,
     applyOnIndeed: hosted,
     hostedApply: hosted,
-    externalApply: !hosted,
+    externalApply: !hosted && explicitlyExternal,
     capturedAt
   };
 }

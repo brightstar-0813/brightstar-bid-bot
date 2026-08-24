@@ -1843,9 +1843,9 @@ export async function startMultiStepApplyOnTab(
 
     if (probe.best.action.type === "submit") {
       if (effectiveAutoSubmit) {
-        if (probe.validationReason) {
+        if (probe.blockedReason || probe.validationReason) {
           summary.status = "needs_review";
-          summary.detail = probe.validationReason;
+          summary.detail = probe.blockedReason || probe.validationReason;
           summary.tabId = currentTabId;
           return summary;
         }

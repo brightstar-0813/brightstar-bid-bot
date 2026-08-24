@@ -6,9 +6,15 @@ import {
   isExplicitlyHostedIndeedJob,
   isIndeedUrl,
   isSalesforceRelevantJob,
+  mergeIndeedApplyEvidence,
   normalizeIndeedCapturedJob
 } from "../indeed.js";
-import { filterJobsByChannel, isIndeedJob, normalizeChannelFilter } from "../csv.js";
+import {
+  filterJobsByChannel,
+  isIndeedJob,
+  isUnitedStatesJob,
+  normalizeChannelFilter
+} from "../csv.js";
 import { jobIdentity, mergeParsedJobs } from "../csv-source.js";
 
 test("Indeed URLs and channel classification are strict", () => {
@@ -76,6 +82,24 @@ test("normalization preserves a conservative hosted-apply gate", () => {
   assert.equal(external.source, "indeed");
   assert.equal(external.hostedApply, false);
   assert.equal(external.externalApply, true);
+  assert.equal(external.remoteRestrictedTo, "");
+  assert.equal(isUnitedStatesJob(external), false);
+});
+
+test("a weak refresh cannot erase prior hosted-apply evidence", () => {
+  const merged = mergeIndeedApplyEvidence(
+    { applyOnIndeed: true, hostedApply: true, externalApply: false },
+    { applyEvidence: "unknown", applyOnIndeed: false, hostedApply: false, externalApply: false }
+  );
+  assert.equal(merged.applyEvidence, "hosted");
+  assert.equal(merged.hostedApply, true);
+  assert.equal(merged.externalApply, false);
+
+  const explicitExternal = mergeIndeedApplyEvidence(
+    { applyOnIndeed: true, hostedApply: true, externalApply: false },
+    { applyEvidence: "external", externalApply: true }
+  );
+  assert.equal(explicitExternal.externalApply, true);
 });
 
 test("merge deduplicates captured URLs while preserving completed state", () => {

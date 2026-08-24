@@ -64,7 +64,8 @@ import {
   filterJobsByChannel,
   normalizeChannelFilter,
   isDiceJob,
-  isIndeedJob
+  isIndeedJob,
+  isUnitedStatesJob
 } from "./csv.js";
 import {
   CSV_SOURCE_ALARM,
@@ -81,6 +82,7 @@ import {
   isExplicitlyHostedIndeedJob,
   isIndeedUrl,
   isSalesforceRelevantJob,
+  mergeIndeedApplyEvidence,
   normalizeIndeedCapturedJob
 } from "./indeed.js";
 
@@ -4286,6 +4288,9 @@ async function runAutoJob(jobMeta) {
 }
 
 async function runBatchLoop(outputDir) {
+  if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
+    throw new Error("Stop Indeed capture before starting the generation/apply batch.");
+  }
   batchControl = { pauseAfterCurrent: false, skipCurrent: false, stop: false, forceProceed: false };
   rateLimitHitsThisBatch = 0;
   await refreshPacingCache();
@@ -4722,6 +4727,11 @@ async function saveIndeedCaptureState(patch = {}) {
     running: false,
     status: "idle",
     page: 0,
+    completedPage: 0,
+    tabId: null,
+    currentUrl: "",
+    nextUrl: "",
+    visitedUrls: [],
     scanned: 0,
     captured: 0,
     qualified: 0,
@@ -4735,6 +4745,12 @@ async function saveIndeedCaptureState(patch = {}) {
   };
   await chrome.storage.local.set({ [INDEED_CAPTURE_STATE_KEY]: next });
   return next;
+}
+
+async function persistedIndeedCaptureIsActive() {
+  const state =
+    (await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY))[INDEED_CAPTURE_STATE_KEY] || {};
+  return Boolean(state.running && (state.status === "running" || state.status === "stopping"));
 }
 
 async function sendIndeedCaptureMessage(tabId, payload) {
@@ -4768,13 +4784,23 @@ async function mergeIndeedCapturedJobs(jobs) {
   let duplicates = 0;
 
   for (const raw of Array.isArray(jobs) ? jobs : []) {
-    const candidate = normalizeIndeedCapturedJob(raw, nextRow);
+    let candidate = normalizeIndeedCapturedJob(raw, nextRow);
     if (!candidate.title || !candidate.jdLink || !isSalesforceRelevantJob(candidate)) continue;
+    if (
+      !isUnitedStatesJob({
+        location: candidate.location,
+        remoteRestrictedTo: candidate.remoteRestrictedTo,
+        source: candidate.source
+      })
+    ) {
+      continue;
+    }
     qualified += 1;
     const id = jobIdentity(candidate);
     if (byIdentity.has(id)) {
       duplicates += 1;
       const prior = byIdentity.get(id);
+      candidate = mergeIndeedApplyEvidence(prior, candidate);
       byIdentity.set(id, {
         ...prior,
         ...candidate,
@@ -4814,20 +4840,9 @@ async function mergeIndeedCapturedJobs(jobs) {
 async function runIndeedCapture(options = {}) {
   if (indeedCaptureControl.running) throw new Error("Indeed capture is already running.");
   if (isRunning) throw new Error("Pause the generation/apply batch before starting Indeed capture.");
-  const previous = await getIndeedCaptureSettings();
-  const settings = {
-    ...previous,
-    searchUrl: String(options.searchUrl ?? previous.searchUrl ?? "").trim(),
-    query: String(options.query ?? previous.query ?? "Salesforce").trim() || "Salesforce",
-    maxPages: clampIndeedPages(options.maxPages ?? previous.maxPages),
-    pageDelayMs: Math.max(800, Math.min(10000, Number(previous.pageDelayMs || 1800)))
-  };
-  await chrome.storage.local.set({ [INDEED_CAPTURE_SETTINGS_KEY]: settings });
-
   indeedCaptureControl = { running: true, stop: false, tabId: null };
   startKeepAlive();
-  let tab = null;
-  const totals = {
+  let totals = {
     scanned: 0,
     captured: 0,
     qualified: 0,
@@ -4835,21 +4850,51 @@ async function runIndeedCapture(options = {}) {
     external: 0,
     blocked: 0
   };
-  await saveIndeedCaptureState({
-    running: true,
-    status: "running",
-    page: 0,
-    maxPages: settings.maxPages,
-    query: settings.query,
-    searchUrl: settings.searchUrl,
-    ...totals,
-    message: "Opening Indeed search…"
-  });
-
   try {
-    const startUrl = buildIndeedSearchUrl(settings);
-    if (Number.isInteger(options.tabId)) {
-      tab = await chrome.tabs.get(options.tabId).catch(() => null);
+    const storedState =
+      (await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY))[INDEED_CAPTURE_STATE_KEY] || {};
+    const resumeState = options.resume ? storedState : null;
+    const previous = await getIndeedCaptureSettings();
+    const settings = {
+      ...previous,
+      searchUrl: String(options.searchUrl ?? previous.searchUrl ?? "").trim(),
+      query: String(options.query ?? previous.query ?? "Salesforce").trim() || "Salesforce",
+      maxPages: clampIndeedPages(options.maxPages ?? previous.maxPages),
+      pageDelayMs: Math.max(800, Math.min(10000, Number(previous.pageDelayMs || 1800)))
+    };
+    await chrome.storage.local.set({ [INDEED_CAPTURE_SETTINGS_KEY]: settings });
+
+    let tab = null;
+    totals = {
+      scanned: Number(resumeState?.scanned || 0),
+      captured: Number(resumeState?.captured || 0),
+      qualified: Number(resumeState?.qualified || 0),
+      duplicates: Number(resumeState?.duplicates || 0),
+      external: Number(resumeState?.external || 0),
+      blocked: Number(resumeState?.blocked || 0)
+    };
+    await saveIndeedCaptureState({
+      running: true,
+      status: "running",
+      page: Number(resumeState?.page || 0),
+      completedPage: Number(resumeState?.completedPage || 0),
+      tabId: resumeState?.tabId || null,
+      currentUrl: String(resumeState?.currentUrl || ""),
+      nextUrl: String(resumeState?.nextUrl || ""),
+      visitedUrls: Array.isArray(resumeState?.visitedUrls) ? resumeState.visitedUrls : [],
+      maxPages: settings.maxPages,
+      query: settings.query,
+      searchUrl: settings.searchUrl,
+      ...totals,
+      message: options.resume ? "Resuming interrupted Indeed capture…" : "Opening Indeed search…"
+    });
+
+    const startUrl =
+      String(resumeState?.nextUrl || resumeState?.currentUrl || "") ||
+      buildIndeedSearchUrl(settings);
+    const requestedTabId = Number(options.tabId ?? resumeState?.tabId);
+    if (Number.isInteger(requestedTabId) && requestedTabId > 0) {
+      tab = await chrome.tabs.get(requestedTabId).catch(() => null);
     }
     if (!tab) {
       const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -4861,21 +4906,44 @@ async function runIndeedCapture(options = {}) {
       tab = await chrome.tabs.update(tab.id, { url: startUrl, active: true });
     }
     indeedCaptureControl.tabId = tab.id;
+    await saveIndeedCaptureState({
+      running: true,
+      status: "running",
+      tabId: tab.id,
+      currentUrl: String(tab.url || startUrl)
+    });
     await waitForTabComplete(tab.id, 35000);
 
-    const visited = new Set();
-    for (let page = 1; page <= settings.maxPages && !indeedCaptureControl.stop; page += 1) {
+    const visited = new Set(
+      Array.isArray(resumeState?.visitedUrls) ? resumeState.visitedUrls.map(String) : []
+    );
+    const startPage = options.resume
+      ? Math.max(
+          1,
+          Number(resumeState?.completedPage || 0) +
+            (resumeState?.nextUrl ? 1 : 0),
+          Number(resumeState?.page || 1)
+        )
+      : 1;
+    let blockedMessage = "";
+    for (
+      let page = startPage;
+      page <= settings.maxPages && !indeedCaptureControl.stop;
+      page += 1
+    ) {
       const live = await chrome.tabs.get(tab.id);
       const pageUrl = String(live?.url || "");
       if (!isIndeedUrl(pageUrl)) {
         throw new Error("Indeed capture left indeed.com; scan stopped.");
       }
       if (visited.has(pageUrl)) break;
-      visited.add(pageUrl);
       await saveIndeedCaptureState({
         running: true,
         status: "running",
         page,
+        tabId: tab.id,
+        currentUrl: pageUrl,
+        visitedUrls: [...visited],
         message: `Scanning Indeed page ${page}/${settings.maxPages}…`
       });
 
@@ -4896,16 +4964,35 @@ async function runIndeedCapture(options = {}) {
       totals.qualified += merged.qualified;
       totals.duplicates += merged.duplicates;
       totals.external += merged.external;
+      visited.add(pageUrl);
+      const nextUrl = String(result.nextUrl || "").trim();
+      if (result?.blocked || result?.loginRequired || result?.rateLimited) {
+        totals.blocked += 1;
+        blockedMessage = String(result?.message || "Indeed blocked further capture.");
+      }
       await saveIndeedCaptureState({
         running: true,
         status: "running",
         page,
+        completedPage: page,
+        tabId: tab.id,
+        currentUrl: pageUrl,
+        nextUrl,
+        visitedUrls: [...visited],
         ...totals,
-        message: `Page ${page}: ${totals.qualified} Salesforce jobs captured (${totals.duplicates} duplicates).`
+        message: blockedMessage
+          ? `${blockedMessage}; saved ${merged.qualified} qualified job(s) from this page.`
+          : `Page ${page}: ${totals.qualified} Salesforce jobs captured (${totals.duplicates} duplicates).`
       });
 
-      const nextUrl = String(result.nextUrl || "").trim();
-      if (!nextUrl || page >= settings.maxPages || indeedCaptureControl.stop) break;
+      if (
+        blockedMessage ||
+        !nextUrl ||
+        page >= settings.maxPages ||
+        indeedCaptureControl.stop
+      ) {
+        break;
+      }
       const next = new URL(nextUrl, pageUrl);
       if (!/(^|\.)indeed\.com$/i.test(next.hostname)) break;
       await chrome.tabs.update(tab.id, { url: next.href });
@@ -4917,10 +5004,13 @@ async function runIndeedCapture(options = {}) {
     await dedupeQueueAgainstSheet({ notifySlack: false }).catch(() => {});
     const finalState = await saveIndeedCaptureState({
       running: false,
-      status: stopped ? "stopped" : "complete",
+      status: stopped ? "stopped" : blockedMessage ? "blocked" : "complete",
+      nextUrl: "",
       ...totals,
       message: stopped
         ? `Indeed capture stopped — ${totals.qualified} Salesforce listings qualified.`
+        : blockedMessage
+          ? `${blockedMessage} ${totals.qualified} Salesforce listings were saved before stopping.`
         : `Indeed capture complete — ${totals.qualified} Salesforce listings qualified; ${totals.external} external apply.`
     });
     return { ok: true, stopped, ...totals, state: finalState };
@@ -5089,6 +5179,9 @@ async function ingestCsvText({
   autoStart = true,
   force = false
 } = {}) {
+  if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
+    throw new Error("Stop Indeed capture before importing or refreshing CSV jobs.");
+  }
   const body = String(text || "");
   if (!body.trim()) throw new Error("CSV text is empty.");
 
@@ -5276,6 +5369,29 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
     if (settings.nativeEnabled) {
       connectNativeHost({});
     }
+    const captureState =
+      (await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY))[INDEED_CAPTURE_STATE_KEY] || {};
+    if (captureState.status === "stopping") {
+      await saveIndeedCaptureState({
+        running: false,
+        status: "stopped",
+        message: "Indeed capture stopped after service-worker restart."
+      });
+      return;
+    }
+    if (
+      captureState.running &&
+      captureState.status === "running" &&
+      !indeedCaptureControl.running &&
+      !isRunning
+    ) {
+      runIndeedCapture({
+        resume: true,
+        tabId: captureState.tabId
+      }).catch(() => {
+        // runIndeedCapture persists the failure for the popup.
+      });
+    }
   } catch {
     // best-effort
   }
@@ -5285,20 +5401,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
 
   if (type === "indeed_capture_start") {
-    (async () => {
-      try {
-        const result = await runIndeedCapture({
-          searchUrl: message.searchUrl,
-          query: message.query,
-          maxPages: message.maxPages,
-          tabId: message.tabId
-        });
-        safeSendResponse(sendResponse, result);
-      } catch (err) {
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
+    if (indeedCaptureControl.running || isRunning) {
+      safeSendResponse(sendResponse, {
+        ok: false,
+        error: indeedCaptureControl.running
+          ? "Indeed capture is already running."
+          : "Pause the generation/apply batch before starting Indeed capture."
+      });
+      return false;
+    }
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    runIndeedCapture({
+      searchUrl: message.searchUrl,
+      query: message.query,
+      maxPages: message.maxPages,
+      tabId: message.tabId
+    }).catch(() => {
+      // runIndeedCapture persists the failure for the popup.
+    });
+    return false;
   }
 
   if (type === "indeed_capture_stop") {
@@ -5446,6 +5567,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         isRunning = false;
+        indeedCaptureControl.stop = true;
         batchControl.stop = true;
         batchControl.skipCurrent = true;
         stopKeepAlive();
@@ -5488,6 +5610,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         isRunning = false;
+        indeedCaptureControl.stop = true;
         batchControl.stop = true;
         stopKeepAlive();
         const tab = await getOpenChatGptTab();
@@ -5503,7 +5626,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           all_us_jobs: [],
           csv_file_name: "",
           csv_total_rows: 0,
-          csv_dropped_non_us: 0
+          csv_dropped_non_us: 0,
+          [INDEED_CAPTURE_STATE_KEY]: {
+            running: false,
+            status: "idle",
+            message: "Generation state reset.",
+            updatedAt: Date.now()
+          }
         });
         safeSendResponse(sendResponse, { ok: true });
       } catch (err) {
@@ -5931,6 +6060,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "retry_job") {
     (async () => {
       try {
+        if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
+          throw new Error("Stop Indeed capture before retrying a job.");
+        }
         const csvRow = Number(message.csvRow);
         if (!Number.isFinite(csvRow)) throw new Error("Missing csvRow.");
         const queue = await getQueue();
@@ -5979,6 +6111,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "retry_error_jobs") {
     (async () => {
       try {
+        if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
+          throw new Error("Stop Indeed capture before retrying error jobs.");
+        }
         const queue = await getQueue();
         const targets = queue.filter(
           (j) => j.status === "error" || j.status === "failed" || j.status === "skipped"
@@ -6022,13 +6157,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (type === "batch_start" || type === "batch_resume") {
-    if (isRunning) {
-      safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
-      return false;
-    }
-    isRunning = true;
-    safeSendResponse(sendResponse, { ok: true, started: true, status: "Batch started…" });
     (async () => {
+      if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
+        safeSendResponse(sendResponse, {
+          ok: false,
+          error: "Stop Indeed capture before starting the generation/apply batch."
+        });
+        return;
+      }
+      if (isRunning) {
+        safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
+        return;
+      }
+      isRunning = true;
+      safeSendResponse(sendResponse, { ok: true, started: true, status: "Batch started…" });
       // Clear leftover "running" rows from a killed service worker, and give
       // rows that hit the attempt ceiling a fresh set of attempts.
       await recoverInterruptedBatch("Starting batch…", { retryFailed: true }).catch(() => {});
@@ -6046,10 +6188,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         message: msg
       });
     });
-    return false;
+    return true;
   }
 
   if (type === "run_one_off") {
+    if (indeedCaptureControl.running) {
+      safeSendResponse(sendResponse, {
+        ok: false,
+        error: "Stop Indeed capture before running a one-off generation."
+      });
+      return false;
+    }
     if (isRunning) {
       safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
       return false;
@@ -6060,6 +6209,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
       try {
+        if (await persistedIndeedCaptureIsActive()) {
+          throw new Error("Stop Indeed capture before running a one-off generation.");
+        }
         const meta = { ...(message.jobMeta || {}), bidSource: "one-off" };
         const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
         const link = normalizeJobLink(meta.jdLink || "");

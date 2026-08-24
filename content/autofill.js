@@ -4775,6 +4775,19 @@
           after: before
         };
       }
+      const blockedReason = detectPageBlocker();
+      if (blockedReason) {
+        return {
+          ok: false,
+          clicked: false,
+          isSubmit: true,
+          submitted: false,
+          blockedReason,
+          action: describeAction(action),
+          before,
+          after: before
+        };
+      }
       const validationReason = detectValidationIssue();
       if (validationReason) {
         return {

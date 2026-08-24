@@ -82,6 +82,26 @@
     return /\beasily apply\b|\bapply on indeed\b/i.test(cleanText(text));
   }
 
+  function applyEvidence(root, text) {
+    if (hasHostedApply(root, text)) return "hosted";
+    const controls = [
+      ...(root?.querySelectorAll?.("a[href], button[formaction]") || [])
+    ].filter((el) => /apply/i.test(cleanText(el.textContent || el.getAttribute?.("aria-label"))));
+    const external = controls.some((el) => {
+      const target = el.href || el.getAttribute?.("formaction") || "";
+      if (!target) return false;
+      try {
+        return !/(^|\.)indeed\.com$/i.test(new URL(target, location.href).hostname);
+      } catch {
+        return false;
+      }
+    });
+    if (external || /\bapply (?:directly )?on (?:the )?company (?:site|website)\b/i.test(cleanText(text))) {
+      return "external";
+    }
+    return "unknown";
+  }
+
   function detectGate() {
     const bodyText = cleanText(document.body?.innerText).slice(0, 12000);
     const href = location.href;
@@ -146,7 +166,8 @@
       ]);
       const cardText = cleanText(root.innerText || root.textContent);
       const relevance = salesforceRelevance(`${title} ${snippet} ${cardText}`);
-      const applyOnIndeed = hasHostedApply(root, cardText);
+      const evidence = applyEvidence(root, cardText);
+      const applyOnIndeed = evidence === "hosted";
       const key = jobKey || link;
       found.set(key, {
         id: jobKey || key,
@@ -160,7 +181,8 @@
         applyOnIndeed,
         indeedApplyOnSite: applyOnIndeed,
         hostedApply: applyOnIndeed,
-        externalApply: !applyOnIndeed,
+        externalApply: evidence === "external",
+        applyEvidence: evidence,
         salesforceRelevant: relevance.relevant,
         relevanceTerms: relevance.matchedTerms,
         captureEligible: relevance.relevant && applyOnIndeed,
@@ -201,7 +223,8 @@
     const canonical = document.querySelector("link[rel='canonical']")?.href || location.href;
     const jobKey = jobKeyFrom(detailRoot, canonical);
     const relevance = salesforceRelevance(`${title} ${description}`);
-    const applyOnIndeed = hasHostedApply(detailRoot, detailRoot.innerText);
+    const evidence = applyEvidence(detailRoot, detailRoot.innerText);
+    const applyOnIndeed = evidence === "hosted";
     return {
       id: jobKey || canonical,
       title,
@@ -214,7 +237,8 @@
       applyOnIndeed,
       indeedApplyOnSite: applyOnIndeed,
       hostedApply: applyOnIndeed,
-      externalApply: !applyOnIndeed,
+      externalApply: evidence === "external",
+      applyEvidence: evidence,
       salesforceRelevant: relevance.relevant,
       relevanceTerms: relevance.matchedTerms,
       captureEligible: relevance.relevant && applyOnIndeed,
@@ -302,7 +326,8 @@
         cleanText(schema?.jobLocation?.address?.addressLocality) ||
         job.location;
       const pageText = cleanText(root?.textContent);
-      const applyOnIndeed = hasHostedApply(root, pageText);
+      const evidence = applyEvidence(root, pageText);
+      const applyOnIndeed = evidence === "hosted";
       const relevance = salesforceRelevance(`${title} ${description}`);
       return {
         ...job,
@@ -313,7 +338,8 @@
         applyOnIndeed,
         indeedApplyOnSite: applyOnIndeed,
         hostedApply: applyOnIndeed,
-        externalApply: !applyOnIndeed,
+        externalApply: evidence === "external",
+        applyEvidence: evidence,
         salesforceRelevant: relevance.relevant,
         relevanceTerms: relevance.matchedTerms,
         captureEligible: relevance.relevant && applyOnIndeed
@@ -327,7 +353,9 @@
     const enriched = [];
     for (const job of results) {
       if (stopped) break;
-      enriched.push(await fetchJobDetail(job));
+      const detail = await fetchJobDetail(job);
+      enriched.push(detail);
+      if (detail.detailRateLimited) break;
       await new Promise((resolve) => setTimeout(resolve, 180));
     }
     return enriched;
@@ -409,12 +437,12 @@
     results = await enrichSearchResults(results);
     if (results.some((job) => job.detailRateLimited)) {
       return {
-        ok: false,
+        ok: true,
         blocked: true,
         rateLimited: true,
-        error: "Indeed rate limited job-detail requests",
         message: "Indeed rate limited job-detail requests",
-        jobs: [],
+        jobs: results.filter((job) => job.salesforceRelevant && !job.detailRateLimited),
+        allJobs: results,
         captured: results.length,
         scannedCount: results.length,
         nextUrl: ""

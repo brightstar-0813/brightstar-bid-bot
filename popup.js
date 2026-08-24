@@ -1047,6 +1047,10 @@ async function startIndeedCapture() {
         setStatus(`Indeed capture failed: ${String(result?.error || "Unknown error")}`);
         return;
       }
+      if (result.started) {
+        setStatus(`Indeed capture started — scanning up to ${maxPages} page(s).`);
+        return;
+      }
       setStatus(
         result.stopped
           ? `Indeed capture stopped — ${Number(result.qualified || 0)} Salesforce job(s) kept.`
