@@ -7,7 +7,7 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 ## What it does
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
-- **Job capture / CSV batch**: scan Salesforce jobs from a signed-in Indeed search or upload sf-job-capture (or similar) `jobs_latest.csv` → keep **US jobs only** → filter by **Dice / Indeed / LI / Etc / All** using the **job link host** (not CSV site labels). Hosted Dice and Indeed jobs interleave generate → auto-apply+submit; external Indeed applications are never submitted.
+- **Job capture / CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv`, or **grab a selected Indeed job** → keep **US jobs only** → filter by **Dice / Indeed / LI / Etc / All** using the **job link host**. Hosted Dice and Indeed jobs interleave generate → auto-apply+submit; external Indeed applications are never submitted.
 - For each job: **one new ChatGPT chat** → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, Salesforce products, experience evidence, and resume structure; hover its queue badge for the breakdown
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
@@ -95,12 +95,12 @@ flowchart TD
 - **Non-Dice job**: build files only; use manual Apply if you want assist (stops before Submit)
 - Blockers mark `applyAttempted` and continue — that row is not auto-retried in the same batch
 
-### Indeed signed-session capture and auto-apply
+### Indeed selected-job grab and auto-apply
 
 1. Sign in to Indeed in the same Chrome profile that has the unpacked extension installed.
-2. In **Indeed capture**, enter an Indeed search URL (or use the Salesforce query), choose a page limit, and click **Start capture**. Capture keeps **Salesforce · US remote · posted in the last 7 days** only (search URL is forced to `l=Remote`, `fromage=7`, and the Remote facet). The scanner follows result pages with a delay and merges jobs by normalized job URL.
-3. Only listings whose title or description contains a Salesforce platform signal are kept. The status reports accepted jobs, duplicates, external applications, and blockers.
-4. Choose the **Indeed** source and start the batch. After each resume and cover letter is generated, the bot fully submits only applications whose flow remains on `indeed.com`.
+2. Filter search results yourself and select a job so the detail pane is visible.
+3. Click **Grab & auto-apply** in the bot. It scrapes title / company / JD / link / salary, generates files, appends the Google Sheet, and submits Apply-on-Indeed applications only.
+4. Use **Grab to queue only** if you want review before Start.
 5. Sign-in screens, CAPTCHA/rate limits, unanswered required fields, external company links, and unconfirmed submissions stop or pause safely with the application tab left open.
 
 Capture uses the browser's existing Indeed cookies; the extension does not read or store them. Keep the scan bounded (the default is 5 pages). Large or rapid scans are more likely to trigger Indeed's anti-automation controls.
@@ -134,9 +134,9 @@ Chrome always closes an extension popup when you click outside it, so copying a 
 
 ## Indeed workflow
 
-1. Open **Indeed** (step 3): capture Salesforce · US remote · last 7 days from your signed-in session.
-2. Click **Review Indeed queue** (or use **Jobs queue** → Source **Indeed**), remove unsuitable roles.
-3. Click **Start Indeed apply** or **Start** in the Jobs queue. Hosted Apply-on-Indeed jobs auto-submit; external ATS links never do.
+1. On Indeed (same Chrome profile), filter yourself and **select/open one job** so the right-hand details pane shows title, company, and full JD.
+2. In the bot **Indeed** section click **Grab & auto-apply** (or **Grab to queue only**).
+3. The bot scrapes title, company, JD, link, salary, builds the resume/cover letter, logs the Google Sheet, and fully submits only **Apply with Indeed** flows. External ATS links get files but are not submitted.
 
 Sheet, ChatGPT pacing, and Slack live under **Integrations** (collapsed by default).
 

@@ -78,11 +78,8 @@ import {
   saveCsvSourceSettings
 } from "./csv-source.js";
 import {
-  buildIndeedSearchUrl,
   isExplicitlyHostedIndeedJob,
-  isIndeedCaptureEligible,
   isIndeedUrl,
-  mergeIndeedApplyEvidence,
   normalizeIndeedCapturedJob
 } from "./indeed.js";
 import { evaluateAtsScore } from "./ats-score.js";
@@ -94,8 +91,6 @@ const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const DEFAULT_CHANNEL_FILTER = "dice";
-const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state";
-const INDEED_CAPTURE_SETTINGS_KEY = "indeed_capture_settings";
 
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
@@ -4377,9 +4372,6 @@ async function runAutoJob(jobMeta) {
 }
 
 async function runBatchLoop(outputDir) {
-  if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
-    throw new Error("Stop Indeed capture before starting the generation/apply batch.");
-  }
   batchControl = { pauseAfterCurrent: false, skipCurrent: false, stop: false, forceProceed: false };
   rateLimitHitsThisBatch = 0;
   await refreshPacingCache();
@@ -4787,350 +4779,211 @@ async function autofillActiveTab(tabId = null) {
   return startAutofillOnTab(tabId);
 }
 
-const DEFAULT_INDEED_CAPTURE_SETTINGS = {
-  searchUrl: "",
-  query: "Salesforce",
-  maxPages: 5,
-  pageDelayMs: 1800
-};
-
-let indeedCaptureControl = {
-  running: false,
-  stop: false,
-  tabId: null
-};
-
-function clampIndeedPages(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.max(1, Math.min(25, Math.round(n))) : 5;
-}
-
-async function getIndeedCaptureSettings() {
-  const data = await chrome.storage.local.get(INDEED_CAPTURE_SETTINGS_KEY);
-  return {
-    ...DEFAULT_INDEED_CAPTURE_SETTINGS,
-    ...(data[INDEED_CAPTURE_SETTINGS_KEY] || {})
-  };
-}
-
-async function saveIndeedCaptureState(patch = {}) {
-  const data = await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY);
-  const next = {
-    running: false,
-    status: "idle",
-    page: 0,
-    completedPage: 0,
-    tabId: null,
-    currentUrl: "",
-    nextUrl: "",
-    visitedUrls: [],
-    scanned: 0,
-    captured: 0,
-    qualified: 0,
-    duplicates: 0,
-    external: 0,
-    blocked: 0,
-    message: "",
-    ...(data[INDEED_CAPTURE_STATE_KEY] || {}),
-    ...patch,
-    updatedAt: Date.now()
-  };
-  await chrome.storage.local.set({ [INDEED_CAPTURE_STATE_KEY]: next });
-  return next;
-}
-
-async function persistedIndeedCaptureIsActive() {
-  const state =
-    (await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY))[INDEED_CAPTURE_STATE_KEY] || {};
-  return Boolean(state.running && (state.status === "running" || state.status === "stopping"));
-}
-
-async function sendIndeedCaptureMessage(tabId, payload) {
-  try {
-    return await chrome.tabs.sendMessage(tabId, payload);
-  } catch {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content/indeed-capture.js"]
-    });
-    await sleep(150);
-    return chrome.tabs.sendMessage(tabId, payload);
+async function findActiveIndeedTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const active = tabs[0];
+  if (active?.id && isIndeedUrl(active.url)) return active;
+  const all = await chrome.tabs.query({ url: ["https://*.indeed.com/*", "https://indeed.com/*"] });
+  const focused = all.find((t) => t.active) || all[0];
+  if (!focused?.id) {
+    throw new Error("Open an Indeed job tab first (select a listing so the details pane is visible).");
   }
+  return focused;
 }
 
-async function mergeIndeedCapturedJobs(jobs) {
+async function scrapeIndeedJobFromTab(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      files: ["content/autofill.js"]
+    });
+  } catch {
+    // Already injected.
+  }
+  await sleep(200);
+  const result = await chrome.tabs.sendMessage(tabId, { type: "scrape_job_page" });
+  if (!result?.ok || !result.jobData) {
+    throw new Error(result?.error || "Could not read the selected Indeed job.");
+  }
+  return result.jobData;
+}
+
+async function enqueueIndeedGrabbedJob(raw) {
   const data = await chrome.storage.local.get([
     ALL_US_JOBS_KEY,
     QUEUE_KEY,
-    JOB_CHANNEL_FILTER_KEY,
     REMOVED_JOB_IDENTITIES_KEY
   ]);
   const previousAll = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
   const previousQueue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
-  let nextRow = previousAll.reduce(
-    (max, job) => Math.max(max, Number(job?.csvRow || 0)),
-    0
-  ) + 1;
-  const byIdentity = new Map(previousAll.map((job) => [jobIdentity(job), job]));
   const removedIdentities = new Set(
     Array.isArray(data[REMOVED_JOB_IDENTITIES_KEY])
       ? data[REMOVED_JOB_IDENTITIES_KEY].map(String)
       : []
   );
-  let qualified = 0;
-  let external = 0;
-  let duplicates = 0;
-
-  for (const raw of Array.isArray(jobs) ? jobs : []) {
-    let candidate = normalizeIndeedCapturedJob(raw, nextRow);
-    if (!candidate.title || !candidate.jdLink) continue;
-    if (!isIndeedCaptureEligible({ ...raw, ...candidate, fromageFiltered: true })) continue;
-    if (removedIdentities.has(jobIdentity(candidate))) continue;
-    if (
-      !isUnitedStatesJob({
-        location: candidate.location,
-        remoteRestrictedTo: candidate.remoteRestrictedTo,
-        source: candidate.source
-      })
-    ) {
-      continue;
-    }
-    qualified += 1;
-    const id = jobIdentity(candidate);
-    if (byIdentity.has(id)) {
-      duplicates += 1;
-      const prior = byIdentity.get(id);
-      candidate = mergeIndeedApplyEvidence(prior, candidate);
-      byIdentity.set(id, {
-        ...prior,
-        ...candidate,
-        csvRow: prior.csvRow,
-        status: prior.status || "pending",
-        attempts: prior.attempts || 0,
-        jobDir: prior.jobDir || "",
-        applied: Boolean(prior.applied)
-      });
-      continue;
-    }
-    if (candidate.externalApply) external += 1;
-    byIdentity.set(id, candidate);
-    nextRow += 1;
+  const nextRow =
+    previousAll.reduce((max, job) => Math.max(max, Number(job?.csvRow || 0)), 0) + 1;
+  const hosted = Boolean(raw.applyOnIndeed || raw.indeedApplyOnSite || raw.hostedApply);
+  let candidate = normalizeIndeedCapturedJob(
+    {
+      title: raw.jobTitle || raw.title || "",
+      company: raw.companyName || raw.company || "",
+      jdLink: raw.jdLink || raw.applyLink || "",
+      jdText: raw.jdText || "",
+      location: raw.jobLocation || raw.location || "",
+      salary: raw.salaryRaw || [raw.salaryMin, raw.salaryMax].filter(Boolean).join(" - "),
+      remoteRestrictedTo: /remote/i.test(String(raw.workArrangement || raw.jobLocation || ""))
+        ? "United States"
+        : "",
+      isRemote: /remote/i.test(String(raw.workArrangement || raw.jobLocation || "")),
+      applyOnIndeed: hosted,
+      indeedApplyOnSite: hosted,
+      hostedApply: hosted,
+      externalApply: !hosted,
+      applyEvidence: hosted ? "hosted" : "unknown",
+      source: "indeed"
+    },
+    nextRow
+  );
+  if (!candidate.title || !candidate.jdLink) {
+    throw new Error("Indeed page is missing a job title or link. Select a job in the results pane first.");
   }
-
-  const incoming = [...byIdentity.values()];
+  if (!candidate.jdText || candidate.jdText.length < 40) {
+    throw new Error("Indeed job description looks empty. Wait for the details pane to finish loading.");
+  }
+  if (removedIdentities.has(jobIdentity(candidate))) {
+    throw new Error("That job was previously removed from the queue.");
+  }
+  const prior = previousAll.find((j) => jobIdentity(j) === jobIdentity(candidate));
+  if (prior) {
+    candidate = {
+      ...prior,
+      ...candidate,
+      csvRow: prior.csvRow,
+      status: prior.status === "done" || prior.applied ? prior.status : "pending",
+      attempts: prior.attempts || 0,
+      jobDir: prior.jobDir || "",
+      applied: Boolean(prior.applied)
+    };
+  }
+  const incoming = prior
+    ? previousAll.map((j) => (jobIdentity(j) === jobIdentity(candidate) ? candidate : j))
+    : [...previousAll, candidate];
   const merged = mergeParsedJobs(previousAll, previousQueue, incoming);
-  const channel = "indeed";
-  const filtered = filterJobsByChannel(merged.allUsJobs, channel);
+  const filtered = filterJobsByChannel(merged.allUsJobs, "indeed");
   await chrome.storage.local.set({
     [ALL_US_JOBS_KEY]: merged.allUsJobs,
     [QUEUE_KEY]: filtered,
-    [JOB_CHANNEL_FILTER_KEY]: channel,
-    csv_file_name: "Indeed signed-session capture",
+    [JOB_CHANNEL_FILTER_KEY]: "indeed",
+    csv_file_name: "Indeed selected job",
     csv_total_rows: merged.allUsJobs.length
   });
   return {
-    added: merged.added,
-    qualified,
-    duplicates,
-    external,
-    total: merged.allUsJobs.length
+    job: filtered.find((j) => jobIdentity(j) === jobIdentity(candidate)) || candidate,
+    duplicated: Boolean(prior)
   };
 }
 
-async function runIndeedCapture(options = {}) {
-  if (indeedCaptureControl.running) throw new Error("Indeed capture is already running.");
-  if (isRunning) throw new Error("Pause the generation/apply batch before starting Indeed capture.");
-  indeedCaptureControl = { running: true, stop: false, tabId: null };
+/** Grab selected Indeed job → resume/sheet → optional full auto-apply. */
+async function runIndeedGrabAndApply({ autoApply = true } = {}) {
+  if (isRunning) throw new Error("Pause the generation/apply batch before grabbing an Indeed job.");
+  isRunning = true;
   startKeepAlive();
-  let totals = {
-    scanned: 0,
-    captured: 0,
-    qualified: 0,
-    duplicates: 0,
-    external: 0,
-    blocked: 0
-  };
+  const setGrab = (status, message) =>
+    chrome.storage.local
+      .set({ indeed_grab_status: { status, message, updatedAt: Date.now() } })
+      .catch(() => {});
+  await chrome.storage.local.set({ generation_running: true });
+  await setGrab("running", autoApply ? "Grabbing → resume → auto-apply…" : "Grabbing into queue…");
   try {
-    const storedState =
-      (await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY))[INDEED_CAPTURE_STATE_KEY] || {};
-    const resumeState = options.resume ? storedState : null;
-    const previous = await getIndeedCaptureSettings();
-    const settings = {
-      ...previous,
-      searchUrl: "",
-      query: String(options.query ?? previous.query ?? "Salesforce").trim() || "Salesforce",
-      maxPages: clampIndeedPages(options.maxPages ?? previous.maxPages),
-      pageDelayMs: Math.max(800, Math.min(10000, Number(previous.pageDelayMs || 1800)))
-    };
-    settings.searchUrl = buildIndeedSearchUrl({
-      searchUrl: String(options.searchUrl ?? previous.searchUrl ?? "").trim(),
-      query: settings.query
-    });
-    await chrome.storage.local.set({ [INDEED_CAPTURE_SETTINGS_KEY]: settings });
-
-    let tab = null;
-    totals = {
-      scanned: Number(resumeState?.scanned || 0),
-      captured: Number(resumeState?.captured || 0),
-      qualified: Number(resumeState?.qualified || 0),
-      duplicates: Number(resumeState?.duplicates || 0),
-      external: Number(resumeState?.external || 0),
-      blocked: Number(resumeState?.blocked || 0)
-    };
-    await saveIndeedCaptureState({
-      running: true,
-      status: "running",
-      page: Number(resumeState?.page || 0),
-      completedPage: Number(resumeState?.completedPage || 0),
-      tabId: resumeState?.tabId || null,
-      currentUrl: String(resumeState?.currentUrl || ""),
-      nextUrl: String(resumeState?.nextUrl || ""),
-      visitedUrls: Array.isArray(resumeState?.visitedUrls) ? resumeState.visitedUrls : [],
-      maxPages: settings.maxPages,
-      query: settings.query,
-      searchUrl: settings.searchUrl,
-      ...totals,
-      message: options.resume ? "Resuming interrupted Indeed capture…" : "Opening Indeed search…"
-    });
-
-    const startUrl =
-      String(resumeState?.nextUrl || resumeState?.currentUrl || "") ||
-      buildIndeedSearchUrl(settings);
-    const requestedTabId = Number(options.tabId ?? resumeState?.tabId);
-    if (Number.isInteger(requestedTabId) && requestedTabId > 0) {
-      tab = await chrome.tabs.get(requestedTabId).catch(() => null);
-    }
-    if (!tab) {
-      const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const active = activeTabs[0];
-      if (active?.id && isIndeedUrl(active.url)) tab = active;
-    }
-    if (!tab) tab = await chrome.tabs.create({ url: startUrl, active: true });
-    else if (!String(tab.url || "").startsWith(startUrl)) {
-      tab = await chrome.tabs.update(tab.id, { url: startUrl, active: true });
-    }
-    indeedCaptureControl.tabId = tab.id;
-    await saveIndeedCaptureState({
-      running: true,
-      status: "running",
-      tabId: tab.id,
-      currentUrl: String(tab.url || startUrl)
-    });
-    await waitForTabComplete(tab.id, 35000);
-
-    const visited = new Set(
-      Array.isArray(resumeState?.visitedUrls) ? resumeState.visitedUrls.map(String) : []
+    const tab = await findActiveIndeedTab();
+    await setStatus("Indeed: reading the selected job…");
+    const scraped = await scrapeIndeedJobFromTab(tab.id);
+    const { job, duplicated } = await enqueueIndeedGrabbedJob(scraped);
+    const hosted = isIndeedHostedApplyJob(job) || isExplicitlyHostedIndeedJob(scraped);
+    await setStatus(
+      duplicated
+        ? `Indeed: refreshed ${job.title} @ ${job.company} (already in queue)`
+        : `Indeed: grabbed ${job.title} @ ${job.company}`
     );
-    const startPage = options.resume
-      ? Math.max(
-          1,
-          Number(resumeState?.completedPage || 0) +
-            (resumeState?.nextUrl ? 1 : 0),
-          Number(resumeState?.page || 1)
-        )
-      : 1;
-    let blockedMessage = "";
-    for (
-      let page = startPage;
-      page <= settings.maxPages && !indeedCaptureControl.stop;
-      page += 1
-    ) {
-      const live = await chrome.tabs.get(tab.id);
-      const pageUrl = String(live?.url || "");
-      if (!isIndeedUrl(pageUrl)) {
-        throw new Error("Indeed capture left indeed.com; scan stopped.");
-      }
-      if (visited.has(pageUrl)) break;
-      await saveIndeedCaptureState({
-        running: true,
-        status: "running",
-        page,
-        tabId: tab.id,
-        currentUrl: pageUrl,
-        visitedUrls: [...visited],
-        message: `Scanning Indeed page ${page}/${settings.maxPages}…`
-      });
 
-      const result = await sendIndeedCaptureMessage(tab.id, {
-        type: "indeed_capture_scan_page",
-        query: settings.query,
-        page,
-        includeDetails: true
-      });
-      if (!result?.ok) {
-        if (result?.blocked || result?.loginRequired || result?.rateLimited) totals.blocked += 1;
-        throw new Error(result?.error || result?.message || "Indeed page scan failed.");
-      }
-      const pageJobs = Array.isArray(result.jobs) ? result.jobs : [];
-      totals.scanned += Number(result.scannedCount ?? result.allJobs?.length ?? pageJobs.length);
-      totals.captured += Number(result.captured ?? pageJobs.length);
-      const merged = await mergeIndeedCapturedJobs(pageJobs);
-      totals.qualified += merged.qualified;
-      totals.duplicates += merged.duplicates;
-      totals.external += merged.external;
-      visited.add(pageUrl);
-      const nextUrl = String(result.nextUrl || "").trim();
-      if (result?.blocked || result?.loginRequired || result?.rateLimited) {
-        totals.blocked += 1;
-        blockedMessage = String(result?.message || "Indeed blocked further capture.");
-      }
-      await saveIndeedCaptureState({
-        running: true,
-        status: "running",
-        page,
-        completedPage: page,
-        tabId: tab.id,
-        currentUrl: pageUrl,
-        nextUrl,
-        visitedUrls: [...visited],
-        ...totals,
-        message: blockedMessage
-          ? `${blockedMessage}; saved ${merged.qualified} qualified job(s) from this page.`
-          : `Page ${page}: ${totals.qualified} Salesforce jobs captured (${totals.duplicates} duplicates).`
-      });
-
-      if (
-        blockedMessage ||
-        !nextUrl ||
-        page >= settings.maxPages ||
-        indeedCaptureControl.stop
-      ) {
-        break;
-      }
-      const next = new URL(nextUrl, pageUrl);
-      if (!/(^|\.)indeed\.com$/i.test(next.hostname)) break;
-      await chrome.tabs.update(tab.id, { url: next.href });
-      await waitForTabComplete(tab.id, 35000);
-      await sleep(settings.pageDelayMs);
+    if (job.status === "done" && job.applied) {
+      await setStatus(`Indeed: ${job.company} / ${job.title} already applied.`);
+      await setGrab("idle", `Already applied — ${job.company} / ${job.title}`);
+      return { ok: true, job, skipped: true, reason: "already-applied" };
     }
 
-    const stopped = indeedCaptureControl.stop;
-    await dedupeQueueAgainstSheet({ notifySlack: false }).catch(() => {});
-    const finalState = await saveIndeedCaptureState({
-      running: false,
-      status: stopped ? "stopped" : blockedMessage ? "blocked" : "complete",
-      nextUrl: "",
-      ...totals,
-      message: stopped
-        ? `Indeed capture stopped — ${totals.qualified} Salesforce listings qualified.`
-        : blockedMessage
-          ? `${blockedMessage} ${totals.qualified} Salesforce listings were saved before stopping.`
-        : `Indeed capture complete — ${totals.qualified} Salesforce listings qualified; ${totals.external} external apply.`
-    });
-    return { ok: true, stopped, ...totals, state: finalState };
+    let result = null;
+    if (job.status !== "done" || !job.jobDir) {
+      await updateQueueJob(job.csvRow, { status: "running", error: "" });
+      const person = await getActivePerson();
+      result = await runAutoJob({
+        csvRow: job.csvRow,
+        jobTitle: job.title,
+        companyName: job.company,
+        jdLink: job.jdLink,
+        jdText: job.jdText || "",
+        salary: job.salary || "",
+        outputDir: await resolveOutputDir(),
+        templateId: await pickTemplateId({}, person),
+        resumeFilePrefix: person.resumeFilePrefix || "Resume",
+        profileId: person.id,
+        bidSource: "indeed-grab"
+      });
+      await updateQueueJob(job.csvRow, {
+        status: "done",
+        jobDir: result.savedDir,
+        profileId: person.id,
+        atsScore: result.atsEvaluation?.score ?? null,
+        atsGrade: result.atsEvaluation?.grade || "",
+        atsEvaluation: result.atsEvaluation || null,
+        error: ""
+      });
+      await setStatus(`Indeed: resume saved for ${job.company} / ${job.title}.`);
+    }
+
+    if (!autoApply) {
+      await setGrab("idle", `Queued — ${job.company} / ${job.title}`);
+      return { ok: true, job, result, applied: false };
+    }
+    if (!hosted) {
+      await setStatus(
+        `Indeed: files ready for ${job.company} — external ATS (not Apply-on-Indeed). Use Apply manually.`
+      );
+      await setGrab("idle", `External ATS — ${job.company} / ${job.title}`);
+      return { ok: true, job, result, applied: false, external: true };
+    }
+
+    const applyRes = await runHostedInterleavedApply(
+      {
+        csvRow: job.csvRow,
+        jobTitle: job.title,
+        companyName: job.company,
+        company: job.company,
+        jdLink: job.jdLink,
+        jobDir: result?.savedDir || job.jobDir || "",
+        applyAttempts: job.applyAttempts || 0
+      },
+      "Indeed"
+    );
+    await setGrab(
+      "idle",
+      applyRes?.status === "applied"
+        ? `Applied — ${job.company} / ${job.title}`
+        : `Finished — ${job.company} / ${job.title}`
+    );
+    return { ok: true, job, result, applyRes, applied: applyRes?.status === "applied" };
   } catch (err) {
-    const message = String(err?.message || err);
-    await saveIndeedCaptureState({
-      running: false,
-      status: "error",
-      ...totals,
-      message
-    });
+    await setGrab("error", String(err?.message || err));
     throw err;
   } finally {
-    indeedCaptureControl.running = false;
-    indeedCaptureControl.tabId = null;
+    isRunning = false;
     stopKeepAlive();
+    await chrome.storage.local.set({ generation_running: false });
+    const latest = (await chrome.storage.local.get("indeed_grab_status")).indeed_grab_status;
+    if (latest?.status === "running") {
+      await setGrab("idle", "Select a job on Indeed, then grab it.");
+    }
   }
 }
 
@@ -5283,10 +5136,7 @@ async function ingestCsvText({
   autoStart = false,
   force = false
 } = {}) {
-  if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
-    throw new Error("Stop Indeed capture before importing or refreshing CSV jobs.");
-  }
-  const body = String(text || "");
+    const body = String(text || "");
   if (!body.trim()) throw new Error("CSV text is empty.");
 
   const fp = await fingerprintText(body);
@@ -5482,29 +5332,6 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
     if (settings.nativeEnabled) {
       connectNativeHost({});
     }
-    const captureState =
-      (await chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY))[INDEED_CAPTURE_STATE_KEY] || {};
-    if (captureState.status === "stopping") {
-      await saveIndeedCaptureState({
-        running: false,
-        status: "stopped",
-        message: "Indeed capture stopped after service-worker restart."
-      });
-      return;
-    }
-    if (
-      captureState.running &&
-      captureState.status === "running" &&
-      !indeedCaptureControl.running &&
-      !isRunning
-    ) {
-      runIndeedCapture({
-        resume: true,
-        tabId: captureState.tabId
-      }).catch(() => {
-        // runIndeedCapture persists the failure for the popup.
-      });
-    }
   } catch {
     // best-effort
   }
@@ -5522,59 +5349,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (type === "indeed_capture_start") {
-    if (indeedCaptureControl.running || isRunning) {
+  if (type === "indeed_grab_and_apply" || type === "indeed_grab_only") {
+    if (isRunning) {
       safeSendResponse(sendResponse, {
         ok: false,
-        error: indeedCaptureControl.running
-          ? "Indeed capture is already running."
-          : "Pause the generation/apply batch before starting Indeed capture."
+        error: "Pause the generation/apply batch before grabbing an Indeed job."
       });
       return false;
     }
     safeSendResponse(sendResponse, { ok: true, started: true });
-    runIndeedCapture({
-      searchUrl: message.searchUrl,
-      query: message.query,
-      maxPages: message.maxPages,
-      tabId: message.tabId
-    }).catch(() => {
-      // runIndeedCapture persists the failure for the popup.
-    });
+    runIndeedGrabAndApply({ autoApply: type === "indeed_grab_and_apply" })
+      .then((result) => {
+        const job = result?.job;
+        const label = job ? job.company + " / " + job.title : "Indeed job";
+        if (result?.skipped) {
+          setStatus("Indeed: " + label + " already applied.");
+          return;
+        }
+        if (result?.external) {
+          setStatus("Indeed: files ready for " + label + " (external ATS — apply manually).");
+          return;
+        }
+        if (result?.applied) {
+          setStatus("Indeed: applied — " + label);
+          return;
+        }
+        if (type === "indeed_grab_only") {
+          setStatus("Indeed: queued " + label + ". Review then Start if needed.");
+          return;
+        }
+        setStatus("Indeed: finished " + label);
+      })
+      .catch((err) => setStatus("Indeed grab failed: " + String(err?.message || err)));
     return false;
-  }
-
-  if (type === "indeed_capture_stop") {
-    indeedCaptureControl.stop = true;
-    saveIndeedCaptureState({
-      running: Boolean(indeedCaptureControl.running),
-      status: indeedCaptureControl.running ? "stopping" : "stopped",
-      message: indeedCaptureControl.running
-        ? "Stopping Indeed capture after the current page…"
-        : "Indeed capture is not running."
-    })
-      .then((state) => safeSendResponse(sendResponse, { ok: true, state }))
-      .catch((err) =>
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
-      );
-    return true;
-  }
-
-  if (type === "indeed_capture_get") {
-    (async () => {
-      const [settings, data] = await Promise.all([
-        getIndeedCaptureSettings(),
-        chrome.storage.local.get(INDEED_CAPTURE_STATE_KEY)
-      ]);
-      safeSendResponse(sendResponse, {
-        ok: true,
-        settings,
-        state: data[INDEED_CAPTURE_STATE_KEY] || null
-      });
-    })().catch((err) =>
-      safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
-    );
-    return true;
   }
 
   if (type === "offscreen_read_pinned_csv") {
@@ -5688,8 +5495,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "remove_queue_job") {
     (async () => {
       try {
-        if (isRunning || indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
-          throw new Error("Pause generation and Indeed capture before removing a job.");
+        if (isRunning) {
+          throw new Error("Pause generation before removing a job.");
         }
         const csvRow = Number(message.csvRow);
         if (!Number.isFinite(csvRow)) throw new Error("Missing CSV row.");
@@ -5742,8 +5549,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         isRunning = false;
-        indeedCaptureControl.stop = true;
-        batchControl.stop = true;
+                batchControl.stop = true;
         batchControl.skipCurrent = true;
         stopKeepAlive();
         await chrome.storage.local.set({
@@ -5760,19 +5566,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           chatgpt_json_ready_at: 0,
           last_resume_json: null,
           [REMOVED_JOB_IDENTITIES_KEY]: [],
-          [INDEED_CAPTURE_STATE_KEY]: {
-            running: false,
-            status: "idle",
-            page: 0,
-            scanned: 0,
-            captured: 0,
-            qualified: 0,
-            duplicates: 0,
-            external: 0,
-            blocked: 0,
-            message: "Job list cleared.",
-            updatedAt: Date.now()
-          }
         });
         safeSendResponse(sendResponse, { ok: true });
       } catch (err) {
@@ -5786,8 +5579,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         isRunning = false;
-        indeedCaptureControl.stop = true;
-        batchControl.stop = true;
+                batchControl.stop = true;
         stopKeepAlive();
         const tab = await getOpenChatGptTab();
         if (tab?.id) {
@@ -5804,12 +5596,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           csv_total_rows: 0,
           csv_dropped_non_us: 0,
           [REMOVED_JOB_IDENTITIES_KEY]: [],
-          [INDEED_CAPTURE_STATE_KEY]: {
-            running: false,
-            status: "idle",
-            message: "Generation state reset.",
-            updatedAt: Date.now()
-          }
         });
         safeSendResponse(sendResponse, { ok: true });
       } catch (err) {
@@ -6240,10 +6026,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "retry_job") {
     (async () => {
       try {
-        if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
-          throw new Error("Stop Indeed capture before retrying a job.");
-        }
-        const csvRow = Number(message.csvRow);
+                const csvRow = Number(message.csvRow);
         if (!Number.isFinite(csvRow)) throw new Error("Missing csvRow.");
         const queue = await getQueue();
         const job = queue.find((j) => Number(j.csvRow) === csvRow);
@@ -6291,10 +6074,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "retry_error_jobs") {
     (async () => {
       try {
-        if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
-          throw new Error("Stop Indeed capture before retrying error jobs.");
-        }
-        const queue = await getQueue();
+                const queue = await getQueue();
         const targets = queue.filter(
           (j) => j.status === "error" || j.status === "failed" || j.status === "skipped"
         );
@@ -6338,14 +6118,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (type === "batch_start" || type === "batch_resume") {
     (async () => {
-      if (indeedCaptureControl.running || (await persistedIndeedCaptureIsActive())) {
-        safeSendResponse(sendResponse, {
-          ok: false,
-          error: "Stop Indeed capture before starting the generation/apply batch."
-        });
-        return;
-      }
-      if (isRunning) {
+            if (isRunning) {
         safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
         return;
       }
@@ -6372,14 +6145,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (type === "run_one_off") {
-    if (indeedCaptureControl.running) {
-      safeSendResponse(sendResponse, {
-        ok: false,
-        error: "Stop Indeed capture before running a one-off generation."
-      });
-      return false;
-    }
-    if (isRunning) {
+        if (isRunning) {
       safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
       return false;
     }
@@ -6389,10 +6155,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
       try {
-        if (await persistedIndeedCaptureIsActive()) {
-          throw new Error("Stop Indeed capture before running a one-off generation.");
-        }
-        const meta = { ...(message.jobMeta || {}), bidSource: "one-off" };
+                const meta = { ...(message.jobMeta || {}), bidSource: "one-off" };
         const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
         const link = normalizeJobLink(meta.jdLink || "");
         const companyKey = normalizeCompanyName(meta.companyName || meta.company || "");

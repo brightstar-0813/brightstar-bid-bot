@@ -5610,18 +5610,28 @@
       root.querySelector('[class*="jobsearch-JobComponent-description"]');
     const meta = Array.from(
       root.querySelectorAll(
-        '#jobDetailsSection li, [data-testid="job-details-section"] li, [class*="jobsearch-JobDescriptionSection"]'
+        '#jobDetailsSection li, [data-testid="job-details-section"] li, [class*="jobsearch-JobDescriptionSection"] li, [class*="jobsearch-JobDescriptionSection"] div'
       )
     )
       .map((el) => elementText(el))
       .filter(Boolean);
+    const pageText = elementText(root);
     const employmentType = meta.find((item) =>
       /\b(full[- ]time|part[- ]time|contract|temporary|internship|per diem)\b/i.test(item)
     );
+    const salaryText =
+      meta.find((item) => /\$|salary|hour|year|compensation/i.test(item)) ||
+      text('[data-testid="attribute_snippet_testid"]') ||
+      "";
     const location =
       text('[data-testid="job-location"]') ||
       text('[data-testid="inlineHeader-companyLocation"]') ||
       text(".jobsearch-JobInfoHeader-subtitle > div:nth-child(2)");
+    const applyOnIndeed = Boolean(
+      root.querySelector(
+        '#indeedApplyButton, button[id*="indeedApply"], a[id*="indeedApply"], [data-testid*="indeedApply"], [data-testid*="indeed-apply"]'
+      )
+    ) || /\bapply with indeed\b|\beasily apply\b|\bapply on indeed\b/i.test(pageText);
     return {
       jobTitle:
         text('[data-testid="jobsearch-JobInfoHeader-title"]') ||
@@ -5639,11 +5649,15 @@
         : "",
       jobLocation: location,
       employmentType: employmentType || "",
+      salaryRaw: salaryText,
+      applyOnIndeed,
+      indeedApplyOnSite: applyOnIndeed,
+      hostedApply: applyOnIndeed,
       datePosted:
         text('[data-testid="myJobsStateDate"]') ||
         text(".jobsearch-JobMetadataFooter") ||
         "",
-      workArrangement: /\bremote\b/i.test(location) ? "Remote" : ""
+      workArrangement: /\bremote\b/i.test(`${location} ${pageText}`) ? "Remote" : ""
     };
   }
 
@@ -5654,6 +5668,13 @@
     const jobTitle = dom.jobTitle || schema.jobTitle || "";
     const jdText = dom.jdText || schema.jdText || "";
     if (!jobTitle && !jdText) return null;
+    const applyOnIndeed = Boolean(
+      dom.applyOnIndeed || dom.indeedApplyOnSite || dom.hostedApply
+    );
+    const salaryRaw =
+      dom.salaryRaw ||
+      [schema.salaryMin, schema.salaryMax].filter(Boolean).join(" - ") ||
+      "";
     return {
       ...schema,
       ...dom,
@@ -5667,6 +5688,10 @@
       employmentType: dom.employmentType || schema.employmentType || "",
       salaryMin: schema.salaryMin || "",
       salaryMax: schema.salaryMax || "",
+      salaryRaw,
+      applyOnIndeed,
+      indeedApplyOnSite: applyOnIndeed,
+      hostedApply: applyOnIndeed,
       datePosted: schema.datePosted || dom.datePosted || "",
       jobLocation: dom.jobLocation || schema.jobLocation || ""
     };

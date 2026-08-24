@@ -63,11 +63,6 @@
       "js": ["content/autofill.js"],
       "run_at": "document_idle",
       "all_frames": true
-    },
-    {
-      "matches": ["https://indeed.com/*", "https://*.indeed.com/*"],
-      "js": ["content/indeed-capture.js"],
-      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

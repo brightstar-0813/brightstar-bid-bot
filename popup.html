@@ -320,50 +320,25 @@
             <span class="step" aria-hidden="true">3</span>
             <div class="section-copy">
               <p class="section-title">Indeed</p>
-              <p class="section-sub">Capture Salesforce · US remote · last 7 days, then auto-apply hosted roles</p>
+              <p class="section-sub">Select a job on Indeed, then grab it here</p>
             </div>
-            <span id="indeedCaptureState" class="state-pill" data-state="idle">idle</span>
+            <span id="indeedGrabState" class="state-pill" data-state="idle">idle</span>
           </header>
           <ol class="workflow-steps" aria-label="Indeed workflow">
-            <li>Capture</li>
-            <li>Review queue</li>
-            <li>Start</li>
+            <li>Filter &amp; select</li>
+            <li>Grab job</li>
+            <li>Resume + apply</li>
           </ol>
           <p class="hint">
-            Uses your signed-in Indeed session. Keeps <strong>Salesforce</strong> jobs that are
-            <strong>US remote</strong> and posted in the <strong>last 7 days</strong>. Hosted Apply-on-Indeed
-            jobs can auto-submit; external ATS links are never submitted.
+            On Indeed, filter yourself and open/select one job (right-hand details). Then click
+            <strong>Grab &amp; auto-apply</strong>. The bot reads title, company, JD, link, salary,
+            builds the resume, logs the Google Sheet, and fully submits only Apply-on-Indeed flows.
           </p>
-          <div class="indeed-capture">
-            <label class="field">
-              <span>Indeed search URL (filters applied automatically)</span>
-              <input
-                id="indeedSearchUrl"
-                type="url"
-                placeholder="https://www.indeed.com/jobs?q=Salesforce&amp;l=Remote&amp;fromage=7"
-                autocomplete="off"
-              />
-            </label>
-            <div class="grid-2">
-              <label class="field">
-                <span>Search query</span>
-                <input id="indeedSearchQuery" type="text" value="Salesforce" placeholder="Salesforce Developer" autocomplete="off" />
-              </label>
-              <label class="field">
-                <span>Max pages</span>
-                <input id="indeedMaxPages" type="number" min="1" max="25" step="1" value="5" />
-              </label>
-            </div>
-            <div class="row row-2">
-              <button type="button" id="indeedCaptureStart" class="primary">Start capture</button>
-              <button type="button" id="indeedCaptureStop" class="ghost danger">Stop</button>
-            </div>
-            <p id="indeedCaptureStatus" class="hint">Idle · 0 qualified · 0 scanned</p>
-          </div>
           <div class="row row-2">
-            <button type="button" id="focusIndeedQueue" class="ghost">Review Indeed queue</button>
-            <button type="button" id="startIndeedBatch" class="primary">Start Indeed apply</button>
+            <button type="button" id="indeedGrabApply" class="primary">Grab &amp; auto-apply</button>
+            <button type="button" id="indeedGrabOnly" class="ghost">Grab to queue only</button>
           </div>
+          <p id="indeedGrabStatus" class="hint">Select a job on Indeed, then grab it.</p>
         </section>
 
         <!-- Jobs queue (CSV + shared batch) -->
@@ -372,7 +347,7 @@
             <span class="step" aria-hidden="true">4</span>
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
-              <p class="section-sub">CSV or Indeed capture → review/remove → Start</p>
+              <p class="section-sub">CSV or Indeed grab → review/remove → Start</p>
             </div>
             <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
           </header>
@@ -483,7 +458,7 @@
           <div id="queueList" class="queue-list">
             <div class="queue-empty">
               <p>Queue is empty</p>
-              <span>Capture from Indeed or upload a CSV, then review before Start</span>
+              <span>Grab a job from Indeed or upload a CSV, then review before Start</span>
             </div>
           </div>
         </section>
