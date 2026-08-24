@@ -1402,19 +1402,23 @@ function renderQueue() {
     badges.appendChild(badge);
     let atsScoreEl = null;
     if (job.atsScore != null && Number.isFinite(Number(job.atsScore))) {
-      const score = Number(job.atsScore);
+      const score = Math.max(0, Math.min(100, Math.round(Number(job.atsScore))));
       const grade = String(job.atsGrade || "").trim();
       const tier =
         score >= 85 ? "is-excellent" : score >= 70 ? "is-good" : score >= 55 ? "is-fair" : "is-low";
       atsScoreEl = document.createElement("div");
       atsScoreEl.className = `ats-score ${tier}`;
+      atsScoreEl.style.setProperty("--ats", String(score));
       atsScoreEl.title = atsScoreTitle(job);
-      atsScoreEl.setAttribute("aria-label", `ATS match ${score} out of 100${grade ? `, grade ${grade}` : ""}`);
+      atsScoreEl.setAttribute(
+        "aria-label",
+        `ATS match ${score} out of 100${grade ? `, ${grade}` : ""}`
+      );
       atsScoreEl.innerHTML =
-        `<span class="ats-score-label">ATS match</span>` +
+        `<span class="ats-score-kicker">ATS</span>` +
         `<span class="ats-score-value">${score}</span>` +
-        `<span class="ats-score-max">/100</span>` +
-        (grade ? `<span class="ats-score-grade">${grade}</span>` : "");
+        (grade ? `<span class="ats-score-grade">${grade}</span>` : `<span class="ats-score-grade ats-score-grade-empty"></span>`) +
+        `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
     }
     if (isLinkedInJob(job)) {
       const liBadge = document.createElement("span");

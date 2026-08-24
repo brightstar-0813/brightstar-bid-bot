@@ -800,72 +800,103 @@ input[type="file"]::file-selector-button {
 }
 
 .ats-score {
-  display: inline-flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin-top: 7px;
-  padding: 7px 10px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  font-weight: 800;
-  line-height: 1.2;
-  max-width: 100%;
-  box-sizing: border-box;
+  --ats: 0;
+  --ats-tone: var(--gold);
+  --ats-tone-soft: rgba(245, 197, 66, 0.22);
+  display: inline-grid;
+  grid-template-columns: auto auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 4px;
+  margin-top: 6px;
+  padding: 5px 8px 6px;
+  width: min(100%, 168px);
+  border-radius: 8px;
+  border: 1px solid rgba(148, 175, 210, 0.16);
+  background: rgba(8, 16, 30, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  line-height: 1;
+  vertical-align: top;
 }
 
-.ats-score-label {
-  font-size: 11px;
-  letter-spacing: 0.06em;
+.ats-score-kicker {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  opacity: 0.88;
+  color: var(--muted);
 }
 
 .ats-score-value {
-  font-size: 20px;
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 15px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
-  line-height: 1;
-}
-
-.ats-score-max {
-  font-size: 12px;
-  font-weight: 700;
-  opacity: 0.8;
+  color: var(--ats-tone);
 }
 
 .ats-score-grade {
-  margin-left: 2px;
-  padding: 2px 7px;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  opacity: 0.92;
+}
+
+.ats-score-grade-empty {
+  min-height: 1em;
+}
+
+.ats-score-meter {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: block;
+  height: 3px;
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ats-score-fill {
+  display: block;
+  height: 100%;
+  width: calc(var(--ats) * 1%);
+  max-width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ats-tone-soft), var(--ats-tone));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ats-tone) 35%, transparent);
+  transition: width 0.35s ease;
 }
 
 .ats-score.is-excellent {
-  background: rgba(20, 83, 45, 0.55);
-  border-color: rgba(134, 239, 172, 0.45);
-  color: #bbf7d0;
+  --ats-tone: #86efac;
+  --ats-tone-soft: rgba(134, 239, 172, 0.28);
+  border-color: rgba(134, 239, 172, 0.28);
 }
 
 .ats-score.is-good {
-  background: rgba(30, 64, 175, 0.5);
-  border-color: rgba(147, 197, 253, 0.45);
-  color: #bfdbfe;
+  --ats-tone: #93c5fd;
+  --ats-tone-soft: rgba(147, 197, 253, 0.28);
+  border-color: rgba(147, 197, 253, 0.28);
 }
 
 .ats-score.is-fair {
-  background: rgba(133, 77, 14, 0.55);
-  border-color: rgba(253, 230, 138, 0.45);
-  color: #fde68a;
+  --ats-tone: #fbbf24;
+  --ats-tone-soft: rgba(251, 191, 36, 0.28);
+  border-color: rgba(251, 191, 36, 0.28);
 }
 
 .ats-score.is-low {
-  background: rgba(127, 29, 29, 0.55);
-  border-color: rgba(252, 165, 165, 0.45);
-  color: #fecaca;
+  --ats-tone: #fca5a5;
+  --ats-tone-soft: rgba(252, 165, 165, 0.28);
+  border-color: rgba(252, 165, 165, 0.28);
 }
 
 .badge-ats.is-excellent {
