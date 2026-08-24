@@ -342,39 +342,37 @@ export function isUnitedStatesJob(fields) {
 }
 
 /**
+ * Board classification is URL-only. CSV "source" / site labels are ignored so a
+ * Greenhouse (etc.) link is never treated as Dice/LI/Indeed just because the
+ * export said so.
+ */
+function jobLinkHost(jdLink = "") {
+  try {
+    return new URL(String(jdLink || "").trim()).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * LinkedIn Easy Apply / LinkedIn-hosted postings (harder to automate applications).
  */
-export function isLinkedInJob({ jdLink = "", source = "" } = {}) {
-  const link = String(jdLink || "").toLowerCase();
-  const src = String(source || "").toLowerCase();
-  if (src.includes("linkedin") || src === "li") return true;
-  if (/linkedin\.com/i.test(link)) return true;
-  if (/^li_/i.test(String(source || ""))) return true;
-  return false;
+export function isLinkedInJob({ jdLink = "" } = {}) {
+  return /(^|\.)linkedin\.com$/i.test(jobLinkHost(jdLink));
 }
 
 /**
  * Dice.com Easy Apply / Dice-hosted postings (interleaved generate → apply path).
  */
-export function isDiceJob({ jdLink = "", source = "" } = {}) {
-  const link = String(jdLink || "").toLowerCase();
-  const src = String(source || "").toLowerCase();
-  if (src.includes("dice") || src === "dice") return true;
-  if (/dice\.com/i.test(link)) return true;
-  if (/^dice[_-]/i.test(String(source || ""))) return true;
-  return false;
+export function isDiceJob({ jdLink = "" } = {}) {
+  return /(^|\.)dice\.com$/i.test(jobLinkHost(jdLink));
 }
 
 /**
  * Indeed / Apply-on-Indeed postings.
  */
-export function isIndeedJob({ jdLink = "", source = "" } = {}) {
-  const link = String(jdLink || "").toLowerCase();
-  const src = String(source || "").toLowerCase();
-  if (src.includes("indeed")) return true;
-  if (/(?:^|\.)indeed\.com/i.test(link)) return true;
-  if (/^indeed[_-]/i.test(String(source || ""))) return true;
-  return false;
+export function isIndeedJob({ jdLink = "" } = {}) {
+  return /(^|\.)indeed\.com$/i.test(jobLinkHost(jdLink));
 }
 
 /**
@@ -402,21 +400,16 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   const mode = normalizeChannelFilter(filter);
   if (mode === "all") return list.slice();
   if (mode === "linkedin") {
-    return list.filter((j) => j.isLinkedIn || isLinkedInJob(j));
+    return list.filter((j) => isLinkedInJob(j));
   }
   if (mode === "dice") {
-    return list.filter((j) => j.isDice || isDiceJob(j));
+    return list.filter((j) => isDiceJob(j));
   }
   if (mode === "indeed") {
-    return list.filter((j) => j.isIndeed || isIndeedJob(j));
+    return list.filter((j) => isIndeedJob(j));
   }
-  // etc = not Dice, LinkedIn, or Indeed
-  return list.filter(
-    (j) =>
-      !(j.isDice || isDiceJob(j)) &&
-      !(j.isLinkedIn || isLinkedInJob(j)) &&
-      !(j.isIndeed || isIndeedJob(j))
-  );
+  // etc = not Dice, LinkedIn, or Indeed by URL
+  return list.filter((j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j));
 }
 
 /**
@@ -484,10 +477,9 @@ export function parseJobsCsv(csvText) {
       continue;
     }
 
-    const srcKey = source || id;
-    const linkedIn = isLinkedInJob({ jdLink, source: srcKey });
-    const dice = isDiceJob({ jdLink, source: srcKey });
-    const indeed = isIndeedJob({ jdLink, source: srcKey });
+    const linkedIn = isLinkedInJob({ jdLink });
+    const dice = isDiceJob({ jdLink });
+    const indeed = isIndeedJob({ jdLink });
 
     usJobs.push({
       csvRow,

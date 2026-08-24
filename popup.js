@@ -30,6 +30,7 @@ import {
   isIndeedJob,
   normalizeChannelFilter
 } from "./csv.js";
+import { buildIndeedSearchUrl } from "./indeed.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
   extractProfileFromResumeText,
@@ -463,6 +464,11 @@ const indeedCaptureStartBtn = document.getElementById("indeedCaptureStart");
 const indeedCaptureStopBtn = document.getElementById("indeedCaptureStop");
 const indeedCaptureStateEl = document.getElementById("indeedCaptureState");
 const indeedCaptureStatusEl = document.getElementById("indeedCaptureStatus");
+const focusIndeedQueueBtn = document.getElementById("focusIndeedQueue");
+const startIndeedBatchBtn = document.getElementById("startIndeedBatch");
+const toggleIntegrationsPanelBtn = document.getElementById("toggleIntegrationsPanel");
+const integrationsPanelBody = document.getElementById("integrationsPanelBody");
+const jobsSectionEl = document.getElementById("jobsSection");
 
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
@@ -1009,13 +1015,7 @@ function renderIndeedCaptureState(state) {
 }
 
 function normalizeIndeedSearchUrl(rawUrl, query) {
-  const raw = String(rawUrl || "").trim();
-  const url = new URL(raw || "https://www.indeed.com/jobs");
-  if (!/(^|\.)indeed\.com$/i.test(url.hostname)) {
-    throw new Error("Indeed search URL must use indeed.com.");
-  }
-  if (query) url.searchParams.set("q", query);
-  return url.toString();
+  return buildIndeedSearchUrl({ searchUrl: rawUrl, query });
 }
 
 async function startIndeedCapture() {
@@ -1137,9 +1137,9 @@ async function loadSettings() {
   allUsJobsCache = Array.isArray(data[ALL_US_JOBS_KEY])
     ? data[ALL_US_JOBS_KEY].map((j) => ({
         ...j,
-        isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j),
-        isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j),
-        isIndeed: typeof j.isIndeed === "boolean" ? j.isIndeed : isIndeedJob(j)
+        isLinkedIn: isLinkedInJob(j),
+        isDice: isDiceJob(j),
+        isIndeed: isIndeedJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -1173,9 +1173,9 @@ async function hydrateJobDirsInUi() {
   if (Array.isArray(res.allUsJobs)) {
     allUsJobsCache = res.allUsJobs.map((j) => ({
       ...j,
-      isLinkedIn: typeof j.isLinkedIn === "boolean" ? j.isLinkedIn : isLinkedInJob(j),
-      isDice: typeof j.isDice === "boolean" ? j.isDice : isDiceJob(j),
-      isIndeed: typeof j.isIndeed === "boolean" ? j.isIndeed : isIndeedJob(j)
+      isLinkedIn: isLinkedInJob(j),
+      isDice: isDiceJob(j),
+      isIndeed: isIndeedJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -1194,14 +1194,11 @@ function updateCsvSummaryFromQueue() {
     csvSummaryEl.innerHTML = `<span class="summary-idle">No CSV loaded</span>`;
     return;
   }
-  const liTotal = allUsJobsCache.filter((j) => j.isLinkedIn || isLinkedInJob(j)).length;
-  const diceTotal = allUsJobsCache.filter((j) => j.isDice || isDiceJob(j)).length;
-  const indeedTotal = allUsJobsCache.filter((j) => j.isIndeed || isIndeedJob(j)).length;
+  const liTotal = allUsJobsCache.filter((j) => isLinkedInJob(j)).length;
+  const diceTotal = allUsJobsCache.filter((j) => isDiceJob(j)).length;
+  const indeedTotal = allUsJobsCache.filter((j) => isIndeedJob(j)).length;
   const etcTotal = allUsJobsCache.filter(
-    (j) =>
-      !(j.isDice || isDiceJob(j)) &&
-      !(j.isLinkedIn || isLinkedInJob(j)) &&
-      !(j.isIndeed || isIndeedJob(j))
+    (j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j)
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
@@ -1348,7 +1345,10 @@ const ACTION_ICON_PATHS = {
   files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
   apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
-  retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>'
+  retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>',
+  window:
+    '<path d="M3 5h18v14H3z"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M14 14h2"/>',
+  panel: '<path d="M4 4h16v16H4z"/><path d="M14 4v16"/>'
 };
 
 function setIconButton(button, icon, label) {
@@ -1414,7 +1414,8 @@ function renderQueue() {
   if (!queueCache.length) {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
-    empty.innerHTML = "<p>Queue is empty</p><span>Upload a jobs CSV to start a batch</span>";
+    empty.innerHTML =
+      "<p>Queue is empty</p><span>Capture from Indeed or upload a CSV, then review before Start</span>";
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     return;
@@ -1459,19 +1460,19 @@ function renderQueue() {
       atsBadge.title = atsScoreTitle(job);
       badges.appendChild(atsBadge);
     }
-    if (job.isLinkedIn || isLinkedInJob(job)) {
+    if (isLinkedInJob(job)) {
       const liBadge = document.createElement("span");
       liBadge.className = "badge badge-li";
       liBadge.textContent = "LI";
       badges.appendChild(liBadge);
     }
-    if (job.isDice || isDiceJob(job)) {
+    if (isDiceJob(job)) {
       const diceBadge = document.createElement("span");
       diceBadge.className = "badge badge-dice";
       diceBadge.textContent = "Dice";
       badges.appendChild(diceBadge);
     }
-    if (job.isIndeed || isIndeedJob(job)) {
+    if (isIndeedJob(job)) {
       const indeedBadge = document.createElement("span");
       indeedBadge.className = "badge badge-indeed";
       indeedBadge.textContent = "Indeed";
@@ -2357,6 +2358,27 @@ async function openAsWindowApp() {
   }
 }
 
+async function focusIndeedQueue() {
+  await applyChannelFilter("indeed");
+  jobsSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+  setStatus("Showing Indeed jobs — review, then Start.");
+}
+
+async function startIndeedBatchFromSection() {
+  await applyChannelFilter("indeed");
+  jobsSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+  await sendBatch("batch_start");
+}
+
+function setIntegrationsPanelOpen(open) {
+  if (!integrationsPanelBody || !toggleIntegrationsPanelBtn) return;
+  integrationsPanelBody.hidden = !open;
+  toggleIntegrationsPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  toggleIntegrationsPanelBtn.textContent = open
+    ? "Hide sheet, pacing & Slack"
+    : "Show sheet, pacing & Slack";
+}
+
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
   runOneOffBtn.disabled = busy;
@@ -2746,6 +2768,16 @@ keepOpenBtn?.addEventListener("click", dockOutOfPopup);
 openAsWindowBtn?.addEventListener("click", () => {
   openAsWindowApp().catch((e) => setStatus(String(e.message || e)));
 });
+focusIndeedQueueBtn?.addEventListener("click", () => {
+  focusIndeedQueue().catch((e) => setStatus(String(e.message || e)));
+});
+startIndeedBatchBtn?.addEventListener("click", () => {
+  startIndeedBatchFromSection().catch((e) => setStatus(String(e.message || e)));
+});
+toggleIntegrationsPanelBtn?.addEventListener("click", () => {
+  const open = integrationsPanelBody?.hidden !== false;
+  setIntegrationsPanelOpen(open);
+});
 previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
 });
@@ -2806,6 +2838,9 @@ if (UI_CONTEXT === "popup") {
   keepOpenBtn && (keepOpenBtn.hidden = true);
   openAsWindowBtn && (openAsWindowBtn.hidden = true);
 }
+
+if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
+if (keepOpenBtn) setIconButton(keepOpenBtn, "panel", "Keep open in side panel");
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
 

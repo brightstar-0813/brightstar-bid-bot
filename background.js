@@ -80,8 +80,8 @@ import {
 import {
   buildIndeedSearchUrl,
   isExplicitlyHostedIndeedJob,
+  isIndeedCaptureEligible,
   isIndeedUrl,
-  isSalesforceRelevantJob,
   mergeIndeedApplyEvidence,
   normalizeIndeedCapturedJob
 } from "./indeed.js";
@@ -1259,14 +1259,14 @@ function isRetriableReadyRowCompanySkip(j) {
 }
 
 function isIndeedHostedApplyJob(j) {
-  if (!(j?.isIndeed || isIndeedJob(j || {}))) return false;
+  if (!isIndeedJob(j || {})) return false;
   return isExplicitlyHostedIndeedJob(j);
 }
 
 function isHostedApplyBacklogJob(j, person = null) {
   const hostedIndeed = isIndeedHostedApplyJob(j);
   if (
-    !(j.isDice || isDiceJob(j) || hostedIndeed) ||
+    !(isDiceJob(j) || hostedIndeed) ||
     j.status !== "done" ||
     j.applied ||
     j.inactive ||
@@ -4601,7 +4601,7 @@ async function runBatchLoop(outputDir) {
         // Hosted Dice and Indeed jobs: generate → auto-apply+submit → close tab → next.
         const hostedApplyBoard = isIndeedHostedApplyJob(next)
           ? "Indeed"
-          : next.isDice || isDiceJob(next)
+          : isDiceJob(next)
             ? "Dice"
             : "";
         if (hostedApplyBoard && !batchControl.stop) {
@@ -4883,7 +4883,8 @@ async function mergeIndeedCapturedJobs(jobs) {
 
   for (const raw of Array.isArray(jobs) ? jobs : []) {
     let candidate = normalizeIndeedCapturedJob(raw, nextRow);
-    if (!candidate.title || !candidate.jdLink || !isSalesforceRelevantJob(candidate)) continue;
+    if (!candidate.title || !candidate.jdLink) continue;
+    if (!isIndeedCaptureEligible({ ...raw, ...candidate, fromageFiltered: true })) continue;
     if (removedIdentities.has(jobIdentity(candidate))) continue;
     if (
       !isUnitedStatesJob({
@@ -4956,11 +4957,15 @@ async function runIndeedCapture(options = {}) {
     const previous = await getIndeedCaptureSettings();
     const settings = {
       ...previous,
-      searchUrl: String(options.searchUrl ?? previous.searchUrl ?? "").trim(),
+      searchUrl: "",
       query: String(options.query ?? previous.query ?? "Salesforce").trim() || "Salesforce",
       maxPages: clampIndeedPages(options.maxPages ?? previous.maxPages),
       pageDelayMs: Math.max(800, Math.min(10000, Number(previous.pageDelayMs || 1800)))
     };
+    settings.searchUrl = buildIndeedSearchUrl({
+      searchUrl: String(options.searchUrl ?? previous.searchUrl ?? "").trim(),
+      query: settings.query
+    });
     await chrome.storage.local.set({ [INDEED_CAPTURE_SETTINGS_KEY]: settings });
 
     let tab = null;

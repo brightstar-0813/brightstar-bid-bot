@@ -164,16 +164,29 @@
         "[data-testid='jobsnippet_footer']",
         "[data-testid='job-snippet']"
       ]);
+      const postedText = textFrom(root, [
+        "[data-testid='myJobsStateDate']",
+        "span.date",
+        ".date",
+        "[class*='date']"
+      ]);
       const cardText = cleanText(root.innerText || root.textContent);
       const relevance = salesforceRelevance(`${title} ${snippet} ${cardText}`);
       const evidence = applyEvidence(root, cardText);
       const applyOnIndeed = evidence === "hosted";
+      const isRemote = /\bremote\b|\bwork from home\b|\bwfh\b/i.test(
+        `${locationText} ${cardText}`
+      );
       const key = jobKey || link;
       found.set(key, {
         id: jobKey || key,
         title,
         company,
         location: locationText,
+        remoteRestrictedTo: isRemote ? "United States" : "",
+        isRemote,
+        postedText,
+        fromageFiltered: true,
         jdLink: link,
         jdText: snippet,
         source: "indeed",
@@ -185,7 +198,7 @@
         applyEvidence: evidence,
         salesforceRelevant: relevance.relevant,
         relevanceTerms: relevance.matchedTerms,
-        captureEligible: relevance.relevant && applyOnIndeed,
+        captureEligible: relevance.relevant,
         capturedAt: new Date().toISOString(),
         status: "pending"
       });
@@ -220,16 +233,28 @@
       "[data-testid='jobsearch-jobDescriptionText']",
       ".jobsearch-jobDescriptionText"
     ]);
+    const postedText = textFrom(detailRoot, [
+      "[data-testid='myJobsStateDate']",
+      "span.date",
+      ".jobsearch-JobMetadataFooter"
+    ]);
     const canonical = document.querySelector("link[rel='canonical']")?.href || location.href;
     const jobKey = jobKeyFrom(detailRoot, canonical);
     const relevance = salesforceRelevance(`${title} ${description}`);
     const evidence = applyEvidence(detailRoot, detailRoot.innerText);
     const applyOnIndeed = evidence === "hosted";
+    const isRemote = /\bremote\b|\bwork from home\b|\bwfh\b|\btelecommut/i.test(
+      `${locationText} ${description}`
+    );
     return {
       id: jobKey || canonical,
       title,
       company,
       location: locationText,
+      remoteRestrictedTo: isRemote ? "United States" : "",
+      isRemote,
+      postedText,
+      fromageFiltered: true,
       jdLink: absoluteUrl(canonical),
       jdText: description,
       source: "indeed",
@@ -241,7 +266,7 @@
       applyEvidence: evidence,
       salesforceRelevant: relevance.relevant,
       relevanceTerms: relevance.matchedTerms,
-      captureEligible: relevance.relevant && applyOnIndeed,
+      captureEligible: relevance.relevant,
       capturedAt: new Date().toISOString(),
       status: "pending"
     };
@@ -329,11 +354,38 @@
       const evidence = applyEvidence(root, pageText);
       const applyOnIndeed = evidence === "hosted";
       const relevance = salesforceRelevance(`${title} ${description}`);
+      const datePosted = cleanText(schema?.datePosted) || job.datePosted || "";
+      const postedText =
+        textFrom(root, ["[data-testid='myJobsStateDate']", "span.date", ".date"]) ||
+        job.postedText ||
+        "";
+      const jobLocationType = cleanText(schema?.jobLocationType) || job.jobLocationType || "";
+      const country = cleanText(
+        schema?.jobLocation?.address?.addressCountry ||
+          schema?.applicantLocationRequirements?.name
+      );
+      const isRemote =
+        job.isRemote === true ||
+        /telecommut/i.test(jobLocationType) ||
+        /\bremote\b|\bwork from home\b|\bwfh\b/i.test(`${locationText} ${description} ${pageText}`);
+      const remoteRestrictedTo =
+        country && /united states|usa|\bu\.?s\.?\b/i.test(country)
+          ? "United States"
+          : isRemote
+            ? "United States"
+            : job.remoteRestrictedTo || "";
       return {
         ...job,
         title,
         company,
         location: locationText,
+        remoteRestrictedTo,
+        isRemote,
+        jobLocationType,
+        datePosted,
+        postedText,
+        postedAt: datePosted || job.postedAt || null,
+        fromageFiltered: true,
         jdText: description || job.jdText,
         applyOnIndeed,
         indeedApplyOnSite: applyOnIndeed,
@@ -342,7 +394,7 @@
         applyEvidence: evidence,
         salesforceRelevant: relevance.relevant,
         relevanceTerms: relevance.matchedTerms,
-        captureEligible: relevance.relevant && applyOnIndeed
+        captureEligible: relevance.relevant
       };
     } catch {
       return job;
