@@ -314,37 +314,10 @@
           <p class="hint">Style only — the active person’s resume content stays the same. Preview uses a sample layout, or your last generated resume.</p>
         </section>
 
-        <!-- Indeed -->
-        <section class="section section-indeed" id="indeedSection">
-          <header class="section-header">
-            <span class="step" aria-hidden="true">3</span>
-            <div class="section-copy">
-              <p class="section-title">Indeed</p>
-              <p class="section-sub">Select a job on Indeed, then grab it here</p>
-            </div>
-            <span id="indeedGrabState" class="state-pill" data-state="idle">idle</span>
-          </header>
-          <ol class="workflow-steps" aria-label="Indeed workflow">
-            <li>Filter &amp; select</li>
-            <li>Grab job</li>
-            <li>Resume + apply</li>
-          </ol>
-          <p class="hint">
-            On Indeed, filter yourself and open/select one job (right-hand details). Then click
-            <strong>Grab &amp; auto-apply</strong>. The bot reads title, company, JD, link, salary,
-            builds the resume, logs the Google Sheet, and fully submits only Apply-on-Indeed flows.
-          </p>
-          <div class="row row-2">
-            <button type="button" id="indeedGrabApply" class="primary">Grab &amp; auto-apply</button>
-            <button type="button" id="indeedGrabOnly" class="ghost">Grab to queue only</button>
-          </div>
-          <p id="indeedGrabStatus" class="hint">Select a job on Indeed, then grab it.</p>
-        </section>
-
         <!-- AI engine -->
         <section class="section" id="aiProviderSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">4</span>
+            <span class="step" aria-hidden="true">3</span>
             <div class="section-copy">
               <p class="section-title">AI engine</p>
               <p class="section-sub">ChatGPT or Claude — switch anytime before Start / Grab</p>
@@ -367,7 +340,7 @@
         <!-- Jobs queue (CSV + shared batch) -->
         <section class="section section-hero" id="jobsSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">5</span>
+            <span class="step" aria-hidden="true">4</span>
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
               <p class="section-sub">CSV or Indeed grab → review/remove → Start</p>
@@ -489,7 +462,7 @@
         <!-- Manual one-off -->
         <section class="section">
           <header class="section-header">
-            <span class="step" aria-hidden="true">6</span>
+            <span class="step" aria-hidden="true">5</span>
             <div class="section-copy">
               <p class="section-title">Manual one-off</p>
               <p class="section-sub">Single JD without a CSV row</p>
@@ -528,6 +501,33 @@
             </div>
             <p class="hint">Sends prompt to the selected AI engine, waits for JSON automatically, then saves resume + cover letter.</p>
           </div>
+        </section>
+
+        <!-- Indeed -->
+        <section class="section section-indeed" id="indeedSection">
+          <header class="section-header">
+            <span class="step" aria-hidden="true">6</span>
+            <div class="section-copy">
+              <p class="section-title">Indeed</p>
+              <p class="section-sub">Select a job on Indeed, then grab it here</p>
+            </div>
+            <span id="indeedGrabState" class="state-pill" data-state="idle">idle</span>
+          </header>
+          <ol class="workflow-steps" aria-label="Indeed workflow">
+            <li>Filter &amp; select</li>
+            <li>Grab job</li>
+            <li>Resume + apply</li>
+          </ol>
+          <p class="hint">
+            On Indeed, filter yourself and open/select one job (right-hand details). Then click
+            <strong>Grab &amp; auto-apply</strong>. The bot reads title, company, JD, link, salary,
+            builds the resume, logs the Google Sheet, and fully submits only Apply-on-Indeed flows.
+          </p>
+          <div class="row row-2">
+            <button type="button" id="indeedGrabApply" class="primary">Grab &amp; auto-apply</button>
+            <button type="button" id="indeedGrabOnly" class="ghost">Grab to queue only</button>
+          </div>
+          <p id="indeedGrabStatus" class="hint">Select a job on Indeed, then grab it.</p>
         </section>
 
         <!-- Apply -->
