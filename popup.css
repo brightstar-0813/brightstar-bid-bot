@@ -1207,16 +1207,41 @@ input[type="file"]::file-selector-button {
   font-size: 9.5px;
 }
 
-.batch-bar {
+.batch-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 0 10px;
 }
 
-.batch-bar button.icon-button,
-.queue-tools button.icon-button {
+.batch-toolbar-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-toolbar-secondary {
+  margin-left: auto;
+}
+
+.batch-toolbar .btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.batch-toolbar .btn-group-sep {
+  display: inline-block;
+  width: 1px;
+  height: 22px;
+  background: var(--line-strong);
+  opacity: 0.9;
+  flex: 0 0 auto;
+}
+
+.batch-toolbar button.icon-button {
   width: 34px;
   min-width: 34px;
   height: 34px;
@@ -1227,28 +1252,21 @@ input[type="file"]::file-selector-button {
   flex: 0 0 auto;
 }
 
-.batch-bar button.primary.icon-button {
-  width: 40px;
-  min-width: 40px;
-  height: 34px;
-}
-
-.batch-bar button.icon-button svg,
-.queue-tools button.icon-button svg {
+.batch-toolbar button.icon-button svg {
   width: 16px;
   height: 16px;
 }
 
-.queue-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 10px;
-}
+@media (max-width: 360px) {
+  .batch-toolbar {
+    justify-content: flex-start;
+  }
 
-.queue-tools button {
-  width: auto;
-  flex: 0 0 auto;
+  .batch-toolbar-secondary {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .topbar-icon {

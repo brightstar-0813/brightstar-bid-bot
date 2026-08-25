@@ -2853,7 +2853,7 @@ if (batchSkipBtn) setIconButton(batchSkipBtn, "skip", "Skip");
 if (batchStopBtn) setIconButton(batchStopBtn, "stop", "Stop");
 if (forceSaveChatgptBtn) setIconButton(forceSaveChatgptBtn, "save", "Save JSON");
 if (retryErrorsBtn) setIconButton(retryErrorsBtn, "retry", "Retry errors");
-if (clearJobsBtn) setIconButton(clearJobsBtn, "remove", "Clear");
+if (clearJobsBtn) setIconButton(clearJobsBtn, "remove", "Clear queue");
 if (resetBtn) setIconButton(resetBtn, "reset", "Reset");
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));

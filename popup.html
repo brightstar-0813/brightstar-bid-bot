@@ -449,17 +449,29 @@
             <span>Output folder (under Downloads)</span>
             <input id="outputDir" type="text" placeholder="Applications-Lewis" autocomplete="off" />
           </label>
-          <div class="batch-bar" role="toolbar" aria-label="Batch controls">
-            <button type="button" id="batchStart" class="primary icon-button" title="Start" aria-label="Start"></button>
-            <button type="button" id="batchPause" class="ghost icon-button" title="Pause" aria-label="Pause"></button>
-            <button type="button" id="batchSkip" class="ghost icon-button" title="Skip" aria-label="Skip"></button>
-            <button type="button" id="batchStop" class="ghost danger icon-button" title="Stop" aria-label="Stop"></button>
-          </div>
-          <div class="queue-tools" role="toolbar" aria-label="Queue tools">
-            <button type="button" id="forceSaveChatgpt" class="ghost icon-button" title="Save JSON" aria-label="Save JSON"></button>
-            <button type="button" id="retryErrors" class="ghost icon-button" title="Retry errors" aria-label="Retry errors"></button>
-            <button type="button" id="clearJobs" class="ghost danger icon-button" title="Clear" aria-label="Clear"></button>
-            <button type="button" id="reset" class="ghost icon-button" title="Reset" aria-label="Reset"></button>
+          <div class="batch-toolbar" role="toolbar" aria-label="Batch and queue controls">
+            <div class="batch-toolbar-cluster" role="group" aria-label="Run controls">
+              <div class="btn-group">
+                <button type="button" id="batchStart" class="primary icon-button" title="Start" aria-label="Start"></button>
+                <button type="button" id="batchPause" class="ghost icon-button" title="Pause" aria-label="Pause"></button>
+                <button type="button" id="batchSkip" class="ghost icon-button" title="Skip" aria-label="Skip"></button>
+              </div>
+              <span class="btn-group-sep" aria-hidden="true"></span>
+              <div class="btn-group">
+                <button type="button" id="batchStop" class="ghost danger icon-button" title="Stop" aria-label="Stop"></button>
+              </div>
+            </div>
+            <div class="batch-toolbar-cluster batch-toolbar-secondary" role="group" aria-label="Queue tools">
+              <div class="btn-group">
+                <button type="button" id="forceSaveChatgpt" class="ghost icon-button" title="Save JSON" aria-label="Save JSON"></button>
+                <button type="button" id="retryErrors" class="ghost icon-button" title="Retry errors" aria-label="Retry errors"></button>
+              </div>
+              <span class="btn-group-sep" aria-hidden="true"></span>
+              <div class="btn-group">
+                <button type="button" id="clearJobs" class="ghost danger icon-button" title="Clear queue" aria-label="Clear queue"></button>
+                <button type="button" id="reset" class="ghost icon-button" title="Reset" aria-label="Reset"></button>
+              </div>
+            </div>
           </div>
           <div id="queueList" class="queue-list">
             <div class="queue-empty">
