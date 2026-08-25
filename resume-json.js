@@ -3,7 +3,9 @@ import {
   missingCompaniesForRules,
   hasAllRequiredCompanies,
   formatRequiredEmployersList,
-  companyMatches
+  companyMatches,
+  cleanEmployerLabel,
+  looksLikeLocationLabel
 } from "./experience-rules.js";
 
 const EXPECTED_BULLET_COUNTS = [
@@ -41,14 +43,21 @@ export function setExperienceValidationRules(rulesOrInput) {
     return null;
   }
   if (rulesOrInput.roles && Array.isArray(rulesOrInput.roles)) {
-    activeExperienceRules = {
-      minJobs: Number(rulesOrInput.minJobs) || rulesOrInput.roles.length,
-      roles: rulesOrInput.roles.map((r) => ({
-        label: String(r.label || r.company || "").trim(),
+    const roles = rulesOrInput.roles
+      .map((r) => ({
+        label: cleanEmployerLabel(r.label || r.company || ""),
         min: Math.max(1, Number(r.min) || 1)
-      })).filter((r) => r.label)
+      }))
+      .filter((r) => r.label && !looksLikeLocationLabel(r.label));
+    if (!roles.length) {
+      activeExperienceRules = null;
+      return null;
+    }
+    // minJobs = employer slots only (ignore inflated mins from location junk).
+    activeExperienceRules = {
+      minJobs: roles.reduce((n, r) => n + r.min, 0),
+      roles
     };
-    if (!activeExperienceRules.roles.length) activeExperienceRules = null;
     return activeExperienceRules;
   }
   activeExperienceRules = compileExperienceRules(rulesOrInput);

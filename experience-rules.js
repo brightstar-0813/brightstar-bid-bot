@@ -12,11 +12,65 @@ function normalizeCompanyKey(value) {
     .replace(/\s+/g, " ");
 }
 
+/**
+ * True when a label is a place string (City, ST, USA) rather than an employer.
+ * Corrupted required-experience lists sometimes store locations; those must never
+ * drive validation retries.
+ */
+export function looksLikeLocationLabel(value) {
+  const s = String(value || "").trim();
+  if (!s) return true;
+  if (
+    /\b(inc\.?|llc|ltd\.?|corp\.?|co\.|international|academy|church|congregation|solutions|technologies|consulting|systems|software|group|partners|university|college)\b/i.test(
+      s
+    )
+  ) {
+    return false;
+  }
+  // "Rosemont, IL, USA" / "Grand Rapids, MI, United States"
+  if (/^[A-Za-z0-9 .'-]+,\s*[A-Z]{2}\b/.test(s)) return true;
+  if (
+    /^[A-Za-z0-9 .'-]+,\s*(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i.test(
+      s
+    )
+  ) {
+    return true;
+  }
+  if (/\bmetropolitan area\b/i.test(s)) return true;
+  if (
+    /\b(united states|usa|\busa\b|\bus\b)\b/i.test(s) &&
+    /,/.test(s) &&
+    !/\b(inc|llc|ltd|corp|international|academy|church)\b/i.test(s)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Strip "Company (City…) — title…" down to the employer name only. */
+export function cleanEmployerLabel(raw) {
+  let s = String(raw || "").trim();
+  if (!s) return "";
+  const withParen = s.match(/^(.+?)\s*\(([^)]{2,160})\)\s*(?:[—–\-|:].*)?$/);
+  if (withParen) {
+    const name = withParen[1].replace(/[,\s]+$/, "").trim();
+    const loc = withParen[2];
+    if (/\b(remote|hybrid|on-?site|united states|usa|area|,|\|)/i.test(loc)) {
+      s = name;
+    }
+  }
+  s = s
+    .replace(/\s*[—–\-]\s*(?:default title|title|senior|salesforce|apr|jan|feb|mar|may|jun|jul|aug|sep|oct|nov|dec).*$/i, "")
+    .trim();
+  return s;
+}
+
 /** True when a resume job.company covers a required employer label. */
 export function companyMatches(jobCompany, requiredLabel) {
   const a = normalizeCompanyKey(jobCompany);
   const b = normalizeCompanyKey(requiredLabel);
   if (!a || !b) return false;
+  if (looksLikeLocationLabel(jobCompany) || looksLikeLocationLabel(requiredLabel)) return false;
   if (a === b) return true;
   if (b.length >= 4 && a.includes(b)) return true;
   if (a.length >= 4 && b.includes(a)) return true;
@@ -34,8 +88,9 @@ export function normalizeRequiredExperienceInput(input) {
   if (input == null) return [];
 
   const pushExpanded = (label, min, out) => {
-    const name = String(label || "").trim();
+    const name = cleanEmployerLabel(label);
     if (!name || name.startsWith("#")) return;
+    if (looksLikeLocationLabel(name)) return;
     const n = Math.max(1, Math.min(12, Number(min) || 1));
     for (let i = 0; i < n; i += 1) out.push(name);
   };
