@@ -376,6 +376,13 @@ export function isIndeedJob({ jdLink = "" } = {}) {
 }
 
 /**
+ * Jobright.ai postings.
+ */
+export function isJobrightJob({ jdLink = "" } = {}) {
+  return /(^|\.)jobright\.ai$/i.test(jobLinkHost(jdLink));
+}
+
+/**
  * MyWorkday / Workday career-site application URLs.
  */
 export function isWorkdayJob({ jdLink = "" } = {}) {
@@ -386,22 +393,23 @@ export function isWorkdayJob({ jdLink = "" } = {}) {
 /**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
- * @returns {"all"|"dice"|"linkedin"|"indeed"|"etc"}
+ * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"etc"}
  */
 export function normalizeChannelFilter(filter) {
   const mode = String(filter || "dice").toLowerCase();
   if (mode === "all") return "all";
   if (mode === "linkedin" || mode === "li") return "linkedin";
   if (mode === "indeed") return "indeed";
+  if (mode === "jobright" || mode === "jr") return "jobright";
   if (mode === "dice") return "dice";
-  // Legacy "general" and unknown → Etc (not Dice, LI, or Indeed)
+  // Legacy "general" and unknown → Etc (not Dice, LI, Indeed, or Jobright)
   if (mode === "etc" || mode === "general" || mode === "other") return "etc";
   return "dice";
 }
 
 /**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"indeed"|"dice"|"etc"} filter
+ * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"dice"|"etc"} filter
  */
 export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
@@ -416,8 +424,13 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   if (mode === "indeed") {
     return list.filter((j) => isIndeedJob(j));
   }
-  // etc = not Dice, LinkedIn, or Indeed by URL
-  return list.filter((j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j));
+  if (mode === "jobright") {
+    return list.filter((j) => isJobrightJob(j));
+  }
+  // etc = not Dice, LinkedIn, Indeed, or Jobright by URL
+  return list.filter(
+    (j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j) && !isJobrightJob(j)
+  );
 }
 
 /**
@@ -488,6 +501,7 @@ export function parseJobsCsv(csvText) {
     const linkedIn = isLinkedInJob({ jdLink });
     const dice = isDiceJob({ jdLink });
     const indeed = isIndeedJob({ jdLink });
+    const jobright = isJobrightJob({ jdLink });
 
     usJobs.push({
       csvRow,
@@ -498,10 +512,21 @@ export function parseJobsCsv(csvText) {
       location,
       remoteRestrictedTo,
       salary,
-      source: source || (linkedIn ? "linkedin" : dice ? "dice" : indeed ? "indeed" : "general"),
+      source:
+        source ||
+        (linkedIn
+          ? "linkedin"
+          : dice
+            ? "dice"
+            : indeed
+              ? "indeed"
+              : jobright
+                ? "jobright"
+                : "general"),
       isLinkedIn: linkedIn,
       isDice: dice,
       isIndeed: indeed,
+      isJobright: jobright,
       status: "pending"
     });
   }
@@ -513,8 +538,13 @@ export function parseJobsCsv(csvText) {
     linkedInCount: usJobs.filter((j) => j.isLinkedIn).length,
     diceCount: usJobs.filter((j) => j.isDice).length,
     indeedCount: usJobs.filter((j) => j.isIndeed).length,
-    etcCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice && !j.isIndeed).length,
+    jobrightCount: usJobs.filter((j) => j.isJobright).length,
+    etcCount: usJobs.filter(
+      (j) => !j.isLinkedIn && !j.isDice && !j.isIndeed && !j.isJobright
+    ).length,
     /** @deprecated use etcCount — kept for older UI strings */
-    generalCount: usJobs.filter((j) => !j.isLinkedIn && !j.isDice && !j.isIndeed).length
+    generalCount: usJobs.filter(
+      (j) => !j.isLinkedIn && !j.isDice && !j.isIndeed && !j.isJobright
+    ).length
   };
 }

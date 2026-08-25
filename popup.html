@@ -353,7 +353,7 @@
             <span class="step" aria-hidden="true">4</span>
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
-              <p class="section-sub">CSV or Indeed grab → review/remove → Start</p>
+              <p class="section-sub">CSV load → review/remove → Start</p>
             </div>
             <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
           </header>
@@ -428,7 +428,11 @@
               <button type="button" class="channel-btn" id="filterLinkedIn" data-filter="linkedin" title="LinkedIn-hosted jobs">
                 LI
               </button>
-              <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed / Apply-on-Indeed">
+              <button type="button" class="channel-btn" id="filterJobright" data-filter="jobright" title="Jobright.ai jobs">
+                Jobright
+              </button>
+              <!-- Indeed filter kept in DOM but hidden — auto-apply not supported right now -->
+              <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed / Apply-on-Indeed" hidden>
                 Indeed
               </button>
               <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards">
@@ -440,7 +444,7 @@
             </div>
           </div>
           <p class="hint" id="diceInterleaveHint">
-            Dice / hosted Indeed: build → autofill → Submit → next. External Indeed ATS links are never submitted.
+            Dice / Workday: build → autofill → Submit → next. External ATS links are never auto-submitted.
           </p>
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No jobs loaded</span>
@@ -476,7 +480,7 @@
           <div id="queueList" class="queue-list">
             <div class="queue-empty">
               <p>Queue is empty</p>
-              <span>Grab a job from Indeed or upload a CSV, then review before Start</span>
+              <span>Upload a CSV, then review before Start</span>
             </div>
           </div>
         </section>
@@ -525,8 +529,8 @@
           </div>
         </section>
 
-        <!-- Indeed -->
-        <section class="section section-indeed" id="indeedSection">
+        <!-- Indeed (hidden — auto-apply not supported; code kept for later) -->
+        <section class="section section-indeed" id="indeedSection" hidden aria-hidden="true">
           <header class="section-header">
             <span class="step" aria-hidden="true">6</span>
             <div class="section-copy">
@@ -573,7 +577,7 @@
           </div>
           <p class="hint">
             Autofill fills the current step. Auto Apply walks Next/Continue and stops before Submit.
-            Batch Dice / hosted Indeed can auto-submit after files are built.
+            Batch Dice / Workday can auto-submit after files are built.
           </p>
           <div class="qa-bank-block">
             <div class="qa-bank-head">

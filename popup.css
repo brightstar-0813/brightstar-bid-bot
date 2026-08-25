@@ -1170,6 +1170,15 @@ input[type="file"]::file-selector-button {
   border-color: rgba(125, 211, 252, 0.28);
 }
 
+.section-indeed[hidden] {
+  display: none !important;
+}
+
+.badge-jobright {
+  background: #14532d;
+  color: #86efac;
+}
+
 .workflow-steps {
   display: flex;
   flex-wrap: wrap;

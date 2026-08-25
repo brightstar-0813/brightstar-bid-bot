@@ -29,6 +29,7 @@ import {
   isLinkedInJob,
   isDiceJob,
   isIndeedJob,
+  isJobrightJob,
   normalizeChannelFilter
 } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
@@ -462,6 +463,7 @@ const retryErrorsBtn = document.getElementById("retryErrors");
 const filterDiceBtn = document.getElementById("filterDice");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
 const filterIndeedBtn = document.getElementById("filterIndeed");
+const filterJobrightBtn = document.getElementById("filterJobright");
 const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
 const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
@@ -1131,12 +1133,14 @@ async function loadSettings() {
   setStatus(data.generation_status || "");
 
   channelFilter = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
+  if (channelFilter === "indeed") channelFilter = DEFAULT_CHANNEL_FILTER;
   allUsJobsCache = Array.isArray(data[ALL_US_JOBS_KEY])
     ? data[ALL_US_JOBS_KEY].map((j) => ({
         ...j,
         isLinkedIn: isLinkedInJob(j),
         isDice: isDiceJob(j),
-        isIndeed: isIndeedJob(j)
+        isIndeed: isIndeedJob(j),
+        isJobright: isJobrightJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -1168,7 +1172,8 @@ async function hydrateJobDirsInUi() {
       ...j,
       isLinkedIn: isLinkedInJob(j),
       isDice: isDiceJob(j),
-      isIndeed: isIndeedJob(j)
+      isIndeed: isIndeedJob(j),
+      isJobright: isJobrightJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -1189,9 +1194,9 @@ function updateCsvSummaryFromQueue() {
   }
   const liTotal = allUsJobsCache.filter((j) => isLinkedInJob(j)).length;
   const diceTotal = allUsJobsCache.filter((j) => isDiceJob(j)).length;
-  const indeedTotal = allUsJobsCache.filter((j) => isIndeedJob(j)).length;
+  const jobrightTotal = allUsJobsCache.filter((j) => isJobrightJob(j)).length;
   const etcTotal = allUsJobsCache.filter(
-    (j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j)
+    (j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j) && !isJobrightJob(j)
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
@@ -1200,6 +1205,8 @@ function updateCsvSummaryFromQueue() {
   const filterLabel =
     channelFilter === "linkedin"
       ? "LI only"
+      : channelFilter === "jobright"
+        ? "Jobright only"
       : channelFilter === "indeed"
         ? "Indeed only"
       : channelFilter === "dice"
@@ -1218,7 +1225,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Indeed ${indeedTotal} · Etc ${etcTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -1227,6 +1234,7 @@ function syncChannelFilterButtons() {
   const map = {
     dice: filterDiceBtn,
     linkedin: filterLinkedInBtn,
+    jobright: filterJobrightBtn,
     indeed: filterIndeedBtn,
     etc: filterEtcBtn,
     all: filterAllBtn
@@ -1272,7 +1280,10 @@ function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
 }
 
 async function applyChannelFilter(nextFilter, { persist = true } = {}) {
-  channelFilter = normalizeChannelFilter(nextFilter || DEFAULT_CHANNEL_FILTER);
+  let mode = normalizeChannelFilter(nextFilter || DEFAULT_CHANNEL_FILTER);
+  // Indeed filter is hidden in the UI — migrate any saved selection.
+  if (mode === "indeed") mode = DEFAULT_CHANNEL_FILTER;
+  channelFilter = mode;
   syncChannelFilterButtons();
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   const person = await getActivePerson().catch(() => null);
@@ -1291,10 +1302,10 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
       ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
       : channelFilter === "linkedin"
         ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
-        : channelFilter === "indeed"
-          ? `Showing Indeed jobs — ${queueCache.length} in queue.`
+        : channelFilter === "jobright"
+          ? `Showing Jobright jobs — ${queueCache.length} in queue.`
         : channelFilter === "etc"
-          ? `Showing Etc (not Dice, LI, or Indeed) — ${queueCache.length} in queue.`
+          ? `Showing Etc (not Dice, LI, Jobright, or Indeed) — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
   );
 }
@@ -1414,7 +1425,7 @@ function renderQueue() {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
     empty.innerHTML =
-      "<p>Queue is empty</p><span>Grab a job from Indeed or upload a CSV, then review before Start</span>";
+      "<p>Queue is empty</p><span>Upload a CSV, then review before Start</span>";
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     return;
@@ -1486,6 +1497,12 @@ function renderQueue() {
       indeedBadge.className = "badge badge-indeed";
       indeedBadge.textContent = "Indeed";
       badges.appendChild(indeedBadge);
+    }
+    if (isJobrightJob(job)) {
+      const jrBadge = document.createElement("span");
+      jrBadge.className = "badge badge-jobright";
+      jrBadge.textContent = "Jobright";
+      badges.appendChild(jrBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
@@ -2723,6 +2740,9 @@ filterDiceBtn?.addEventListener("click", () => {
 });
 filterLinkedInBtn?.addEventListener("click", () => {
   applyChannelFilter("linkedin").catch((e) => setStatus(String(e.message || e)));
+});
+filterJobrightBtn?.addEventListener("click", () => {
+  applyChannelFilter("jobright").catch((e) => setStatus(String(e.message || e)));
 });
 filterIndeedBtn?.addEventListener("click", () => {
   applyChannelFilter("indeed").catch((e) => setStatus(String(e.message || e)));
