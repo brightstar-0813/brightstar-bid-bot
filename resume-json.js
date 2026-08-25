@@ -544,6 +544,21 @@ export function sanitizeResumeData(data) {
       .filter((line) => !isKeywordStubBullet(line));
   }
 
+  if (Array.isArray(out.certifications)) {
+    out.certifications = out.certifications
+      .map((c) => {
+        if (c == null) return "";
+        if (typeof c === "string" || typeof c === "number") return String(c).trim();
+        if (typeof c === "object") {
+          return String(
+            c.name || c.title || c.certification || c.label || c.credential || c.text || ""
+          ).trim();
+        }
+        return "";
+      })
+      .filter(Boolean);
+  }
+
   if (Array.isArray(out.experience)) {
     out.experience = out.experience.map((job) => {
       if (!job || typeof job !== "object") return job;

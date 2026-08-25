@@ -7,6 +7,29 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+/**
+ * Certifications may arrive as strings or as objects ({ name, title, ... }).
+ * Always return a displayable label — never "[object Object]".
+ */
+export function certLabel(cert) {
+  if (cert == null) return "";
+  if (typeof cert === "string" || typeof cert === "number") {
+    return String(cert).trim();
+  }
+  if (typeof cert === "object") {
+    const label =
+      cert.name ||
+      cert.title ||
+      cert.certification ||
+      cert.label ||
+      cert.credential ||
+      cert.text ||
+      "";
+    return String(label).trim();
+  }
+  return "";
+}
+
 function cleanEmail(value) {
   // Prefer the visible label for [email](mailto:email); fall back to mailto target.
   const raw = String(value || "").trim();
@@ -103,8 +126,11 @@ ${rows.join("\n")}
 
 export function renderCerts(certs, { listClass = "certifications" } = {}) {
   const items = (certs || [])
+    .map((c) => certLabel(c))
+    .filter(Boolean)
     .map((c) => `<li>${escapeHtml(c)}</li>`)
     .join("\n");
+  if (!items) return "";
   return `<ul class="${listClass}">${items}</ul>`;
 }
 
@@ -191,7 +217,7 @@ const CERT_BADGE_DEFS = [
 ];
 
 function resolveCertBadge(certText) {
-  const text = String(certText || "").trim();
+  const text = certLabel(certText);
   if (!text) return null;
   for (const def of CERT_BADGE_DEFS) {
     if (def.match.test(text)) {
