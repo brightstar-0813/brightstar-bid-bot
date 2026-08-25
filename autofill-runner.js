@@ -35,7 +35,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-25.01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-26.01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -1041,17 +1041,28 @@ async function loadFormHistory(applicantInfo = {}) {
   };
 }
 
+function applySiteLabel(site) {
+  if (site === "indeed") return "Indeed";
+  if (site === "dice") return "Dice";
+  if (site === "workday") return "Workday";
+  return "application";
+}
+
 function pickBestApplyAction(frameResults = []) {
   const rank = { next: 1, review: 2, entry: 3, submit: 4 };
   let best = null;
+  let workdayWizard = null;
   for (const f of frameResults) {
+    if (f?.workdayWizard && !workdayWizard) workdayWizard = f.workdayWizard;
     if (!f?.action?.type) continue;
     const cand = {
       frameId: f.frameId,
       action: f.action,
       signature: f.signature || "",
       href: f.href || "",
-      isApplicationForm: Boolean(f.isApplicationForm)
+      isApplicationForm: Boolean(f.isApplicationForm),
+      workdayWizard: f.workdayWizard || null,
+      fillableCount: Number(f.fillableCount || 0)
     };
     if (!best) {
       best = cand;
@@ -1067,9 +1078,19 @@ function pickBestApplyAction(frameResults = []) {
     if (cand.action.type === "entry" && best.action.type === "submit") {
       continue;
     }
+    // Workday Review: prefer Submit even if another frame still shows Next.
+    if (
+      cand.workdayWizard?.isReview &&
+      cand.action.type === "submit" &&
+      best.action.type !== "submit"
+    ) {
+      best = cand;
+      continue;
+    }
     if (cr < br) best = cand;
     else if (cr === br && cand.isApplicationForm && !best.isApplicationForm) best = cand;
   }
+  if (best?.workdayWizard) workdayWizard = best.workdayWizard;
   return {
     best,
     anyForm: frameResults.some((f) => f?.isApplicationForm),
@@ -1082,7 +1103,13 @@ function pickBestApplyAction(frameResults = []) {
       frameResults.find((f) => f?.applySuccess && f?.applySuccessText)?.applySuccessText || "",
     applyUrls: [...new Set(frameResults.flatMap((f) => f?.applyUrls || []).filter(Boolean))],
     signature: best?.signature || frameResults[0]?.signature || "",
-    href: best?.href || frameResults[0]?.href || ""
+    href: best?.href || frameResults[0]?.href || "",
+    workdayWizard,
+    fillableCount: Number(
+      best?.fillableCount ??
+        frameResults.find((f) => f?.fillableCount != null)?.fillableCount ??
+        0
+    )
   };
 }
 
@@ -1619,11 +1646,12 @@ export async function startMultiStepApplyOnTab(
 
   let currentTabId = tab.id;
   const initialSite = applySiteFromUrl(tab.url || "");
-  const stepBudget =
-    initialSite === "workday" ? Math.max(Number(maxSteps) || 12, 20) : Number(maxSteps) || 12;
+  let stepBudget =
+    initialSite === "workday" ? Math.max(Number(maxSteps) || 12, 16) : Number(maxSteps) || 12;
   const effectiveAutoSubmit =
     Boolean(autoSubmit) &&
     (initialSite === "dice" || initialSite === "indeed" || initialSite === "workday");
+  const siteLabel = applySiteLabel(initialSite);
   const summary = {
     ok: true,
     steps: 0,
@@ -1643,6 +1671,7 @@ export async function startMultiStepApplyOnTab(
   };
 
   let noAdvance = 0;
+  let workdayStepHint = "";
 
   for (let step = 0; step < stepBudget; step += 1) {
     const currentTab = await chrome.tabs.get(currentTabId).catch(() => null);
@@ -1657,7 +1686,10 @@ export async function startMultiStepApplyOnTab(
       summary.tabUrl = currentTab?.url || summary.tabUrl;
       return summary;
     }
-    await setApplyStatus(`Apply: step ${step + 1}/${stepBudget} — checking page...`);
+    const stepLabel = workdayStepHint
+      ? `${siteLabel} · ${workdayStepHint}`
+      : siteLabel;
+    await setApplyStatus(`Apply: ${stepLabel} (${step + 1}/${stepBudget}) — checking page...`);
     await ensureAutofillScript(currentTabId);
 
     let probe = await getApplyActionFromTab(currentTabId).catch(() => ({
@@ -1695,6 +1727,16 @@ export async function startMultiStepApplyOnTab(
       summary.detail = probe.blockedReason;
       summary.tabId = currentTabId;
       return summary;
+    }
+
+    if (probe.workdayWizard) {
+      workdayStepHint = probe.workdayWizard.current || workdayStepHint;
+      // Cap the loop to what this employer actually shows (+ room for account/auth).
+      const detected = Number(probe.workdayWizard.stepCount || 0);
+      if (detected > 0) {
+        const adaptive = Math.min(22, Math.max(detected + 5, 8));
+        if (adaptive < stepBudget) stepBudget = adaptive;
+      }
     }
 
     if (!probe.anyForm && (!probe.best || probe.best.action.type === "entry")) {
@@ -1800,7 +1842,10 @@ export async function startMultiStepApplyOnTab(
       }
     }
 
-    await setApplyStatus(`Apply: step ${step + 1}/${stepBudget} — filling form...`);
+    const fillStepLabel = workdayStepHint
+      ? `${siteLabel} · ${workdayStepHint}`
+      : siteLabel;
+    await setApplyStatus(`Apply: ${fillStepLabel} (${step + 1}/${stepBudget}) — filling form...`);
     const fillRes = await startAutofillOnTab(currentTabId, applyHint);
     summary.filled += Number(fillRes?.filledCount || 0);
     summary.filledCount = summary.filled;
@@ -1817,12 +1862,34 @@ export async function startMultiStepApplyOnTab(
     summary.tabUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || summary.tabUrl;
 
     probe = await getApplyActionFromTab(currentTabId).catch(() => ({ best: null, anyForm: false }));
+    if (probe.workdayWizard?.current) {
+      workdayStepHint = probe.workdayWizard.current;
+    }
 
     if (probe.applySuccess) {
       summary.status = "submitted";
       summary.detail = probe.applySuccessText || "Your application is on its way";
       summary.tabId = currentTabId;
       return summary;
+    }
+
+    // Workday Review (including short wizards) paints Submit after fill — wait briefly.
+    if (
+      (!probe.best || (probe.workdayWizard?.isReview && probe.best.action?.type !== "submit")) &&
+      probe.anyForm
+    ) {
+      for (let retry = 0; retry < 8 && !(probe.best?.action?.type === "submit"); retry += 1) {
+        await sleep(450 + retry * 100);
+        probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+        if (probe.workdayWizard?.current) workdayStepHint = probe.workdayWizard.current;
+        if (probe.applySuccess) {
+          summary.status = "submitted";
+          summary.detail = probe.applySuccessText || "Your application is on its way";
+          summary.tabId = currentTabId;
+          return summary;
+        }
+        if (probe.best && !probe.workdayWizard?.isReview) break;
+      }
     }
 
     // Dice review step paints sticky footer Submit slightly after fill completes.
@@ -1906,7 +1973,7 @@ export async function startMultiStepApplyOnTab(
           }
           summary.status = "needs_review";
           summary.detail =
-            `Submit was clicked but the ${initialSite === "indeed" ? "Indeed" : "Dice"} success screen was not detected. Confirm in the tab, then click Start.`;
+            `Submit was clicked but the ${siteLabel} success screen was not detected. Confirm in the tab, then click Start.`;
           summary.tabId = currentTabId;
           return summary;
         }
@@ -1931,6 +1998,18 @@ export async function startMultiStepApplyOnTab(
     const prevUrl = live?.url || "";
     const prevSig = probe.signature || "";
     const actionType = probe.best.action.type;
+
+    // Empty optional Workday pages (no fields): advance quickly instead of over-filling.
+    if (
+      initialSite === "workday" &&
+      actionType === "next" &&
+      Number(probe.fillableCount || 0) === 0 &&
+      Number(fillRes?.filledCount || 0) === 0
+    ) {
+      await setApplyStatus(
+        `Apply: ${siteLabel}${workdayStepHint ? ` · ${workdayStepHint}` : ""} — empty step, continuing…`
+      );
+    }
 
     await setApplyStatus(`Apply: clicking ${probe.best.action.text || actionType}...`);
     const clickRes = await sendMessageToTab(
@@ -1985,7 +2064,7 @@ export async function startMultiStepApplyOnTab(
           }
           summary.status = "needs_review";
           summary.detail =
-            `Submit was clicked but the ${initialSite === "indeed" ? "Indeed" : "Dice"} success screen was not detected. Confirm in the tab, then click Start.`;
+            `Submit was clicked but the ${siteLabel} success screen was not detected. Confirm in the tab, then click Start.`;
           return summary;
         }
         summary.status = "needs_review";

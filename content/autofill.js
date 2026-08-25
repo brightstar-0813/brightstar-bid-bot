@@ -4046,7 +4046,17 @@
   ) {
     suppressLearn();
     const filled = [];
-    const historyFilled = await fillHistorySections(history.workHistory, history.educationHistory);
+    const wd = isWorkdayPage() ? detectWorkdayWizardState() : null;
+    // Only run experience/education fillers on pages that actually have them.
+    // Short Workday flows (My Info → Questions → Review) must not hunt for Add Job.
+    const shouldFillHistory =
+      !wd ||
+      wd.isExperience ||
+      wd.isEducation ||
+      looksLikeHistoryForm();
+    const historyFilled = shouldFillHistory
+      ? await fillHistorySections(history.workHistory, history.educationHistory)
+      : [];
     for (const row of historyFilled) filled.push(row);
 
     const controls = collectFillableControls();
@@ -4084,7 +4094,11 @@
       }
     }
 
-    const uploadResult = await uploadApplicationFiles(uploadFiles);
+    // Review pages rarely need uploads; skip file UI hunting there.
+    const uploadResult =
+      wd?.isReview && !collectFileInputs().length && !findUploadCards().length
+        ? { uploadedCount: 0, uploaded: [], skipped: [] }
+        : await uploadApplicationFiles(uploadFiles);
     const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
     const unmatchedChoiceQuestions = collectUnmatchedChoiceQuestions();
 
@@ -4098,7 +4112,8 @@
       uploaded: uploadResult.uploaded,
       uploadSkipped: uploadResult.skipped,
       unmatchedQuestions,
-      unmatchedChoiceQuestions
+      unmatchedChoiceQuestions,
+      workdayWizard: wd
     };
   }
 
@@ -4187,6 +4202,121 @@
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Workday wizards vary by employer: some are My Info → Review → Submit;
+   * others add Experience, Questions, Voluntary Disclosures, Self Identify.
+   * Detect whatever progress/heading is actually on screen — never assume a fixed path.
+   */
+  function detectWorkdayWizardState() {
+    if (!isWorkdayPage()) return null;
+
+    const STEP_NAME_RE =
+      /\b(my information|personal information|contact information|my experience|work experience|experience|education|application questions|questions|voluntary disclosures?|self[- ]?identify|review|account information|create account|sign in)\b/i;
+
+    const normalizeStep = (raw) => {
+      const t = cleanLabelText(raw || "");
+      if (!t || t.length > 90) return "";
+      const m = t.match(STEP_NAME_RE);
+      if (!m) return "";
+      const key = m[1].toLowerCase();
+      if (/create account|sign in|account information/.test(key)) return "Account";
+      if (/my information|personal information|contact information/.test(key)) return "My Information";
+      if (/my experience|work experience|^experience$/.test(key)) return "My Experience";
+      if (/^education$/.test(key)) return "Education";
+      if (/application questions|^questions$/.test(key)) return "Application Questions";
+      if (/voluntary/.test(key)) return "Voluntary Disclosures";
+      if (/self/.test(key)) return "Self Identify";
+      if (/review/.test(key)) return "Review";
+      return m[1];
+    };
+
+    const steps = [];
+    const seen = new Set();
+    const pushStep = (label) => {
+      const n = normalizeStep(label);
+      if (!n || seen.has(n)) return;
+      seen.add(n);
+      steps.push(n);
+    };
+
+    for (const el of queryAllDeep(
+      [
+        '[data-automation-id*="progress"]',
+        '[data-automation-id*="Progress"]',
+        '[data-automation-id*="wizard"]',
+        '[data-automation-id*="step"]',
+        '[aria-current="step"]',
+        '[aria-current="page"]',
+        'nav li',
+        '[role="listitem"]',
+        '[role="navigation"] button',
+        '[role="navigation"] a'
+      ].join(", ")
+    )) {
+      if (!isElVisible(el) && el.getAttribute?.("aria-current") == null) continue;
+      pushStep(el.textContent || el.getAttribute?.("aria-label") || "");
+    }
+
+    const headingEl =
+      document.querySelector('[data-automation-id="pageHeaderTitleText"]') ||
+      document.querySelector('[data-automation-id*="pageHeader"]') ||
+      document.querySelector("h1, h2, [role='heading']");
+    const heading = cleanLabelText(headingEl?.textContent || "");
+    const headingStep = normalizeStep(heading);
+
+    let current = "";
+    const currentEl = queryAllDeep('[aria-current="step"], [aria-current="page"]').find((el) =>
+      STEP_NAME_RE.test(el.textContent || el.getAttribute?.("aria-label") || "")
+    );
+    if (currentEl) current = normalizeStep(currentEl.textContent || currentEl.getAttribute("aria-label"));
+    if (!current && headingStep) current = headingStep;
+    if (!current) {
+      const path = String(location.pathname || "");
+      if (/\/review/i.test(path)) current = "Review";
+      else if (/\/experience/i.test(path)) current = "My Experience";
+      else if (/\/education/i.test(path)) current = "Education";
+      else if (/\/questions?/i.test(path)) current = "Application Questions";
+      else if (/\/voluntary/i.test(path)) current = "Voluntary Disclosures";
+      else if (/\/self.?ident/i.test(path)) current = "Self Identify";
+      else if (/\/(myInfo|my.?information|personal)/i.test(path)) current = "My Information";
+    }
+    if (headingStep && !seen.has(headingStep)) pushStep(headingStep);
+    if (current && !seen.has(current)) pushStep(current);
+
+    const isReview =
+      current === "Review" ||
+      /review/i.test(heading) ||
+      /\/review(?:\/|$|\?)/i.test(location.pathname);
+    const isAuth =
+      current === "Account" ||
+      /create account|sign in|log in|register/i.test(heading) ||
+      (Boolean(
+        document.querySelector(
+          'input[type="password"], [data-automation-id*="password"], [name*="password" i]'
+        )
+      ) &&
+        /create account|sign in|log in|register|account/i.test(
+          document.body?.innerText?.slice(0, 2000) || ""
+        ));
+    const isExperience = current === "My Experience" || /experience/i.test(current || "");
+    const isEducation = current === "Education";
+    const isMyInfo = current === "My Information";
+
+    return {
+      current: current || headingStep || "",
+      heading,
+      steps,
+      stepCount: steps.length || (current ? 1 : 0),
+      isReview,
+      isAuth,
+      isExperience,
+      isEducation,
+      isMyInfo,
+      // Short flows often jump to Review after My Information / Questions only.
+      isSimpleFlow: steps.length > 0 && steps.length <= 4
+    };
   }
 
   function applyPageSite(url = location.href) {
@@ -4538,7 +4668,16 @@
     /\b(easy apply|1-?click apply|one-?click apply|quick apply|continue(\s+your)?\s+application|apply with|apply now|apply)\b/i;
 
   const ACTION_CONTROL_SEL =
-    'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"], a[class*="btn"], a[class*="button"], [class*="btn"][class*="submit"], [data-testid*="submit"], [data-testid*="continue"], [data-testid*="apply"], [data-cy*="submit"], [data-qa*="submit"], #indeedApplyButton';
+    'button, [role="button"], input[type="submit"], input[type="button"], a[role="button"], a[class*="btn"], a[class*="button"], [class*="btn"][class*="submit"], [data-testid*="submit"], [data-testid*="continue"], [data-testid*="apply"], [data-cy*="submit"], [data-qa*="submit"], #indeedApplyButton, [data-automation-id*="next"], [data-automation-id*="Next"], [data-automation-id*="submit"], [data-automation-id*="Submit"], [data-automation-id*="bottom-navigation"]';
+
+  function workdayAutomationAction(el) {
+    if (!(el instanceof Element)) return null;
+    const autoId = String(el.getAttribute?.("data-automation-id") || "");
+    if (!autoId) return null;
+    if (/submit/i.test(autoId)) return "submit";
+    if (/next|continue|saveAndContinue|bottom-navigation-next/i.test(autoId)) return "next";
+    return null;
+  }
 
   function elActionText(el) {
     if (!el) return "";
@@ -4635,6 +4774,7 @@
    * Pick the forward action.
    * If Next/Continue exists, advance; only treat Submit/Apply as final when
    * there is no Next button (final page of a multi-step form).
+   * Workday Review (including short My-Info→Review flows): prefer Submit.
    *
    * Dice keeps Submit in a sticky footer outside the densest form card.
    * getApplyScope() often picks that card (lots of inputs/buttons) and excludes
@@ -4654,7 +4794,13 @@
       for (const el of queryAllDeep("a", scopeEl)) {
         if (seen.has(el) || !isElVisible(el)) continue;
         const text = elActionText(el);
-        if (!classifyActionButton(text) && !looksLikeSubmitControl(el, text)) continue;
+        if (
+          !classifyActionButton(text) &&
+          !looksLikeSubmitControl(el, text) &&
+          !workdayAutomationAction(el)
+        ) {
+          continue;
+        }
         seen.add(el);
         buttons.push(el);
       }
@@ -4664,9 +4810,12 @@
       let submit = null;
       for (const btn of buttons) {
         const text = elActionText(btn);
+        const autoCls = workdayAutomationAction(btn);
         // Keep disabled Submit visible in the snapshot (Dice enables it late);
         // skip other disabled controls.
-        if (!isElEnabled(btn) && !looksLikeSubmitControl(btn, text)) continue;
+        if (!isElEnabled(btn) && !looksLikeSubmitControl(btn, text) && autoCls !== "submit") {
+          continue;
+        }
         if (!text && looksLikeSubmitControl(btn, text)) {
           if (!submit) submit = { type: "submit", el: btn, text: "Submit" };
           continue;
@@ -4674,8 +4823,8 @@
         if (EASY_BACK_RE.test(text) && !EASY_NEXT_RE.test(text) && !EASY_SUBMIT_RE.test(text)) {
           continue;
         }
-        const cls = classifyActionButton(text);
-        if (cls === "next" && !next) next = { type: "next", el: btn, text };
+        const cls = autoCls || classifyActionButton(text);
+        if (cls === "next" && !next) next = { type: "next", el: btn, text: text || "Next" };
         else if (cls === "review" && !review) review = { type: "review", el: btn, text };
         else if ((cls === "submit" || looksLikeSubmitControl(btn, text)) && !submit) {
           submit = { type: "submit", el: btn, text: text || "Submit" };
@@ -4686,9 +4835,15 @@
 
     const scopedRoot = scope || getApplyScope();
     const primary = collectFrom(scopedRoot);
-    // Bug fix: previously `scope && …` meant the no-arg call never left the
-    // dense card, so sticky footer Submit was invisible to the runner.
     const docWide = scopedRoot === document ? primary : collectFrom(document);
+    const wd = isWorkdayPage() ? detectWorkdayWizardState() : null;
+
+    // Short / review Workday flows: Submit is the real forward action.
+    if (wd?.isReview) {
+      if (primary.submit) return primary.submit;
+      if (docWide.submit) return docWide.submit;
+    }
+
     // Prefer scoped Next/Continue, but never miss a document-level Submit on Dice.
     if (primary.next) return primary.next;
     if (docWide.next) return docWide.next;
@@ -4857,12 +5012,14 @@
       scope.querySelector?.('h1, h2, h3, [role="heading"], legend')?.textContent || ""
     );
     const fields = queryAllDeep("input, textarea, select", scope).length || 0;
-    return `${location.href}|${heading}|${fields}`;
+    const wd = isWorkdayPage() ? detectWorkdayWizardState()?.current || "" : "";
+    return `${location.href}|${wd}|${heading}|${fields}`;
   }
 
   function getApplyActionSnapshot() {
     const probe = probeApplicationForm();
     const success = detectApplySuccess();
+    const workdayWizard = isWorkdayPage() ? detectWorkdayWizardState() : null;
     let action = findActionButton();
     // On a job listing (not the form yet), "Apply" / "Apply now" is an entry
     // control — not the final submit. Remap so the SW can click through.
@@ -4878,6 +5035,8 @@
       signature: stepSignature(),
       isApplicationForm: Boolean(probe.isApplicationForm),
       site: applyPageSite(),
+      workdayWizard,
+      fillableCount: Number(probe.fillableCount || 0),
       blockedReason: probe.blockedReason || "",
       validationReason: probe.validationReason || "",
       jobUnavailable: probe.jobUnavailable || "",
