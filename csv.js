@@ -393,7 +393,7 @@ export function isWorkdayJob({ jdLink = "" } = {}) {
 /**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
- * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"etc"}
+ * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"etc"}
  */
 export function normalizeChannelFilter(filter) {
   const mode = String(filter || "dice").toLowerCase();
@@ -401,15 +401,16 @@ export function normalizeChannelFilter(filter) {
   if (mode === "linkedin" || mode === "li") return "linkedin";
   if (mode === "indeed") return "indeed";
   if (mode === "jobright" || mode === "jr") return "jobright";
+  if (mode === "workday" || mode === "wd") return "workday";
   if (mode === "dice") return "dice";
-  // Legacy "general" and unknown → Etc (not Dice, LI, Indeed, or Jobright)
+  // Legacy "general" and unknown → Etc (not Dice, LI, Indeed, Jobright, or Workday)
   if (mode === "etc" || mode === "general" || mode === "other") return "etc";
   return "dice";
 }
 
 /**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"dice"|"etc"} filter
+ * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"dice"|"etc"} filter
  */
 export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
@@ -427,9 +428,17 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   if (mode === "jobright") {
     return list.filter((j) => isJobrightJob(j));
   }
-  // etc = not Dice, LinkedIn, Indeed, or Jobright by URL
+  if (mode === "workday") {
+    return list.filter((j) => isWorkdayJob(j));
+  }
+  // etc = not Dice, LinkedIn, Indeed, Jobright, or Workday by URL
   return list.filter(
-    (j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j) && !isJobrightJob(j)
+    (j) =>
+      !isDiceJob(j) &&
+      !isLinkedInJob(j) &&
+      !isIndeedJob(j) &&
+      !isJobrightJob(j) &&
+      !isWorkdayJob(j)
   );
 }
 
@@ -502,6 +511,7 @@ export function parseJobsCsv(csvText) {
     const dice = isDiceJob({ jdLink });
     const indeed = isIndeedJob({ jdLink });
     const jobright = isJobrightJob({ jdLink });
+    const workday = isWorkdayJob({ jdLink });
 
     usJobs.push({
       csvRow,
@@ -522,14 +532,21 @@ export function parseJobsCsv(csvText) {
               ? "indeed"
               : jobright
                 ? "jobright"
-                : "general"),
+                : workday
+                  ? "workday"
+                  : "general"),
       isLinkedIn: linkedIn,
       isDice: dice,
       isIndeed: indeed,
       isJobright: jobright,
+      isWorkday: workday,
       status: "pending"
     });
   }
+
+  const etcJobs = usJobs.filter(
+    (j) => !j.isLinkedIn && !j.isDice && !j.isIndeed && !j.isJobright && !j.isWorkday
+  );
 
   return {
     totalRows: rows.length,
@@ -539,12 +556,9 @@ export function parseJobsCsv(csvText) {
     diceCount: usJobs.filter((j) => j.isDice).length,
     indeedCount: usJobs.filter((j) => j.isIndeed).length,
     jobrightCount: usJobs.filter((j) => j.isJobright).length,
-    etcCount: usJobs.filter(
-      (j) => !j.isLinkedIn && !j.isDice && !j.isIndeed && !j.isJobright
-    ).length,
+    workdayCount: usJobs.filter((j) => j.isWorkday).length,
+    etcCount: etcJobs.length,
     /** @deprecated use etcCount — kept for older UI strings */
-    generalCount: usJobs.filter(
-      (j) => !j.isLinkedIn && !j.isDice && !j.isIndeed && !j.isJobright
-    ).length
+    generalCount: etcJobs.length
   };
 }

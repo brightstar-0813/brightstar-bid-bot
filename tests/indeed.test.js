@@ -17,6 +17,7 @@ import {
   filterJobsByChannel,
   isIndeedJob,
   isUnitedStatesJob,
+  isWorkdayJob,
   normalizeChannelFilter
 } from "../csv.js";
 import { jobIdentity, mergeParsedJobs } from "../csv-source.js";
@@ -55,6 +56,22 @@ test("Indeed URLs and channel classification are strict", () => {
     ).length,
     1
   );
+});
+
+test("Workday URLs and channel filter", () => {
+  assert.equal(
+    isWorkdayJob({ jdLink: "https://company.wd1.myworkdayjobs.com/en-US/careers/job/123" }),
+    true
+  );
+  assert.equal(normalizeChannelFilter("workday"), "workday");
+  assert.equal(normalizeChannelFilter("wd"), "workday");
+  const jobs = [
+    { jdLink: "https://company.wd1.myworkdayjobs.com/en-US/careers/job/1" },
+    { jdLink: "https://www.dice.com/jobs/1" },
+    { jdLink: "https://boards.greenhouse.io/acme/1" }
+  ];
+  assert.equal(filterJobsByChannel(jobs, "workday").length, 1);
+  assert.equal(filterJobsByChannel(jobs, "etc").length, 1);
 });
 
 test("search URL forces Salesforce US remote jobs from the last 7 days", () => {

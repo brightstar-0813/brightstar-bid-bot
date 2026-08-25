@@ -30,6 +30,7 @@ import {
   isDiceJob,
   isIndeedJob,
   isJobrightJob,
+  isWorkdayJob,
   normalizeChannelFilter
 } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
@@ -464,6 +465,7 @@ const filterDiceBtn = document.getElementById("filterDice");
 const filterLinkedInBtn = document.getElementById("filterLinkedIn");
 const filterIndeedBtn = document.getElementById("filterIndeed");
 const filterJobrightBtn = document.getElementById("filterJobright");
+const filterWorkdayBtn = document.getElementById("filterWorkday");
 const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
 const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
@@ -1140,7 +1142,8 @@ async function loadSettings() {
         isLinkedIn: isLinkedInJob(j),
         isDice: isDiceJob(j),
         isIndeed: isIndeedJob(j),
-        isJobright: isJobrightJob(j)
+        isJobright: isJobrightJob(j),
+        isWorkday: isWorkdayJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -1173,7 +1176,8 @@ async function hydrateJobDirsInUi() {
       isLinkedIn: isLinkedInJob(j),
       isDice: isDiceJob(j),
       isIndeed: isIndeedJob(j),
-      isJobright: isJobrightJob(j)
+      isJobright: isJobrightJob(j),
+      isWorkday: isWorkdayJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -1195,8 +1199,14 @@ function updateCsvSummaryFromQueue() {
   const liTotal = allUsJobsCache.filter((j) => isLinkedInJob(j)).length;
   const diceTotal = allUsJobsCache.filter((j) => isDiceJob(j)).length;
   const jobrightTotal = allUsJobsCache.filter((j) => isJobrightJob(j)).length;
+  const workdayTotal = allUsJobsCache.filter((j) => isWorkdayJob(j)).length;
   const etcTotal = allUsJobsCache.filter(
-    (j) => !isDiceJob(j) && !isLinkedInJob(j) && !isIndeedJob(j) && !isJobrightJob(j)
+    (j) =>
+      !isDiceJob(j) &&
+      !isLinkedInJob(j) &&
+      !isIndeedJob(j) &&
+      !isJobrightJob(j) &&
+      !isWorkdayJob(j)
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
@@ -1207,6 +1217,8 @@ function updateCsvSummaryFromQueue() {
       ? "LI only"
       : channelFilter === "jobright"
         ? "Jobright only"
+      : channelFilter === "workday"
+        ? "Workday only"
       : channelFilter === "indeed"
         ? "Indeed only"
       : channelFilter === "dice"
@@ -1225,7 +1237,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Etc ${etcTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -1235,6 +1247,7 @@ function syncChannelFilterButtons() {
     dice: filterDiceBtn,
     linkedin: filterLinkedInBtn,
     jobright: filterJobrightBtn,
+    workday: filterWorkdayBtn,
     indeed: filterIndeedBtn,
     etc: filterEtcBtn,
     all: filterAllBtn
@@ -1304,8 +1317,10 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
         ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
         : channelFilter === "jobright"
           ? `Showing Jobright jobs — ${queueCache.length} in queue.`
+        : channelFilter === "workday"
+          ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "etc"
-          ? `Showing Etc (not Dice, LI, Jobright, or Indeed) — ${queueCache.length} in queue.`
+          ? `Showing Etc (not Dice, LI, Jobright, Workday, or Indeed) — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
   );
 }
@@ -1503,6 +1518,12 @@ function renderQueue() {
       jrBadge.className = "badge badge-jobright";
       jrBadge.textContent = "Jobright";
       badges.appendChild(jrBadge);
+    }
+    if (isWorkdayJob(job)) {
+      const wdBadge = document.createElement("span");
+      wdBadge.className = "badge badge-workday";
+      wdBadge.textContent = "Workday";
+      badges.appendChild(wdBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
@@ -1854,7 +1875,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Indeed ${result.indeedCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
     );
 
     try {
@@ -2743,6 +2764,9 @@ filterLinkedInBtn?.addEventListener("click", () => {
 });
 filterJobrightBtn?.addEventListener("click", () => {
   applyChannelFilter("jobright").catch((e) => setStatus(String(e.message || e)));
+});
+filterWorkdayBtn?.addEventListener("click", () => {
+  applyChannelFilter("workday").catch((e) => setStatus(String(e.message || e)));
 });
 filterIndeedBtn?.addEventListener("click", () => {
   applyChannelFilter("indeed").catch((e) => setStatus(String(e.message || e)));

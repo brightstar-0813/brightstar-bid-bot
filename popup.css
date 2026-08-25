@@ -1179,6 +1179,11 @@ input[type="file"]::file-selector-button {
   color: #86efac;
 }
 
+.badge-workday {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
 .workflow-steps {
   display: flex;
   flex-wrap: wrap;
