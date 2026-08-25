@@ -6,7 +6,7 @@
  * autoSubmit is explicitly enabled for a supported in-site flow.
  */
 
-import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson } from "./profiles.js";
+import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson, personToAtsCredentials, DEFAULT_ATS_PASSWORD } from "./profiles.js";
 import { outputDirFromPerson } from "./resume-profile.js";
 import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
@@ -35,7 +35,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-24.01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-25.01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -861,6 +861,7 @@ function applySiteFromUrl(url) {
   const host = hostnameFromUrl(url).toLowerCase();
   if (/(^|\.)dice\.com$/.test(host)) return "dice";
   if (/(^|\.)indeed\.com$/.test(host)) return "indeed";
+  if (/(^|\.)myworkdayjobs\.com$/.test(host) || /(^|\.)workdayjobs\.com$/.test(host)) return "workday";
   return "generic";
 }
 
@@ -1482,7 +1483,7 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
  * Fill the current (or given) application tab from the active person.
  */
 export async function startAutofillOnTab(tabId = null, applyHint = {}) {
-  const { person, applicantInfo, extras } = await getApplicantInfoForAutofill();
+  const { person, applicantInfo, extras, credentials } = await getApplicantInfoForAutofill();
   const hasAnyValue = Object.values(applicantInfo).some((v) => String(v || "").trim());
   const tab = tabId
     ? await chrome.tabs.get(tabId).catch(() => null)
@@ -1546,11 +1547,16 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     await sleep(APPLY_SETTLE_MS);
   }
 
+  const atsCreds = credentials || personToAtsCredentials(person);
   await ensureAutofillScript(tab.id);
   const frameResults = await sendMessageToAllFrames(tab.id, {
     type: "autofill_application",
     applicantInfo,
-    credentials: { email: applicantInfo.email || "" },
+    credentials: {
+      email: atsCreds.email || applicantInfo.email || "",
+      username: atsCreds.username || atsCreds.email || applicantInfo.email || "",
+      password: atsCreds.password || DEFAULT_ATS_PASSWORD
+    },
     workHistory: history.workHistory,
     educationHistory: history.educationHistory,
     uploadFiles: {
@@ -1613,8 +1619,11 @@ export async function startMultiStepApplyOnTab(
 
   let currentTabId = tab.id;
   const initialSite = applySiteFromUrl(tab.url || "");
+  const stepBudget =
+    initialSite === "workday" ? Math.max(Number(maxSteps) || 12, 20) : Number(maxSteps) || 12;
   const effectiveAutoSubmit =
-    Boolean(autoSubmit) && (initialSite === "dice" || initialSite === "indeed");
+    Boolean(autoSubmit) &&
+    (initialSite === "dice" || initialSite === "indeed" || initialSite === "workday");
   const summary = {
     ok: true,
     steps: 0,
@@ -1635,7 +1644,7 @@ export async function startMultiStepApplyOnTab(
 
   let noAdvance = 0;
 
-  for (let step = 0; step < maxSteps; step += 1) {
+  for (let step = 0; step < stepBudget; step += 1) {
     const currentTab = await chrome.tabs.get(currentTabId).catch(() => null);
     if (
       initialSite === "indeed" &&
@@ -1648,7 +1657,7 @@ export async function startMultiStepApplyOnTab(
       summary.tabUrl = currentTab?.url || summary.tabUrl;
       return summary;
     }
-    await setApplyStatus(`Apply: step ${step + 1}/${maxSteps} — checking page...`);
+    await setApplyStatus(`Apply: step ${step + 1}/${stepBudget} — checking page...`);
     await ensureAutofillScript(currentTabId);
 
     let probe = await getApplyActionFromTab(currentTabId).catch(() => ({
@@ -1791,7 +1800,7 @@ export async function startMultiStepApplyOnTab(
       }
     }
 
-    await setApplyStatus(`Apply: step ${step + 1}/${maxSteps} — filling form...`);
+    await setApplyStatus(`Apply: step ${step + 1}/${stepBudget} — filling form...`);
     const fillRes = await startAutofillOnTab(currentTabId, applyHint);
     summary.filled += Number(fillRes?.filledCount || 0);
     summary.filledCount = summary.filled;

@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-24.01";
+  const SCRIPT_BUILD = "2026-08-25.01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -364,11 +364,11 @@
       "linkedin profile url",
       "linkedin link"
     ],
-    portfolioUrl: ["portfolio", "website", "personal website", "portfolio url"],
+    portfolioUrl: ["portfolio", "website", "personal website", "portfolio url", "websites", "website url"],
     githubUrl: ["github", "github url", "github profile"],
 
     highestDegree: ["highest degree", "degree", "education level", "highest level of education"],
-    schoolName: ["school", "university", "college", "institution", "school name"],
+    schoolName: ["school", "university", "college", "institution", "school name", "school or university"],
     fieldOfStudy: ["field of study", "major", "concentration", "area of study"],
     graduationDate: [
       "graduation",
@@ -406,26 +406,64 @@
     ],
     backgroundCheckConsent: ["background check", "background screening"],
     drugTestConsent: ["drug test", "drug screen", "drug screening"],
+    termsConsent: [
+      "read and consent",
+      "consent to the terms",
+      "terms and conditions",
+      "i have read and consent",
+      "yes i have read and consent",
+      "privacy statement",
+      "applicant privacy"
+    ],
+    howDidYouHear: [
+      "how did you hear about us",
+      "how did you hear",
+      "how did you find",
+      "general source",
+      "source information",
+      "where did you hear"
+    ],
+    signatureName: [
+      "signature",
+      "print name",
+      "your name",
+      "applicant name",
+      "full legal name",
+      "typed name",
+      "name as it appears"
+    ],
+    signatureDate: ["today's date", "todays date", "signature date", "date signed"],
+    selfIdentifyLanguage: ["language", "preferred language", "select a language"],
 
-    gender: ["gender", "gender identity", "sex"],
+    gender: ["gender", "gender identity", "sex", "please select your gender"],
     hispanicLatino: [
       "hispanic/latino",
       "hispanic or latino",
       "are you hispanic",
       "hispanic latino",
-      "latinx"
+      "latinx",
+      "indicate whether you are hispanic"
     ],
     raceEthnicity: [
       "identify your race",
       "please identify your race",
+      "please select the race",
       "racial/ethnic background",
       "race/ethnicity",
       "race ethnicity",
       "racial background",
       "ethnicity",
-      "race"
+      "race",
+      "how you identify yourself"
     ],
-    veteranStatus: ["veteran", "military status", "protected veteran", "armed forces"],
+    veteranStatus: [
+      "veteran",
+      "military status",
+      "protected veteran",
+      "armed forces",
+      "veteran status",
+      "please select your veteran status"
+    ],
     disabilityStatus: ["disability", "disabled", "chronic condition"]
   };
 
@@ -476,7 +514,12 @@
     "veteranStatus",
     "disabilityStatus",
     "backgroundCheckConsent",
-    "drugTestConsent"
+    "drugTestConsent",
+    "termsConsent",
+    "howDidYouHear",
+    "signatureName",
+    "signatureDate",
+    "selfIdentifyLanguage"
   ];
 
   const AUTOCOMPLETE_FIELD_MAP = {
@@ -562,6 +605,9 @@
     "felonyConviction",
     "backgroundCheckConsent",
     "drugTestConsent",
+    "termsConsent",
+    "howDidYouHear",
+    "selfIdentifyLanguage",
     "gender",
     "hispanicLatino",
     "raceEthnicity",
@@ -586,6 +632,7 @@
     felonyConviction: { yes: ["Yes"], no: ["No"] },
     backgroundCheckConsent: { yes: ["Yes"], no: ["No"] },
     drugTestConsent: { yes: ["Yes"], no: ["No"] },
+    termsConsent: { yes: ["Yes"], no: ["No"] },
     postEmploymentRestrictions: { yes: ["Yes"], no: ["No"] },
     workedForCompanyBefore: { yes: ["Yes"], no: ["No"] },
     relatedToEmployee: { yes: ["Yes"], no: ["No"] },
@@ -616,13 +663,20 @@
         "Pacific Islander"
       ],
       white: ["White", "Caucasian"],
-      two_or_more: ["Two or more races", "Two or more", "Multiracial"]
+      two_or_more: ["Two or more races", "Two or more", "Multiracial"],
+      not_specified: [
+        "Not Specified (United States of America)",
+        "Not Specified",
+        "Prefer not to say",
+        "Decline to self identify",
+        "I decline to self-identify"
+      ]
     },
     veteranStatus: {
       not_veteran: [
         "I am not a protected veteran",
-        "No, I am not a veteran or active member",
         "I am not a veteran",
+        "No, I am not a veteran or active member",
         "Not a veteran",
         "No"
       ],
@@ -646,6 +700,16 @@
         "No"
       ],
       decline: ["I do not want to answer", "I do not wish to answer", "Prefer not to say"]
+    },
+    howDidYouHear: {
+      "Job Board": ["Job Board", "Job board", "Online Job Board", "Indeed", "LinkedIn", "Internet Search"],
+      LinkedIn: ["LinkedIn", "Linkedin"],
+      Indeed: ["Indeed"],
+      "Internet Search": ["Internet Search", "Search Engine", "Google"],
+      "Company Website": ["Company Website", "Company Career Site", "Career Site"]
+    },
+    selfIdentifyLanguage: {
+      English: ["English", "EN", "en"]
     },
     englishLevel: {
       A1: ["A1"],
@@ -3525,6 +3589,19 @@
       const parts = [city, stateLabel, country].filter(Boolean);
       if (parts.length) return parts.join(", ");
     }
+    if (key === "signatureName") {
+      const first = String(applicantInfo?.firstName || "").trim();
+      const last = String(applicantInfo?.lastName || "").trim();
+      return [first, last].filter(Boolean).join(" ");
+    }
+    if (key === "signatureDate") {
+      const d = new Date();
+      return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+    }
+    if (key === "selfIdentifyLanguage") return "English";
+    if (key === "howDidYouHear") return "Job Board";
+    if (key === "termsConsent") return "yes";
+    if (key === "country") return "United States of America";
     // Sensible defaults for common yes/no compliance questions when profile is blank.
     if (key === "workAuthorized") return "yes";
     if (key === "needsSponsorship") return "no";
@@ -3533,6 +3610,7 @@
     if (key === "relatedToEmployee") return "no";
     if (key === "governmentEmployee") return "no";
     if (key === "governmentEthicsRecusal") return "no";
+    if (key === "raceEthnicity") return "not_specified";
     return "";
   }
 
@@ -3851,8 +3929,13 @@
 
   function historyDateValues(bundle = {}, extra = []) {
     const out = [];
+    const mmYyyy =
+      bundle.monthNum && bundle.year ? `${bundle.monthNum}/${bundle.year}` : "";
+    const yyyyMm = bundle.isoMonth || "";
     for (const v of [
       ...(Array.isArray(bundle.candidates) ? bundle.candidates : []),
+      mmYyyy,
+      yyyyMm,
       bundle.month,
       bundle.monthShort,
       bundle.monthNum,
@@ -3988,6 +4071,18 @@
       password: String(credentials.password || "")
     };
     const credResult = fillLoginCredentials(creds);
+    if (isWorkdayPage() && credResult.filledCount > 0) {
+      const authSubmit = queryAllDeep("button, a, [role='button'], input[type='submit']").find((el) => {
+        if (!isElVisible(el) || !isElEnabled(el)) return false;
+        const t = elActionText(el);
+        return /^(create account|create an account|sign in|log in|register|continue)$/i.test(t.trim());
+      });
+      if (authSubmit) {
+        scrollElIntoView(authSubmit);
+        safeClick(authSubmit);
+        await sleep(1600);
+      }
+    }
 
     const uploadResult = await uploadApplicationFiles(uploadFiles);
     const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
@@ -4085,12 +4180,34 @@
     }
   }
 
+  function isWorkdayPage(url = location.href) {
+    try {
+      const host = new URL(String(url || location.href)).hostname.toLowerCase();
+      return /(^|\.)myworkdayjobs\.com$/.test(host) || /(^|\.)workdayjobs\.com$/.test(host);
+    } catch {
+      return false;
+    }
+  }
+
+  function applyPageSite(url = location.href) {
+    if (isIndeedPage(url)) return "indeed";
+    if (isDicePage(url)) return "dice";
+    if (isWorkdayPage(url)) return "workday";
+    return "generic";
+  }
+
   function isSameSiteApplyUrl(url, site = "") {
     try {
       const target = new URL(String(url || ""), location.href);
       if (!/^https?:$/i.test(target.protocol)) return false;
       if (site === "indeed") return /(^|\.)indeed\.com$/i.test(target.hostname);
       if (site === "dice") return /(^|\.)dice\.com$/i.test(target.hostname);
+      if (site === "workday") {
+        return (
+          /(^|\.)myworkdayjobs\.com$/i.test(target.hostname) ||
+          /(^|\.)workdayjobs\.com$/i.test(target.hostname)
+        );
+      }
       return target.origin === location.origin;
     } catch {
       return false;
@@ -4099,6 +4216,17 @@
 
   function detectPageBlocker() {
     const href = String(location.href || "");
+    // Workday create-account / sign-in is handled by credential autofill — do not block.
+    if (isWorkdayPage()) {
+      if (
+        document.querySelector(
+          '.g-recaptcha, #g-recaptcha, [data-sitekey], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"]'
+        )
+      ) {
+        return "A CAPTCHA is on the page. Solve it, then retry.";
+      }
+      return "";
+    }
     const loginForm = document.querySelector(
       'input[type="password"], form[action*="login" i], form[action*="signin" i], [data-testid*="login" i] input'
     );
@@ -4296,9 +4424,30 @@
     };
   }
 
+  const WORKDAY_APPLY_SUCCESS_RE =
+    /\b(application\s+(?:has\s+been\s+)?(?:submitted|received|sent)|thank you for (?:applying|your application)|you(?:'|’)ve successfully applied|successfully submitted your application)\b/i;
+
+  function detectWorkdayApplySuccess() {
+    if (!isWorkdayPage()) return { ok: false };
+    const href = String(location.href || "");
+    const successUrl = /\/apply\/(?:complete|submitted|success)|applicationSubmitted|\/submitted/i.test(href);
+    const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    const headings = queryAllDeep("h1, h2, [role='heading']")
+      .map((el) => cleanLabelText(el.textContent))
+      .filter(Boolean);
+    const headingHit = headings.find((t) => WORKDAY_APPLY_SUCCESS_RE.test(t));
+    const bodyHit = bodyText ? bodyText.match(WORKDAY_APPLY_SUCCESS_RE) : null;
+    if (!successUrl && !headingHit && !bodyHit) return { ok: false };
+    return {
+      ok: true,
+      text: (headingHit || (bodyHit && bodyHit[0]) || "Application submitted").slice(0, 160)
+    };
+  }
+
   function detectApplySuccess() {
     if (isIndeedPage()) return detectIndeedApplySuccess();
     if (isDicePage()) return detectDiceApplySuccess();
+    if (isWorkdayPage()) return detectWorkdayApplySuccess();
     return { ok: false };
   }
 
@@ -4353,7 +4502,14 @@
       identityFields >= 2 ||
       (hasApplyForm && fillableCount >= 2) ||
       (hasIndeedApplyUi && fillableCount >= 1) ||
-      looksLikeHistoryForm();
+      looksLikeHistoryForm() ||
+      (isWorkdayPage() &&
+        (/\/apply\//i.test(location.href) ||
+          Boolean(
+            document.querySelector(
+              '[data-automation-id*="formField"], [data-automation-id="applyManual"], [data-automation-id*="apply"]'
+            )
+          )));
 
     return {
       ok: true,
@@ -4548,7 +4704,72 @@
     return { type: action.type, text: action.text || elActionText(action.el) };
   }
 
+  async function clickWorkdayApplyEntry() {
+    // Prefer Autofill with Resume inside the Start Your Application modal.
+    const modalBtns = queryAllDeep(
+      'button, a, [role="button"], [data-automation-id]'
+    ).filter((el) => isElVisible(el) && isElEnabled(el));
+    const autofillResume = modalBtns.find((el) =>
+      /autofill with resume|apply with resume|upload (a )?resume/i.test(elActionText(el))
+    );
+    if (autofillResume) {
+      scrollElIntoView(autofillResume);
+      safeClick(autofillResume);
+      await sleep(1400);
+      return { ok: true, clicked: true, text: elActionText(autofillResume) || "Autofill with Resume" };
+    }
+
+    // Create Account / Sign In CTAs on auth gate.
+    const authCta = modalBtns.find((el) =>
+      /^(create account|create an account|sign in|log in|register)$/i.test(elActionText(el).trim())
+    );
+    if (authCta) {
+      scrollElIntoView(authCta);
+      safeClick(authCta);
+      await sleep(1200);
+      return { ok: true, clicked: true, text: elActionText(authCta) };
+    }
+
+    // Listing-page Apply button (opens Start Your Application modal).
+    const applyBtn = modalBtns.find((el) => {
+      const t = elActionText(el);
+      const autoId = String(el.getAttribute?.("data-automation-id") || "");
+      return (
+        /^(apply|apply now)$/i.test(t.trim()) ||
+        /jobPostingApplyButton|applyButton/i.test(autoId)
+      );
+    });
+    if (applyBtn) {
+      scrollElIntoView(applyBtn);
+      safeClick(applyBtn);
+      await sleep(1400);
+      // Modal may now show Autofill with Resume — click it immediately.
+      const after = queryAllDeep("button, a, [role='button']").filter(
+        (el) => isElVisible(el) && isElEnabled(el)
+      );
+      const resumeOpt = after.find((el) =>
+        /autofill with resume|apply with resume/i.test(elActionText(el))
+      );
+      if (resumeOpt) {
+        scrollElIntoView(resumeOpt);
+        safeClick(resumeOpt);
+        await sleep(1400);
+        return { ok: true, clicked: true, text: elActionText(resumeOpt) || "Autofill with Resume" };
+      }
+      return { ok: true, clicked: true, text: elActionText(applyBtn) || "Apply" };
+    }
+
+    // Already inside the application wizard.
+    if (/\/apply\//i.test(location.href) || probeApplicationForm().isApplicationForm) {
+      return { ok: true, clicked: false, alreadyOpen: true, text: "workday apply" };
+    }
+    return { ok: false, clicked: false };
+  }
+
   async function clickEasyApplyEntry() {
+    if (isWorkdayPage()) {
+      return clickWorkdayApplyEntry();
+    }
     // Dice / DHI web components first (stable hosts), then generic Easy Apply labels.
     const hosts = [
       ...queryAllDeep("apply-button-wc, dhi-apply-button, dice-apply-button"),
@@ -4656,7 +4877,7 @@
       href: location.href,
       signature: stepSignature(),
       isApplicationForm: Boolean(probe.isApplicationForm),
-      site: isIndeedPage() ? "indeed" : isDicePage() ? "dice" : "generic",
+      site: applyPageSite(),
       blockedReason: probe.blockedReason || "",
       validationReason: probe.validationReason || "",
       jobUnavailable: probe.jobUnavailable || "",
@@ -4731,7 +4952,7 @@
       action.el?.getAttribute?.("formaction") ||
       action.el?.closest?.("form")?.getAttribute?.("action") ||
       "";
-    const pageSite = isIndeedPage() ? "indeed" : isDicePage() ? "dice" : "generic";
+    const pageSite = applyPageSite();
     if (pageSite === "indeed" && actionHref && !isSameSiteApplyUrl(actionHref, "indeed")) {
       return {
         ok: false,
@@ -4756,12 +4977,11 @@
           after: before
         };
       }
-      // Preserve Dice batch submission. Indeed submission is allowed only while
-      // the live document and the submit target remain on Indeed. Every other
-      // site retains stop-before-submit behavior even if a caller passes true.
+      // Dice / Indeed / Workday may auto-submit. Every other site stops before Submit.
       if (
         pageSite === "generic" ||
         (pageSite === "indeed" && !isIndeedPage()) ||
+        (pageSite === "workday" && !isWorkdayPage()) ||
         (actionHref && !isSameSiteApplyUrl(actionHref, pageSite))
       ) {
         return {
@@ -4984,7 +5204,7 @@
 
       if (action.type === "submit") {
         if (autoSubmit) {
-          const liveSite = isIndeedPage() ? "indeed" : isDicePage() ? "dice" : "generic";
+          const liveSite = applyPageSite();
           const actionHref =
             action.el?.href ||
             action.el?.getAttribute?.("formaction") ||
@@ -4993,6 +5213,7 @@
           if (
             liveSite === "generic" ||
             (site === "indeed" && liveSite !== "indeed") ||
+            (site === "workday" && liveSite !== "workday") ||
             (actionHref && !isSameSiteApplyUrl(actionHref, liveSite))
           ) {
             summary.status = liveSite === "indeed" ? "skipped" : "needs_review";

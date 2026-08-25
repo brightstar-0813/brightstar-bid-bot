@@ -65,6 +65,7 @@ import {
   normalizeChannelFilter,
   isDiceJob,
   isIndeedJob,
+  isWorkdayJob,
   isUnitedStatesJob
 } from "./csv.js";
 import {
@@ -1045,7 +1046,8 @@ async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, excludeJdLi
  * On incomplete apply, pause (keep tab open) so Start can retry.
  */
 async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
-  const boardLabel = board === "Indeed" ? "Indeed" : "Dice";
+  const boardLabel =
+    board === "Indeed" ? "Indeed" : board === "Workday" ? "Workday" : "Dice";
   const jdLink = String(jobMeta.jdLink || "").trim();
   const prevAttempts = Number(jobMeta.applyAttempts || 0);
   const companyName = jobMeta.companyName || jobMeta.company || "";
@@ -1277,8 +1279,9 @@ function isIndeedHostedApplyJob(j) {
 
 function isHostedApplyBacklogJob(j, person = null) {
   const hostedIndeed = isIndeedHostedApplyJob(j);
+  const workday = isWorkdayJob(j || {});
   if (
-    !(isDiceJob(j) || hostedIndeed) ||
+    !(isDiceJob(j) || hostedIndeed || workday) ||
     j.status !== "done" ||
     j.applied ||
     j.inactive ||
@@ -5212,12 +5215,16 @@ async function runBatchLoop(outputDir) {
       const queue = await getQueue();
       const activePerson = await getActivePerson().catch(() => null);
 
-      // Hosted Dice/Indeed jobs: apply already-built rows that are not Applied yet (no ChatGPT).
+      // Hosted Dice/Indeed/Workday jobs: apply already-built rows that are not Applied yet (no ChatGPT).
       // Gated by job type, not the visible source filter.
       // Only the active person's rows (profileId / Applications-* folder).
       const backlog = queue.find((j) => isHostedApplyBacklogJob(j, activePerson));
       if (backlog) {
-        const backlogBoard = isIndeedHostedApplyJob(backlog) ? "Indeed" : "Dice";
+        const backlogBoard = isIndeedHostedApplyJob(backlog)
+          ? "Indeed"
+          : isWorkdayJob(backlog)
+            ? "Workday"
+            : "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
@@ -5397,12 +5404,14 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Hosted Dice and Indeed jobs: generate → auto-apply+submit → close tab → next.
+        // Hosted Dice, Indeed, and Workday jobs: generate → auto-apply+submit → close tab → next.
         const hostedApplyBoard = isIndeedHostedApplyJob(next)
           ? "Indeed"
-          : isDiceJob(next)
-            ? "Dice"
-            : "";
+          : isWorkdayJob(next)
+            ? "Workday"
+            : isDiceJob(next)
+              ? "Dice"
+              : "";
         if (hostedApplyBoard && !batchControl.stop) {
           const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,

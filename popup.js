@@ -1,5 +1,6 @@
 import {
   DEFAULT_PROFILE_ID,
+  DEFAULT_ATS_PASSWORD,
   getResumeProfiles,
   getBuiltinPreset,
   getActivePerson,
@@ -401,6 +402,8 @@ const personNameEl = document.getElementById("personName");
 const personEmailEl = document.getElementById("personEmail");
 const personPhoneEl = document.getElementById("personPhone");
 const personLinkedinEl = document.getElementById("personLinkedin");
+const personPortfolioEl = document.getElementById("personPortfolio");
+const personPasswordEl = document.getElementById("personPassword");
 const personLocationEl = document.getElementById("personLocation");
 const personAddressEl = document.getElementById("personAddress");
 const personZipEl = document.getElementById("personZip");
@@ -587,6 +590,8 @@ function clearPersonContactFields() {
   personEmailEl.value = "";
   personPhoneEl.value = "";
   personLinkedinEl.value = "";
+  if (personPortfolioEl) personPortfolioEl.value = "";
+  if (personPasswordEl) personPasswordEl.value = DEFAULT_ATS_PASSWORD;
   personLocationEl.value = "";
   personAddressEl.value = "";
   personZipEl.value = "";
@@ -832,6 +837,8 @@ function fillPersonForm(person) {
   personEmailEl.value = person?.email || "";
   personPhoneEl.value = person?.phone || "";
   personLinkedinEl.value = person?.linkedin || "";
+  if (personPortfolioEl) personPortfolioEl.value = person?.portfolio || "";
+  if (personPasswordEl) personPasswordEl.value = person?.password || DEFAULT_ATS_PASSWORD;
   personLocationEl.value = person?.location || "";
   personAddressEl.value = person?.address || "";
   personZipEl.value = person?.zip || "";
@@ -865,6 +872,8 @@ function readPersonForm({ asNew = false } = {}) {
     email: personEmailEl.value.trim(),
     phone: personPhoneEl.value.trim(),
     linkedin: personLinkedinEl.value.trim(),
+    portfolio: personPortfolioEl?.value?.trim() || "",
+    password: personPasswordEl?.value?.trim() || DEFAULT_ATS_PASSWORD,
     location: personLocationEl.value.trim(),
     address: personAddressEl.value.trim(),
     zip: personZipEl.value.trim(),
@@ -2071,6 +2080,8 @@ async function savePerson({ asNew = false, successMessage = "" } = {}) {
         email: person.email,
         phone: person.phone,
         linkedin: person.linkedin,
+        portfolio: person.portfolio,
+        password: person.password,
         location: person.location,
         address: person.address,
         zip: person.zip,

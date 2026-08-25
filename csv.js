@@ -376,6 +376,14 @@ export function isIndeedJob({ jdLink = "" } = {}) {
 }
 
 /**
+ * MyWorkday / Workday career-site application URLs.
+ */
+export function isWorkdayJob({ jdLink = "" } = {}) {
+  const host = jobLinkHost(jdLink);
+  return /(^|\.)myworkdayjobs\.com$/i.test(host) || /(^|\.)workdayjobs\.com$/i.test(host);
+}
+
+/**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
  * @returns {"all"|"dice"|"linkedin"|"indeed"|"etc"}

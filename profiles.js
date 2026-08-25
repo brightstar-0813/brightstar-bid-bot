@@ -12,6 +12,9 @@ export const COVER_LETTER_PROFILE_ID = "cover-letter";
 export const GENERIC_SENIOR_PROMPT = genericSeniorPrompt;
 export const GENERIC_COVER_LETTER_PROMPT = coverLetterPrompt;
 
+/** Default ATS / MyWorkday account password for create-account + sign-in. */
+export const DEFAULT_ATS_PASSWORD = "Brightstar@0813";
+
 /** Built-in prompts shipped as separate files under /prompts. */
 export const BUILTIN_PROFILES = [
   {
@@ -26,6 +29,8 @@ export const BUILTIN_PROFILES = [
     email: "dmario.lewis1992@outlook.com",
     phone: "+1 (248) 340-3582",
     linkedin: "https://www.linkedin.com/in/dmario-lewis/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
     location: "Muskegon, Michigan, United States",
     address: "1325 Sumac St",
     zip: "49445",
@@ -62,6 +67,8 @@ export const BUILTIN_PROFILES = [
     email: "edrwin.revolorio1996@outlook.com",
     phone: "+1 (713) 659-9480",
     linkedin: "https://www.linkedin.com/in/edwin-revolorio/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
     location: "Indianapolis, Indiana, United States",
     address: "1633 Deloss St",
     zip: "46201",
@@ -265,6 +272,8 @@ function normalizePerson(p) {
     email: "",
     phone: "",
     linkedin: "",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
     location: "",
     address: "",
     zip: "",
@@ -299,6 +308,8 @@ function normalizePerson(p) {
   if (!requiredExperience.length && p.promptTemplate) {
     requiredExperience = parseRequiredExperienceFromPrompt(p.promptTemplate);
   }
+  const portfolioFromExtras =
+    String(extras.portfolio || extras["portfolio url"] || extras["personal website"] || extras.website || "").trim();
   return {
     ...empty,
     id: p.id,
@@ -307,6 +318,8 @@ function normalizePerson(p) {
     email: p.email || "",
     phone: p.phone || "",
     linkedin: p.linkedin || "",
+    portfolio: String(p.portfolio || portfolioFromExtras || "").trim(),
+    password: String(p.password || DEFAULT_ATS_PASSWORD).trim() || DEFAULT_ATS_PASSWORD,
     location: p.location || "",
     address: p.address || "",
     zip: p.zip || "",
@@ -430,6 +443,8 @@ export async function addCustomProfile({
   email = "",
   phone = "",
   linkedin = "",
+  portfolio = "",
+  password = DEFAULT_ATS_PASSWORD,
   location = "",
   address = "",
   zip = "",
@@ -499,6 +514,8 @@ export async function addCustomProfile({
     email: String(email || "").trim(),
     phone: String(phone || "").trim(),
     linkedin: String(linkedin || "").trim(),
+    portfolio: String(portfolio || "").trim(),
+    password: String(password || DEFAULT_ATS_PASSWORD).trim() || DEFAULT_ATS_PASSWORD,
     location: String(location || "").trim(),
     address: String(address || "").trim(),
     zip: String(zip || "").trim(),
@@ -555,6 +572,8 @@ export async function savePersonProfile(person) {
     email: String(person?.email || "").trim(),
     phone: String(person?.phone || "").trim(),
     linkedin: String(person?.linkedin || "").trim(),
+    portfolio: String(person?.portfolio || "").trim(),
+    password: String(person?.password || DEFAULT_ATS_PASSWORD).trim() || DEFAULT_ATS_PASSWORD,
     location: String(person?.location || "").trim(),
     address: String(person?.address || "").trim(),
     zip: String(person?.zip || "").trim(),
@@ -739,7 +758,7 @@ const EXTRA_TO_APPLICANT_KEY = [
   [["years of experience", "years experience", "total experience", "years of exp"], "yearsExperience"],
   [["relevant experience"], "relevantExperience"],
   [["github"], "githubUrl"],
-  [["portfolio", "personal website", "website url"], "portfolioUrl"],
+  [["portfolio", "personal website", "website url", "website"], "portfolioUrl"],
   [["willing to relocate", "relocate", "relocation"], "willingToRelocate"],
   [["over 18", "18 years", "at least 18"], "over18"],
   [["felony", "criminal conviction", "conviction"], "felonyConviction"],
@@ -753,13 +772,19 @@ const EXTRA_TO_APPLICANT_KEY = [
   [["graduation date", "graduated"], "graduationDate"],
   [["why are you interested", "why do you want", "why this role"], "whyInterested"],
   [["english level", "english proficiency"], "englishLevel"],
-  [["address line 2", "address2", "apt", "suite", "unit"], "addressLine2"]
+  [["address line 2", "address2", "apt", "suite", "unit"], "addressLine2"],
+  [["how did you hear", "how did you hear about us", "source", "general source"], "howDidYouHear"],
+  [["terms and conditions", "consent to the terms", "read and consent"], "termsConsent"],
+  [["signature", "print name", "typed name", "applicant name"], "signatureName"],
+  [["todays date", "today's date", "signature date", "date signed"], "signatureDate"],
+  [["language", "preferred language"], "selfIdentifyLanguage"]
 ];
 
 const APPLICANT_KEY_TO_PERSON = {
   email: "email",
   phone: "phone",
   linkedinUrl: "linkedin",
+  portfolioUrl: "portfolio",
   addressLine1: "address",
   zipCode: "zip",
   gender: "gender",
@@ -843,6 +868,7 @@ function genderToken(value) {
 function raceToken(value) {
   const t = String(value || "").trim().toLowerCase();
   if (!t) return "";
+  if (/prefer not|decline|not specified|do not wish|do not want/.test(t)) return "not_specified";
   if (/american indian|alaska native/.test(t)) return "american_indian";
   if (/native hawaiian|pacific islander/.test(t)) return "native_hawaiian";
   if (/two or more|multiracial|mixed/.test(t)) return "two_or_more";
@@ -851,6 +877,15 @@ function raceToken(value) {
   if (/\basian\b/.test(t)) return "asian";
   if (/\bwhite\b|caucasian/.test(t)) return "white";
   return t;
+}
+
+/** Login credentials for MyWorkday create-account / sign-in steps. */
+export function personToAtsCredentials(person = {}) {
+  return {
+    email: String(person.email || "").trim(),
+    username: String(person.email || "").trim(),
+    password: String(person.password || DEFAULT_ATS_PASSWORD).trim() || DEFAULT_ATS_PASSWORD
+  };
 }
 
 function matchExtraToApplicantKey(extraKey) {
@@ -899,12 +934,24 @@ function emptyApplicantInfo() {
     earliestStartDate: "",
     backgroundCheckConsent: "",
     drugTestConsent: "",
+    termsConsent: "yes",
+    howDidYouHear: "",
+    signatureName: "",
+    signatureDate: "",
+    selfIdentifyLanguage: "English",
     gender: "",
     hispanicLatino: "",
     raceEthnicity: "",
     veteranStatus: "",
     disabilityStatus: ""
   };
+}
+
+function todaysDateMmDdYyyy() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${d.getFullYear()}`;
 }
 
 /** Map Brightstar person + extras onto the resume-bot applicant-info shape. */
@@ -924,6 +971,7 @@ export function personToApplicantInfo(person = {}) {
   info.email = String(person.email || "").trim();
   info.phone = String(person.phone || "").trim();
   info.linkedinUrl = String(person.linkedin || "").trim();
+  info.portfolioUrl = String(person.portfolio || extras.portfolio || extras["portfolio url"] || extras["personal website"] || "").trim();
   info.addressLine1 = String(person.address || "").trim();
   info.zipCode = String(person.zip || extras.zip || extras.postal || "").trim();
   info.city = loc.city;
@@ -931,19 +979,30 @@ export function personToApplicantInfo(person = {}) {
   info.country = loc.country || extras.country || "United States";
   info.cityCountryOfResidence = String(person.location || "").trim();
   info.gender = genderToken(person.gender);
-  info.raceEthnicity = raceToken(person.ethnicity);
+  info.raceEthnicity = raceToken(person.ethnicity) || "not_specified";
   info.disabilityStatus = disabilityToken(person.disability);
   info.veteranStatus = veteranToken(person.veteran);
   info.hispanicLatino = yesNoToken(person.hispanicLatino) || String(person.hispanicLatino || "").trim();
   info.workAuthorized = yesNoToken(person.workAuthorized) || String(person.workAuthorized || "").trim().toLowerCase();
   info.needsSponsorship = yesNoToken(person.sponsorship) || String(person.sponsorship || "").trim().toLowerCase();
+  info.signatureName = String(person.name || person.label || `${name.firstName} ${name.lastName}`.trim()).trim();
+  info.signatureDate = todaysDateMmDdYyyy();
+  info.selfIdentifyLanguage = String(extras.language || extras["self identify language"] || "English").trim() || "English";
+  info.howDidYouHear = String(
+    extras["how did you hear"] ||
+      extras["how did you hear about us"] ||
+      extras.source ||
+      extras["general source"] ||
+      "Job Board"
+  ).trim();
+  info.termsConsent = "yes";
 
   for (const [key, value] of Object.entries(extras)) {
     const v = String(value || "").trim();
     if (!v) continue;
     const field = matchExtraToApplicantKey(key);
     if (field && !String(info[field] || "").trim()) {
-      if (["workAuthorized", "needsSponsorship", "willingToRelocate", "over18", "felonyConviction", "backgroundCheckConsent", "drugTestConsent", "hispanicLatino"].includes(field)) {
+      if (["workAuthorized", "needsSponsorship", "willingToRelocate", "over18", "felonyConviction", "backgroundCheckConsent", "drugTestConsent", "hispanicLatino", "termsConsent"].includes(field)) {
         info[field] = yesNoToken(v) || v;
       } else {
         info[field] = v;
@@ -961,6 +1020,7 @@ export async function getApplicantInfoForAutofill() {
   return {
     person,
     applicantInfo: personToApplicantInfo(person),
+    credentials: personToAtsCredentials(person),
     extras: { ...extras, ...(person.citizenship ? { citizenship: person.citizenship } : {}) }
   };
 }
