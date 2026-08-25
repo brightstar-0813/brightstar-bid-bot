@@ -1339,6 +1339,12 @@ const ACTION_ICON_PATHS = {
   apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
   retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>',
+  start: '<path d="M8 5v14l11-7z"/>',
+  pause: '<path d="M7 5h3v14H7zM14 5h3v14h-3z"/>',
+  skip: '<path d="M5 5v14l9-7z"/><path d="M17 5v14"/>',
+  stop: '<path d="M7 7h10v10H7z"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
+  reset: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
   window:
     '<path d="M3 5h18v14H3z"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M14 14h2"/>',
   panel: '<path d="M4 4h16v16H4z"/><path d="M14 4v16"/>'
@@ -2840,6 +2846,15 @@ if (UI_CONTEXT === "popup") {
 
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
 if (keepOpenBtn) setIconButton(keepOpenBtn, "panel", "Keep open in side panel");
+
+if (batchStartBtn) setIconButton(batchStartBtn, "start", "Start");
+if (batchPauseBtn) setIconButton(batchPauseBtn, "pause", "Pause");
+if (batchSkipBtn) setIconButton(batchSkipBtn, "skip", "Skip");
+if (batchStopBtn) setIconButton(batchStopBtn, "stop", "Stop");
+if (forceSaveChatgptBtn) setIconButton(forceSaveChatgptBtn, "save", "Save JSON");
+if (retryErrorsBtn) setIconButton(retryErrorsBtn, "retry", "Retry errors");
+if (clearJobsBtn) setIconButton(clearJobsBtn, "remove", "Clear");
+if (resetBtn) setIconButton(resetBtn, "reset", "Reset");
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
 

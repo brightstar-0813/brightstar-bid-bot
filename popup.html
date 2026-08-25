@@ -449,17 +449,17 @@
             <span>Output folder (under Downloads)</span>
             <input id="outputDir" type="text" placeholder="Applications-Lewis" autocomplete="off" />
           </label>
-          <div class="batch-bar">
-            <button type="button" id="batchStart" class="primary">Start</button>
-            <button type="button" id="batchPause" class="ghost">Pause</button>
-            <button type="button" id="batchSkip" class="ghost">Skip</button>
-            <button type="button" id="batchStop" class="ghost danger">Stop</button>
+          <div class="batch-bar" role="toolbar" aria-label="Batch controls">
+            <button type="button" id="batchStart" class="primary icon-button" title="Start" aria-label="Start"></button>
+            <button type="button" id="batchPause" class="ghost icon-button" title="Pause" aria-label="Pause"></button>
+            <button type="button" id="batchSkip" class="ghost icon-button" title="Skip" aria-label="Skip"></button>
+            <button type="button" id="batchStop" class="ghost danger icon-button" title="Stop" aria-label="Stop"></button>
           </div>
-          <div class="queue-tools">
-            <button type="button" id="forceSaveChatgpt" class="ghost compact">Save JSON</button>
-            <button type="button" id="retryErrors" class="ghost compact">Retry errors</button>
-            <button type="button" id="clearJobs" class="ghost compact danger">Clear</button>
-            <button type="button" id="reset" class="ghost compact">Reset</button>
+          <div class="queue-tools" role="toolbar" aria-label="Queue tools">
+            <button type="button" id="forceSaveChatgpt" class="ghost icon-button" title="Save JSON" aria-label="Save JSON"></button>
+            <button type="button" id="retryErrors" class="ghost icon-button" title="Retry errors" aria-label="Retry errors"></button>
+            <button type="button" id="clearJobs" class="ghost danger icon-button" title="Clear" aria-label="Clear"></button>
+            <button type="button" id="reset" class="ghost icon-button" title="Reset" aria-label="Reset"></button>
           </div>
           <div id="queueList" class="queue-list">
             <div class="queue-empty">

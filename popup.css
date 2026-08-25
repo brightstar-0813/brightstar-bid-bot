@@ -1207,6 +1207,38 @@ input[type="file"]::file-selector-button {
   font-size: 9.5px;
 }
 
+.batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.batch-bar button.icon-button,
+.queue-tools button.icon-button {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.batch-bar button.primary.icon-button {
+  width: 40px;
+  min-width: 40px;
+  height: 34px;
+}
+
+.batch-bar button.icon-button svg,
+.queue-tools button.icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .queue-tools {
   display: flex;
   flex-wrap: wrap;
@@ -1328,13 +1360,6 @@ input[type="file"]::file-selector-button {
   color: var(--faint);
   font-size: 10.5px;
   text-align: center;
-}
-
-.batch-bar {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 8px;
 }
 
 .state-pill {
