@@ -703,12 +703,19 @@ input[type="file"]::file-selector-button {
 
 .queue-item {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: start;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
   font-size: 11.5px;
+}
+
+.queue-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
 }
 
 .queue-item:last-child {
@@ -866,17 +873,17 @@ input[type="file"]::file-selector-button {
 
 .queue-item .actions {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  width: 68px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  width: 30px;
   gap: 4px;
 }
 
 .queue-item .apply-action {
   display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
+  justify-content: flex-start;
+  align-items: stretch;
   min-width: 30px;
 }
 
@@ -1424,10 +1431,10 @@ input[type="file"]::file-selector-button {
 
 body.ctx-panel .queue-item .actions,
 body.ctx-window .queue-item .actions {
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  width: auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  width: 30px;
 }
 
 body.ctx-panel .queue-item .apply-action,
@@ -1437,14 +1444,13 @@ body.ctx-window .queue-item .apply-action {
 
 @media (max-width: 420px) {
   .queue-item {
-    grid-template-columns: 26px minmax(0, 1fr) auto auto;
+    grid-template-columns: 26px minmax(0, 1fr) auto;
     gap: 6px;
     padding: 7px 8px;
   }
 
   .queue-item .actions {
-    width: auto;
-    max-width: 64px;
+    width: 30px;
   }
 
   .queue-item .actions button.icon-button,

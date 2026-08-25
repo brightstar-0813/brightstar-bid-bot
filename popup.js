@@ -1561,10 +1561,14 @@ function renderQueue() {
     applyBtn.addEventListener("click", () => applyAssist(job));
     applyWrap.appendChild(applyBtn);
 
+    const controls = document.createElement("div");
+    controls.className = "queue-controls";
+    controls.appendChild(actions);
+    controls.appendChild(applyWrap);
+
     item.appendChild(rowEl);
     item.appendChild(meta);
-    item.appendChild(actions);
-    item.appendChild(applyWrap);
+    item.appendChild(controls);
     queueListEl.appendChild(item);
   }
 
