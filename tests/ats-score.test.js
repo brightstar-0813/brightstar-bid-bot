@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { evaluateAtsScore } from "../ats-score.js";
+import { evaluateAtsScore, boostResumeForAts, ATS_TARGET_SCORE } from "../ats-score.js";
 
 const jd = `
 Salesforce Technical Architect
@@ -49,7 +49,7 @@ test("ATS score rewards JD keyword and Salesforce product coverage", () => {
     { jdText: jd, jobTitle: "Salesforce Technical Architect" }
   );
 
-  assert.ok(strong.score >= 80, `expected strong score, received ${strong.score}`);
+  assert.ok(strong.score >= 80, `expected strong baseline score, received ${strong.score}`);
   assert.ok(strong.score > weak.score);
   assert.equal(strong.missingProducts.length, 0);
   assert.ok(weak.missingProducts.includes("Service Cloud"));
@@ -67,4 +67,31 @@ test("ATS scoring is deterministic for identical inputs", () => {
   assert.equal(first.score, second.score);
   assert.deepEqual(first.components, second.components);
   assert.deepEqual(first.missingKeywords, second.missingKeywords);
+});
+
+test("boostResumeForAts lifts a weak resume toward the 90+ target", () => {
+  const weak = {
+    name: "Candidate",
+    email: "candidate@example.com",
+    headline: "Engineer",
+    profile: "Experienced technology professional.",
+    skills: [{ category: "General", items: "Communication" }],
+    experience: [{ company: "Acme", title: "Engineer", bullets: ["Worked with business teams."] }],
+    education: [{ school: "University" }]
+  };
+  const before = evaluateAtsScore(weak, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect"
+  });
+  const { data, evaluation, changed } = boostResumeForAts(weak, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect"
+  });
+  assert.equal(changed, true);
+  assert.ok(evaluation.score > before.score, `expected lift ${before.score} → ${evaluation.score}`);
+  assert.ok(
+    evaluation.score >= ATS_TARGET_SCORE,
+    `expected ≥${ATS_TARGET_SCORE}, got ${evaluation.score}; missing=${evaluation.missingKeywords}`
+  );
+  assert.ok(String(data.headline || "").includes("Salesforce"));
 });

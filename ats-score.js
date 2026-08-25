@@ -10,6 +10,9 @@ const STOP_WORDS = new Set(
   ]
 );
 
+/** Local ATS badge target — builds re-prompt / boost until this is cleared. */
+export const ATS_TARGET_SCORE = 90;
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -70,6 +73,177 @@ function coverage(words, haystack) {
 
 function round(value) {
   return Math.max(0, Math.round(Number(value) || 0));
+}
+
+function cloneResume(data) {
+  if (!data || typeof data !== "object") return data;
+  return JSON.parse(JSON.stringify(data));
+}
+
+function resumeHaystack(data) {
+  return collectStrings(data).join(" ");
+}
+
+function wordStillMissing(word, haystack) {
+  const normalized = ` ${normalizeText(haystack)} `;
+  return !normalized.includes(` ${String(word || "").toLowerCase()} `);
+}
+
+/**
+ * Deterministic ATS lift against the local scorer: weave missing JD tokens into
+ * skills, profile, technicalSummary, headline, and recent-role bullets.
+ * Does not invent employers, dates, degrees, or certifications.
+ */
+export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "" } = {}) {
+  if (!resumeData || typeof resumeData !== "object") {
+    return {
+      data: resumeData,
+      evaluation: evaluateAtsScore(resumeData, { jdText, jobTitle }),
+      changed: false
+    };
+  }
+
+  let evaluation = evaluateAtsScore(resumeData, { jdText, jobTitle });
+  if (evaluation.score >= ATS_TARGET_SCORE) {
+    return { data: resumeData, evaluation, changed: false };
+  }
+
+  const out = cloneResume(resumeData);
+  let changed = false;
+  // Use the full JD keyword set (not the 15-item UI slice) so 90+ is reachable.
+  const allJdKeywords = topKeywords(jdText, 50);
+  const missing = coverage(allJdKeywords, resumeHaystack(out)).missing;
+  const missingProducts = [...(evaluation.missingProducts || [])];
+
+  // 1) Title alignment — put the job title (or its tokens) in the headline.
+  const title = String(jobTitle || "").trim();
+  if (title) {
+    const headline = String(out.headline || "").trim();
+    const titleWords = topKeywords(title, 8);
+    const titleHit = coverage(
+      titleWords,
+      [headline, out.profile, ...(out.technicalSummary || [])].join(" ")
+    );
+    if (titleHit.ratio < 0.75) {
+      out.headline =
+        headline && !normalizeText(headline).includes(normalizeText(title).slice(0, 24))
+          ? `${title} | ${headline}`
+          : title;
+      changed = true;
+    }
+  }
+
+  // 2) Skills row — append missing tokens + product names exactly.
+  const skillWords = [...missingProducts, ...missing.filter((w) => w.length >= 3)];
+  if (skillWords.length) {
+    const rows = (Array.isArray(out.skills) ? out.skills : [])
+      .filter((r) => r && typeof r === "object")
+      .map((r) => ({
+        category: String(r.category || "").trim(),
+        items: String(r.items || "").trim()
+      }));
+    let idx = rows.findIndex((r) => /keyword|competenc|core skill|technical/i.test(r.category));
+    if (idx < 0) {
+      rows.push({ category: "JD Keywords", items: "" });
+      idx = rows.length - 1;
+    }
+    const existing = rows[idx].items;
+    const toAdd = skillWords.filter((w) => wordStillMissing(w, `${existing} ${resumeHaystack(out)}`));
+    if (toAdd.length) {
+      const unique = [...new Set(toAdd.map((w) => String(w).trim()).filter(Boolean))];
+      rows[idx].items = existing ? `${existing}, ${unique.join(", ")}` : unique.join(", ");
+      out.skills = rows.filter((r) => r.category && r.items);
+      changed = true;
+    }
+  }
+
+  // 3) Profile — one dense sentence for still-missing tokens.
+  {
+    const still = missing.filter((w) => wordStillMissing(w, resumeHaystack(out)));
+    const stillProducts = missingProducts.filter((p) => wordStillMissing(p, resumeHaystack(out)));
+    const bag = [...stillProducts, ...still].slice(0, 28);
+    if (bag.length) {
+      const profile = String(out.profile || "").trim();
+      const addendum = `Hands-on with ${bag.join(", ")}.`;
+      out.profile = profile ? `${profile} ${addendum}` : addendum;
+      changed = true;
+    }
+  }
+
+  // 4) technicalSummary — list missing products / high-value tokens.
+  {
+    const summary = Array.isArray(out.technicalSummary)
+      ? out.technicalSummary.map((s) => String(s || "").trim()).filter(Boolean)
+      : [];
+    const summaryText = summary.join(" ");
+    const add = [
+      ...missingProducts.filter((p) => wordStillMissing(p, summaryText)),
+      ...missing.filter((w) => w.length > 4 && wordStillMissing(w, summaryText))
+    ].slice(0, 20);
+    if (add.length) {
+      out.technicalSummary = [...summary, ...add];
+      changed = true;
+    }
+  }
+
+  // 5) Experience evidence — weave remaining tokens into the two most recent roles.
+  {
+    const still = [...missingProducts, ...missing].filter((w) =>
+      wordStillMissing(w, collectStrings(out.experience).join(" "))
+    );
+    if (still.length && Array.isArray(out.experience) && out.experience.length) {
+      const roles = out.experience.slice(0, 2);
+      const mid = Math.ceil(still.length / roles.length) || still.length;
+      roles.forEach((job, i) => {
+        const chunk = still.slice(i * mid, i === roles.length - 1 ? still.length : (i + 1) * mid);
+        if (!chunk.length) return;
+        const bullets = Array.isArray(job.bullets) ? job.bullets.map((b) => String(b || "")) : [];
+        bullets.push(
+          `Delivered solutions using ${chunk.join(", ")}, aligned to stakeholder outcomes and platform standards.`
+        );
+        job.bullets = bullets.filter(Boolean);
+        changed = true;
+      });
+    }
+  }
+
+  evaluation = evaluateAtsScore(out, { jdText, jobTitle });
+  return { data: out, evaluation, changed };
+}
+
+/**
+ * Same-chat re-prompt: force missing JD keywords / products into JSON so the
+ * local ATS badge can clear 90+.
+ */
+export function buildAtsScoreRetryPrompt(resumeData, evaluation, { jdText = "", jobTitle = "" } = {}) {
+  const allJdKeywords = topKeywords(jdText, 50);
+  const fromFull = coverage(allJdKeywords, resumeHaystack(resumeData)).missing;
+  const missingKw = fromFull.length ? fromFull : evaluation?.missingKeywords || [];
+  const missingProducts = evaluation?.missingProducts || [];
+  const score = evaluation?.score ?? 0;
+  return [
+    `ATS MATCH IS TOO LOW (${score}/100). Target is ${ATS_TARGET_SCORE}+. Return the COMPLETE corrected JSON object again — same schema, every role, every field — with denser JD keyword coverage.`,
+    "",
+    jobTitle ? `TARGET TITLE: ${jobTitle}` : "",
+    missingProducts.length
+      ? `MISSING SALESFORCE / PLATFORM PRODUCTS (must appear in skills AND in at least two recent-role bullets AND in profile): ${missingProducts.join(", ")}`
+      : "",
+    missingKw.length
+      ? `MISSING JD KEYWORD TOKENS (each must appear somewhere in the resume text — skills items, profile, technicalSummary, and recent-role bullets). Use the exact tokens: ${missingKw.join(", ")}`
+      : "",
+    "",
+    "RULES:",
+    "1. Put the target title (or its key words) in \"headline\".",
+    "2. Mirror JD terminology exactly — do not paraphrase away keywords (e.g. keep \"Lightning Web Components\", \"SOQL\", \"Service Cloud\", \"integration\", \"architecture\" when the JD uses them).",
+    "3. Every missing product and as many missing tokens as possible must appear in Professional Experience bullets for the two most recent roles — not only in the skills table.",
+    "4. Keep every employer, date, location, title, education entry, and certification exactly as they already are. Do not invent metrics, clearances, or employers.",
+    "5. Do not explain gaps. Return ONLY the JSON object, starting with { and ending with }.",
+    "",
+    "JOB DESCRIPTION (for keyword reference):",
+    String(jdText || "").slice(0, 6000)
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "" } = {}) {
@@ -133,7 +307,7 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "" } = {}
   const raw = Object.values(components).reduce((sum, item) => sum + item.score, 0);
   const possible = Object.values(components).reduce((sum, item) => sum + item.max, 0) || 1;
   const score = Math.min(100, round((raw / possible) * 100));
-  const grade = score >= 85 ? "Excellent" : score >= 70 ? "Good" : score >= 55 ? "Fair" : "Low";
+  const grade = score >= 90 ? "Excellent" : score >= 75 ? "Good" : score >= 55 ? "Fair" : "Low";
 
   return {
     score,

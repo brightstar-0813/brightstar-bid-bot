@@ -409,7 +409,7 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (!person.promptTemplate.includes("{JD}")) {
     throw new Error("Prompt must include the {JD} placeholder.");
   }
-  return applyPlaceholders(
+  const body = applyPlaceholders(
     person.promptTemplate,
     personPlaceholderExtras(person, {
       jdText,
@@ -418,6 +418,20 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
       masterResume: extras.masterResume
     })
   );
+  // Appended for every person so ChatGPT mirrors JD tokens the local ATS badge scores.
+  const atsAppendix = `
+
+==================================================
+ATS KEYWORD DENSITY (local match target ≥ 90/100)
+==================================================
+Mirror the job description's exact terminology throughout the JSON — do not paraphrase away keywords.
+- Put the target job title (or its key words) in "headline".
+- Every Tier 0 / must-have technology and every Salesforce product named in the JD must appear in: skills items, profile, AND at least two bullets across the two most recent roles.
+- Prefer JD spellings: "Lightning Web Components", "Service Cloud", "SOQL", "Apex", "MuleSoft", "integration", "architecture", etc.
+- technicalSummary should list the JD's top tools verbatim.
+A resume that covers fewer than ~90% of the JD's distinctive tokens will be boosted and may be re-prompted until it clears 90.
+`.trim();
+  return `${body}\n\n${atsAppendix}`;
 }
 
 export async function buildCoverLetterPrompt({ jdText, jobTitle, companyName }) {

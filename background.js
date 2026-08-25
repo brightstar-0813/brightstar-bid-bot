@@ -83,7 +83,12 @@ import {
   isIndeedUrl,
   normalizeIndeedCapturedJob
 } from "./indeed.js";
-import { evaluateAtsScore } from "./ats-score.js";
+import {
+  evaluateAtsScore,
+  boostResumeForAts,
+  buildAtsScoreRetryPrompt,
+  ATS_TARGET_SCORE
+} from "./ats-score.js";
 import {
   AI_PROVIDER_KEY,
   AI_PROVIDERS,
@@ -3489,22 +3494,49 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
           Accept: "application/json"
         };
         if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
-        for (const body of [{ is_visible: false }, { is_archived: true }]) {
-          try {
-            const res = await fetch(`${origin}/backend-api/conversation/${id}`, {
-              method: "PATCH",
-              credentials: "include",
-              headers,
-              body: JSON.stringify(body)
-            });
-            if (res.ok || res.status === 204 || res.status === 404) {
-              return { ok: true, status: res.status };
-            }
-          } catch {
-            // try next payload
+
+        // Soft-delete only: is_visible=false. Do NOT treat archive as success —
+        // archived chats still clutter history and look "not deleted".
+        const verifyGone = async (status) => {
+          await sleep(600);
+          const still = Boolean(sidebarLink(id));
+          if (!still || status === 404) {
+            return { ok: true, status, verified: !still };
           }
+          return { ok: false, error: "api-ok-still-in-sidebar", status };
+        };
+
+        try {
+          const patch = await fetch(`${origin}/backend-api/conversation/${id}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers,
+            body: JSON.stringify({ is_visible: false })
+          });
+          if (patch.ok || patch.status === 204 || patch.status === 404) {
+            const checked = await verifyGone(patch.status);
+            if (checked.ok) return checked;
+          } else if (patch.status) {
+            // continue to DELETE attempt
+          }
+
+          // Some accounts accept hard DELETE when PATCH leaves the row visible.
+          const del = await fetch(`${origin}/backend-api/conversation/${id}`, {
+            method: "DELETE",
+            credentials: "include",
+            headers
+          });
+          if (del.ok || del.status === 204 || del.status === 404) {
+            return await verifyGone(del.status);
+          }
+          return {
+            ok: false,
+            error: `api-status-patch-${patch.status}-del-${del.status}`,
+            status: del.status || patch.status
+          };
+        } catch (err) {
+          return { ok: false, error: String(err?.message || err || "api-failed") };
         }
-        return { ok: false, error: "api-failed" };
       };
 
       const chatgptDeleteViaUi = async (id) => {
@@ -3515,38 +3547,48 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
             link.scrollIntoView({ block: "nearest" });
             link.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
             link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-            await sleep(300);
+            link.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+            await sleep(350);
             const row =
+              link.closest('[data-testid*="history"]') ||
               link.closest("[data-testid]") ||
               link.closest("li") ||
               link.closest("div.group") ||
+              link.closest("div[class*='group']") ||
               link.parentElement;
             const optionsBtn =
               row?.querySelector('button[data-testid="history-item-options"]') ||
-              row?.querySelector('button[aria-label*="Options"]') ||
-              row?.querySelector('button[aria-label*="More"]') ||
+              row?.querySelector('button[aria-label*="Open conversation options" i]') ||
+              row?.querySelector('button[aria-label*="Conversation options" i]') ||
+              row?.querySelector('button[aria-label*="Options" i]') ||
+              row?.querySelector('button[aria-label*="More" i]') ||
+              [...(row?.querySelectorAll("button") || [])].find((b) =>
+                /options|more|menu/i.test(
+                  `${b.getAttribute("aria-label") || ""} ${b.getAttribute("data-testid") || ""}`
+                )
+              ) ||
               row?.querySelector("button");
             if (optionsBtn instanceof HTMLElement) {
               firePointerClick(optionsBtn);
               opened = true;
-              await sleep(450);
+              await sleep(500);
             }
           }
         }
         if (!opened) {
           for (const selector of [
             'button[data-testid="conversation-options-button"]',
-            'button[aria-label*="Open conversation options"]',
-            'button[aria-label*="Conversation options"]',
-            'button[aria-label*="More actions"]',
-            'button[aria-label*="More options"]',
+            'button[aria-label*="Open conversation options" i]',
+            'button[aria-label*="Conversation options" i]',
+            'button[aria-label*="More actions" i]',
+            'button[aria-label*="More options" i]',
             'button[data-testid="history-item-options"]'
           ]) {
             const btn = document.querySelector(selector);
             if (btn instanceof HTMLElement && btn.offsetParent !== null) {
               firePointerClick(btn);
               opened = true;
-              await sleep(450);
+              await sleep(500);
               break;
             }
           }
@@ -3554,28 +3596,34 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
         const clickedDelete =
           clickMatching(/delete chat|delete conversation|^delete$/i) || clickMatching(/delete/i);
         if (!clickedDelete) return { ok: false, error: "no-delete-menu" };
-        await sleep(500);
+        await sleep(550);
         clickMatching(/^delete$/i) ||
           clickMatching(/delete chat|confirm|yes,?\s*delete/i) ||
           clickMatching(/^confirm$/i);
-        await sleep(900);
+        await sleep(1000);
         const stillThere = id ? Boolean(sidebarLink(id)) : true;
         return { ok: id ? !stillThere : opened, error: stillThere && id ? "still-in-sidebar" : "" };
       };
 
       if (convId) {
-        const api = await chatgptDeleteViaApi(convId);
-        if (api.ok) {
-          await sleep(400);
-          return { ok: true, via: "api", chatId: convId };
+        let lastErr = "";
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (attempt > 0) await sleep(700 * attempt);
+          const api = await chatgptDeleteViaApi(convId);
+          if (api.ok) {
+            await sleep(400);
+            return { ok: true, via: "api", chatId: convId, attempt: attempt + 1 };
+          }
+          lastErr = api.error || lastErr;
+          const ui = await chatgptDeleteViaUi(convId);
+          if (ui.ok) return { ok: true, via: "ui", chatId: convId, attempt: attempt + 1 };
+          lastErr = ui.error || api.error || lastErr;
         }
-        const ui = await chatgptDeleteViaUi(convId);
-        if (ui.ok) return { ok: true, via: "ui", chatId: convId };
         return {
           ok: false,
           via: "failed",
           chatId: convId,
-          error: ui.error || api.error || "chatgpt-delete-failed"
+          error: lastErr || "chatgpt-delete-failed"
         };
       }
 
@@ -3590,16 +3638,17 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
   });
 
   const detail = results?.[0]?.result || { ok: false };
+  if (!detail?.ok) {
+    // Do not open another chat when delete failed — that is how Recents pile up.
+    throw new Error(
+      `${label} chat cleanup did not confirm${detail?.error ? ` (${detail.error})` : ""}.`
+    );
+  }
   // Leave a blank chat so the next job does not reopen the deleted URL.
   try {
     await ensureFreshChat(tabId, provider);
   } catch {
     // ignore
-  }
-  if (!detail?.ok) {
-    throw new Error(
-      `${label} chat cleanup did not confirm${detail?.error ? ` (${detail.error})` : ""}.`
-    );
   }
   try {
     await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider"]);
@@ -3614,6 +3663,24 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
  * Inter-job cooldown: delete the finished AI chat first, then wait out the rest
  * of the configured gap. Keeps cleanup off the critical save/apply path.
  */
+async function resolveAiTabForCleanup(preferredTabId = null) {
+  if (typeof preferredTabId === "number") {
+    try {
+      const tab = await chrome.tabs.get(preferredTabId);
+      if (tab?.id) return tab.id;
+    } catch {
+      // tab closed — fall through
+    }
+  }
+  try {
+    const provider = await getStoredAiProvider();
+    const tab = await getOpenAiTab(provider);
+    return tab?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function cooldownBeforeNextJob({
   aiTabId = null,
   aiChatId = "",
@@ -3621,13 +3688,25 @@ async function cooldownBeforeNextJob({
 } = {}) {
   const gapMs = currentJobGapMs();
   const started = Date.now();
-  if (typeof aiTabId === "number") {
+  const tabId = await resolveAiTabForCleanup(aiTabId);
+  let chatId = String(aiChatId || "").trim();
+  if (!chatId) {
+    try {
+      const stored = await chrome.storage.local.get(["last_ai_chat_id"]);
+      chatId = String(stored.last_ai_chat_id || "").trim();
+    } catch {
+      // ignore
+    }
+  }
+  if (typeof tabId === "number") {
     try {
       await setStatus("Cooling down — removing finished AI chat…");
-      await deleteCurrentAiConversation(aiTabId, { chatId: aiChatId });
+      await deleteCurrentAiConversation(tabId, { chatId });
     } catch (err) {
       await setStatus(`Cooling down — chat cleanup skipped: ${String(err?.message || err)}`);
     }
+  } else if (chatId) {
+    await setStatus("Cooling down — chat cleanup skipped (no AI tab open).");
   }
   const left = Math.max(0, gapMs - (Date.now() - started));
   if (left <= 0) return;
@@ -5115,10 +5194,69 @@ async function runAutoJob(jobMeta) {
     }
   }
 
-  const atsEvaluation = evaluateAtsScore(resumeData, {
-    jdText: jobMeta.jdText || "",
-    jobTitle: jobMeta.jobTitle || jobMeta.title || ""
-  });
+  // Local ATS badge: deterministic keyword weave, then up to 2 ChatGPT retries until ≥90.
+  const atsJd = jobMeta.jdText || "";
+  const atsTitle = jobMeta.jobTitle || jobMeta.title || "";
+  let atsEvaluation = evaluateAtsScore(resumeData, { jdText: atsJd, jobTitle: atsTitle });
+  {
+    let boostPass = 0;
+    while (atsEvaluation.score < ATS_TARGET_SCORE && boostPass < 2) {
+      const boosted = boostResumeForAts(resumeData, { jdText: atsJd, jobTitle: atsTitle });
+      if (!boosted.changed || boosted.evaluation.score < atsEvaluation.score) break;
+      resumeData = boosted.data;
+      atsEvaluation = boosted.evaluation;
+      boostPass += 1;
+      await setStatus(
+        `ATS boost applied → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
+      );
+      if (atsEvaluation.score >= ATS_TARGET_SCORE) break;
+    }
+  }
+  const maxAtsRetries = 2;
+  for (
+    let atsAttempt = 1;
+    atsAttempt <= maxAtsRetries &&
+    atsEvaluation.score < ATS_TARGET_SCORE &&
+    !batchControl.skipCurrent &&
+    !batchControl.stop;
+    atsAttempt += 1
+  ) {
+    if (!atsEvaluation.missingKeywords?.length && !atsEvaluation.missingProducts?.length) break;
+    await setStatus(
+      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — re-prompt ${atsAttempt}/${maxAtsRetries} for ${ATS_TARGET_SCORE}+…`
+    );
+    try {
+      const atsRaw = await automateChatGpt(
+        tab.id,
+        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, { jdText: atsJd, jobTitle: atsTitle }),
+        {
+          newChat: false,
+          expectResumeJson: true,
+          statusLabel: `Same chat · ATS keyword boost (${jobMeta.companyName || "job"})…`
+        }
+      );
+      let improved = enforceJdSkills(extractResumeJson(atsRaw), atsJd);
+      const improvedBoost = boostResumeForAts(improved, { jdText: atsJd, jobTitle: atsTitle });
+      if (improvedBoost.changed) improved = improvedBoost.data;
+      const improvedEval = improvedBoost.evaluation;
+      if (
+        (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) &&
+        improvedEval.score >= atsEvaluation.score
+      ) {
+        resumeData = improved;
+        atsEvaluation = improvedEval;
+        await setStatus(
+          `ATS re-prompt ${atsAttempt} → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
+        );
+      } else {
+        await setStatus(`ATS re-prompt ${atsAttempt} did not improve score — keeping prior resume.`);
+        break;
+      }
+    } catch (err) {
+      await setStatus(`ATS re-prompt skipped (${err?.message || "failed"}). Keeping resume.`);
+      break;
+    }
+  }
   if (jobMeta.csvRow != null) {
     await updateQueueJob(jobMeta.csvRow, {
       atsScore: atsEvaluation.score,
@@ -5431,7 +5569,14 @@ async function runBatchLoop(outputDir) {
           }
         }
 
-        if (batchControl.stop) break;
+        if (batchControl.stop) {
+          await cooldownBeforeNextJob({
+            aiTabId: result?.aiTabId,
+            aiChatId: result?.aiChatId || "",
+            reason: "stop"
+          });
+          break;
+        }
 
         await cooldownBeforeNextJob({
           aiTabId: result?.aiTabId,
@@ -5452,7 +5597,14 @@ async function runBatchLoop(outputDir) {
           await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
           continue;
         }
-        if (batchControl.stop) break;
+        if (batchControl.stop) {
+          await cooldownBeforeNextJob({
+            aiTabId: null,
+            aiChatId: "",
+            reason: "stop"
+          });
+          break;
+        }
 
         // Only a global blocker (no ChatGPT tab / signed out) pauses the batch.
         // Anything row-specific must not stop the remaining jobs.
@@ -5515,7 +5667,11 @@ async function runBatchLoop(outputDir) {
           maxAttempts: MAX_JOB_ATTEMPTS,
           progress: await queueSlackProgress()
         });
-        await sleep(currentJobGapMs());
+        await cooldownBeforeNextJob({
+          aiTabId: null,
+          aiChatId: "",
+          reason: "next job after error"
+        });
         continue;
       }
 
