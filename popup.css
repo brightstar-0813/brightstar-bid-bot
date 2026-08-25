@@ -1499,13 +1499,31 @@ input[type="file"]::file-selector-button {
 
 .qa-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.qa-toolbar button {
-  width: auto;
+.qa-toolbar .btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.qa-toolbar button.icon-button {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
+}
+
+.qa-toolbar button.icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 body.ctx-panel .queue-item .actions,

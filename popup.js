@@ -1373,7 +1373,13 @@ const ACTION_ICON_PATHS = {
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
   window:
     '<path d="M3 5h18v14H3z"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M14 14h2"/>',
-  panel: '<path d="M4 4h16v16H4z"/><path d="M14 4v16"/>'
+  panel: '<path d="M4 4h16v16H4z"/><path d="M14 4v16"/>',
+  editor:
+    '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
+  bundled:
+    '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.27 6.96 8.73 5.05 8.73-5.05M12 22.08V12"/>',
+  import: '<path d="M12 3v12"/><path d="m7 10 5-5 5 5"/><path d="M5 21h14"/>',
+  export: '<path d="M12 3v12"/><path d="m7 14 5 5 5-5"/><path d="M5 21h14"/>'
 };
 
 function setIconButton(button, icon, label) {
@@ -2899,6 +2905,11 @@ if (forceSaveChatgptBtn) setIconButton(forceSaveChatgptBtn, "save", "Save JSON")
 if (retryErrorsBtn) setIconButton(retryErrorsBtn, "retry", "Retry errors");
 if (clearJobsBtn) setIconButton(clearJobsBtn, "remove", "Clear queue");
 if (resetBtn) setIconButton(resetBtn, "reset", "Reset");
+
+if (qaOpenEditorBtn) setIconButton(qaOpenEditorBtn, "editor", "Open editor");
+if (qaImportBundledBtn) setIconButton(qaImportBundledBtn, "bundled", "Load bundled bank");
+if (qaImportBtn) setIconButton(qaImportBtn, "import", "Import JSON");
+if (qaExportBtn) setIconButton(qaExportBtn, "export", "Export JSON");
 
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
 

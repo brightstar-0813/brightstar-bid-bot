@@ -595,11 +595,13 @@
               <span>Learn mode — save answers you type on forms</span>
               <input type="checkbox" id="qaLearnToggle" checked />
             </label>
-            <div class="qa-toolbar">
-              <button type="button" id="qaOpenEditorBtn" class="ghost compact">Open editor</button>
-              <button type="button" id="qaImportBundledBtn" class="ghost compact">Load bundled</button>
-              <button type="button" id="qaImportBtn" class="ghost compact">Import</button>
-              <button type="button" id="qaExportBtn" class="ghost compact">Export</button>
+            <div class="qa-toolbar" role="toolbar" aria-label="Q&A bank tools">
+              <div class="btn-group">
+                <button type="button" id="qaOpenEditorBtn" class="ghost icon-button" title="Open editor" aria-label="Open editor"></button>
+                <button type="button" id="qaImportBundledBtn" class="ghost icon-button" title="Load bundled bank" aria-label="Load bundled bank"></button>
+                <button type="button" id="qaImportBtn" class="ghost icon-button" title="Import JSON" aria-label="Import JSON"></button>
+                <button type="button" id="qaExportBtn" class="ghost icon-button" title="Export JSON" aria-label="Export JSON"></button>
+              </div>
               <input type="file" id="qaImportInput" accept="application/json,.json" hidden />
             </div>
           </div>
