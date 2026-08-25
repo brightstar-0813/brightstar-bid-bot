@@ -8,8 +8,9 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 
 - **Active person**: name, contact, master resume, **resume tailor prompt** (JD auto from CSV), cover letter prompt, PDF prefix, template
 - **Job capture / CSV batch**: upload sf-job-capture (or similar) `jobs_latest.csv`, or **grab a selected Indeed job** → keep **US jobs only** → filter by **Dice / Indeed / LI / Etc / All** using the **job link host**. Hosted Dice and Indeed jobs interleave generate → auto-apply+submit; external Indeed applications are never submitted.
-- For each job: **one new chat** on the selected AI engine (ChatGPT or Claude) → resume JSON (JD auto-injected) → save files → **same chat** cover letter → **delete that job’s chat** → next job
+- For each job: **one new chat** on the selected AI engine (ChatGPT or Claude) → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Toggle **AI engine** in the bot UI anytime before Start / Grab (stay logged in on that site)
+- During the **cooldown between jobs**, the finished chat is deleted so AI history stays tidy
 - After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, Salesforce products, experience evidence, and resume structure; hover its queue badge for the breakdown
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`

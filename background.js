@@ -3016,6 +3016,12 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         );
       }
 
+      // First message creates /c/<id> — wait so cooldown cleanup can target it.
+      for (let i = 0; i < 24; i += 1) {
+        if (/\/c\/[a-zA-Z0-9_-]+/.test(location.pathname)) break;
+        await sleep(250);
+      }
+
       return { blocksBefore, latestBefore };
     }
   });
@@ -3060,11 +3066,18 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
             return true;
           };
 
-          const findInput = () =>
-            document.querySelector('div[contenteditable="true"][data-testid]') ||
-            document.querySelector("div.ProseMirror[contenteditable='true']") ||
-            document.querySelector('div[contenteditable="true"][enterkeyhint]') ||
-            document.querySelector('div[contenteditable="true"]');
+          const findInput = () => {
+            const candidates = [
+              document.querySelector('div[contenteditable="true"][data-testid]'),
+              document.querySelector("div.ProseMirror[contenteditable='true']"),
+              document.querySelector('div[contenteditable="true"][enterkeyhint]'),
+              document.querySelector('fieldset div[contenteditable="true"]'),
+              document.querySelector('div[contenteditable="true"]')
+            ].filter(Boolean);
+            return (
+              candidates.find((el) => el instanceof HTMLElement && el.offsetParent !== null) || null
+            );
+          };
 
           const setInputValue = (el, text) => {
             if (!(el instanceof HTMLElement)) return;
@@ -3217,6 +3230,12 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
             );
           }
 
+          // First message creates /chat/<uuid> — wait so cleanup can target it later.
+          for (let i = 0; i < 20; i += 1) {
+            if (/\/chat\/[a-f0-9-]+/i.test(location.pathname)) break;
+            await sleep(250);
+          }
+
           return {
             blocksBefore: document.querySelectorAll(
               '[data-testid="assistant-message"], [data-testid="assistant"]'
@@ -3249,25 +3268,78 @@ async function aiSendPrompt(tabId, prompt, startNewChat) {
   return chatgptSendPrompt(tabId, prompt, startNewChat);
 }
 
+/** Read the current Claude/ChatGPT conversation id from the tab URL. */
+async function readAiConversationId(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [p],
+      func: (site) => {
+        const href = String(location.href || "");
+        const pathName = String(location.pathname || "");
+        if (site === "claude") {
+          return (pathName.match(/\/chat\/([a-f0-9-]+)/i) || href.match(/\/chat\/([a-f0-9-]+)/i) || [])[1] || "";
+        }
+        return (pathName.match(/\/c\/([a-zA-Z0-9_-]+)/) || href.match(/\/c\/([a-zA-Z0-9_-]+)/) || [])[1] || "";
+      }
+    });
+    const fromPage = String(results?.[0]?.result || "").trim();
+    if (fromPage) return fromPage;
+    const tab = await chrome.tabs.get(tabId);
+    const url = String(tab?.url || "");
+    if (p === AI_PROVIDERS.CLAUDE) {
+      return (url.match(/\/chat\/([a-f0-9-]+)/i) || [])[1] || "";
+    }
+    return (url.match(/\/c\/([a-zA-Z0-9_-]+)/) || [])[1] || "";
+  } catch {
+    return "";
+  }
+}
+
 /**
- * Remove the conversation used for the just-finished job so history stays clean.
- * Best-effort: API when possible, UI confirm as fallback, then open a blank chat.
+ * Remove the conversation used for a finished job so history stays clean.
+ * Prefer API delete (Claude needs JSON body = uuid). UI is fallback.
+ * Intended to run during inter-job cooldown, not mid file-save.
  */
-async function deleteCurrentAiConversation(tabId) {
+async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
   const provider = await getStoredAiProvider();
   const label = aiProviderLabel(provider);
+  let targetChatId = String(chatId || "").trim();
+  if (!targetChatId) {
+    targetChatId = await readAiConversationId(tabId, provider);
+  }
+  if (!targetChatId) {
+    try {
+      const stored = await chrome.storage.local.get(["last_ai_chat_id", "last_ai_provider"]);
+      if (normalizeAiProvider(stored.last_ai_provider) === provider) {
+        targetChatId = String(stored.last_ai_chat_id || "").trim();
+      }
+    } catch {
+      // ignore
+    }
+  }
   await focusTabForInput(tabId);
-  await setStatus(`Removing finished ${label} chat…`);
+  await setStatus(
+    targetChatId
+      ? `Removing finished ${label} chat (${targetChatId.slice(0, 8)}…)…`
+      : `Removing finished ${label} chat…`
+  );
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    args: [provider],
-    func: async (site) => {
+    args: [provider, targetChatId],
+    func: async (site, knownChatId) => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-      const clickMatching = (re) => {
-        const nodes = Array.from(document.querySelectorAll("button, a, [role='menuitem'], div[role='button']"));
-        const hit = nodes.find((el) => re.test(`${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`.trim()));
+      const clickMatching = (re, roots = null) => {
+        const scope = roots || document;
+        const nodes = Array.from(
+          scope.querySelectorAll("button, a, [role='menuitem'], div[role='button'], [role='option']")
+        );
+        const hit = nodes.find((el) =>
+          re.test(`${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`.trim())
+        );
         if (hit instanceof HTMLElement) {
           hit.click();
           return true;
@@ -3275,78 +3347,242 @@ async function deleteCurrentAiConversation(tabId) {
         return false;
       };
 
+      const apiJson = async (path, opts = {}) => {
+        const res = await fetch(`https://claude.ai/api${path}`, {
+          credentials: "include",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          ...opts
+        });
+        let data = null;
+        const text = await res.text();
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = text;
+          }
+        }
+        return { ok: res.ok || res.status === 204 || res.status === 404, status: res.status, data };
+      };
+
       if (site === "claude") {
-        const chatId = (location.pathname.match(/\/chat\/([a-f0-9-]+)/i) || [])[1];
+        const chatId =
+          String(knownChatId || "").trim() ||
+          (location.pathname.match(/\/chat\/([a-f0-9-]+)/i) || [])[1] ||
+          "";
+
         if (chatId) {
           try {
-            const orgs = await fetch("/api/organizations", { credentials: "include" }).then((r) => r.json());
-            const orgId = Array.isArray(orgs) ? orgs[0]?.uuid || orgs[0]?.id : orgs?.uuid || orgs?.id;
-            if (orgId) {
-              const res = await fetch(`/api/organizations/${orgId}/chat_conversations/${chatId}`, {
+            const orgsRes = await apiJson("/organizations");
+            const orgs = Array.isArray(orgsRes.data)
+              ? orgsRes.data
+              : Array.isArray(orgsRes.data?.data)
+                ? orgsRes.data.data
+                : orgsRes.data
+                  ? [orgsRes.data]
+                  : [];
+            for (const org of orgs) {
+              const orgId = org?.uuid || org?.id;
+              if (!orgId) continue;
+              // Claude web expects DELETE body = JSON string of the conversation uuid.
+              const del = await apiJson(`/organizations/${orgId}/chat_conversations/${chatId}`, {
                 method: "DELETE",
-                credentials: "include"
+                body: JSON.stringify(chatId)
               });
-              if (res.ok || res.status === 204 || res.status === 404) {
-                return { ok: true, via: "api" };
-              }
+              if (del.ok) return { ok: true, via: "api", chatId };
             }
           } catch {
             // fall through to UI
           }
         }
 
-        clickMatching(/chat menu|more options|conversation options|^\s*⋯\s*$|^\s*\.\.\.\s*$/i);
-        await sleep(400);
-        clickMatching(/^delete$/i);
-        await sleep(350);
-        clickMatching(/^delete$/i);
-        return { ok: true, via: "ui" };
-      }
-
-      // ChatGPT — hide conversation via backend API when session token is available.
-      const convId = (location.pathname.match(/\/c\/([^/?#]+)/i) || [])[1];
-      if (convId) {
-        try {
-          const session = await fetch("/api/auth/session", { credentials: "include" }).then((r) => r.json());
-          const token = session?.accessToken || session?.access_token;
-          if (token) {
-            const res = await fetch(`/backend-api/conversation/${convId}`, {
-              method: "PATCH",
-              credentials: "include",
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({ is_visible: false })
-            });
-            if (res.ok || res.status === 204 || res.status === 404) {
-              return { ok: true, via: "api" };
+        // UI: open chat header / sidebar menu → Delete → confirm.
+        const menuSelectors = [
+          'button[aria-label*="Chat menu"]',
+          'button[aria-label*="chat menu"]',
+          'button[data-testid="chat-menu"]',
+          'button[aria-label*="More"]',
+          'button[aria-haspopup="menu"]'
+        ];
+        for (const selector of menuSelectors) {
+          const btn = document.querySelector(selector);
+          if (btn instanceof HTMLElement && btn.offsetParent !== null) {
+            btn.click();
+            await sleep(450);
+            break;
+          }
+        }
+        // Sidebar row for this chat (hover reveals ⋯).
+        if (chatId) {
+          const link = document.querySelector(`a[href*="/chat/${chatId}"]`);
+          if (link instanceof HTMLElement) {
+            link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+            await sleep(250);
+            const row = link.closest("div") || link.parentElement;
+            if (row) {
+              const more = row.querySelector("button");
+              if (more instanceof HTMLElement) more.click();
+              await sleep(400);
             }
           }
-        } catch {
-          // fall through to UI
         }
+        clickMatching(/delete/i);
+        await sleep(400);
+        clickMatching(/^delete$/i);
+        await sleep(500);
+        const stillThere = chatId ? Boolean(document.querySelector(`a[href*="/chat/${chatId}"]`)) : true;
+        return { ok: !stillThere || Boolean(chatId), via: "ui", chatId };
       }
 
-      const menuSelectors = [
-        'button[data-testid="conversation-options-button"]',
-        'button[aria-label*="Open conversation options"]',
-        'button[aria-label*="Conversation options"]',
-        'button[aria-label*="More actions"]',
-        'button[aria-label*="More options"]'
-      ];
-      for (const selector of menuSelectors) {
-        const btn = document.querySelector(selector);
-        if (btn instanceof HTMLElement) {
-          btn.click();
-          break;
+      // ChatGPT — hide/delete via backend API, then verify sidebar (UI fallback).
+      const origin = location.origin.includes("openai.com")
+        ? "https://chat.openai.com"
+        : "https://chatgpt.com";
+      const convId =
+        String(knownChatId || "").trim() ||
+        (location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/) || [])[1] ||
+        "";
+
+      const sidebarLink = (id) => {
+        if (!id) return null;
+        return (
+          document.querySelector(`a[href="/c/${id}"]`) ||
+          document.querySelector(`a[href*="/c/${id}"]`) ||
+          document.querySelector(`a[href*="${id}"]`)
+        );
+      };
+
+      const firePointerClick = (el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        const opts = { bubbles: true, cancelable: true, view: window };
+        el.dispatchEvent(new PointerEvent("pointerdown", { ...opts, pointerId: 1, pointerType: "mouse" }));
+        el.dispatchEvent(new MouseEvent("mousedown", opts));
+        el.dispatchEvent(new PointerEvent("pointerup", { ...opts, pointerId: 1, pointerType: "mouse" }));
+        el.dispatchEvent(new MouseEvent("mouseup", opts));
+        el.dispatchEvent(new MouseEvent("click", opts));
+        if (typeof el.click === "function") el.click();
+        return true;
+      };
+
+      const chatgptDeleteViaApi = async (id) => {
+        if (!id) return { ok: false, error: "missing-id" };
+        let token = "";
+        let accountId = "";
+        for (const sessionUrl of [`${origin}/api/auth/session`, "/api/auth/session"]) {
+          try {
+            const session = await fetch(sessionUrl, { credentials: "include" }).then((r) => r.json());
+            token = session?.accessToken || session?.access_token || "";
+            accountId =
+              session?.account?.id || session?.user?.id || session?.chatgpt_account_id || "";
+            if (token) break;
+          } catch {
+            // try next
+          }
         }
+        if (!token) return { ok: false, error: "no-token" };
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        };
+        if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
+        for (const body of [{ is_visible: false }, { is_archived: true }]) {
+          try {
+            const res = await fetch(`${origin}/backend-api/conversation/${id}`, {
+              method: "PATCH",
+              credentials: "include",
+              headers,
+              body: JSON.stringify(body)
+            });
+            if (res.ok || res.status === 204 || res.status === 404) {
+              return { ok: true, status: res.status };
+            }
+          } catch {
+            // try next payload
+          }
+        }
+        return { ok: false, error: "api-failed" };
+      };
+
+      const chatgptDeleteViaUi = async (id) => {
+        let opened = false;
+        if (id) {
+          const link = sidebarLink(id);
+          if (link instanceof HTMLElement) {
+            link.scrollIntoView({ block: "nearest" });
+            link.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+            link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+            await sleep(300);
+            const row =
+              link.closest("[data-testid]") ||
+              link.closest("li") ||
+              link.closest("div.group") ||
+              link.parentElement;
+            const optionsBtn =
+              row?.querySelector('button[data-testid="history-item-options"]') ||
+              row?.querySelector('button[aria-label*="Options"]') ||
+              row?.querySelector('button[aria-label*="More"]') ||
+              row?.querySelector("button");
+            if (optionsBtn instanceof HTMLElement) {
+              firePointerClick(optionsBtn);
+              opened = true;
+              await sleep(450);
+            }
+          }
+        }
+        if (!opened) {
+          for (const selector of [
+            'button[data-testid="conversation-options-button"]',
+            'button[aria-label*="Open conversation options"]',
+            'button[aria-label*="Conversation options"]',
+            'button[aria-label*="More actions"]',
+            'button[aria-label*="More options"]',
+            'button[data-testid="history-item-options"]'
+          ]) {
+            const btn = document.querySelector(selector);
+            if (btn instanceof HTMLElement && btn.offsetParent !== null) {
+              firePointerClick(btn);
+              opened = true;
+              await sleep(450);
+              break;
+            }
+          }
+        }
+        const clickedDelete =
+          clickMatching(/delete chat|delete conversation|^delete$/i) || clickMatching(/delete/i);
+        if (!clickedDelete) return { ok: false, error: "no-delete-menu" };
+        await sleep(500);
+        clickMatching(/^delete$/i) ||
+          clickMatching(/delete chat|confirm|yes,?\s*delete/i) ||
+          clickMatching(/^confirm$/i);
+        await sleep(900);
+        const stillThere = id ? Boolean(sidebarLink(id)) : true;
+        return { ok: id ? !stillThere : opened, error: stillThere && id ? "still-in-sidebar" : "" };
+      };
+
+      if (convId) {
+        const api = await chatgptDeleteViaApi(convId);
+        if (api.ok) {
+          await sleep(400);
+          return { ok: true, via: "api", chatId: convId };
+        }
+        const ui = await chatgptDeleteViaUi(convId);
+        if (ui.ok) return { ok: true, via: "ui", chatId: convId };
+        return {
+          ok: false,
+          via: "failed",
+          chatId: convId,
+          error: ui.error || api.error || "chatgpt-delete-failed"
+        };
       }
-      await sleep(450);
-      clickMatching(/delete chat|delete conversation|^delete$/i);
-      await sleep(400);
-      clickMatching(/^delete$/i);
-      return { ok: true, via: "ui" };
+
+      const uiOnly = await chatgptDeleteViaUi("");
+      return {
+        ok: Boolean(uiOnly.ok),
+        via: uiOnly.ok ? "ui" : "failed",
+        chatId: "",
+        error: uiOnly.error || "missing-chat-id"
+      };
     }
   });
 
@@ -3358,10 +3594,47 @@ async function deleteCurrentAiConversation(tabId) {
     // ignore
   }
   if (!detail?.ok) {
-    throw new Error(`${label} chat cleanup did not confirm.`);
+    throw new Error(
+      `${label} chat cleanup did not confirm${detail?.error ? ` (${detail.error})` : ""}.`
+    );
+  }
+  try {
+    await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider"]);
+  } catch {
+    // ignore
   }
   await setStatus(`Removed finished ${label} chat (${detail.via || "ok"}).`);
   return detail;
+}
+
+/**
+ * Inter-job cooldown: delete the finished AI chat first, then wait out the rest
+ * of the configured gap. Keeps cleanup off the critical save/apply path.
+ */
+async function cooldownBeforeNextJob({
+  aiTabId = null,
+  aiChatId = "",
+  reason = "next job"
+} = {}) {
+  const gapMs = currentJobGapMs();
+  const started = Date.now();
+  if (typeof aiTabId === "number") {
+    try {
+      await setStatus("Cooling down — removing finished AI chat…");
+      await deleteCurrentAiConversation(aiTabId, { chatId: aiChatId });
+    } catch (err) {
+      await setStatus(`Cooling down — chat cleanup skipped: ${String(err?.message || err)}`);
+    }
+  }
+  const left = Math.max(0, gapMs - (Date.now() - started));
+  if (left <= 0) return;
+  await setStatus(`Cooling down ${Math.round(left / 1000)}s before ${reason}…`);
+  const end = Date.now() + left;
+  while (Date.now() < end) {
+    if (batchControl?.stop) break;
+    await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
+    await sleep(Math.min(5000, Math.max(0, end - Date.now())));
+  }
 }
 
 async function chatgptPollState(tabId, { harvestJson = false } = {}) {
@@ -4885,16 +5158,21 @@ async function runAutoJob(jobMeta) {
     // ignore
   }
 
-  // Drop the per-job conversation so GPT/Claude history stays tidy.
-  try {
-    await deleteCurrentAiConversation(tab.id);
-  } catch (cleanupErr) {
-    await setStatus(
-      `${result.status} — chat cleanup skipped: ${String(cleanupErr?.message || cleanupErr)}`
-    );
+  // Capture conversation id now; chat is deleted later during inter-job cooldown.
+  let aiChatId = await readAiConversationId(tab.id, provider);
+  if (!aiChatId) {
+    for (let i = 0; i < 10 && !aiChatId; i += 1) {
+      await sleep(400);
+      aiChatId = await readAiConversationId(tab.id, provider);
+    }
+  }
+  if (aiChatId) {
+    await chrome.storage.local
+      .set({ last_ai_chat_id: aiChatId, last_ai_provider: provider })
+      .catch(() => {});
   }
 
-  return { ...result, atsEvaluation };
+  return { ...result, atsEvaluation, aiTabId: tab.id, aiChatId, aiProvider: provider };
 }
 
 async function runBatchLoop(outputDir) {
@@ -5043,14 +5321,17 @@ async function runBatchLoop(outputDir) {
 
       // Cool down before opening a new chat if ChatGPT already rate-limited us.
       try {
-        const tab = await ensureChatGptTab();
-        if (tab?.id) await waitOutChatGptRateLimit(tab.id);
+        const provider = await getStoredAiProvider();
+        const tab = await ensureAiTab(provider);
+        if (tab?.id && provider === AI_PROVIDERS.CHATGPT) {
+          await waitOutChatGptRateLimit(tab.id);
+        }
       } catch (preErr) {
         const preMsg = String(preErr?.message || preErr);
         if (preMsg === "__RATE_LIMIT_PAUSE__") {
           await updateQueueJob(next.csvRow, {
             status: "pending",
-            error: "ChatGPT rate limit — batch paused for cool-down"
+            error: "AI rate limit — batch paused for cool-down"
           });
           return;
         }
@@ -5062,11 +5343,11 @@ async function runBatchLoop(outputDir) {
         if (/rate limit/i.test(preMsg)) {
           await updateQueueJob(next.csvRow, {
             status: "pending",
-            error: "Waiting for ChatGPT rate limit to clear"
+            error: "Waiting for AI rate limit to clear"
           });
           await setBatchState("paused");
           await setStatus(
-            "Batch paused: ChatGPT rate limit. Wait a few minutes, then click Start / Retry errors."
+            "Batch paused: AI rate limit. Wait a few minutes, then click Start / Retry errors."
           );
           await chrome.storage.local.set({ generation_running: false });
           return;
@@ -5143,10 +5424,11 @@ async function runBatchLoop(outputDir) {
 
         if (batchControl.stop) break;
 
-        await setStatus(
-          `Cooling down ${Math.round(currentJobGapMs() / 1000)}s before next job (rate-limit protection)…`
-        );
-        await sleep(currentJobGapMs());
+        await cooldownBeforeNextJob({
+          aiTabId: result?.aiTabId,
+          aiChatId: result?.aiChatId || "",
+          reason: "next job (rate-limit protection)"
+        });
       } catch (err) {
         const msg = String(err?.message || err);
         if (msg === "__RATE_LIMIT_PAUSE__") {
@@ -5165,10 +5447,10 @@ async function runBatchLoop(outputDir) {
 
         // Only a global blocker (no ChatGPT tab / signed out) pauses the batch.
         // Anything row-specific must not stop the remaining jobs.
-        if (/Open ChatGPT in a browser tab first/i.test(msg)) {
+        if (/Open (ChatGPT|Claude|AI) in a browser tab first/i.test(msg) || /No (ChatGPT|Claude) tab open/i.test(msg)) {
           await updateQueueJob(next.csvRow, {
             status: "pending",
-            error: "Waiting for a ChatGPT tab"
+            error: "Waiting for an AI tab"
           });
           await setBatchState("paused");
           await setStatus(`Batch paused: ${msg}`);
@@ -5466,6 +5748,24 @@ async function runIndeedGrabAndApply({ autoApply = true } = {}) {
         error: ""
       });
       await setStatus(`Indeed: resume saved for ${job.company} / ${job.title}.`);
+      if (result?.aiTabId) {
+        if (autoApply) {
+          // Clean chat now; don't burn the full inter-job gap before Apply.
+          try {
+            await deleteCurrentAiConversation(result.aiTabId, { chatId: result.aiChatId || "" });
+          } catch (cleanupErr) {
+            await setStatus(
+              `Indeed: files ready; chat cleanup skipped: ${String(cleanupErr?.message || cleanupErr)}`
+            );
+          }
+        } else {
+          await cooldownBeforeNextJob({
+            aiTabId: result.aiTabId,
+            aiChatId: result.aiChatId || "",
+            reason: "next action"
+          });
+        }
+      }
     }
 
     if (!autoApply) {
