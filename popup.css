@@ -1106,11 +1106,10 @@ input[type="file"]::file-selector-button {
 
 .channel-toggle {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   margin: 8px 0;
-  flex-wrap: wrap;
 }
 
 .channel-label {
@@ -1121,29 +1120,35 @@ input[type="file"]::file-selector-button {
   text-transform: uppercase;
 }
 
-.segmented {
-  display: flex;
-  padding: 3px;
-  border-radius: 999px;
-  background: rgba(7, 13, 24, 0.7);
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(7, 13, 24, 0.72);
   border: 1px solid var(--line-strong);
 }
 
 .channel-btn {
-  width: auto;
-  min-width: 58px;
-  padding: 5px 11px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
   font-size: 11px;
   font-weight: 750;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  border-color: transparent;
+  line-height: 1.15;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .channel-btn.active {
   background: linear-gradient(180deg, #ffe08a, var(--gold));
-  border-color: transparent;
+  border-color: rgba(245, 197, 66, 0.35);
   color: var(--gold-ink);
   box-shadow: 0 2px 8px rgba(245, 197, 66, 0.22);
 }
@@ -1151,11 +1156,28 @@ input[type="file"]::file-selector-button {
 .channel-btn:hover {
   background: #1e293b;
   color: var(--ink);
+  border-color: rgba(148, 175, 210, 0.22);
 }
 
 .channel-btn.active:hover {
   background: linear-gradient(180deg, #fff0b3, #f0bc2e);
   color: var(--gold-ink);
+}
+
+.channel-btn:focus {
+  outline: none;
+}
+
+.channel-btn:focus-visible {
+  box-shadow: var(--ring);
+}
+
+.channel-btn.active:focus-visible {
+  box-shadow: 0 2px 8px rgba(245, 197, 66, 0.22), var(--ring);
+}
+
+.channel-btn[hidden] {
+  display: none !important;
 }
 
 .indeed-capture {

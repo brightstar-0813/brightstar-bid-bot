@@ -1224,7 +1224,7 @@ function updateCsvSummaryFromQueue() {
       : channelFilter === "dice"
         ? "Dice only"
         : channelFilter === "etc"
-          ? "Etc only"
+          ? "Other only"
           : channelFilter === "all"
             ? "All"
             : "Dice only";
@@ -1320,7 +1320,7 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
         : channelFilter === "workday"
           ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "etc"
-          ? `Showing Etc (not Dice, LI, Jobright, Workday, or Indeed) — ${queueCache.length} in queue.`
+          ? `Showing other boards — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
   );
 }
