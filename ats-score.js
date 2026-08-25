@@ -170,23 +170,10 @@ export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "" } = {
     }
   }
 
-  // 4) technicalSummary — list missing products / high-value tokens.
-  {
-    const summary = Array.isArray(out.technicalSummary)
-      ? out.technicalSummary.map((s) => String(s || "").trim()).filter(Boolean)
-      : [];
-    const summaryText = summary.join(" ");
-    const add = [
-      ...missingProducts.filter((p) => wordStillMissing(p, summaryText)),
-      ...missing.filter((w) => w.length > 4 && wordStillMissing(w, summaryText))
-    ].slice(0, 20);
-    if (add.length) {
-      out.technicalSummary = [...summary, ...add];
-      changed = true;
-    }
-  }
+  // technicalSummary is rendered as resume bullets — never inject bare JD tokens here.
+  // Keyword coverage belongs in skills, profile, and experience bullets instead.
 
-  // 5) Experience evidence — weave remaining tokens into the two most recent roles.
+  // 4) Experience evidence — weave remaining tokens into the two most recent roles.
   {
     const still = [...missingProducts, ...missing].filter((w) =>
       wordStillMissing(w, collectStrings(out.experience).join(" "))
@@ -229,13 +216,13 @@ export function buildAtsScoreRetryPrompt(resumeData, evaluation, { jdText = "", 
       ? `MISSING SALESFORCE / PLATFORM PRODUCTS (must appear in skills AND in at least two recent-role bullets AND in profile): ${missingProducts.join(", ")}`
       : "",
     missingKw.length
-      ? `MISSING JD KEYWORD TOKENS (each must appear somewhere in the resume text — skills items, profile, technicalSummary, and recent-role bullets). Use the exact tokens: ${missingKw.join(", ")}`
+      ? `MISSING JD KEYWORD TOKENS (each must appear somewhere in the resume text — skills items, profile, and recent-role bullets; never as one-word technicalSummary lines). Use the exact tokens: ${missingKw.join(", ")}`
       : "",
     "",
     "RULES:",
     "1. Put the target title (or its key words) in \"headline\".",
     "2. Mirror JD terminology exactly — do not paraphrase away keywords (e.g. keep \"Lightning Web Components\", \"SOQL\", \"Service Cloud\", \"integration\", \"architecture\" when the JD uses them).",
-    "3. Every missing product and as many missing tokens as possible must appear in Professional Experience bullets for the two most recent roles — not only in the skills table.",
+    "3. Every missing product and as many missing tokens as possible must appear in Professional Experience bullets for the two most recent roles — not only in the skills table. Do not add single-word lines or keyword stubs to technicalSummary; keep every technicalSummary bullet a full sentence.",
     "4. Keep every employer, date, location, title, education entry, and certification exactly as they already are. Do not invent metrics, clearances, or employers.",
     "5. Do not explain gaps. Return ONLY the JSON object, starting with { and ending with }.",
     "",

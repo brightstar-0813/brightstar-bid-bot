@@ -478,6 +478,18 @@ function escapeStrayQuotesInJsonStrings(text) {
 }
 
 /**
+ * Drop ATS-boost / model keyword stubs that render as one-word bullets in PDFs.
+ */
+export function isKeywordStubBullet(line) {
+  const s = String(line || "").trim();
+  if (!s) return true;
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length === 1 && s.length < 40) return true;
+  if (words.length <= 2 && s.length < 28) return true;
+  return false;
+}
+
+/**
  * Clean contact fields after parse — ChatGPT autolinks often leave markdown or
  * truncated URLs inside email/linkedin/profile even when JSON still parses.
  */
@@ -528,7 +540,8 @@ export function sanitizeResumeData(data) {
   if (Array.isArray(out.technicalSummary)) {
     out.technicalSummary = out.technicalSummary
       .map((line) => stripDisqualifyingClaims(line))
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((line) => !isKeywordStubBullet(line));
   }
 
   if (Array.isArray(out.experience)) {
