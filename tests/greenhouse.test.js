@@ -5,6 +5,7 @@ import {
   filterJobsByChannel,
   isGreenhouseJob,
   isJobgetherJob,
+  isUnitedStatesJob,
   isWorkdayJob,
   normalizeChannelFilter
 } from "../csv.js";
@@ -15,6 +16,30 @@ import {
   DEFAULT_HOURLY_COMPENSATION
 } from "../compensation-format.js";
 import { extractGreenhouseSecurityCode } from "../ms-graph-mail.js";
+
+test("US filter accepts Remote US style Greenhouse locations", () => {
+  assert.equal(
+    isUnitedStatesJob({ location: "Remote US", remoteRestrictedTo: "Remote" }),
+    true
+  );
+  assert.equal(
+    isUnitedStatesJob({ location: "Remote - US", remoteRestrictedTo: "" }),
+    true
+  );
+  assert.equal(
+    isUnitedStatesJob({ location: "REMOTE, US", remoteRestrictedTo: "" }),
+    true
+  );
+  assert.equal(
+    isUnitedStatesJob({ location: "United States", remoteRestrictedTo: "Remote" }),
+    true
+  );
+  // Warsaw-only remote role is not US
+  assert.equal(
+    isUnitedStatesJob({ location: "Warsaw", remoteRestrictedTo: "Remote" }),
+    false
+  );
+});
 
 test("Greenhouse URLs and channel filter", () => {
   assert.equal(

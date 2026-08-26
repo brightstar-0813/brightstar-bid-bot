@@ -34,6 +34,15 @@ const NON_US_COUNTRIES = [
   "denmark", "norway", "finland", "new zealand", "costa rica", "panama"
 ];
 
+/** Well-known non-US cities (when location is city-only with no US signal). */
+const NON_US_CITIES = [
+  "warsaw", "krakow", "wroclaw", "london", "manchester", "berlin", "munich",
+  "paris", "toronto", "vancouver", "montreal", "sydney", "melbourne",
+  "bangalore", "bengaluru", "hyderabad", "mumbai", "delhi", "pune",
+  "dublin", "amsterdam", "lisbon", "madrid", "barcelona", "tel aviv",
+  "sao paulo", "mexico city", "singapore"
+];
+
 /**
  * Parse CSV text into an array of objects keyed by header names.
  * Handles quoted fields and embedded newlines.
@@ -252,7 +261,9 @@ function textLooksUs(text) {
     /\bunited states\b/.test(lower) ||
     /\busa\b/.test(lower) ||
     /\bu\.s\.a\.?\b/.test(lower) ||
-    /\bu\.s\.\b/.test(lower)
+    /\bu\.s\.\b/.test(lower) ||
+    // Bare "US" / "U.S" common on Greenhouse exports ("Remote US", "Remote - US", "REMOTE, US")
+    /(^|[^a-z])u\.?s\.?([^a-z]|$)/i.test(t)
   ) {
     return true;
   }
@@ -287,6 +298,12 @@ function textLooksNonUsCountry(text) {
       return true;
     }
   }
+
+  for (const city of NON_US_CITIES) {
+    if (lower === city || new RegExp(`^${city}\\b`, "i").test(lower)) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -309,9 +326,9 @@ export function isUsOnlySource(source) {
 }
 
 /**
- * Conservative US filter using location + remote_restricted_to. When the row
- * comes from a US-only board (e.g. Dice), trust the source and only drop it if
- * the location clearly names a foreign country.
+ * Conservative US filter using location + remote_restricted_to / work_arrangement.
+ * When the row comes from a US-only board (e.g. Dice), trust the source and only
+ * drop it if the location clearly names a foreign country.
  * @param {{ location?: string, remoteRestrictedTo?: string, source?: string }} fields
  */
 export function isUnitedStatesJob(fields) {
@@ -323,6 +340,17 @@ export function isUnitedStatesJob(fields) {
   if (usSignal) {
     // Explicit non-US-only remote restriction without US → drop
     if (remote && textLooksNonUsCountry(remote) && !textLooksUs(remote)) {
+      return false;
+    }
+    // Location is clearly a foreign city/country even if remote says "Remote"
+    // (e.g. Warsaw + Remote) — keep only when location itself also looks US
+    // or remote explicitly restricts to US.
+    if (
+      location &&
+      textLooksNonUsCountry(location) &&
+      !textLooksUs(location) &&
+      !textLooksUs(remote)
+    ) {
       return false;
     }
     return true;
@@ -502,7 +530,10 @@ export function parseJobsCsv(csvText) {
     const remoteRestrictedTo = getField(row, [
       "remote_restricted_to",
       "remoteRestrictedTo",
-      "Remote Restricted To"
+      "Remote Restricted To",
+      "work_arrangement",
+      "workArrangement",
+      "Work Arrangement"
     ]);
     const jdLink = getField(row, ["url", "link", "jd_link", "job_url", "Job Link"]);
     const jdText = getField(row, ["description", "job_description", "jd", "Description"]);
