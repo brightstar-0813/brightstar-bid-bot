@@ -52,9 +52,16 @@ test("Indeed URLs and channel classification are strict", () => {
   assert.equal(
     filterJobsByChannel(
       [{ source: "dice", jdLink: "https://jobs.lever.co/acme/1", isDice: true }],
-      "etc"
+      "lever"
     ).length,
     1
+  );
+  assert.equal(
+    filterJobsByChannel(
+      [{ source: "dice", jdLink: "https://jobs.lever.co/acme/1", isDice: true }],
+      "etc"
+    ).length,
+    0
   );
 });
 
@@ -72,8 +79,9 @@ test("Workday URLs and channel filter", () => {
     { jdLink: "https://jobs.lever.co/acme/1" }
   ];
   assert.equal(filterJobsByChannel(jobs, "workday").length, 1);
-  // Greenhouse is its own channel; Lever remains Etc
-  assert.equal(filterJobsByChannel(jobs, "etc").length, 1);
+  assert.equal(filterJobsByChannel(jobs, "lever").length, 1);
+  // Greenhouse and Lever are their own channels
+  assert.equal(filterJobsByChannel(jobs, "etc").length, 0);
 });
 
 test("search URL forces Salesforce US remote jobs from the last 7 days", () => {

@@ -32,6 +32,8 @@ import {
   isJobrightJob,
   isWorkdayJob,
   isGreenhouseJob,
+  isAshbyJob,
+  isLeverJob,
   normalizeChannelFilter
 } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
@@ -468,6 +470,8 @@ const filterIndeedBtn = document.getElementById("filterIndeed");
 const filterJobrightBtn = document.getElementById("filterJobright");
 const filterWorkdayBtn = document.getElementById("filterWorkday");
 const filterGreenhouseBtn = document.getElementById("filterGreenhouse");
+const filterAshbyBtn = document.getElementById("filterAshby");
+const filterLeverBtn = document.getElementById("filterLever");
 const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
 const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
@@ -1149,7 +1153,9 @@ async function loadSettings() {
         isIndeed: isIndeedJob(j),
         isJobright: isJobrightJob(j),
         isWorkday: isWorkdayJob(j),
-        isGreenhouse: isGreenhouseJob(j)
+        isGreenhouse: isGreenhouseJob(j),
+        isAshby: isAshbyJob(j),
+        isLever: isLeverJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -1185,7 +1191,9 @@ async function hydrateJobDirsInUi() {
       isIndeed: isIndeedJob(j),
       isJobright: isJobrightJob(j),
       isWorkday: isWorkdayJob(j),
-      isGreenhouse: isGreenhouseJob(j)
+      isGreenhouse: isGreenhouseJob(j),
+      isAshby: isAshbyJob(j),
+      isLever: isLeverJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -1209,6 +1217,8 @@ function updateCsvSummaryFromQueue() {
   const jobrightTotal = allUsJobsCache.filter((j) => isJobrightJob(j)).length;
   const workdayTotal = allUsJobsCache.filter((j) => isWorkdayJob(j)).length;
   const greenhouseTotal = allUsJobsCache.filter((j) => isGreenhouseJob(j)).length;
+  const ashbyTotal = allUsJobsCache.filter((j) => isAshbyJob(j)).length;
+  const leverTotal = allUsJobsCache.filter((j) => isLeverJob(j)).length;
   const etcTotal = allUsJobsCache.filter(
     (j) =>
       !isDiceJob(j) &&
@@ -1216,7 +1226,9 @@ function updateCsvSummaryFromQueue() {
       !isIndeedJob(j) &&
       !isJobrightJob(j) &&
       !isWorkdayJob(j) &&
-      !isGreenhouseJob(j)
+      !isGreenhouseJob(j) &&
+      !isAshbyJob(j) &&
+      !isLeverJob(j)
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
@@ -1231,6 +1243,10 @@ function updateCsvSummaryFromQueue() {
         ? "Workday only"
       : channelFilter === "greenhouse"
         ? "Greenhouse only"
+      : channelFilter === "ashby"
+        ? "Ashby only"
+      : channelFilter === "lever"
+        ? "Lever only"
       : channelFilter === "indeed"
         ? "Indeed only"
       : channelFilter === "dice"
@@ -1249,7 +1265,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · GH ${greenhouseTotal} · Etc ${etcTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · GH ${greenhouseTotal} · Ashby ${ashbyTotal} · Lever ${leverTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -1261,6 +1277,8 @@ function syncChannelFilterButtons() {
     jobright: filterJobrightBtn,
     workday: filterWorkdayBtn,
     greenhouse: filterGreenhouseBtn,
+    ashby: filterAshbyBtn,
+    lever: filterLeverBtn,
     indeed: filterIndeedBtn,
     etc: filterEtcBtn,
     all: filterAllBtn
@@ -1334,6 +1352,10 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
           ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "greenhouse"
           ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+        : channelFilter === "ashby"
+          ? `Showing Ashby jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+        : channelFilter === "lever"
+          ? `Showing Lever jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "etc"
           ? `Showing other boards — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
@@ -1551,6 +1573,18 @@ function renderQueue() {
       ghBadge.className = "badge badge-greenhouse";
       ghBadge.textContent = "Greenhouse";
       badges.appendChild(ghBadge);
+    }
+    if (isAshbyJob(job)) {
+      const ashbyBadge = document.createElement("span");
+      ashbyBadge.className = "badge badge-ashby";
+      ashbyBadge.textContent = "Ashby";
+      badges.appendChild(ashbyBadge);
+    }
+    if (isLeverJob(job)) {
+      const leverBadge = document.createElement("span");
+      leverBadge.className = "badge badge-lever";
+      leverBadge.textContent = "Lever";
+      badges.appendChild(leverBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
@@ -1902,7 +1936,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}).` +
+      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Ashby ${result.ashbyCount || 0} / Lever ${result.leverCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}).` +
         (result.droppedNonUs
           ? ` Dropped ${result.droppedNonUs} non-US.`
           : "") +
@@ -2823,6 +2857,12 @@ filterWorkdayBtn?.addEventListener("click", () => {
 });
 filterGreenhouseBtn?.addEventListener("click", () => {
   applyChannelFilter("greenhouse").catch((e) => setStatus(String(e.message || e)));
+});
+filterAshbyBtn?.addEventListener("click", () => {
+  applyChannelFilter("ashby").catch((e) => setStatus(String(e.message || e)));
+});
+filterLeverBtn?.addEventListener("click", () => {
+  applyChannelFilter("lever").catch((e) => setStatus(String(e.message || e)));
 });
 filterIndeedBtn?.addEventListener("click", () => {
   applyChannelFilter("indeed").catch((e) => setStatus(String(e.message || e)));

@@ -91,8 +91,9 @@ test("Greenhouse URLs and channel filter", () => {
   ];
   assert.equal(filterJobsByChannel(jobs, "greenhouse").length, 1);
   assert.equal(filterJobsByChannel(jobs, "workday").length, 1);
-  // Etc excludes Greenhouse
-  assert.equal(filterJobsByChannel(jobs, "etc").length, 1);
+  assert.equal(filterJobsByChannel(jobs, "lever").length, 1);
+  // Etc excludes Greenhouse, Workday, Dice, and Lever
+  assert.equal(filterJobsByChannel(jobs, "etc").length, 0);
   assert.equal(
     isGreenhouseJob({ jdLink: "https://boards.greenhouse.io/acme/1" }) &&
       !isWorkdayJob({ jdLink: "https://boards.greenhouse.io/acme/1" }),

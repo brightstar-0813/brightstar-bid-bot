@@ -67,6 +67,8 @@ import {
   isIndeedJob,
   isWorkdayJob,
   isGreenhouseJob,
+  isAshbyJob,
+  isLeverJob,
   isJobgetherJob,
   isUnitedStatesJob
 } from "./csv.js";
@@ -1089,9 +1091,13 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
         ? "Workday"
         : board === "Greenhouse"
           ? "Greenhouse"
-          : board === "Jobgether"
-            ? "Jobgether"
-            : "Dice";
+          : board === "Ashby"
+            ? "Ashby"
+            : board === "Lever"
+              ? "Lever"
+              : board === "Jobgether"
+                ? "Jobgether"
+                : "Dice";
   const jdLink = String(jobMeta.jdLink || "").trim();
   const prevAttempts = Number(jobMeta.applyAttempts || 0);
   const companyName = jobMeta.companyName || jobMeta.company || "";
@@ -1325,9 +1331,11 @@ function isHostedApplyBacklogJob(j, person = null) {
   const hostedIndeed = isIndeedHostedApplyJob(j);
   const workday = isWorkdayJob(j || {});
   const greenhouse = isGreenhouseJob(j || {});
+  const ashby = isAshbyJob(j || {});
+  const lever = isLeverJob(j || {});
   const jobgether = isJobgetherJob(j || {});
   if (
-    !(isDiceJob(j) || hostedIndeed || workday || greenhouse || jobgether) ||
+    !(isDiceJob(j) || hostedIndeed || workday || greenhouse || ashby || lever || jobgether) ||
     j.status !== "done" ||
     j.applied ||
     j.inactive ||
@@ -5419,9 +5427,13 @@ async function runBatchLoop(outputDir) {
             ? "Workday"
             : isGreenhouseJob(backlog)
               ? "Greenhouse"
-              : isJobgetherJob(backlog)
-                ? "Jobgether"
-                : "Dice";
+              : isAshbyJob(backlog)
+                ? "Ashby"
+                : isLeverJob(backlog)
+                  ? "Lever"
+                  : isJobgetherJob(backlog)
+                    ? "Jobgether"
+                    : "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
@@ -5623,11 +5635,15 @@ async function runBatchLoop(outputDir) {
             ? "Workday"
             : isGreenhouseJob(next)
               ? "Greenhouse"
-              : isJobgetherJob(next)
-                ? "Jobgether"
-                : isDiceJob(next)
-                  ? "Dice"
-                  : "";
+              : isAshbyJob(next)
+                ? "Ashby"
+                : isLeverJob(next)
+                  ? "Lever"
+                  : isJobgetherJob(next)
+                    ? "Jobgether"
+                    : isDiceJob(next)
+                      ? "Dice"
+                      : "";
         if (hostedApplyBoard && !batchControl.stop) {
           const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,
@@ -6853,9 +6869,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             ? await chrome.tabs.get(message.tabId).catch(() => null)
             : (await chrome.tabs.query({ active: true, currentWindow: true }))[0] || null;
         const tabUrl = tab?.url || stored.last_apply_jd_link || "";
-        const greenhousePage = isGreenhouseJob({ jdLink: tabUrl });
+        const alwaysSubmitPage =
+          isGreenhouseJob({ jdLink: tabUrl }) ||
+          isAshbyJob({ jdLink: tabUrl }) ||
+          isLeverJob({ jdLink: tabUrl });
         const result = await startMultiStepApplyOnTab(message.tabId || tab?.id || null, {
-          autoSubmit: greenhousePage || message.autoSubmit === true,
+          autoSubmit: alwaysSubmitPage || message.autoSubmit === true,
           applyHint: {
             csvRow: stored.last_apply_csv_row,
             jobDir: stored.last_apply_job_dir,
@@ -6863,11 +6882,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           }
         });
         const filled = Number(result.filled || result.filledCount || 0);
+        const metricsBits = [
+          filled ? `${filled} filled` : "",
+          result.bankHits ? `${result.bankHits} bank` : "",
+          result.aiHits ? `${result.aiHits} AI` : "",
+          result.unmatchedAfterSecondPass != null
+            ? `${result.unmatchedAfterSecondPass} unmatched`
+            : "",
+          result.fillRate ? `${result.fillRate}% fill` : ""
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const msg =
           result.detail ||
           `Apply assist filled ${filled} field(s) across ${result.steps || 1} step(s).`;
-        await setStatus(msg);
-        if (result.status === "submitted" && greenhousePage && result.tabId) {
+        await setStatus(metricsBits ? `${msg} (${metricsBits})` : msg);
+        if (result.status === "submitted" && alwaysSubmitPage && result.tabId) {
           await closeApplyTab(result.tabId).catch(() => false);
         }
         safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
@@ -6950,6 +6980,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           autoSubmit:
             message.autoSubmit === true ||
             isGreenhouseJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+            isAshbyJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+            isLeverJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
             isWorkdayJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
             isJobgetherJob({ jdLink: jobMeta.jdLink || message.url || "" }),
           csvRow: jobMeta.csvRow,
@@ -7452,9 +7484,12 @@ chrome.commands.onCommand.addListener((command) => {
     (async () => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const greenhousePage = isGreenhouseJob({ jdLink: tab?.url || "" });
+        const alwaysSubmitPage =
+          isGreenhouseJob({ jdLink: tab?.url || "" }) ||
+          isAshbyJob({ jdLink: tab?.url || "" }) ||
+          isLeverJob({ jdLink: tab?.url || "" });
         const r = await startMultiStepApplyOnTab(tab?.id || null, {
-          autoSubmit: greenhousePage
+          autoSubmit: alwaysSubmitPage
         });
         await setStatus(
           r.detail ||
@@ -7462,7 +7497,7 @@ chrome.commands.onCommand.addListener((command) => {
               ? "Application submitted."
               : `Apply assist filled ${r.filled || 0} field(s). Review and submit.`)
         );
-        if (r.status === "submitted" && greenhousePage && r.tabId) {
+        if (r.status === "submitted" && alwaysSubmitPage && r.tabId) {
           await closeApplyTab(r.tabId).catch(() => false);
         }
       } catch (err) {

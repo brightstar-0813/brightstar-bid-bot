@@ -17,6 +17,7 @@ import { NATIVE_HOST_NAME } from "./csv-source.js";
 import {
   generateHumanizedApplicationAnswers,
   generateConstrainedChoiceAnswers,
+  generateFormInventoryAnswers,
   shouldBankAnswer,
   isCertificationQuestion,
   answerCertificationQuestion,
@@ -24,6 +25,15 @@ import {
   certificationsFromText,
   bankAnswerFitsQuestion
 } from "./ai-answers.js";
+import {
+  applySiteFromUrl,
+  applySiteLabel,
+  getAdapter,
+  isEmployerAtsSite,
+  resolveEffectiveAutoSubmit,
+  stepBudgetForSite,
+  hostnameFromUrl
+} from "./ats/adapters.js";
 import {
   docsHaveFile,
   getJobDocs,
@@ -36,7 +46,7 @@ import { fetchLatestGreenhouseSecurityCode } from "./ms-graph-mail.js";
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-  const AUTOFILL_SCRIPT_BUILD = "2026-08-26.otp03";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-26.scale01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -811,6 +821,7 @@ function mergeAutofillFrameResults(frameResults = []) {
     ok: false,
     filledCount: 0,
     filled: [],
+    fillableCount: 0,
     credentialFilledCount: 0,
     credentialFilled: [],
     uploadedCount: 0,
@@ -825,6 +836,7 @@ function mergeAutofillFrameResults(frameResults = []) {
     if (!r || r.ok === false) continue;
     merged.ok = true;
     merged.filledCount += Number(r.filledCount || 0);
+    merged.fillableCount += Number(r.fillableCount || 0);
     if (Array.isArray(r.filled)) merged.filled.push(...r.filled);
     merged.credentialFilledCount += Number(r.credentialFilledCount || 0);
     if (Array.isArray(r.credentialFilled)) {
@@ -848,28 +860,6 @@ function mergeAutofillFrameResults(frameResults = []) {
   }
 
   return merged;
-}
-
-function hostnameFromUrl(url) {
-  try {
-    return new URL(url).hostname || "";
-  } catch {
-    return "";
-  }
-}
-
-function applySiteFromUrl(url) {
-  const host = hostnameFromUrl(url).toLowerCase();
-  if (/(^|\.)dice\.com$/.test(host)) return "dice";
-  if (/(^|\.)indeed\.com$/.test(host)) return "indeed";
-  if (/(^|\.)myworkdayjobs\.com$/.test(host) || /(^|\.)workdayjobs\.com$/.test(host)) return "workday";
-  if (/(^|\.)greenhouse\.io$/.test(host)) return "greenhouse";
-  if (/(^|\.)jobgether\.com$/.test(host)) return "jobgether";
-  return "generic";
-}
-
-function isEmployerAtsSite(site) {
-  return site === "workday" || site === "greenhouse";
 }
 
 function isUrlOnApplySite(url, site) {
@@ -1046,15 +1036,6 @@ async function loadFormHistory(applicantInfo = {}) {
     workHistory: buildWorkHistory(resume),
     educationHistory: buildEducationHistory(resume, applicantInfo)
   };
-}
-
-function applySiteLabel(site) {
-  if (site === "indeed") return "Indeed";
-  if (site === "dice") return "Dice";
-  if (site === "workday") return "Workday";
-  if (site === "greenhouse") return "Greenhouse";
-  if (site === "jobgether") return "Jobgether";
-  return "application";
 }
 
 function pickBestApplyAction(frameResults = []) {
@@ -1638,6 +1619,9 @@ async function enrichAnswersWithAi(questions, answers, {
   return { aiHits };
 }
 
+/**
+ * Apply bank + AI answers for unmatched text/choice questions already collected on the page.
+ */
 async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, applicantInfo = {}) {
   let extraFilled = 0;
   let bankHits = 0;
@@ -1709,6 +1693,206 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
   }
 
   return { extraFilled, bankHits, aiHits };
+}
+
+/**
+ * Collect leftover unmatched questions still empty on the page (second-pass inventory).
+ */
+async function collectRemainingUnmatchedFromTab(tabId, applicantInfo = {}) {
+  const frameResults = await sendMessageToAllFrames(tabId, {
+    type: "collect_unmatched_fields",
+    applicantInfo
+  }).catch(() => []);
+  return mergeAutofillFrameResults(
+    (frameResults || []).map((r) => ({
+      ...r,
+      filledCount: 0,
+      filled: [],
+      uploadedCount: 0,
+      uploaded: [],
+      uploadSkipped: []
+    }))
+  );
+}
+
+/**
+ * One inventory AI pass for mixed leftovers (choices + free text) still unanswered.
+ */
+async function fillInventoryPlannerPass(tabId, inventory, extras, profileId, site, applicantInfo = {}) {
+  const fields = [
+    ...(Array.isArray(inventory?.unmatchedChoiceQuestions)
+      ? inventory.unmatchedChoiceQuestions.map((q) => ({
+          ...q,
+          type: q.fieldType || "choice",
+          options: q.options || []
+        }))
+      : []),
+    ...(Array.isArray(inventory?.unmatchedQuestions)
+      ? inventory.unmatchedQuestions.map((q) => ({
+          ...q,
+          type: q.fieldType || "text"
+        }))
+      : [])
+  ];
+  if (!fields.length) return { extraFilled: 0, bankHits: 0, aiHits: 0 };
+
+  // Prefer bank/extras first via the normal path.
+  const first = await fillUnmatchedAnswers(tabId, inventory, extras, profileId, site, applicantInfo);
+
+  const still = await collectRemainingUnmatchedFromTab(tabId, applicantInfo);
+  const leftoverFields = [
+    ...(still.unmatchedChoiceQuestions || []).map((q) => ({
+      ...q,
+      type: q.fieldType || "choice",
+      options: q.options || []
+    })),
+    ...(still.unmatchedQuestions || []).map((q) => ({
+      ...q,
+      type: q.fieldType || "text"
+    }))
+  ];
+  if (!leftoverFields.length) return first;
+
+  const { apiKey, model } = await getOpenAiSettings();
+  if (!apiKey) return first;
+
+  const info = await withResumeCertifications(applicantInfo);
+  const ctx = await getAutofillAiContext();
+  let aiHits = 0;
+  let extraFilled = 0;
+  try {
+    const planned = await generateFormInventoryAnswers({
+      apiKey,
+      model,
+      fields: leftoverFields,
+      applicantInfo: {
+        ...info,
+        certifications: parseCertificationList(info.certifications).length
+          ? info.certifications
+          : ctx.certifications
+      },
+      jobMeta: ctx.jobMeta,
+      resumeText: ctx.resumeText
+    });
+    const byFrame = new Map();
+    for (const row of planned.answers || []) {
+      const field = leftoverFields.find((f) => f.id === row.id);
+      if (!field) continue;
+      const fid = field.frameId;
+      if (!byFrame.has(fid)) byFrame.set(fid, { choice: [], text: [] });
+      const bucket = byFrame.get(fid);
+      if (row.kind === "choice") bucket.choice.push(row);
+      else bucket.text.push(row);
+      aiHits += 1;
+      if (field.label && shouldBankAnswer(field, row.answer, field.fieldType || "text")) {
+        saveQa({
+          profileId: profileId || "",
+          question: field.label,
+          answer: row.answer,
+          fieldType: field.fieldType || (row.kind === "choice" ? "select" : "text"),
+          source: "ai",
+          site
+        }).catch(() => {});
+      }
+    }
+    for (const [frameId, packs] of byFrame) {
+      if (packs.choice.length) {
+        const cRes = await sendMessageToTab(
+          tabId,
+          { type: "autofill_choice_answers", answers: packs.choice },
+          { attempts: 2, frameId }
+        ).catch(() => null);
+        extraFilled += Number(cRes?.filledCount || 0);
+      }
+      if (packs.text.length) {
+        const tRes = await sendMessageToTab(
+          tabId,
+          { type: "autofill_ai_answers", answers: packs.text },
+          { attempts: 2, frameId }
+        ).catch(() => null);
+        extraFilled += Number(tRes?.filledCount || 0);
+      }
+    }
+  } catch (err) {
+    await setApplyStatus(`Inventory AI skipped: ${String(err?.message || err)}`).catch(() => {});
+  }
+
+  return {
+    extraFilled: first.extraFilled + extraFilled,
+    bankHits: first.bankHits,
+    aiHits: first.aiHits + aiHits
+  };
+}
+
+/**
+ * Second pass: re-collect empty unmatched / required fields and fill again.
+ */
+async function runSecondFillPass(tabId, extras, profileId, site, applicantInfo = {}) {
+  const inventory = await collectRemainingUnmatchedFromTab(tabId, applicantInfo);
+  const unmatchedCount =
+    (inventory.unmatchedQuestions?.length || 0) + (inventory.unmatchedChoiceQuestions?.length || 0);
+  if (!unmatchedCount) {
+    return {
+      extraFilled: 0,
+      bankHits: 0,
+      aiHits: 0,
+      unmatchedAfter: 0,
+      secondPass: true
+    };
+  }
+  const leftover = await fillInventoryPlannerPass(
+    tabId,
+    inventory,
+    extras,
+    profileId,
+    site,
+    applicantInfo
+  );
+  const after = await collectRemainingUnmatchedFromTab(tabId, applicantInfo);
+  return {
+    ...leftover,
+    unmatchedAfter:
+      (after.unmatchedQuestions?.length || 0) + (after.unmatchedChoiceQuestions?.length || 0),
+    secondPass: true
+  };
+}
+
+async function probeValidationOnTab(tabId) {
+  const frames = await sendMessageToAllFrames(tabId, { type: "probe_application_form" }).catch(
+    () => []
+  );
+  for (const f of frames || []) {
+    if (f?.validationReason) return String(f.validationReason);
+    if (f?.blockedReason) return String(f.blockedReason);
+  }
+  return "";
+}
+
+/**
+ * Before Submit: if required fields are still empty, refill once; still broken → needs_review reason.
+ */
+async function ensureRequiredFieldsBeforeSubmit(
+  tabId,
+  extras,
+  profileId,
+  site,
+  applicantInfo,
+  metrics
+) {
+  let validationReason = await probeValidationOnTab(tabId);
+  if (!validationReason) return { ok: true, metrics };
+
+  const pass = await runSecondFillPass(tabId, extras, profileId, site, applicantInfo);
+  metrics.extraFilled = Number(metrics.extraFilled || 0) + Number(pass.extraFilled || 0);
+  metrics.bankHits = Number(metrics.bankHits || 0) + Number(pass.bankHits || 0);
+  metrics.aiHits = Number(metrics.aiHits || 0) + Number(pass.aiHits || 0);
+  metrics.secondPassFilled =
+    Number(metrics.secondPassFilled || 0) + Number(pass.extraFilled || 0);
+  metrics.unmatchedAfterSecondPass = pass.unmatchedAfter;
+
+  validationReason = await probeValidationOnTab(tabId);
+  if (!validationReason) return { ok: true, metrics };
+  return { ok: false, metrics, validationReason };
 }
 
 /**
@@ -1806,22 +1990,32 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     site,
     applicantInfo
   );
+  const unmatchedAfterFirst =
+    (result.unmatchedQuestions?.length || 0) + (result.unmatchedChoiceQuestions?.length || 0);
+  const second = await runSecondFillPass(tab.id, extras, person.id || "", site, applicantInfo);
+  const filledTotal = result.filledCount + leftover.extraFilled + second.extraFilled;
+  const controlCount = Number(result.fillableCount || 0) || Math.max(filledTotal, 1);
 
   return {
-    ok: Boolean(result.ok) || result.filledCount > 0 || leftover.extraFilled > 0,
+    ok: Boolean(result.ok) || filledTotal > 0,
     tabId: tab.id,
     tabUrl: tab.url || "",
-    filled: result.filledCount + leftover.extraFilled,
-    filledCount: result.filledCount + leftover.extraFilled,
+    filled: filledTotal,
+    filledCount: filledTotal,
     fields: result.filled,
     uploaded: result.uploadedCount,
     uploadedCount: result.uploadedCount,
     uploadSkipped: result.uploadSkipped,
-    bankHits: leftover.bankHits,
-    extraFilled: leftover.extraFilled,
-    aiHits: leftover.aiHits || 0,
+    bankHits: leftover.bankHits + second.bankHits,
+    extraFilled: leftover.extraFilled + second.extraFilled,
+    aiHits: (leftover.aiHits || 0) + (second.aiHits || 0),
     unmatchedQuestions: result.unmatchedQuestions,
     unmatchedChoiceQuestions: result.unmatchedChoiceQuestions,
+    unmatchedAfterFirst,
+    unmatchedAfterSecondPass: second.unmatchedAfter,
+    secondPassFilled: second.extraFilled,
+    fillRate:
+      controlCount > 0 ? Math.round((Math.min(filledTotal, controlCount) / controlCount) * 100) : 0,
     uploadFolder: docs?.jobDir || docs?.folderName || "",
     uploadResumeName: docs?.resume?.fileName || "",
     uploadCoverName: docs?.coverLetter?.fileName || "",
@@ -1852,23 +2046,8 @@ export async function startMultiStepApplyOnTab(
   let currentTabId = tab.id;
   const initialSite = applySiteFromUrl(tab.url || "");
   let liveSite = initialSite;
-  let stepBudget =
-    initialSite === "workday"
-      ? Math.max(Number(maxSteps) || 12, 16)
-      : initialSite === "greenhouse"
-        ? Math.max(Number(maxSteps) || 12, 18)
-        : initialSite === "jobgether"
-          ? Math.max(Number(maxSteps) || 12, 18)
-          : Number(maxSteps) || 12;
-  // Greenhouse pages always run full Auto Apply (fill → submit → OTP). Other boards
-  // only auto-submit when the caller passes autoSubmit (hosted batch / Apply button).
-  let effectiveAutoSubmit =
-    (Boolean(autoSubmit) || initialSite === "greenhouse") &&
-    (initialSite === "dice" ||
-      initialSite === "indeed" ||
-      initialSite === "workday" ||
-      initialSite === "greenhouse" ||
-      initialSite === "jobgether");
+  let stepBudget = stepBudgetForSite(initialSite, maxSteps);
+  let effectiveAutoSubmit = resolveEffectiveAutoSubmit(initialSite, autoSubmit);
   let siteLabel = applySiteLabel(initialSite);
   const summary = {
     ok: true,
@@ -1880,6 +2059,10 @@ export async function startMultiStepApplyOnTab(
     bankHits: 0,
     extraFilled: 0,
     aiHits: 0,
+    unmatchedAfterFirst: 0,
+    unmatchedAfterSecondPass: 0,
+    secondPassFilled: 0,
+    fillRate: 0,
     status: "",
     detail: "",
     tabId: currentTabId,
@@ -1888,6 +2071,10 @@ export async function startMultiStepApplyOnTab(
     site: initialSite
   };
 
+  const { person, applicantInfo, extras } = await getApplicantInfoForAutofill();
+  const metricsPersonId = person?.id || "";
+  const metricsSiteHost = () => hostnameFromUrl(summary.tabUrl || "");
+
   let noAdvance = 0;
   let workdayStepHint = "";
   let greenhouseSubmitAt = 0;
@@ -1895,7 +2082,7 @@ export async function startMultiStepApplyOnTab(
   function syncLiveSiteFromUrl(url) {
     const detected = applySiteFromUrl(url || "");
     if (!detected || detected === liveSite) return;
-    // Upgrade Jobgether / generic → Workday or Greenhouse after APPLY redirect.
+    // Upgrade Jobgether / generic → employer ATS after APPLY redirect.
     if (
       isEmployerAtsSite(detected) &&
       (liveSite === "jobgether" || liveSite === "generic" || liveSite === detected)
@@ -1906,17 +2093,13 @@ export async function startMultiStepApplyOnTab(
       if (
         Boolean(autoSubmit) ||
         initialSite === "jobgether" ||
-        detected === "greenhouse" ||
-        initialSite === "greenhouse"
+        getAdapter(detected)?.alwaysAutoSubmit ||
+        getAdapter(initialSite)?.alwaysAutoSubmit
       ) {
-        effectiveAutoSubmit = true;
-        summary.autoSubmit = true;
+        effectiveAutoSubmit = resolveEffectiveAutoSubmit(detected, true);
+        summary.autoSubmit = effectiveAutoSubmit;
       }
-      if (detected === "workday") {
-        stepBudget = Math.max(stepBudget, 16);
-      } else if (detected === "greenhouse") {
-        stepBudget = Math.max(stepBudget, 18);
-      }
+      stepBudget = Math.max(stepBudget, stepBudgetForSite(detected, stepBudget));
     }
   }
 
@@ -2160,6 +2343,14 @@ export async function startMultiStepApplyOnTab(
     summary.bankHits += Number(fillRes?.bankHits || 0);
     summary.extraFilled += Number(fillRes?.extraFilled || 0);
     summary.aiHits += Number(fillRes?.aiHits || 0);
+    summary.unmatchedAfterFirst += Number(fillRes?.unmatchedAfterFirst || 0);
+    summary.unmatchedAfterSecondPass = Number(
+      fillRes?.unmatchedAfterSecondPass ?? summary.unmatchedAfterSecondPass ?? 0
+    );
+    summary.secondPassFilled += Number(fillRes?.secondPassFilled || 0);
+    if (Number(fillRes?.fillRate || 0) > 0) {
+      summary.fillRate = Math.max(Number(summary.fillRate || 0), Number(fillRes.fillRate));
+    }
     summary.uploadResumeName = fillRes?.uploadResumeName || summary.uploadResumeName || "";
     summary.uploadCoverName = fillRes?.uploadCoverName || summary.uploadCoverName || "";
     summary.uploadFolder = fillRes?.uploadFolder || summary.uploadFolder || "";
@@ -2225,9 +2416,28 @@ export async function startMultiStepApplyOnTab(
 
     if (probe.best.action.type === "submit") {
       if (effectiveAutoSubmit) {
-        if (probe.blockedReason || probe.validationReason) {
+        const gate = await ensureRequiredFieldsBeforeSubmit(
+          currentTabId,
+          extras,
+          metricsPersonId,
+          metricsSiteHost() || liveSite,
+          applicantInfo,
+          summary
+        );
+        if (!gate.ok) {
           summary.status = "needs_review";
-          summary.detail = probe.blockedReason || probe.validationReason;
+          summary.detail =
+            gate.validationReason ||
+            probe.blockedReason ||
+            probe.validationReason ||
+            "A required answer needs review.";
+          summary.tabId = currentTabId;
+          return summary;
+        }
+        probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+        if (probe.blockedReason) {
+          summary.status = "needs_review";
+          summary.detail = probe.blockedReason;
           summary.tabId = currentTabId;
           return summary;
         }
@@ -2491,12 +2701,26 @@ export async function startMultiStepApplyOnTab(
         if (effectiveAutoSubmit) {
           const lastProbe = await getApplyActionFromTab(currentTabId).catch(() => null);
           if (lastProbe?.best?.action?.type === "submit") {
-            if (lastProbe.blockedReason || lastProbe.validationReason) {
+            const gate = await ensureRequiredFieldsBeforeSubmit(
+              currentTabId,
+              extras,
+              metricsPersonId,
+              metricsSiteHost() || liveSite,
+              applicantInfo,
+              summary
+            );
+            if (!gate.ok) {
               summary.status = "needs_review";
               summary.detail =
+                gate.validationReason ||
                 lastProbe.blockedReason ||
                 lastProbe.validationReason ||
                 "A required answer needs review.";
+              return summary;
+            }
+            if (lastProbe.blockedReason) {
+              summary.status = "needs_review";
+              summary.detail = lastProbe.blockedReason;
               return summary;
             }
             await setApplyStatus(

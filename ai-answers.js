@@ -408,6 +408,130 @@ export async function generateConstrainedChoiceAnswers({
 }
 
 /**
+ * Classify inventory rows for a single mixed AI pass.
+ * @param {Array<{ id: string, label: string, type?: string, options?: string[], required?: boolean, multiline?: boolean }>} fields
+ */
+export function partitionFormInventory(fields = []) {
+  const list = (fields || []).filter((f) => f?.id && f?.label);
+  const choice = [];
+  const freeText = [];
+  for (const f of list) {
+    const type = String(f.type || f.fieldType || "").toLowerCase();
+    const hasOptions = Array.isArray(f.options) && f.options.length > 0;
+    if (
+      hasOptions ||
+      type === "select" ||
+      type === "radio" ||
+      type === "checkbox" ||
+      type === "combobox" ||
+      type === "choice"
+    ) {
+      choice.push({
+        ...f,
+        options: hasOptions ? f.options : f.options || []
+      });
+    } else {
+      freeText.push(f);
+    }
+  }
+  return { choice, freeText };
+}
+
+/**
+ * Answer a full page form inventory in one constrained pass (choices + free text).
+ * Prefer calling after profile aliases + Q&A bank; this is last resort for leftovers.
+ *
+ * @returns {Promise<{ answers: Array<{ id: string, answer: string, kind: "choice"|"text" }>, usage: object }>}
+ */
+export async function generateFormInventoryAnswers({
+  apiKey,
+  model = DEFAULT_OPENAI_MODEL,
+  fields,
+  applicantInfo,
+  jobMeta = {},
+  resumeText = "",
+  applicationBrief = null
+}) {
+  const { choice, freeText } = partitionFormInventory(fields);
+  const choiceReady = choice.filter((q) => Array.isArray(q.options) && q.options.length);
+  const textReady = freeText.filter((q) => q?.id && q?.label).slice(0, 12);
+  const choiceSlice = choiceReady.slice(0, 14);
+  if (!choiceSlice.length && !textReady.length) return { answers: [], usage: null };
+
+  const profile = compactApplicantContext(applicantInfo);
+  const certs = parseCertificationList(applicantInfo?.certifications);
+  const hasCertQuestion = textReady.some((q) => isCertificationQuestion(q.label));
+
+  const result = await chatCompletion({
+    apiKey,
+    model,
+    jsonMode: true,
+    temperature: hasCertQuestion ? 0.2 : 0.45,
+    maxTokens: 2200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You fill a US job-application form inventory for a real candidate. " +
+          'Return ONLY JSON: {"answers":[{"id":"...","answer":"..."}]}. ' +
+          "For CHOICE fields you MUST set answer to EXACTLY one string from that field's options. " +
+          "For free-text fields keep answers to 1-2 sentences (short phrase for tiny fields). " +
+          'Yes/no free-text answers must be Title Case "Yes" or "No". ' +
+          "Ground answers in candidateProfile / resume; do not invent employers, visas, or certifications. " +
+          "Certification questions may only list credentials from candidateProfile.certifications. " +
+          "Default when profile is silent: work eligible US → Yes; sponsorship needed → No; " +
+          "related to employee / prior employer conflict → No."
+      },
+      {
+        role: "user",
+        content: JSON.stringify(
+          {
+            ...buildAutofillContext({
+              jobMeta,
+              resumeText,
+              applicationBrief,
+              certifications: certs
+            }),
+            candidateProfile: profile,
+            choiceFields: choiceSlice.map((q) => ({
+              id: q.id,
+              question: q.label,
+              options: q.options,
+              required: Boolean(q.required)
+            })),
+            textFields: textReady.map((q) => ({
+              id: q.id,
+              question: q.label,
+              preferLonger: Boolean(q.multiline),
+              required: Boolean(q.required)
+            }))
+          },
+          null,
+          2
+        )
+      }
+    ]
+  });
+
+  const drafted = answersFromJson(result.content, [...choiceSlice, ...textReady]);
+  const answers = [];
+  for (const row of drafted) {
+    const choiceQ = choiceSlice.find((q) => q.id === row.id);
+    if (choiceQ) {
+      const matched = pickClosestOption(row.answer, choiceQ.options || []);
+      if (matched) answers.push({ id: row.id, answer: matched, kind: "choice" });
+      continue;
+    }
+    const textQ = textReady.find((q) => q.id === row.id);
+    if (textQ && bankAnswerFitsQuestion(textQ.label, row.answer)) {
+      answers.push({ id: row.id, answer: row.answer, kind: "text" });
+    }
+  }
+
+  return { answers, usage: result.usage };
+}
+
+/**
  * Humanized first-person summaries for repeating Work Experience form fields.
  * One short paragraph per role — not a bullet dump.
  */

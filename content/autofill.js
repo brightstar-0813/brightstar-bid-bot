@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-26.otp03";
+  const SCRIPT_BUILD = "2026-08-26.scale01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -3333,11 +3333,11 @@
   }
 
   /**
-   * Collect novel CHOICE questions (native select / radio / checkbox) that are
+   * Collect novel CHOICE questions (native select / radio / checkbox / combobox) that are
    * NOT mapped to a known profile field. These get answered from the Q&A bank
-   * (stable, reusable selections) — never from AI.
+   * (stable, reusable selections) — never free-text AI into combobox search boxes.
    */
-  function collectUnmatchedChoiceQuestions() {
+  async function collectUnmatchedChoiceQuestions() {
     const out = [];
     const groupIds = new Map(); // labelNorm -> id (radio/checkbox groups share one)
     const nodes = [
@@ -3384,7 +3384,7 @@
             : el.type === "radio"
               ? "radio"
               : "select";
-      out.push({ id, label: label.slice(0, 1000), options, fieldType });
+      out.push({ id, label: label.slice(0, 1000), options, fieldType, required: isControlRequired(el) });
     }
 
     for (const group of collectChoiceChipGroups()) {
@@ -3407,7 +3407,8 @@
         id,
         label: label.slice(0, 1000),
         options: group.labels.filter(Boolean).slice(0, 20),
-        fieldType: group.kind === "yesno" ? "radio" : "select"
+        fieldType: group.kind === "yesno" ? "radio" : "select",
+        required: false
       });
     }
 
@@ -3433,13 +3434,36 @@
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6 || seenLabels.has(labelNorm)) continue;
 
+      let options = [];
       const expanded = el.getAttribute("aria-expanded") === "true";
-      const options = expanded
-        ? collectVisibleOptions(document)
+      if (expanded) {
+        options = collectVisibleOptions(document)
+          .map((node) => cleanLabelText(node.textContent))
+          .filter(Boolean)
+          .slice(0, 40);
+      } else {
+        // Open briefly so choice AI / bank get real options — never free-text into the search box.
+        try {
+          openReactSelect(el);
+          const nodes = await waitForOptions(8, 80);
+          options = nodes
             .map((node) => cleanLabelText(node.textContent))
-            .filter(Boolean)
-            .slice(0, 40)
-        : [];
+            .filter((t) => t && !EDITOR_STYLE_OPTION_RE.test(t))
+            .slice(0, 40);
+          document.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "Escape",
+              code: "Escape",
+              bubbles: true,
+              cancelable: true
+            })
+          );
+          await sleep(60);
+        } catch {
+          options = [];
+        }
+      }
+      if (!options.length) continue;
 
       const id = `rbc_${out.length}_${Math.abs(
         Array.from(labelNorm).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
@@ -3450,11 +3474,19 @@
         id,
         label: label.slice(0, 1000),
         options,
-        fieldType: "combobox"
+        fieldType: "combobox",
+        required: isControlRequired(el)
       });
     }
 
     return out;
+  }
+
+  function isControlRequired(el) {
+    if (!el) return false;
+    if (el.required || el.getAttribute?.("aria-required") === "true") return true;
+    const label = cleanLabelText(labelTextForControl(el) || questionTextForAi(el) || "");
+    return /\*\s*$|^\*|required/i.test(label);
   }
 
   async function fillChoiceAnswers(answers = []) {
@@ -4188,11 +4220,12 @@
         ? { uploadedCount: 0, uploaded: [], skipped: [] }
         : await uploadApplicationFiles(uploadFiles);
     const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
-    const unmatchedChoiceQuestions = collectUnmatchedChoiceQuestions();
+    const unmatchedChoiceQuestions = await collectUnmatchedChoiceQuestions();
 
     return {
       ok: true,
       filledCount: filled.length,
+      fillableCount: controls.length,
       filled,
       credentialFilledCount: credResult.filledCount,
       credentialFilled: credResult.filled,
@@ -4318,6 +4351,22 @@
   function isGreenhousePage(url = location.href) {
     try {
       return /(^|\.)greenhouse\.io$/i.test(new URL(String(url || location.href)).hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function isAshbyPage(url = location.href) {
+    try {
+      return /(^|\.)ashbyhq\.com$/i.test(new URL(String(url || location.href)).hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function isLeverPage(url = location.href) {
+    try {
+      return /(^|\.)lever\.co$/i.test(new URL(String(url || location.href)).hostname);
     } catch {
       return false;
     }
@@ -4464,6 +4513,8 @@
     if (isDicePage(url)) return "dice";
     if (isWorkdayPage(url)) return "workday";
     if (isGreenhousePage(url)) return "greenhouse";
+    if (isAshbyPage(url)) return "ashby";
+    if (isLeverPage(url)) return "lever";
     if (isJobgetherPage(url)) return "jobgether";
     return "generic";
   }
@@ -4482,6 +4533,8 @@
         );
       }
       if (site === "greenhouse") return /(^|\.)greenhouse\.io$/i.test(target.hostname);
+      if (site === "ashby") return /(^|\.)ashbyhq\.com$/i.test(target.hostname);
+      if (site === "lever") return /(^|\.)lever\.co$/i.test(target.hostname);
       return target.origin === location.origin;
     } catch {
       return false;
@@ -4589,9 +4642,7 @@
     }
 
     const required = collectFillableControls().find(
-      (el) =>
-        (el.required || el.getAttribute?.("aria-required") === "true") &&
-        requiredControlIsEmpty(el)
+      (el) => isControlRequired(el) && requiredControlIsEmpty(el)
     );
     if (required) {
       const label = cleanLabelText(labelTextForControl(required) || questionTextForAi(required));
@@ -4607,6 +4658,7 @@
         '[data-testid*="error" i]',
         '[class*="field-error" i]',
         '[class*="validation" i]',
+        '[class*="errorMessage" i]',
         '.icl-Input-errorText',
         '.ia-Input-error'
       ].join(", ")
@@ -4616,6 +4668,21 @@
       return text && text.length <= 300 && /required|invalid|select|enter|answer|missing/i.test(text);
     });
     return error ? cleanLabelText(error.textContent).slice(0, 180) : "";
+  }
+
+  /**
+   * Re-collect still-empty unmatched fields for a second bank/AI/inventory pass.
+   */
+  async function collectUnmatchedFieldsPayload(applicantInfo = {}) {
+    const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
+    const unmatchedChoiceQuestions = await collectUnmatchedChoiceQuestions();
+    return {
+      ok: true,
+      fillableCount: collectFillableControls().length,
+      unmatchedQuestions,
+      unmatchedChoiceQuestions,
+      validationReason: detectValidationIssue()
+    };
   }
 
   // Phrases that mean the posting is gone (expired / filled / removed / 404).
@@ -4778,6 +4845,46 @@
     return {
       ok: true,
       text: (headingHit || (bodyHit && bodyHit[0]) || "Your application has been received").slice(0, 160)
+    };
+  }
+
+  const ASHBY_APPLY_SUCCESS_RE =
+    /\b(thanks for applying|thank you for (?:applying|your application)|application (?:has been |was )?submitted|we(?:'|’)ve received your application|your application has been received)\b/i;
+
+  function detectAshbyApplySuccess() {
+    if (!isAshbyPage()) return { ok: false };
+    const href = String(location.href || "");
+    const successUrl = /\/application-submitted|\/thanks|confirmation/i.test(href);
+    const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    const headings = queryAllDeep("h1, h2, [role='heading']")
+      .map((el) => cleanLabelText(el.textContent))
+      .filter(Boolean);
+    const headingHit = headings.find((t) => ASHBY_APPLY_SUCCESS_RE.test(t));
+    const bodyHit = bodyText ? bodyText.match(ASHBY_APPLY_SUCCESS_RE) : null;
+    if (!successUrl && !headingHit && !bodyHit) return { ok: false };
+    return {
+      ok: true,
+      text: (headingHit || (bodyHit && bodyHit[0]) || "Application submitted").slice(0, 160)
+    };
+  }
+
+  const LEVER_APPLY_SUCCESS_RE =
+    /\b(thanks for applying|thank you for (?:applying|your application)|application (?:has been |was )?submitted|we(?:'|’)ve received your application|your application has been received)\b/i;
+
+  function detectLeverApplySuccess() {
+    if (!isLeverPage()) return { ok: false };
+    const href = String(location.href || "");
+    const successUrl = /\/thanks|application-submitted|confirmation/i.test(href);
+    const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    const headings = queryAllDeep("h1, h2, [role='heading']")
+      .map((el) => cleanLabelText(el.textContent))
+      .filter(Boolean);
+    const headingHit = headings.find((t) => LEVER_APPLY_SUCCESS_RE.test(t));
+    const bodyHit = bodyText ? bodyText.match(LEVER_APPLY_SUCCESS_RE) : null;
+    if (!successUrl && !headingHit && !bodyHit) return { ok: false };
+    return {
+      ok: true,
+      text: (headingHit || (bodyHit && bodyHit[0]) || "Application submitted").slice(0, 160)
     };
   }
 
@@ -4979,6 +5086,8 @@
     if (isDicePage()) return detectDiceApplySuccess();
     if (isWorkdayPage()) return detectWorkdayApplySuccess();
     if (isGreenhousePage()) return detectGreenhouseApplySuccess();
+    if (isAshbyPage()) return detectAshbyApplySuccess();
+    if (isLeverPage()) return detectLeverApplySuccess();
     return { ok: false };
   }
 
@@ -5429,12 +5538,62 @@
     return { ok: false, clicked: false };
   }
 
+  async function clickAshbyApplyEntry() {
+    const controls = queryAllDeep(
+      "a, button, [role='button'], input[type='button'], input[type='submit']"
+    ).filter((el) => isElVisible(el) && isElEnabled(el));
+    const applyBtn = controls.find((el) => {
+      const t = elActionText(el).trim();
+      return /^(apply|apply now|apply for this job|start application)$/i.test(t);
+    });
+    if (applyBtn) {
+      scrollElIntoView(applyBtn);
+      safeClick(applyBtn);
+      await sleep(1200);
+      return { ok: true, clicked: true, text: elActionText(applyBtn) || "Apply" };
+    }
+    if (probeApplicationForm().isApplicationForm || /\/application|\/apply/i.test(location.href)) {
+      return { ok: true, clicked: false, alreadyOpen: true, text: "ashby apply" };
+    }
+    return { ok: false, clicked: false };
+  }
+
+  async function clickLeverApplyEntry() {
+    const controls = queryAllDeep(
+      "a, button, [role='button'], input[type='button'], input[type='submit']"
+    ).filter((el) => isElVisible(el) && isElEnabled(el));
+    const applyBtn = controls.find((el) => {
+      const t = elActionText(el).trim();
+      return /^(apply|apply now|apply for this job)$/i.test(t);
+    });
+    if (applyBtn) {
+      scrollElIntoView(applyBtn);
+      safeClick(applyBtn);
+      await sleep(1200);
+      return { ok: true, clicked: true, text: elActionText(applyBtn) || "Apply" };
+    }
+    if (
+      probeApplicationForm().isApplicationForm ||
+      /\/apply|application-form/i.test(location.href) ||
+      document.querySelector("form#application-form, .application-form, form[action*='apply']")
+    ) {
+      return { ok: true, clicked: false, alreadyOpen: true, text: "lever apply" };
+    }
+    return { ok: false, clicked: false };
+  }
+
   async function clickEasyApplyEntry() {
     if (isWorkdayPage()) {
       return clickWorkdayApplyEntry();
     }
     if (isGreenhousePage()) {
       return clickGreenhouseApplyEntry();
+    }
+    if (isAshbyPage()) {
+      return clickAshbyApplyEntry();
+    }
+    if (isLeverPage()) {
+      return clickLeverApplyEntry();
     }
     if (isJobgetherPage()) {
       return clickJobgetherApplyEntry();
@@ -5654,12 +5813,14 @@
           after: before
         };
       }
-      // Dice / Indeed / Workday / Greenhouse may auto-submit. Every other site stops before Submit.
+      // Adapter-covered boards may auto-submit. Generic / off-host stops before Submit.
       if (
         pageSite === "generic" ||
         (pageSite === "indeed" && !isIndeedPage()) ||
         (pageSite === "workday" && !isWorkdayPage()) ||
         (pageSite === "greenhouse" && !isGreenhousePage()) ||
+        (pageSite === "ashby" && !isAshbyPage()) ||
+        (pageSite === "lever" && !isLeverPage()) ||
         (actionHref && !isSameSiteApplyUrl(actionHref, pageSite))
       ) {
         return {
@@ -6992,6 +7153,12 @@
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });
       }
+      return true;
+    }
+    if (message?.type === "collect_unmatched_fields") {
+      collectUnmatchedFieldsPayload(message.applicantInfo || {})
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;
     }
     if (message?.type === "autofill_ai_answers") {

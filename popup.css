@@ -1211,6 +1211,16 @@ input[type="file"]::file-selector-button {
   color: #86efac;
 }
 
+.badge-ashby {
+  background: #3b2f1a;
+  color: #fbbf24;
+}
+
+.badge-lever {
+  background: #312e81;
+  color: #c7d2fe;
+}
+
 .workflow-steps {
   display: flex;
   flex-wrap: wrap;

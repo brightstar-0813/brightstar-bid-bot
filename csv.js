@@ -478,6 +478,20 @@ export function isGreenhouseJob({ jdLink = "" } = {}) {
 }
 
 /**
+ * Ashby-hosted career pages.
+ */
+export function isAshbyJob({ jdLink = "" } = {}) {
+  return /(^|\.)ashbyhq\.com$/i.test(jobLinkHost(jdLink));
+}
+
+/**
+ * Lever-hosted career pages (jobs.lever.co / *.lever.co).
+ */
+export function isLeverJob({ jdLink = "" } = {}) {
+  return /(^|\.)lever\.co$/i.test(jobLinkHost(jdLink));
+}
+
+/**
  * Jobgether aggregator — APPLY opens employer ATS (usually Workday / Greenhouse).
  * Stays in the Etc / Other channel; hosted apply follows the external board.
  */
@@ -488,7 +502,7 @@ export function isJobgetherJob({ jdLink = "" } = {}) {
 /**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
- * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"etc"}
+ * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"ashby"|"lever"|"etc"}
  */
 export function normalizeChannelFilter(filter) {
   const mode = String(filter || "dice").toLowerCase();
@@ -498,15 +512,17 @@ export function normalizeChannelFilter(filter) {
   if (mode === "jobright" || mode === "jr") return "jobright";
   if (mode === "workday" || mode === "wd") return "workday";
   if (mode === "greenhouse" || mode === "gh") return "greenhouse";
+  if (mode === "ashby") return "ashby";
+  if (mode === "lever") return "lever";
   if (mode === "dice") return "dice";
-  // Legacy "general" and unknown → Etc (not Dice, LI, Indeed, Jobright, Workday, or Greenhouse)
+  // Legacy "general" and unknown → Etc (not known ATS channels)
   if (mode === "etc" || mode === "general" || mode === "other") return "etc";
   return "dice";
 }
 
 /**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"dice"|"etc"} filter
+ * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"ashby"|"lever"|"dice"|"etc"} filter
  */
 export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
@@ -530,7 +546,13 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   if (mode === "greenhouse") {
     return list.filter((j) => isGreenhouseJob(j));
   }
-  // etc = not Dice, LinkedIn, Indeed, Jobright, Workday, or Greenhouse by URL
+  if (mode === "ashby") {
+    return list.filter((j) => isAshbyJob(j));
+  }
+  if (mode === "lever") {
+    return list.filter((j) => isLeverJob(j));
+  }
+  // etc = not Dice, LinkedIn, Indeed, Jobright, Workday, Greenhouse, Ashby, or Lever by URL
   return list.filter(
     (j) =>
       !isDiceJob(j) &&
@@ -538,7 +560,9 @@ export function filterJobsByChannel(jobs, filter = "dice") {
       !isIndeedJob(j) &&
       !isJobrightJob(j) &&
       !isWorkdayJob(j) &&
-      !isGreenhouseJob(j)
+      !isGreenhouseJob(j) &&
+      !isAshbyJob(j) &&
+      !isLeverJob(j)
   );
 }
 
@@ -623,6 +647,8 @@ export function parseJobsCsv(csvText) {
     const jobright = isJobrightJob({ jdLink });
     const workday = isWorkdayJob({ jdLink });
     const greenhouse = isGreenhouseJob({ jdLink });
+    const ashby = isAshbyJob({ jdLink });
+    const lever = isLeverJob({ jdLink });
     const jobgether = isJobgetherJob({ jdLink });
 
     usJobs.push({
@@ -648,15 +674,21 @@ export function parseJobsCsv(csvText) {
                   ? "workday"
                   : greenhouse
                     ? "greenhouse"
-                    : jobgether
-                      ? "jobgether"
-                      : "general"),
+                    : ashby
+                      ? "ashby"
+                      : lever
+                        ? "lever"
+                        : jobgether
+                          ? "jobgether"
+                          : "general"),
       isLinkedIn: linkedIn,
       isDice: dice,
       isIndeed: indeed,
       isJobright: jobright,
       isWorkday: workday,
       isGreenhouse: greenhouse,
+      isAshby: ashby,
+      isLever: lever,
       isJobgether: jobgether,
       status: "pending"
     });
@@ -669,7 +701,9 @@ export function parseJobsCsv(csvText) {
       !j.isIndeed &&
       !j.isJobright &&
       !j.isWorkday &&
-      !j.isGreenhouse
+      !j.isGreenhouse &&
+      !j.isAshby &&
+      !j.isLever
   );
 
   return {
@@ -682,6 +716,8 @@ export function parseJobsCsv(csvText) {
     jobrightCount: usJobs.filter((j) => j.isJobright).length,
     workdayCount: usJobs.filter((j) => j.isWorkday).length,
     greenhouseCount: usJobs.filter((j) => j.isGreenhouse).length,
+    ashbyCount: usJobs.filter((j) => j.isAshby).length,
+    leverCount: usJobs.filter((j) => j.isLever).length,
     etcCount: etcJobs.length,
     /** @deprecated use etcCount — kept for older UI strings */
     generalCount: etcJobs.length

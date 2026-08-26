@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check background.js && node --check autofill-runner.js && node --check popup.js && node --check ats-score.js && node --check ai-provider.js && node --check content/autofill.js",
+    "check": "node --check background.js && node --check autofill-runner.js && node --check popup.js && node --check ats-score.js && node --check ai-provider.js && node --check ai-answers.js && node --check ats/adapters.js && node --check content/autofill.js && node --check csv.js",
     "test": "node --test tests"
   }
 }
