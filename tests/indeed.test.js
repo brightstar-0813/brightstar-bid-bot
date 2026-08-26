@@ -68,9 +68,11 @@ test("Workday URLs and channel filter", () => {
   const jobs = [
     { jdLink: "https://company.wd1.myworkdayjobs.com/en-US/careers/job/1" },
     { jdLink: "https://www.dice.com/jobs/1" },
-    { jdLink: "https://boards.greenhouse.io/acme/1" }
+    { jdLink: "https://boards.greenhouse.io/acme/1" },
+    { jdLink: "https://jobs.lever.co/acme/1" }
   ];
   assert.equal(filterJobsByChannel(jobs, "workday").length, 1);
+  // Greenhouse is its own channel; Lever remains Etc
   assert.equal(filterJobsByChannel(jobs, "etc").length, 1);
 });
 

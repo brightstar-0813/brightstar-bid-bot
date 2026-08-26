@@ -434,11 +434,14 @@
               <button type="button" class="channel-btn" id="filterWorkday" data-filter="workday" title="MyWorkday jobs — build then auto-apply+submit">
                 Workday
               </button>
+              <button type="button" class="channel-btn" id="filterGreenhouse" data-filter="greenhouse" title="Greenhouse jobs — build then auto-apply+submit">
+                Greenhouse
+              </button>
               <!-- Indeed filter kept in DOM but hidden — auto-apply not supported right now -->
               <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed / Apply-on-Indeed" hidden>
                 Indeed
               </button>
-              <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards (not Dice, LinkedIn, Jobright, or Workday)">
+              <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards (not Dice, LinkedIn, Jobright, Workday, or Greenhouse)">
                 Other
               </button>
               <button type="button" class="channel-btn" id="filterAll" data-filter="all" title="All US jobs">
@@ -447,7 +450,7 @@
             </div>
           </div>
           <p class="hint" id="diceInterleaveHint">
-            Dice / Workday: build → autofill → Submit → next. External ATS links are never auto-submitted.
+            Dice / Workday / Greenhouse / Jobgether→ATS: build → autofill → Submit → next. Other external ATS links are never auto-submitted.
           </p>
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No jobs loaded</span>
@@ -582,9 +585,26 @@
             </button>
           </div>
           <p class="hint">
-            Autofill fills the current step. Auto Apply walks Next/Continue and stops before Submit.
-            Batch Dice / Workday can auto-submit after files are built.
+            Autofill fills the current step. Auto Apply walks Next/Continue and stops before Submit
+            (Greenhouse queue Apply / batch can auto-submit).
+            Batch Dice / Workday / Greenhouse / Jobgether can auto-submit after files are built.
           </p>
+          <div class="qa-bank-block">
+            <div class="qa-bank-head">
+              <p class="subsection-title">Outlook (Graph) — Greenhouse OTP</p>
+              <span class="qa-bank-note" id="msGraphStatusNote">Not connected</span>
+            </div>
+            <p class="hint">
+              Connect the profile Outlook mailbox to fetch Greenhouse security codes. Requires
+              <code>MS_GRAPH_CLIENT_ID</code> in <code>.env</code>.
+            </p>
+            <div class="qa-toolbar" role="toolbar" aria-label="Outlook Graph">
+              <div class="btn-group">
+                <button type="button" id="msGraphConnectBtn" class="ghost" title="Connect Outlook">Connect</button>
+                <button type="button" id="msGraphDisconnectBtn" class="ghost danger" title="Disconnect Outlook">Disconnect</button>
+              </div>
+            </div>
+          </div>
           <div class="qa-bank-block">
             <div class="qa-bank-head">
               <p class="subsection-title">Q&amp;A bank</p>

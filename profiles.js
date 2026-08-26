@@ -945,6 +945,7 @@ function emptyApplicantInfo() {
     graduationDate: "",
     whyInterested: "",
     salaryExpectation: "",
+    hourlyRate: "",
     earliestStartDate: "",
     backgroundCheckConsent: "",
     drugTestConsent: "",
@@ -1022,6 +1023,18 @@ export function personToApplicantInfo(person = {}) {
         info[field] = v;
       }
     }
+  }
+
+  // Compensation defaults used by Greenhouse / ATS desired-pay fields.
+  if (!String(info.salaryExpectation || "").trim()) {
+    info.salaryExpectation =
+      String(extras["desired salary"] || extras["expected salary"] || extras.compensation || "").trim() ||
+      "$120000/yr";
+  }
+  if (!String(info.hourlyRate || "").trim()) {
+    info.hourlyRate =
+      String(extras["hourly rate"] || extras["desired hourly"] || extras.hourly || "").trim() ||
+      "$60 per hour";
   }
 
   return info;

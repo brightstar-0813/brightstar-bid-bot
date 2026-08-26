@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-25.01";
+  const SCRIPT_BUILD = "2026-08-26.jg01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -267,7 +267,14 @@
     phoneDeviceType: ["phone device type", "device type"],
     phoneCountryCode: ["country phone code", "phone country code", "country code"],
     country: ["country", "country/region"],
-    addressLine1: ["address line 1", "street address", "address 1", "home address", "street"],
+    addressLine1: [
+      "address line 1",
+      "street address",
+      "address 1",
+      "home address",
+      "street",
+      "legal address"
+    ],
     addressLine2: ["address line 2", "address 2", "apartment", "suite", "unit", "apt"],
     city: ["city", "town", "municipality"],
     state: ["state", "province", "state/province"],
@@ -390,6 +397,7 @@
     salaryExpectation: [
       "salary",
       "compensation",
+      "desired compensation",
       "expected salary",
       "salary expectations",
       "desired salary",
@@ -397,6 +405,7 @@
       "hourly rate",
       "hourly rate for this job"
     ],
+    hourlyRate: ["hourly rate", "hourly pay", "pay rate", "rate per hour"],
     earliestStartDate: [
       "start date",
       "earliest start",
@@ -506,6 +515,7 @@
     "fieldOfStudy",
     "graduationDate",
     "salaryExpectation",
+    "hourlyRate",
     "earliestStartDate",
     "whyInterested",
     "gender",
@@ -2315,32 +2325,110 @@
     return answerPresentInEditor(el, text);
   }
 
+  function detectCompensationStyle(context = "") {
+    const t = String(context || "").toLowerCase();
+    if (!t.trim()) return "unknown";
+    if (
+      /\b(hour|hourly|\/\s*hr|per\s*hr|per\s*hour|\$\/hr|rate)\b/.test(t) &&
+      !/\b(year|annual|salary|\/\s*yr|per\s*year)\b/.test(t)
+    ) {
+      return "hourly";
+    }
+    if (/\b(year|yearly|annual|annually|salary|\/\s*yr|per\s*year|\/\s*annum)\b/.test(t)) {
+      return "annual";
+    }
+    if (/\b(number only|numeric|amount only|enter (a )?number|digits only)\b/.test(t)) {
+      return "number";
+    }
+    if (/\b(compensation|desired\s+pay|expected\s+pay|salary\s+expectation|desired\s+salary)\b/.test(t)) {
+      return "annual";
+    }
+    return "unknown";
+  }
+
+  function formatCompensationForField(raw, fieldContext = "", key = "") {
+    const hourlyDefault = "$60 per hour";
+    const annualDefault = "$120000/yr";
+    const style =
+      key === "hourlyRate" ? "hourly" : detectCompensationStyle(fieldContext);
+    const rawStr = String(raw || "").trim();
+    const amountMatch = rawStr.replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
+    const amount = amountMatch ? Number(amountMatch[1]) : NaN;
+    const rawLower = rawStr.toLowerCase();
+    const rawIsHourly =
+      /\b(hour|hourly|\/\s*hr|per\s*hr|per\s*hour)\b/.test(rawLower) ||
+      (Number.isFinite(amount) && amount > 0 && amount < 500);
+    const rawIsAnnual =
+      /\b(year|yearly|annual|\/\s*yr|per\s*year|salary)\b/.test(rawLower) ||
+      (Number.isFinite(amount) && amount >= 1000);
+    const hourlyAmount =
+      Number.isFinite(amount) && rawIsHourly ? amount : 60;
+    const annualAmount =
+      Number.isFinite(amount) && rawIsAnnual ? Math.round(amount) : 120000;
+
+    if (style === "hourly") {
+      if (/\d/.test(rawStr) && rawIsHourly) {
+        if (/hour|hr/i.test(rawStr)) return rawStr;
+        return `$${hourlyAmount} per hour`;
+      }
+      return hourlyDefault;
+    }
+    if (style === "annual") {
+      if (/\d/.test(rawStr) && rawIsAnnual) {
+        if (/\/\s*yr|per\s*year|annual/i.test(rawStr)) return rawStr.replace(/,/g, "");
+        return `$${annualAmount}/yr`;
+      }
+      return annualDefault;
+    }
+    if (style === "number") {
+      if (/\bhour|hourly|\/\s*hr\b/.test(String(fieldContext || "").toLowerCase())) {
+        return String(hourlyAmount);
+      }
+      return String(annualAmount);
+    }
+    if (rawStr) return rawStr.replace(/,/g, "");
+    return annualDefault;
+  }
+
   async function fillControl(el, value, key = null) {
     if (value == null || String(value).trim() === "") return false;
     if (el.disabled || el.readOnly) return false;
     if (isEditorChrome(el) && !isRichTextEditor(el)) return false;
     const tag = el.tagName.toLowerCase();
 
-    if (tag === "select") return fillSelect(el, value, key);
+    let fillValue = value;
+    if (key === "salaryExpectation" || key === "hourlyRate" || key === "desiredSalary") {
+      const ctx = [
+        questionLabelForControl(el),
+        labelTextForControl(el),
+        el.getAttribute?.("aria-label") || "",
+        el.getAttribute?.("placeholder") || "",
+        el.name || "",
+        el.id || ""
+      ].join(" ");
+      fillValue = formatCompensationForField(value, ctx, key);
+    }
+
+    if (tag === "select") return fillSelect(el, fillValue, key);
 
     if (tag === "input") {
       const type = (el.type || "text").toLowerCase();
-      if (type === "checkbox" || type === "radio") return fillCheckboxOrRadio(el, value, key);
+      if (type === "checkbox" || type === "radio") return fillCheckboxOrRadio(el, fillValue, key);
       if (["hidden", "file", "submit", "button", "image", "reset"].includes(type)) return false;
 
       // React-Select / combobox: ONLY pick from the option list — never type an answer.
       if (isReactSelectInput(el) || looksLikeCombobox(el)) {
-        return fillCustomDropdown(el, value, key);
+        return fillCustomDropdown(el, fillValue, key);
       }
 
       // Known select-like profile fields: try list first; never leave lowercase yes/no typed in.
-      if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(value)) {
-        const ok = await fillCustomDropdown(el, value, key);
+      if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(fillValue)) {
+        const ok = await fillCustomDropdown(el, fillValue, key);
         if (ok) return true;
-        if (isYesNoValue(value) || SELECT_LIKE_KEYS.has(key)) return false;
+        if (isYesNoValue(fillValue) || SELECT_LIKE_KEYS.has(key)) return false;
       }
 
-      const coerced = coerceValueForInput(el, value);
+      const coerced = coerceValueForInput(el, fillValue);
       if (coerced == null) return false;
       if (!setNativeValue(el, coerced)) return false;
       // Inputs such as date / number silently drop values they cannot represent.
@@ -2348,17 +2436,17 @@
     }
 
     if (tag === "textarea") {
-      if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(value) || looksLikeCombobox(el)) {
-        const ok = await fillCustomDropdown(el, value, key);
+      if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(fillValue) || looksLikeCombobox(el)) {
+        const ok = await fillCustomDropdown(el, fillValue, key);
         if (ok) return true;
-        if (isYesNoValue(value) || SELECT_LIKE_KEYS.has(key) || looksLikeCombobox(el)) return false;
+        if (isYesNoValue(fillValue) || SELECT_LIKE_KEYS.has(key) || looksLikeCombobox(el)) return false;
       }
-      setNativeValue(el, String(value));
+      setNativeValue(el, String(fillValue));
       return true;
     }
 
     if (isRichTextEditor(el) || el.isContentEditable) {
-      return await fillContentEditable(el, value);
+      return await fillContentEditable(el, fillValue);
     }
 
     if (
@@ -2367,7 +2455,7 @@
       el.getAttribute("role") === "radio"
     ) {
       const t = buttonChoiceText(el);
-      if (optionMatches(t, value) || (isYesNoValue(value) && optionMatches(t, value))) {
+      if (optionMatches(t, fillValue) || (isYesNoValue(fillValue) && optionMatches(t, fillValue))) {
         clickChip(el);
         return true;
       }
@@ -2377,7 +2465,7 @@
     // Non-input combobox buttons / divs / react-select controls
     if (nearestEssayEditor(el)) return false;
     if (looksLikeCombobox(el) || isReactSelectInput(el) || el.getAttribute("role") === "combobox") {
-      return fillCustomDropdown(el, value, key);
+      return fillCustomDropdown(el, fillValue, key);
     }
 
     return false;
@@ -4144,10 +4232,33 @@
       try {
         const text = String(a.textContent || a.getAttribute("aria-label") || "").trim();
         if (applyRe.test(text)) pushUrl(a.href);
+        // Jobgether: also collect off-site APPLY hrefs even when label is just an icon.
+        if (
+          isJobgetherPage() &&
+          a.href &&
+          !isSameSiteApplyUrl(a.href, "jobgether") &&
+          isEmployerAtsHost(new URL(a.href, location.href).hostname)
+        ) {
+          pushUrl(a.href);
+        }
       } catch {
         /* ignore */
       }
-      if (applyUrls.length >= 5) break;
+      if (applyUrls.length >= 8) break;
+    }
+
+    // Prefer employer ATS URLs when starting from Jobgether.
+    if (isJobgetherPage() && applyUrls.length > 1) {
+      applyUrls.sort((a, b) => {
+        const score = (u) => {
+          try {
+            return isEmployerAtsHost(new URL(u).hostname) ? 0 : 1;
+          } catch {
+            return 2;
+          }
+        };
+        return score(a) - score(b);
+      });
     }
 
     if (applyUrls.length < 5) {
@@ -4202,6 +4313,35 @@
     } catch {
       return false;
     }
+  }
+
+  function isGreenhousePage(url = location.href) {
+    try {
+      return /(^|\.)greenhouse\.io$/i.test(new URL(String(url || location.href)).hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function isJobgetherPage(url = location.href) {
+    try {
+      return /(^|\.)jobgether\.com$/i.test(new URL(String(url || location.href)).hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function isEmployerAtsHost(hostname = "") {
+    const host = String(hostname || "").toLowerCase();
+    return (
+      /(^|\.)myworkdayjobs\.com$/.test(host) ||
+      /(^|\.)workdayjobs\.com$/.test(host) ||
+      /(^|\.)greenhouse\.io$/.test(host) ||
+      /(^|\.)lever\.co$/.test(host) ||
+      /(^|\.)ashbyhq\.com$/.test(host) ||
+      /(^|\.)icims\.com$/.test(host) ||
+      /(^|\.)smartrecruiters\.com$/.test(host)
+    );
   }
 
   /**
@@ -4323,6 +4463,8 @@
     if (isIndeedPage(url)) return "indeed";
     if (isDicePage(url)) return "dice";
     if (isWorkdayPage(url)) return "workday";
+    if (isGreenhousePage(url)) return "greenhouse";
+    if (isJobgetherPage(url)) return "jobgether";
     return "generic";
   }
 
@@ -4332,12 +4474,14 @@
       if (!/^https?:$/i.test(target.protocol)) return false;
       if (site === "indeed") return /(^|\.)indeed\.com$/i.test(target.hostname);
       if (site === "dice") return /(^|\.)dice\.com$/i.test(target.hostname);
+      if (site === "jobgether") return /(^|\.)jobgether\.com$/i.test(target.hostname);
       if (site === "workday") {
         return (
           /(^|\.)myworkdayjobs\.com$/i.test(target.hostname) ||
           /(^|\.)workdayjobs\.com$/i.test(target.hostname)
         );
       }
+      if (site === "greenhouse") return /(^|\.)greenhouse\.io$/i.test(target.hostname);
       return target.origin === location.origin;
     } catch {
       return false;
@@ -4574,10 +4718,100 @@
     };
   }
 
+  const GREENHOUSE_APPLY_SUCCESS_RE =
+    /\b(you(?:'|’)re in the race|your application has been received|application has been received|thank you for applying|successfully submitted|application (?:was |has been )?submitted)\b/i;
+
+  function detectGreenhouseApplySuccess() {
+    if (!isGreenhousePage()) return { ok: false };
+    const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    const headings = queryAllDeep("h1, h2, [role='heading']")
+      .map((el) => cleanLabelText(el.textContent))
+      .filter(Boolean);
+    const headingHit = headings.find((t) => GREENHOUSE_APPLY_SUCCESS_RE.test(t));
+    const bodyHit = bodyText ? bodyText.match(GREENHOUSE_APPLY_SUCCESS_RE) : null;
+    const myGh = /mygreenhouse|track your application/i.test(bodyText);
+    if (!headingHit && !bodyHit && !myGh) return { ok: false };
+    // OTP page also mentions application — require success cues, not security-code UI.
+    if (detectGreenhouseEmailVerification().ok) return { ok: false };
+    return {
+      ok: true,
+      text: (headingHit || (bodyHit && bodyHit[0]) || "Your application has been received").slice(0, 160)
+    };
+  }
+
+  function detectGreenhouseEmailVerification() {
+    if (!isGreenhousePage()) return { ok: false };
+    const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
+    const hasCopy =
+      /\b(security\s*code|verification\s*code|enter\s+(?:the\s+)?code|copy\s+and\s+paste\s+this\s+code|resubmit your application)\b/i.test(
+        bodyText
+      );
+    const codeInput = findGreenhouseSecurityCodeInput();
+    if (!hasCopy && !codeInput) return { ok: false };
+    if (!codeInput && !/\bsecurity\s*code\b/i.test(bodyText)) return { ok: false };
+    return {
+      ok: true,
+      text: "Greenhouse security code verification"
+    };
+  }
+
+  function findGreenhouseSecurityCodeInput() {
+    const inputs = queryAllDeep('input:not([type="hidden"]):not([type="file"]), textarea');
+    for (const el of inputs) {
+      if (!isElVisible(el) || el.disabled) continue;
+      const blob = normalize(
+        [
+          questionLabelForControl(el),
+          labelTextForControl(el),
+          el.getAttribute?.("aria-label") || "",
+          el.getAttribute?.("placeholder") || "",
+          el.name || "",
+          el.id || ""
+        ].join(" ")
+      );
+      if (/\b(security\s*code|verification\s*code|one[- ]time|otp|email\s*code)\b/.test(blob)) {
+        return el;
+      }
+    }
+    // Fallback: single short text input on a page that mentions security code.
+    const bodyText = cleanLabelText(document.body?.innerText || "");
+    if (!/\bsecurity\s*code\b/i.test(bodyText)) return null;
+    const candidates = inputs.filter(
+      (el) =>
+        isElVisible(el) &&
+        !el.disabled &&
+        /^(text|tel|search|)$/i.test(String(el.type || "text")) &&
+        !/email|phone|name|password/i.test(
+          normalize([el.name, el.id, el.getAttribute?.("autocomplete") || ""].join(" "))
+        )
+    );
+    return candidates.length === 1 ? candidates[0] : candidates[0] || null;
+  }
+
+  async function fillGreenhouseSecurityCode(code) {
+    const value = String(code || "").trim();
+    if (!value) return { ok: false, error: "Empty security code" };
+    const el = findGreenhouseSecurityCodeInput();
+    if (!el) return { ok: false, error: "Security code field not found" };
+    suppressLearn(3000);
+    const filled = await fillControl(el, value, null);
+    if (!filled) return { ok: false, error: "Could not fill security code field" };
+    // Prefer Submit / Resubmit on the verification step.
+    const action = findActionButton();
+    if (action?.el && (action.type === "submit" || /submit|resubmit|verify|continue/i.test(action.text || ""))) {
+      scrollElIntoView(action.el);
+      safeClick(action.el);
+      await sleep(900);
+      return { ok: true, filled: true, submitted: true, text: action.text || "Submit" };
+    }
+    return { ok: true, filled: true, submitted: false };
+  }
+
   function detectApplySuccess() {
     if (isIndeedPage()) return detectIndeedApplySuccess();
     if (isDicePage()) return detectDiceApplySuccess();
     if (isWorkdayPage()) return detectWorkdayApplySuccess();
+    if (isGreenhousePage()) return detectGreenhouseApplySuccess();
     return { ok: false };
   }
 
@@ -4921,9 +5155,122 @@
     return { ok: false, clicked: false };
   }
 
+  async function clickGreenhouseApplyEntry() {
+    const controls = queryAllDeep("a, button, [role='button'], input[type='button'], input[type='submit']").filter(
+      (el) => isElVisible(el) && isElEnabled(el)
+    );
+    const applyBtn = controls.find((el) => {
+      const t = elActionText(el).trim();
+      return /^(apply|apply now|apply for this job)$/i.test(t);
+    });
+    if (applyBtn) {
+      scrollElIntoView(applyBtn);
+      safeClick(applyBtn);
+      await sleep(1200);
+      return { ok: true, clicked: true, text: elActionText(applyBtn) || "Apply" };
+    }
+    if (probeApplicationForm().isApplicationForm || /job_app|\/apply/i.test(location.href)) {
+      return { ok: true, clicked: false, alreadyOpen: true, text: "greenhouse apply" };
+    }
+    return { ok: false, clicked: false };
+  }
+
+  /**
+   * Jobgether: click the external APPLY (opens Workday / Greenhouse), never Auto-Apply.
+   */
+  async function clickJobgetherApplyEntry() {
+    const controls = queryAllDeep("a, button, [role='button']").filter(
+      (el) => isElVisible(el) && isElEnabled(el)
+    );
+
+    const isInternalOnly = (el) => {
+      const t = elActionText(el);
+      return /auto[-\s]?apply|easy apply|1-?click|save job|bookmark|share|not a fit|match score/i.test(
+        t
+      );
+    };
+
+    const scored = [];
+    for (const el of controls) {
+      if (isInternalOnly(el)) continue;
+      const t = elActionText(el).trim();
+      // Exact APPLY / Apply now — not "Apply with profile" style internals.
+      if (!/^(apply|apply now)$/i.test(t)) continue;
+      let score = 10;
+      const href = String(el.href || el.getAttribute?.("href") || "").trim();
+      const target = String(el.getAttribute?.("target") || "");
+      if (/_blank/i.test(target)) score += 8;
+      if (href && !isSameSiteApplyUrl(href, "jobgether")) {
+        score += 20;
+        try {
+          if (isEmployerAtsHost(new URL(href, location.href).hostname)) score += 25;
+        } catch {
+          /* ignore */
+        }
+      }
+      const hasExternalIcon = Boolean(
+        el.querySelector?.(
+          'svg, img[alt*="external" i], [class*="external" i], [data-testid*="external" i], [aria-label*="external" i]'
+        )
+      );
+      if (hasExternalIcon) score += 12;
+      // Prefer header/primary blue APPLY over buried text links.
+      const classBlob = String(el.className || "");
+      if (/btn|button|primary|cta/i.test(classBlob)) score += 4;
+      scored.push({ el, score, href });
+    }
+    scored.sort((a, b) => b.score - a.score);
+
+    const best = scored[0];
+    if (best) {
+      scrollElIntoView(best.el);
+      safeClick(best.el);
+      await sleep(1500);
+      const out = {
+        ok: true,
+        clicked: true,
+        text: elActionText(best.el) || "APPLY",
+        // Jobgether APPLY always leaves for the employer ATS — follow it.
+        followExternal: true
+      };
+      if (best.href && !isSameSiteApplyUrl(best.href, "jobgether")) {
+        try {
+          out.externalUrl = new URL(best.href, location.href).toString();
+        } catch {
+          out.externalUrl = best.href;
+        }
+      }
+      return out;
+    }
+
+    // Fallback: any visible APPLY-ish control that is not Auto-Apply.
+    const fallback = controls.find((el) => {
+      if (isInternalOnly(el)) return false;
+      return /\bapply\b/i.test(elActionText(el)) && !/auto/i.test(elActionText(el));
+    });
+    if (fallback) {
+      scrollElIntoView(fallback);
+      safeClick(fallback);
+      await sleep(1500);
+      return {
+        ok: true,
+        clicked: true,
+        text: elActionText(fallback) || "APPLY",
+        followExternal: true
+      };
+    }
+    return { ok: false, clicked: false };
+  }
+
   async function clickEasyApplyEntry() {
     if (isWorkdayPage()) {
       return clickWorkdayApplyEntry();
+    }
+    if (isGreenhousePage()) {
+      return clickGreenhouseApplyEntry();
+    }
+    if (isJobgetherPage()) {
+      return clickJobgetherApplyEntry();
     }
     // Dice / DHI web components first (stable hosts), then generic Easy Apply labels.
     const hosts = [
@@ -5019,6 +5366,7 @@
   function getApplyActionSnapshot() {
     const probe = probeApplicationForm();
     const success = detectApplySuccess();
+    const emailVerification = detectGreenhouseEmailVerification();
     const workdayWizard = isWorkdayPage() ? detectWorkdayWizardState() : null;
     let action = findActionButton();
     // On a job listing (not the form yet), "Apply" / "Apply now" is an entry
@@ -5042,6 +5390,8 @@
       jobUnavailable: probe.jobUnavailable || "",
       applySuccess: Boolean(success.ok),
       applySuccessText: success.text || "",
+      emailVerification: Boolean(emailVerification.ok),
+      emailVerificationText: emailVerification.text || "",
       action: describeAction(action),
       applyUrls: probe.applyUrls || []
     };
@@ -5058,6 +5408,7 @@
         clicked: Boolean(entryRes?.clicked),
         isSubmit: false,
         externalRedirect: Boolean(entryRes?.externalRedirect),
+        followExternal: Boolean(entryRes?.followExternal),
         externalUrl: entryRes?.externalUrl || "",
         action: entryRes?.clicked || entryRes?.alreadyOpen
           ? { type: "entry", text: entryRes.text || "" }
@@ -5136,11 +5487,12 @@
           after: before
         };
       }
-      // Dice / Indeed / Workday may auto-submit. Every other site stops before Submit.
+      // Dice / Indeed / Workday / Greenhouse may auto-submit. Every other site stops before Submit.
       if (
         pageSite === "generic" ||
         (pageSite === "indeed" && !isIndeedPage()) ||
         (pageSite === "workday" && !isWorkdayPage()) ||
+        (pageSite === "greenhouse" && !isGreenhousePage()) ||
         (actionHref && !isSameSiteApplyUrl(actionHref, pageSite))
       ) {
         return {
@@ -6501,6 +6853,12 @@
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });
       }
+      return true;
+    }
+    if (message?.type === "fill_greenhouse_security_code") {
+      fillGreenhouseSecurityCode(message.code || "")
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;
     }
     if (message?.type === "click_apply_action") {

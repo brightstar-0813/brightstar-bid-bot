@@ -15,7 +15,8 @@
     "alarms",
     "sidePanel",
     "offscreen",
-    "nativeMessaging"
+    "nativeMessaging",
+    "identity"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -56,6 +57,9 @@
         "https://*.ultipro.com/*",
         "https://www.dice.com/*",
         "https://*.dice.com/*",
+        "https://www.jobgether.com/*",
+        "https://jobgether.com/*",
+        "https://*.jobgether.com/*",
         "https://www.braintrust.com/*",
         "https://*.braintrust.com/*",
         "https://app.usebraintrust.com/*",

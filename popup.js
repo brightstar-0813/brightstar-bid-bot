@@ -31,6 +31,7 @@ import {
   isIndeedJob,
   isJobrightJob,
   isWorkdayJob,
+  isGreenhouseJob,
   normalizeChannelFilter
 } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
@@ -466,6 +467,7 @@ const filterLinkedInBtn = document.getElementById("filterLinkedIn");
 const filterIndeedBtn = document.getElementById("filterIndeed");
 const filterJobrightBtn = document.getElementById("filterJobright");
 const filterWorkdayBtn = document.getElementById("filterWorkday");
+const filterGreenhouseBtn = document.getElementById("filterGreenhouse");
 const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
 const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
@@ -510,6 +512,9 @@ const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
+const msGraphStatusNoteEl = document.getElementById("msGraphStatusNote");
+const msGraphConnectBtn = document.getElementById("msGraphConnectBtn");
+const msGraphDisconnectBtn = document.getElementById("msGraphDisconnectBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
 const qaImportBtn = document.getElementById("qaImportBtn");
 const qaExportBtn = document.getElementById("qaExportBtn");
@@ -1143,7 +1148,8 @@ async function loadSettings() {
         isDice: isDiceJob(j),
         isIndeed: isIndeedJob(j),
         isJobright: isJobrightJob(j),
-        isWorkday: isWorkdayJob(j)
+        isWorkday: isWorkdayJob(j),
+        isGreenhouse: isGreenhouseJob(j)
       }))
     : [];
   queueCache = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
@@ -1164,6 +1170,7 @@ async function loadSettings() {
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   await refreshQaBank().catch(() => {});
+  await refreshMsGraphStatus().catch(() => {});
   await hydrateJobDirsInUi().catch(() => {});
 }
 
@@ -1177,7 +1184,8 @@ async function hydrateJobDirsInUi() {
       isDice: isDiceJob(j),
       isIndeed: isIndeedJob(j),
       isJobright: isJobrightJob(j),
-      isWorkday: isWorkdayJob(j)
+      isWorkday: isWorkdayJob(j),
+      isGreenhouse: isGreenhouseJob(j)
     }));
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;
@@ -1200,13 +1208,15 @@ function updateCsvSummaryFromQueue() {
   const diceTotal = allUsJobsCache.filter((j) => isDiceJob(j)).length;
   const jobrightTotal = allUsJobsCache.filter((j) => isJobrightJob(j)).length;
   const workdayTotal = allUsJobsCache.filter((j) => isWorkdayJob(j)).length;
+  const greenhouseTotal = allUsJobsCache.filter((j) => isGreenhouseJob(j)).length;
   const etcTotal = allUsJobsCache.filter(
     (j) =>
       !isDiceJob(j) &&
       !isLinkedInJob(j) &&
       !isIndeedJob(j) &&
       !isJobrightJob(j) &&
-      !isWorkdayJob(j)
+      !isWorkdayJob(j) &&
+      !isGreenhouseJob(j)
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
@@ -1219,6 +1229,8 @@ function updateCsvSummaryFromQueue() {
         ? "Jobright only"
       : channelFilter === "workday"
         ? "Workday only"
+      : channelFilter === "greenhouse"
+        ? "Greenhouse only"
       : channelFilter === "indeed"
         ? "Indeed only"
       : channelFilter === "dice"
@@ -1237,7 +1249,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · Etc ${etcTotal} · batch ${batchState}</p>
+    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · GH ${greenhouseTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -1248,6 +1260,7 @@ function syncChannelFilterButtons() {
     linkedin: filterLinkedInBtn,
     jobright: filterJobrightBtn,
     workday: filterWorkdayBtn,
+    greenhouse: filterGreenhouseBtn,
     indeed: filterIndeedBtn,
     etc: filterEtcBtn,
     all: filterAllBtn
@@ -1319,6 +1332,8 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
           ? `Showing Jobright jobs — ${queueCache.length} in queue.`
         : channelFilter === "workday"
           ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+        : channelFilter === "greenhouse"
+          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "etc"
           ? `Showing other boards — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue.`
@@ -1530,6 +1545,12 @@ function renderQueue() {
       wdBadge.className = "badge badge-workday";
       wdBadge.textContent = "Workday";
       badges.appendChild(wdBadge);
+    }
+    if (isGreenhouseJob(job)) {
+      const ghBadge = document.createElement("span");
+      ghBadge.className = "badge badge-greenhouse";
+      ghBadge.textContent = "Greenhouse";
+      badges.appendChild(ghBadge);
     }
     if (job.applied) {
       const appliedBadge = document.createElement("span");
@@ -1881,7 +1902,7 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
     );
 
     try {
@@ -2511,6 +2532,28 @@ async function refreshQaBank() {
   }
 }
 
+async function refreshMsGraphStatus() {
+  if (!msGraphStatusNoteEl) return;
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "ms_graph_status" });
+    if (!res?.ok) {
+      msGraphStatusNoteEl.textContent = "Unavailable";
+      return;
+    }
+    if (!res.hasClientId) {
+      msGraphStatusNoteEl.textContent = "Set MS_GRAPH_CLIENT_ID";
+      return;
+    }
+    if (res.connected) {
+      msGraphStatusNoteEl.textContent = res.email ? `Connected · ${res.email}` : "Connected";
+    } else {
+      msGraphStatusNoteEl.textContent = "Not connected";
+    }
+  } catch {
+    msGraphStatusNoteEl.textContent = "Unavailable";
+  }
+}
+
 function activePersonLabel() {
   return profilesCache.find((p) => p.id === profileSelectEl.value)?.label || "active person";
 }
@@ -2774,6 +2817,9 @@ filterJobrightBtn?.addEventListener("click", () => {
 filterWorkdayBtn?.addEventListener("click", () => {
   applyChannelFilter("workday").catch((e) => setStatus(String(e.message || e)));
 });
+filterGreenhouseBtn?.addEventListener("click", () => {
+  applyChannelFilter("greenhouse").catch((e) => setStatus(String(e.message || e)));
+});
 filterIndeedBtn?.addEventListener("click", () => {
   applyChannelFilter("indeed").catch((e) => setStatus(String(e.message || e)));
 });
@@ -2854,6 +2900,33 @@ qaExportBtn?.addEventListener("click", () => {
 });
 qaLearnToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ qa_learn_enabled: Boolean(qaLearnToggleEl.checked) }).catch(() => {});
+});
+msGraphConnectBtn?.addEventListener("click", () => {
+  setStatus("Connecting Outlook via Microsoft Graph…");
+  chrome.runtime
+    .sendMessage({ type: "ms_graph_connect" })
+    .then(async (res) => {
+      if (!res?.ok) {
+        setStatus(res?.error || "Outlook connect failed.");
+        return;
+      }
+      await refreshMsGraphStatus();
+      setStatus(res.email ? `Outlook connected: ${res.email}` : "Outlook connected.");
+    })
+    .catch((e) => setStatus(`Outlook connect failed: ${String(e.message || e)}`));
+});
+msGraphDisconnectBtn?.addEventListener("click", () => {
+  chrome.runtime
+    .sendMessage({ type: "ms_graph_disconnect" })
+    .then(async (res) => {
+      if (!res?.ok) {
+        setStatus(res?.error || "Disconnect failed.");
+        return;
+      }
+      await refreshMsGraphStatus();
+      setStatus("Outlook disconnected.");
+    })
+    .catch((e) => setStatus(String(e.message || e)));
 });
 
 aiProviderChatgptBtn?.addEventListener("click", () => {

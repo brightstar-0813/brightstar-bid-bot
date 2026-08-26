@@ -31,11 +31,12 @@ import {
   jobDocsId,
   putJobDocs
 } from "./job-docs-db.js";
+import { fetchLatestGreenhouseSecurityCode } from "./ms-graph-mail.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-26.01";
+  const AUTOFILL_SCRIPT_BUILD = "2026-08-26.jg01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -862,7 +863,13 @@ function applySiteFromUrl(url) {
   if (/(^|\.)dice\.com$/.test(host)) return "dice";
   if (/(^|\.)indeed\.com$/.test(host)) return "indeed";
   if (/(^|\.)myworkdayjobs\.com$/.test(host) || /(^|\.)workdayjobs\.com$/.test(host)) return "workday";
+  if (/(^|\.)greenhouse\.io$/.test(host)) return "greenhouse";
+  if (/(^|\.)jobgether\.com$/.test(host)) return "jobgether";
   return "generic";
+}
+
+function isEmployerAtsSite(site) {
+  return site === "workday" || site === "greenhouse";
 }
 
 function isUrlOnApplySite(url, site) {
@@ -1045,6 +1052,8 @@ function applySiteLabel(site) {
   if (site === "indeed") return "Indeed";
   if (site === "dice") return "Dice";
   if (site === "workday") return "Workday";
+  if (site === "greenhouse") return "Greenhouse";
+  if (site === "jobgether") return "Jobgether";
   return "application";
 }
 
@@ -1101,6 +1110,10 @@ function pickBestApplyAction(frameResults = []) {
     applySuccess: frameResults.some((f) => f?.applySuccess),
     applySuccessText:
       frameResults.find((f) => f?.applySuccess && f?.applySuccessText)?.applySuccessText || "",
+    emailVerification: frameResults.some((f) => f?.emailVerification),
+    emailVerificationText:
+      frameResults.find((f) => f?.emailVerification && f?.emailVerificationText)
+        ?.emailVerificationText || "",
     applyUrls: [...new Set(frameResults.flatMap((f) => f?.applyUrls || []).filter(Boolean))],
     signature: best?.signature || frameResults[0]?.signature || "",
     href: best?.href || frameResults[0]?.href || "",
@@ -1138,8 +1151,79 @@ async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
           (site === "indeed" ? "Application submitted" : "Your application is on its way")
       };
     }
+    if (probe?.emailVerification) {
+      return {
+        ok: false,
+        tabId,
+        reason: "email_verification",
+        text: probe.emailVerificationText || "Security code required"
+      };
+    }
   }
   return { ok: false, tabId, reason: "timeout" };
+}
+
+/**
+ * Greenhouse email OTP: poll Microsoft Graph, fill code, resubmit.
+ */
+async function completeGreenhouseEmailVerification(tabId, { afterEpochMs } = {}) {
+  await setApplyStatus("Apply: Greenhouse — waiting for security code email (Outlook)…");
+  const mail = await fetchLatestGreenhouseSecurityCode({
+    afterEpochMs: afterEpochMs || Date.now() - 60_000,
+    timeoutMs: 120_000,
+    pollMs: 4000
+  });
+  if (!mail?.ok || !mail.code) {
+    return {
+      ok: false,
+      detail: mail?.error || "No Greenhouse security code found in Outlook."
+    };
+  }
+  await setApplyStatus(`Apply: Greenhouse — entering security code…`);
+  await ensureAutofillScript(tabId);
+  const fillRes = await sendMessageToTab(
+    tabId,
+    { type: "fill_greenhouse_security_code", code: mail.code },
+    { attempts: 2 }
+  ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
+  if (!fillRes?.ok) {
+    return {
+      ok: false,
+      detail: fillRes?.error || "Could not fill the Greenhouse security code field."
+    };
+  }
+  await sleep(600);
+  const clickRes = await sendMessageToTab(
+    tabId,
+    { type: "click_apply_action", preferredType: "submit", autoSubmit: true },
+    { attempts: 2 }
+  ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
+  if (!(clickRes?.clicked || clickRes?.submitted || fillRes?.submitted)) {
+    // fill handler may already have clicked submit
+    if (!fillRes?.submitted) {
+      return {
+        ok: false,
+        detail:
+          clickRes?.error ||
+          clickRes?.validationReason ||
+          "Security code filled but Submit could not be clicked."
+      };
+    }
+  }
+  const confirmed = await waitForApplySuccess(tabId, "greenhouse", 25000);
+  if (confirmed.ok) {
+    return { ok: true, detail: confirmed.text || "Your application has been received" };
+  }
+  if (confirmed.reason === "email_verification") {
+    return {
+      ok: false,
+      detail: "Security code was entered but Greenhouse still asks for verification."
+    };
+  }
+  return {
+    ok: false,
+    detail: "Security code submitted but Greenhouse success screen was not detected."
+  };
 }
 
 function looksLikeApplicationUrl(url) {
@@ -1168,6 +1252,24 @@ function shouldAdoptNewApplyTab(originUrl, newUrl, newProbe) {
     return false;
   }
 
+  // Jobgether APPLY opens Workday / Greenhouse (or similar) — always follow.
+  if (applySiteFromUrl(origin) === "jobgether") {
+    const dest = applySiteFromUrl(next);
+    if (isEmployerAtsSite(dest) || dest === "generic") {
+      if (isEmployerAtsSite(dest)) return true;
+      // Same-origin Jobgether deep link — keep looking; off-site unknown hosts still adopt if apply UI.
+      try {
+        const o = new URL(origin);
+        const n = new URL(next);
+        if (o.hostname !== n.hostname && /^https?:$/i.test(n.protocol)) {
+          return true;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+
   // Never leave an in-progress Dice wizard for a job-detail listing.
   if (isDiceWizardUrl(origin) && isDiceJobDetailUrl(next)) return false;
   if (isDiceJobDetailUrl(next) && !newProbe?.anyForm) return false;
@@ -1176,6 +1278,10 @@ function shouldAdoptNewApplyTab(originUrl, newUrl, newProbe) {
   if (newProbe?.anyForm && actionType && actionType !== "entry") return true;
   if (isDiceWizardUrl(next)) return true;
   if (looksLikeApplicationUrl(next) && (newProbe?.anyForm || Boolean(actionType))) return true;
+  // Workday / Greenhouse listing + Start Application modal (entry only).
+  if (isEmployerAtsSite(applySiteFromUrl(next)) && (actionType === "entry" || newProbe?.anyForm)) {
+    return true;
+  }
   return false;
 }
 
@@ -1210,6 +1316,15 @@ async function waitForApplyAdvance(tabId, prevSig, prevUrl, timeoutMs = 15000) {
         reason: "apply_success",
         applySuccess: true,
         applySuccessText: successProbe.applySuccessText || ""
+      };
+    }
+    if (successProbe?.emailVerification) {
+      return {
+        advanced: true,
+        tabId,
+        reason: "email_verification",
+        emailVerification: true,
+        emailVerificationText: successProbe.emailVerificationText || ""
       };
     }
 
@@ -1646,12 +1761,24 @@ export async function startMultiStepApplyOnTab(
 
   let currentTabId = tab.id;
   const initialSite = applySiteFromUrl(tab.url || "");
+  let liveSite = initialSite;
   let stepBudget =
-    initialSite === "workday" ? Math.max(Number(maxSteps) || 12, 16) : Number(maxSteps) || 12;
-  const effectiveAutoSubmit =
+    initialSite === "workday"
+      ? Math.max(Number(maxSteps) || 12, 16)
+      : initialSite === "greenhouse"
+        ? Math.max(Number(maxSteps) || 12, 18)
+        : initialSite === "jobgether"
+          ? Math.max(Number(maxSteps) || 12, 18)
+          : Number(maxSteps) || 12;
+  // Jobgether APPLY lands on Workday/Greenhouse — enable submit once on those boards.
+  let effectiveAutoSubmit =
     Boolean(autoSubmit) &&
-    (initialSite === "dice" || initialSite === "indeed" || initialSite === "workday");
-  const siteLabel = applySiteLabel(initialSite);
+    (initialSite === "dice" ||
+      initialSite === "indeed" ||
+      initialSite === "workday" ||
+      initialSite === "greenhouse" ||
+      initialSite === "jobgether");
+  let siteLabel = applySiteLabel(initialSite);
   const summary = {
     ok: true,
     steps: 0,
@@ -1672,9 +1799,34 @@ export async function startMultiStepApplyOnTab(
 
   let noAdvance = 0;
   let workdayStepHint = "";
+  let greenhouseSubmitAt = 0;
+
+  function syncLiveSiteFromUrl(url) {
+    const detected = applySiteFromUrl(url || "");
+    if (!detected || detected === liveSite) return;
+    // Upgrade Jobgether / generic → Workday or Greenhouse after APPLY redirect.
+    if (
+      isEmployerAtsSite(detected) &&
+      (liveSite === "jobgether" || liveSite === "generic" || liveSite === detected)
+    ) {
+      liveSite = detected;
+      siteLabel = applySiteLabel(detected);
+      summary.site = detected;
+      if (Boolean(autoSubmit) || initialSite === "jobgether") {
+        effectiveAutoSubmit = true;
+        summary.autoSubmit = true;
+      }
+      if (detected === "workday") {
+        stepBudget = Math.max(stepBudget, 16);
+      } else if (detected === "greenhouse") {
+        stepBudget = Math.max(stepBudget, 18);
+      }
+    }
+  }
 
   for (let step = 0; step < stepBudget; step += 1) {
     const currentTab = await chrome.tabs.get(currentTabId).catch(() => null);
+    syncLiveSiteFromUrl(currentTab?.url || "");
     if (
       initialSite === "indeed" &&
       !isUrlOnApplySite(currentTab?.url || "", "indeed")
@@ -1722,6 +1874,21 @@ export async function startMultiStepApplyOnTab(
       summary.tabId = currentTabId;
       return summary;
     }
+    if (probe.emailVerification && effectiveAutoSubmit && liveSite === "greenhouse") {
+      const otp = await completeGreenhouseEmailVerification(currentTabId, {
+        afterEpochMs: greenhouseSubmitAt || Date.now() - 120_000
+      });
+      if (otp.ok) {
+        summary.status = "submitted";
+        summary.detail = otp.detail || "Your application has been received";
+        summary.tabId = currentTabId;
+        return summary;
+      }
+      summary.status = "needs_review";
+      summary.detail = otp.detail || "Greenhouse security code verification failed.";
+      summary.tabId = currentTabId;
+      return summary;
+    }
     if (probe.blockedReason) {
       summary.status = "needs_review";
       summary.detail = probe.blockedReason;
@@ -1744,6 +1911,8 @@ export async function startMultiStepApplyOnTab(
       const prevUrl = live?.url || "";
       const prevSig = probe.signature || "";
       let alreadyOpen = false;
+      let followExternal = initialSite === "jobgether" || liveSite === "jobgether";
+      let followUrl = "";
 
       if (probe.best?.action?.type === "entry") {
         const entryClick = await sendMessageToTab(
@@ -1751,7 +1920,9 @@ export async function startMultiStepApplyOnTab(
           { type: "click_apply_action", preferredType: "entry", autoSubmit: false },
           { attempts: 2, frameId: probe.best.frameId }
         ).catch(() => null);
-        if (entryClick?.externalRedirect) {
+        followExternal = followExternal || Boolean(entryClick?.followExternal);
+        followUrl = String(entryClick?.externalUrl || "").trim();
+        if (entryClick?.externalRedirect && !followExternal) {
           summary.status = "skipped";
           summary.detail =
             "Indeed uses an external ATS for this job. Automatic application was not started.";
@@ -1765,7 +1936,9 @@ export async function startMultiStepApplyOnTab(
           { attempts: 2 }
         ).catch(() => null);
         alreadyOpen = Boolean(entry?.alreadyOpen);
-        if (entry?.externalRedirect) {
+        followExternal = followExternal || Boolean(entry?.followExternal);
+        followUrl = String(entry?.externalUrl || "").trim();
+        if (entry?.externalRedirect && !followExternal) {
           summary.status = "skipped";
           summary.detail =
             "Indeed uses an external ATS for this job. Automatic application was not started.";
@@ -1776,7 +1949,18 @@ export async function startMultiStepApplyOnTab(
           const nextUrl =
             probe.applyUrls
               .map((url) => String(url || "").trim())
-              .find((url) => initialSite !== "indeed" || isUrlOnApplySite(url, "indeed")) || "";
+              .find((url) => {
+                if (!url) return false;
+                if (initialSite === "indeed") return isUrlOnApplySite(url, "indeed");
+                if (initialSite === "jobgether" || liveSite === "jobgether") {
+                  return isEmployerAtsSite(applySiteFromUrl(url));
+                }
+                return true;
+              }) ||
+            (initialSite === "jobgether" || liveSite === "jobgether"
+              ? ""
+              : probe.applyUrls.map((u) => String(u || "").trim()).find(Boolean)) ||
+            "";
           if (initialSite === "indeed" && !nextUrl) {
             summary.status = "skipped";
             summary.detail =
@@ -1785,8 +1969,10 @@ export async function startMultiStepApplyOnTab(
             return summary;
           }
           if (nextUrl) {
+            followUrl = nextUrl;
             await chrome.tabs.update(currentTabId, { url: nextUrl });
             await waitForTabComplete(currentTabId, 30000).catch(() => {});
+            syncLiveSiteFromUrl(nextUrl);
           }
         } else if (!entry?.clicked && !alreadyOpen && probe.blockedReason) {
           summary.status = "needs_review";
@@ -1806,16 +1992,40 @@ export async function startMultiStepApplyOnTab(
         }
       }
       if (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry"))) {
-        const advanced = await waitForApplyAdvance(currentTabId, prevSig, prevUrl, 12000);
-        if (advanced.reason === "external_redirect") {
+        if (followExternal) {
+          await setApplyStatus(
+            `Apply: Jobgether — waiting for Workday / Greenhouse…`
+          );
+        }
+        const advanced = await waitForApplyAdvance(
+          currentTabId,
+          prevSig,
+          prevUrl,
+          followExternal ? 20000 : 12000
+        );
+        // Jobgether intentionally follows off-site ATS — adopt that tab instead of skipping.
+        if (advanced.reason === "external_redirect" && !followExternal) {
           summary.status = "skipped";
           summary.detail =
             "Indeed redirected to an external ATS. Automatic application was stopped.";
           summary.tabId = advanced.tabId || currentTabId;
           return summary;
         }
-        currentTabId = advanced.tabId;
+        if (
+          followExternal &&
+          !advanced.advanced &&
+          followUrl &&
+          isEmployerAtsSite(applySiteFromUrl(followUrl))
+        ) {
+          await chrome.tabs.update(currentTabId, { url: followUrl });
+          await waitForTabComplete(currentTabId, 30000).catch(() => {});
+          syncLiveSiteFromUrl(followUrl);
+        } else {
+          currentTabId = advanced.tabId || currentTabId;
+        }
         await rememberApplyTab(currentTabId);
+        const afterUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || "";
+        syncLiveSiteFromUrl(afterUrl);
         if (advanced.applySuccess) {
           summary.status = "submitted";
           summary.detail = advanced.applySuccessText || "Your application is on its way";
@@ -1943,10 +2153,26 @@ export async function startMultiStepApplyOnTab(
           return summary;
         }
         if (clickRes?.clicked || clickRes?.submitted) {
-          const confirmed = await waitForApplySuccess(currentTabId, initialSite, 20000);
+          greenhouseSubmitAt = Date.now();
+          const confirmed = await waitForApplySuccess(currentTabId, liveSite, 20000);
           if (confirmed.ok) {
             summary.status = "submitted";
             summary.detail = confirmed.text || "Your application is on its way";
+            summary.tabId = currentTabId;
+            return summary;
+          }
+          if (confirmed.reason === "email_verification" && liveSite === "greenhouse") {
+            const otp = await completeGreenhouseEmailVerification(currentTabId, {
+              afterEpochMs: greenhouseSubmitAt
+            });
+            if (otp.ok) {
+              summary.status = "submitted";
+              summary.detail = otp.detail || "Your application has been received";
+              summary.tabId = currentTabId;
+              return summary;
+            }
+            summary.status = "needs_review";
+            summary.detail = otp.detail || "Greenhouse security code verification failed.";
             summary.tabId = currentTabId;
             return summary;
           }
@@ -1962,6 +2188,21 @@ export async function startMultiStepApplyOnTab(
             summary.status = "submitted";
             summary.detail = advanced.applySuccessText || "Your application is on its way";
             summary.tabId = advanced.tabId || currentTabId;
+            return summary;
+          }
+          if (advanced?.emailVerification && liveSite === "greenhouse") {
+            const otp = await completeGreenhouseEmailVerification(currentTabId, {
+              afterEpochMs: greenhouseSubmitAt
+            });
+            if (otp.ok) {
+              summary.status = "submitted";
+              summary.detail = otp.detail || "Your application has been received";
+              summary.tabId = currentTabId;
+              return summary;
+            }
+            summary.status = "needs_review";
+            summary.detail = otp.detail || "Greenhouse security code verification failed.";
+            summary.tabId = currentTabId;
             return summary;
           }
           if (advanced?.reason === "external_redirect") {
@@ -2001,7 +2242,7 @@ export async function startMultiStepApplyOnTab(
 
     // Empty optional Workday pages (no fields): advance quickly instead of over-filling.
     if (
-      initialSite === "workday" &&
+      liveSite === "workday" &&
       actionType === "next" &&
       Number(probe.fillableCount || 0) === 0 &&
       Number(fillRes?.filledCount || 0) === 0
@@ -2034,10 +2275,26 @@ export async function startMultiStepApplyOnTab(
           return summary;
         }
         if (submitRes?.clicked || submitRes?.submitted) {
-          const confirmed = await waitForApplySuccess(currentTabId, initialSite, 20000);
+          greenhouseSubmitAt = Date.now();
+          const confirmed = await waitForApplySuccess(currentTabId, liveSite, 20000);
           if (confirmed.ok) {
             summary.status = "submitted";
             summary.detail = confirmed.text || "Your application is on its way";
+            summary.tabId = currentTabId;
+            return summary;
+          }
+          if (confirmed.reason === "email_verification" && liveSite === "greenhouse") {
+            const otp = await completeGreenhouseEmailVerification(currentTabId, {
+              afterEpochMs: greenhouseSubmitAt
+            });
+            if (otp.ok) {
+              summary.status = "submitted";
+              summary.detail = otp.detail || "Your application has been received";
+              summary.tabId = currentTabId;
+              return summary;
+            }
+            summary.status = "needs_review";
+            summary.detail = otp.detail || "Greenhouse security code verification failed.";
             summary.tabId = currentTabId;
             return summary;
           }
@@ -2053,6 +2310,21 @@ export async function startMultiStepApplyOnTab(
             summary.status = "submitted";
             summary.detail = advanced.applySuccessText || "Your application is on its way";
             summary.tabId = advanced.tabId || currentTabId;
+            return summary;
+          }
+          if (advanced?.emailVerification && liveSite === "greenhouse") {
+            const otp = await completeGreenhouseEmailVerification(currentTabId, {
+              afterEpochMs: greenhouseSubmitAt
+            });
+            if (otp.ok) {
+              summary.status = "submitted";
+              summary.detail = otp.detail || "Your application has been received";
+              summary.tabId = currentTabId;
+              return summary;
+            }
+            summary.status = "needs_review";
+            summary.detail = otp.detail || "Greenhouse security code verification failed.";
+            summary.tabId = currentTabId;
             return summary;
           }
           if (advanced?.reason === "external_redirect") {
@@ -2097,6 +2369,22 @@ export async function startMultiStepApplyOnTab(
       summary.detail = advanced.applySuccessText || "Your application is on its way";
       return summary;
     }
+    if (advanced.emailVerification && effectiveAutoSubmit && liveSite === "greenhouse") {
+      greenhouseSubmitAt = greenhouseSubmitAt || Date.now();
+      const otp = await completeGreenhouseEmailVerification(currentTabId, {
+        afterEpochMs: greenhouseSubmitAt
+      });
+      if (otp.ok) {
+        summary.status = "submitted";
+        summary.detail = otp.detail || "Your application has been received";
+        summary.tabId = currentTabId;
+        return summary;
+      }
+      summary.status = "needs_review";
+      summary.detail = otp.detail || "Greenhouse security code verification failed.";
+      summary.tabId = currentTabId;
+      return summary;
+    }
 
     if (advanced.advanced) {
       noAdvance = 0;
@@ -2124,10 +2412,26 @@ export async function startMultiStepApplyOnTab(
               { attempts: 2, frameId: lastProbe.best.frameId }
             ).catch((err) => ({ ok: false, error: String(err?.message || err) }));
             if (submitRes?.clicked || submitRes?.submitted) {
-              const confirmed = await waitForApplySuccess(currentTabId, initialSite, 20000);
+              greenhouseSubmitAt = Date.now();
+              const confirmed = await waitForApplySuccess(currentTabId, liveSite, 20000);
               if (confirmed.ok) {
                 summary.status = "submitted";
                 summary.detail = confirmed.text || "Your application is on its way";
+                summary.tabId = currentTabId;
+                return summary;
+              }
+              if (confirmed.reason === "email_verification" && liveSite === "greenhouse") {
+                const otp = await completeGreenhouseEmailVerification(currentTabId, {
+                  afterEpochMs: greenhouseSubmitAt
+                });
+                if (otp.ok) {
+                  summary.status = "submitted";
+                  summary.detail = otp.detail || "Your application has been received";
+                  summary.tabId = currentTabId;
+                  return summary;
+                }
+                summary.status = "needs_review";
+                summary.detail = otp.detail || "Greenhouse security code verification failed.";
                 summary.tabId = currentTabId;
                 return summary;
               }

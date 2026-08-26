@@ -391,9 +391,24 @@ export function isWorkdayJob({ jdLink = "" } = {}) {
 }
 
 /**
+ * Greenhouse-hosted job boards (boards / job-boards / embed).
+ */
+export function isGreenhouseJob({ jdLink = "" } = {}) {
+  return /(^|\.)greenhouse\.io$/i.test(jobLinkHost(jdLink));
+}
+
+/**
+ * Jobgether aggregator — APPLY opens employer ATS (usually Workday / Greenhouse).
+ * Stays in the Etc / Other channel; hosted apply follows the external board.
+ */
+export function isJobgetherJob({ jdLink = "" } = {}) {
+  return /(^|\.)jobgether\.com$/i.test(jobLinkHost(jdLink));
+}
+
+/**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
- * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"etc"}
+ * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"etc"}
  */
 export function normalizeChannelFilter(filter) {
   const mode = String(filter || "dice").toLowerCase();
@@ -402,15 +417,16 @@ export function normalizeChannelFilter(filter) {
   if (mode === "indeed") return "indeed";
   if (mode === "jobright" || mode === "jr") return "jobright";
   if (mode === "workday" || mode === "wd") return "workday";
+  if (mode === "greenhouse" || mode === "gh") return "greenhouse";
   if (mode === "dice") return "dice";
-  // Legacy "general" and unknown → Etc (not Dice, LI, Indeed, Jobright, or Workday)
+  // Legacy "general" and unknown → Etc (not Dice, LI, Indeed, Jobright, Workday, or Greenhouse)
   if (mode === "etc" || mode === "general" || mode === "other") return "etc";
   return "dice";
 }
 
 /**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"dice"|"etc"} filter
+ * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"dice"|"etc"} filter
  */
 export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
@@ -431,14 +447,18 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   if (mode === "workday") {
     return list.filter((j) => isWorkdayJob(j));
   }
-  // etc = not Dice, LinkedIn, Indeed, Jobright, or Workday by URL
+  if (mode === "greenhouse") {
+    return list.filter((j) => isGreenhouseJob(j));
+  }
+  // etc = not Dice, LinkedIn, Indeed, Jobright, Workday, or Greenhouse by URL
   return list.filter(
     (j) =>
       !isDiceJob(j) &&
       !isLinkedInJob(j) &&
       !isIndeedJob(j) &&
       !isJobrightJob(j) &&
-      !isWorkdayJob(j)
+      !isWorkdayJob(j) &&
+      !isGreenhouseJob(j)
   );
 }
 
@@ -512,6 +532,8 @@ export function parseJobsCsv(csvText) {
     const indeed = isIndeedJob({ jdLink });
     const jobright = isJobrightJob({ jdLink });
     const workday = isWorkdayJob({ jdLink });
+    const greenhouse = isGreenhouseJob({ jdLink });
+    const jobgether = isJobgetherJob({ jdLink });
 
     usJobs.push({
       csvRow,
@@ -534,18 +556,30 @@ export function parseJobsCsv(csvText) {
                 ? "jobright"
                 : workday
                   ? "workday"
-                  : "general"),
+                  : greenhouse
+                    ? "greenhouse"
+                    : jobgether
+                      ? "jobgether"
+                      : "general"),
       isLinkedIn: linkedIn,
       isDice: dice,
       isIndeed: indeed,
       isJobright: jobright,
       isWorkday: workday,
+      isGreenhouse: greenhouse,
+      isJobgether: jobgether,
       status: "pending"
     });
   }
 
   const etcJobs = usJobs.filter(
-    (j) => !j.isLinkedIn && !j.isDice && !j.isIndeed && !j.isJobright && !j.isWorkday
+    (j) =>
+      !j.isLinkedIn &&
+      !j.isDice &&
+      !j.isIndeed &&
+      !j.isJobright &&
+      !j.isWorkday &&
+      !j.isGreenhouse
   );
 
   return {
@@ -557,6 +591,7 @@ export function parseJobsCsv(csvText) {
     indeedCount: usJobs.filter((j) => j.isIndeed).length,
     jobrightCount: usJobs.filter((j) => j.isJobright).length,
     workdayCount: usJobs.filter((j) => j.isWorkday).length,
+    greenhouseCount: usJobs.filter((j) => j.isGreenhouse).length,
     etcCount: etcJobs.length,
     /** @deprecated use etcCount — kept for older UI strings */
     generalCount: etcJobs.length

@@ -66,6 +66,8 @@ import {
   isDiceJob,
   isIndeedJob,
   isWorkdayJob,
+  isGreenhouseJob,
+  isJobgetherJob,
   isUnitedStatesJob
 } from "./csv.js";
 import {
@@ -1047,12 +1049,49 @@ async function isCompanyAlreadyCovered(companyName, { excludeCsvRow, excludeJdLi
 }
 
 /**
+ * Duplicate gate that MUST run before ChatGPT resume build.
+ * Returns a human reason if the job should be skipped, else "".
+ */
+async function getPreGenerateSkipReason(jobMeta = {}) {
+  const companyName = jobMeta.companyName || jobMeta.company || "";
+  const companyDup = await isCompanyAlreadyCovered(companyName, {
+    excludeCsvRow: jobMeta.csvRow,
+    excludeJdLink: jobMeta.jdLink || ""
+  });
+  if (companyDup.covered) {
+    return companyDup.reason || "duplicate company";
+  }
+  return "";
+}
+
+/** Mark a queue row skipped for company/link coverage — no resume build, no apply. */
+async function markJobSkippedAsDuplicate(csvRow, reason, { lockSheetSkip = true } = {}) {
+  const detail = String(reason || "duplicate").trim() || "duplicate";
+  await updateQueueJob(csvRow, {
+    status: "skipped",
+    applied: false,
+    applyAttempted: true,
+    applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+    companySheetSkipLocked: Boolean(lockSheetSkip),
+    error: `Skipped — ${detail}`
+  }).catch(() => {});
+}
+
+/**
  * Hosted-board interleaved flow: auto-apply with submit after files exist.
  * On incomplete apply, pause (keep tab open) so Start can retry.
  */
 async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
   const boardLabel =
-    board === "Indeed" ? "Indeed" : board === "Workday" ? "Workday" : "Dice";
+    board === "Indeed"
+      ? "Indeed"
+      : board === "Workday"
+        ? "Workday"
+        : board === "Greenhouse"
+          ? "Greenhouse"
+          : board === "Jobgether"
+            ? "Jobgether"
+            : "Dice";
   const jdLink = String(jobMeta.jdLink || "").trim();
   const prevAttempts = Number(jobMeta.applyAttempts || 0);
   const companyName = jobMeta.companyName || jobMeta.company || "";
@@ -1285,8 +1324,10 @@ function isIndeedHostedApplyJob(j) {
 function isHostedApplyBacklogJob(j, person = null) {
   const hostedIndeed = isIndeedHostedApplyJob(j);
   const workday = isWorkdayJob(j || {});
+  const greenhouse = isGreenhouseJob(j || {});
+  const jobgether = isJobgetherJob(j || {});
   if (
-    !(isDiceJob(j) || hostedIndeed || workday) ||
+    !(isDiceJob(j) || hostedIndeed || workday || greenhouse || jobgether) ||
     j.status !== "done" ||
     j.applied ||
     j.inactive ||
@@ -1309,29 +1350,27 @@ function isHostedApplyBacklogJob(j, person = null) {
  */
 async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
-  if (!spreadsheetUrl || !webAppUrl) {
-    return {
-      ok: true,
-      checked: false,
-      skipped: 0,
-      reason: "Google Sheet not configured — duplicate check skipped."
-    };
-  }
-
-  await setStatus("Checking Google Sheet for jobs/companies already bid…");
   let links = [];
   let companies = [];
-  try {
-    const keys = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
-    links = keys.links || [];
-    companies = keys.companies || [];
-  } catch (err) {
-    return {
-      ok: false,
-      checked: false,
-      skipped: 0,
-      error: String(err?.message || err)
-    };
+  let sheetError = "";
+  let sheetConfigured = Boolean(spreadsheetUrl && webAppUrl);
+
+  if (sheetConfigured) {
+    await setStatus("Checking Google Sheet for jobs/companies already bid…");
+    try {
+      const keys = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
+      links = keys.links || [];
+      companies = keys.companies || [];
+    } catch (err) {
+      // Still dedupe within this person's queue so we never build two resumes
+      // for the same company/link when the sheet endpoint is down.
+      sheetError = String(err?.message || err);
+      await setStatus(
+        `Sheet duplicate check failed (${sheetError}). Deduping within this queue only…`
+      );
+    }
+  } else {
+    await setStatus("Google Sheet not configured — deduping within this queue only…");
   }
 
   const knownLinks = buildKnownLinkSet(links);
@@ -1367,7 +1406,9 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
       return {
         ...job,
         status: "skipped",
-        error: "Duplicate — same job link already in Google Sheet (or earlier in this CSV)"
+        error: sheetConfigured
+          ? "Duplicate — same job link already in Google Sheet (or earlier in this CSV)"
+          : "Duplicate — same job link already earlier in this CSV"
       };
     }
     if (companyKey && seenCompanies.has(companyKey)) {
@@ -1375,7 +1416,9 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
       return {
         ...job,
         status: "skipped",
-        error: "Duplicate — same company already in Google Sheet (or earlier in this CSV)"
+        error: sheetConfigured
+          ? "Duplicate — same company already in Google Sheet (or earlier in this CSV)"
+          : "Duplicate — same company already earlier in this CSV"
       };
     }
 
@@ -1392,13 +1435,17 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   }
 
   return {
-    ok: true,
+    ok: sheetConfigured ? !sheetError : true,
     checked: true,
     skipped: duplicates.length,
     sheetLinkCount: links.length,
     sheetCompanyCount: companies.length,
     pendingLeft: next.filter((j) => j.status === "pending" || j.status === "error").length,
-    duplicates
+    duplicates,
+    ...(!sheetConfigured
+      ? { reason: "Google Sheet not configured — duplicate check used queue only." }
+      : {}),
+    ...(sheetError ? { error: sheetError } : {})
   };
 }
 
@@ -4952,6 +4999,12 @@ async function pickTemplateId(jobMeta = {}, person = {}) {
  * resume (with JD) → save files → cover letter in the same chat → save CL.
  */
 async function runAutoJob(jobMeta) {
+  // Duplicate / coverage first — never spend ChatGPT time on a company we already bid.
+  const preSkipReason = await getPreGenerateSkipReason(jobMeta);
+  if (preSkipReason) {
+    throw new Error(`__DUPLICATE_SKIP__:${preSkipReason}`);
+  }
+
   const provider = await getStoredAiProvider();
   const providerLabel = aiProviderLabel(provider);
   const tab = await ensureAiTab(provider);
@@ -5333,12 +5386,14 @@ async function runBatchLoop(outputDir) {
       `${aiProviderLabel(await getStoredAiProvider())} pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
     );
     const dedupe = await dedupeQueueAgainstSheet({ notifySlack: true });
-    if (dedupe.checked && dedupe.skipped > 0) {
+    if (dedupe.skipped > 0) {
       await setStatus(
-        `Skipped ${dedupe.skipped} duplicate(s) already on the Google Sheet. Continuing with remaining jobs…`
+        `Skipped ${dedupe.skipped} duplicate(s) before generate. Continuing with remaining jobs…`
       );
-    } else if (dedupe.checked === false && dedupe.error) {
-      await setStatus(`Sheet duplicate check failed (${dedupe.error}). Continuing without it…`);
+    } else if (dedupe.error) {
+      await setStatus(
+        `Sheet duplicate check failed (${dedupe.error}). Continuing with in-queue dedupe…`
+      );
     }
 
     while (!batchControl.stop) {
@@ -5353,7 +5408,7 @@ async function runBatchLoop(outputDir) {
       const queue = await getQueue();
       const activePerson = await getActivePerson().catch(() => null);
 
-      // Hosted Dice/Indeed/Workday jobs: apply already-built rows that are not Applied yet (no ChatGPT).
+      // Hosted Dice/Indeed/Workday/Greenhouse/Jobgether jobs: apply already-built rows that are not Applied yet (no ChatGPT).
       // Gated by job type, not the visible source filter.
       // Only the active person's rows (profileId / Applications-* folder).
       const backlog = queue.find((j) => isHostedApplyBacklogJob(j, activePerson));
@@ -5362,7 +5417,11 @@ async function runBatchLoop(outputDir) {
           ? "Indeed"
           : isWorkdayJob(backlog)
             ? "Workday"
-            : "Dice";
+            : isGreenhouseJob(backlog)
+              ? "Greenhouse"
+              : isJobgetherJob(backlog)
+                ? "Jobgether"
+                : "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
@@ -5461,6 +5520,21 @@ async function runBatchLoop(outputDir) {
         continue;
       }
 
+      // Validate duplicates BEFORE ChatGPT — do not build a resume we will skip.
+      const preSkipReason = await getPreGenerateSkipReason({
+        csvRow: next.csvRow,
+        companyName: next.company,
+        company: next.company,
+        jdLink: next.jdLink || ""
+      });
+      if (preSkipReason) {
+        await markJobSkippedAsDuplicate(next.csvRow, preSkipReason);
+        await setStatus(
+          `Row ${next.csvRow}: skipped before generate (${preSkipReason}). Continuing…`
+        );
+        continue;
+      }
+
       await updateQueueJob(next.csvRow, { status: "running", error: "" });
       await setStatus(`Batch: generating row ${next.csvRow} — ${next.company} / ${next.title}`);
 
@@ -5542,14 +5616,18 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Hosted Dice, Indeed, and Workday jobs: generate → auto-apply+submit → close tab → next.
+        // Hosted Dice, Indeed, Workday, Greenhouse, and Jobgether jobs: generate → auto-apply+submit → close tab → next.
         const hostedApplyBoard = isIndeedHostedApplyJob(next)
           ? "Indeed"
           : isWorkdayJob(next)
             ? "Workday"
-            : isDiceJob(next)
-              ? "Dice"
-              : "";
+            : isGreenhouseJob(next)
+              ? "Greenhouse"
+              : isJobgetherJob(next)
+                ? "Jobgether"
+                : isDiceJob(next)
+                  ? "Dice"
+                  : "";
         if (hostedApplyBoard && !batchControl.stop) {
           const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,
@@ -5585,6 +5663,14 @@ async function runBatchLoop(outputDir) {
         });
       } catch (err) {
         const msg = String(err?.message || err);
+        if (msg.startsWith("__DUPLICATE_SKIP__:")) {
+          const reason = msg.slice("__DUPLICATE_SKIP__:".length) || "duplicate company";
+          await markJobSkippedAsDuplicate(next.csvRow, reason);
+          await setStatus(
+            `Row ${next.csvRow}: skipped before generate (${reason}). Continuing…`
+          );
+          continue;
+        }
         if (msg === "__RATE_LIMIT_PAUSE__") {
           await updateQueueJob(next.csvRow, {
             status: "pending",
@@ -5888,21 +5974,46 @@ async function runIndeedGrabAndApply({ autoApply = true } = {}) {
 
     let result = null;
     if (job.status !== "done" || !job.jobDir) {
+      const preSkipReason = await getPreGenerateSkipReason({
+        csvRow: job.csvRow,
+        companyName: job.company,
+        company: job.company,
+        jdLink: job.jdLink || ""
+      });
+      if (preSkipReason) {
+        await markJobSkippedAsDuplicate(job.csvRow, preSkipReason);
+        await setStatus(`Indeed: skipped before generate — ${preSkipReason}`);
+        await setGrab("idle", `Skipped — ${preSkipReason}`);
+        return { ok: true, job, skipped: true, reason: preSkipReason };
+      }
+
       await updateQueueJob(job.csvRow, { status: "running", error: "" });
       const person = await getActivePerson();
-      result = await runAutoJob({
-        csvRow: job.csvRow,
-        jobTitle: job.title,
-        companyName: job.company,
-        jdLink: job.jdLink,
-        jdText: job.jdText || "",
-        salary: job.salary || "",
-        outputDir: await resolveOutputDir(),
-        templateId: await pickTemplateId({}, person),
-        resumeFilePrefix: person.resumeFilePrefix || "Resume",
-        profileId: person.id,
-        bidSource: "indeed-grab"
-      });
+      try {
+        result = await runAutoJob({
+          csvRow: job.csvRow,
+          jobTitle: job.title,
+          companyName: job.company,
+          jdLink: job.jdLink,
+          jdText: job.jdText || "",
+          salary: job.salary || "",
+          outputDir: await resolveOutputDir(),
+          templateId: await pickTemplateId({}, person),
+          resumeFilePrefix: person.resumeFilePrefix || "Resume",
+          profileId: person.id,
+          bidSource: "indeed-grab"
+        });
+      } catch (genErr) {
+        const genMsg = String(genErr?.message || genErr);
+        if (genMsg.startsWith("__DUPLICATE_SKIP__:")) {
+          const reason = genMsg.slice("__DUPLICATE_SKIP__:".length) || "duplicate company";
+          await markJobSkippedAsDuplicate(job.csvRow, reason);
+          await setStatus(`Indeed: skipped before generate — ${reason}`);
+          await setGrab("idle", `Skipped — ${reason}`);
+          return { ok: true, job, skipped: true, reason };
+        }
+        throw genErr;
+      }
       await updateQueueJob(job.csvRow, {
         status: "done",
         jobDir: result.savedDir,
@@ -6650,6 +6761,46 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (type === "ms_graph_status") {
+    (async () => {
+      try {
+        const { getGraphAuthStatus, getMsGraphClientId } = await import("./ms-graph-mail.js");
+        const status = await getGraphAuthStatus();
+        const clientId = await getMsGraphClientId();
+        safeSendResponse(sendResponse, { ok: true, ...status, hasClientId: Boolean(clientId) });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "ms_graph_connect") {
+    (async () => {
+      try {
+        const { connectMsGraph } = await import("./ms-graph-mail.js");
+        const result = await connectMsGraph();
+        safeSendResponse(sendResponse, { ok: true, ...result });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "ms_graph_disconnect") {
+    (async () => {
+      try {
+        const { disconnectMsGraph } = await import("./ms-graph-mail.js");
+        await disconnectMsGraph();
+        safeSendResponse(sendResponse, { ok: true });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "reveal_job_files") {
     (async () => {
       try {
@@ -6786,10 +6937,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         const result = await openJobAndApply(message.url, {
           multiStep: message.multiStep !== false,
+          autoSubmit:
+            message.autoSubmit === true ||
+            isGreenhouseJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+            isWorkdayJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+            isJobgetherJob({ jdLink: jobMeta.jdLink || message.url || "" }),
           csvRow: jobMeta.csvRow,
           jobDir: jobMeta.jobDir || "",
           jdLink: jobMeta.jdLink || message.url || ""
         });
+        if (result?.status === "submitted" && result?.tabId) {
+          await closeApplyTab(result.tabId).catch(() => false);
+        }
         if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
           const docsPatch = {
             jobDir: result.uploadFolder || jobMeta.jobDir || "",
@@ -6805,13 +6964,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         const filled = Number(result.filled || result.filledCount || 0);
         const files = [result.uploadResumeName, result.uploadCoverName].filter(Boolean).join(" + ");
-        let msg =
-          result.detail ||
-          `Apply assist: filled ${filled} field(s)` +
-            (result.uploaded
-              ? `, uploaded ${files || `${result.uploaded} file(s)`}`
-              : "") +
-            `. Review and submit.`;
+        let msg = result.detail || "";
+        if (!msg) {
+          if (result.status === "submitted") {
+            msg = `Apply assist: submitted application` +
+              (result.uploaded ? ` (uploaded ${files || `${result.uploaded} file(s)`})` : "") +
+              `.`;
+          } else {
+            msg =
+              `Apply assist: filled ${filled} field(s)` +
+              (result.uploaded
+                ? `, uploaded ${files || `${result.uploaded} file(s)`}`
+                : "") +
+              `. Review and submit.`;
+          }
+        }
         if (sheetLabel) msg = `${msg} ${sheetLabel}.`;
         await setStatus(msg);
       } catch (err) {
@@ -7147,6 +7314,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
                 const meta = { ...(message.jobMeta || {}), bidSource: "one-off" };
+        const preSkipReason = await getPreGenerateSkipReason(meta);
+        if (preSkipReason) {
+          if (meta.csvRow != null && meta.csvRow !== "") {
+            await markJobSkippedAsDuplicate(meta.csvRow, preSkipReason);
+          }
+          await chrome.storage.local.set({ generation_running: false });
+          await setStatus(
+            `Skipped duplicate — ${preSkipReason}: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
+          );
+          return;
+        }
         const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
         const link = normalizeJobLink(meta.jdLink || "");
         const companyKey = normalizeCompanyName(meta.companyName || meta.company || "");
@@ -7186,6 +7364,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } catch (err) {
         await chrome.storage.local.set({ generation_running: false });
         const msg = String(err?.message || err);
+        if (msg.startsWith("__DUPLICATE_SKIP__:")) {
+          const reason = msg.slice("__DUPLICATE_SKIP__:".length) || "duplicate company";
+          const meta = message.jobMeta || {};
+          if (meta.csvRow != null && meta.csvRow !== "") {
+            await markJobSkippedAsDuplicate(meta.csvRow, reason);
+          }
+          await setStatus(
+            `Skipped duplicate — ${reason}: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
+          );
+          return;
+        }
         await setStatus(`Generation failed: ${msg}`);
         const meta = message.jobMeta || {};
         await trySlackJobStatus({

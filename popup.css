@@ -1206,6 +1206,11 @@ input[type="file"]::file-selector-button {
   color: #93c5fd;
 }
 
+.badge-greenhouse {
+  background: #14532d;
+  color: #86efac;
+}
+
 .workflow-steps {
   display: flex;
   flex-wrap: wrap;
