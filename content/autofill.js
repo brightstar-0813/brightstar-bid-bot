@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-26.jg01";
+  const SCRIPT_BUILD = "2026-08-26.otp03";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -4490,13 +4490,10 @@
 
   function detectPageBlocker() {
     const href = String(location.href || "");
-    // Workday create-account / sign-in is handled by credential autofill — do not block.
+    // Workday create-account / sign-in is handled by credential autofill — do not
+    // treat login forms as blockers. Only pause on a real visible CAPTCHA challenge.
     if (isWorkdayPage()) {
-      if (
-        document.querySelector(
-          '.g-recaptcha, #g-recaptcha, [data-sitekey], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"]'
-        )
-      ) {
+      if (hasActiveCaptchaChallenge()) {
         return "A CAPTCHA is on the page. Solve it, then retry.";
       }
       return "";
@@ -4507,14 +4504,59 @@
     if (loginForm || (isIndeedPage() && /\/account\/login|\/auth|\/m\/basecamp/i.test(href))) {
       return "A sign-in form is on the page. Log in, then retry.";
     }
-    if (
-      document.querySelector(
-        '.g-recaptcha, #g-recaptcha, [data-sitekey], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"]'
-      )
-    ) {
+    // Greenhouse / Ashby / etc. often embed invisible reCAPTCHA + the corner badge.
+    // Only pause when a real interactive challenge is visible.
+    if (hasActiveCaptchaChallenge()) {
       return "A CAPTCHA is on the page. Solve it, then retry.";
     }
     return "";
+  }
+
+  /**
+   * True only for an interactive CAPTCHA the user must solve — not the Google
+   * privacy badge or invisible reCAPTCHA tokens Greenhouse embeds by default.
+   */
+  function hasActiveCaptchaChallenge() {
+    // Explicit challenge iframes (image picker / puzzle) that are actually shown.
+    for (const iframe of queryAllDeep(
+      'iframe[src*="recaptcha"][src*="bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[src*="challenges.cloudflare.com"], iframe[title*="challenge" i]'
+    )) {
+      if (!isElVisible(iframe)) continue;
+      const w = iframe.offsetWidth || 0;
+      const h = iframe.offsetHeight || 0;
+      if (w >= 120 && h >= 80) return true;
+    }
+
+    // Visible "I'm not a robot" checkbox widget (not the tiny corner badge).
+    for (const host of queryAllDeep(
+      '.g-recaptcha, #g-recaptcha, [data-sitekey], .h-captcha, .cf-turnstile'
+    )) {
+      if (!isElVisible(host)) continue;
+      if (host.classList?.contains("grecaptcha-badge")) continue;
+      if (host.closest?.(".grecaptcha-badge")) continue;
+      // Invisible widgets are 0×0 or tiny; checkbox is ~300×70+.
+      const w = host.offsetWidth || 0;
+      const h = host.offsetHeight || 0;
+      if (w >= 100 && h >= 40) return true;
+      const anchor = host.querySelector?.('iframe[src*="anchor"]');
+      if (anchor && isElVisible(anchor) && (anchor.offsetWidth || 0) >= 100) return true;
+    }
+
+    // Challenge overlay / modal copy.
+    const bodyText = cleanLabelText(document.body?.innerText || "").slice(0, 4000);
+    if (
+      /\b(select all (?:images|squares)|i'?m not a robot|verify you are human|complete the captcha)\b/i.test(
+        bodyText
+      )
+    ) {
+      // Only if a sizable captcha frame/widget is also present — avoid JD copy false hits.
+      const frame = document.querySelector(
+        'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"]'
+      );
+      if (frame && isElVisible(frame) && (frame.offsetWidth || 0) >= 100) return true;
+    }
+
+    return false;
   }
 
   function requiredControlIsEmpty(el) {
@@ -4743,22 +4785,99 @@
     if (!isGreenhousePage()) return { ok: false };
     const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
     const hasCopy =
-      /\b(security\s*code|verification\s*code|enter\s+(?:the\s+)?code|copy\s+and\s+paste\s+this\s+code|resubmit your application)\b/i.test(
+      /\b(security\s*code|verification\s*code|enter\s+(?:the\s+)?(?:\d+[-\s]?)?character\s+code|confirm you(?:'|’)re a human|copy\s+and\s+paste\s+this\s+code|resubmit your application)\b/i.test(
         bodyText
       );
-    const codeInput = findGreenhouseSecurityCodeInput();
-    if (!hasCopy && !codeInput) return { ok: false };
-    if (!codeInput && !/\bsecurity\s*code\b/i.test(bodyText)) return { ok: false };
+    const boxes = findGreenhouseSecurityCodeBoxes();
+    const codeInput = boxes[0] || findGreenhouseSecurityCodeInput();
+    if (!hasCopy && !codeInput && !boxes.length) return { ok: false };
+    if (!codeInput && !boxes.length && !/\bsecurity\s*code\b/i.test(bodyText)) return { ok: false };
     return {
       ok: true,
       text: "Greenhouse security code verification"
     };
   }
 
+  /**
+   * Greenhouse often uses 6–8 single-character inputs under "Security code".
+   * @returns {HTMLInputElement[]}
+   */
+  function findGreenhouseSecurityCodeBoxes() {
+    const inputs = queryAllDeep('input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"])')
+      .filter((el) => isElVisible(el) && !el.disabled);
+
+    const isOtpCharInput = (el) => {
+      const maxLen = Number(el.getAttribute("maxlength") || el.maxLength || 0);
+      const pattern = String(el.getAttribute("pattern") || "");
+      const auto = String(el.getAttribute("autocomplete") || "").toLowerCase();
+      const inputMode = String(el.getAttribute("inputmode") || "").toLowerCase();
+      const name = normalize([el.name || "", el.id || "", el.getAttribute("aria-label") || ""].join(" "));
+      if (/email|phone|password|search|first|last|name|linkedin/i.test(name)) return false;
+      if (auto.includes("one-time-code")) return true;
+      if (maxLen === 1) return true;
+      if (/^\.?[a-z0-9]$/i.test(pattern) || pattern.includes("{1}")) return true;
+      if (inputMode === "numeric" || inputMode === "text") {
+        if (maxLen > 0 && maxLen <= 2) return true;
+      }
+      return false;
+    };
+
+    // Prefer a contiguous group near the Security code label.
+    const labeled = inputs.filter((el) => {
+      const blob = normalize(
+        [
+          questionLabelForControl(el),
+          labelTextForControl(el),
+          el.getAttribute?.("aria-label") || "",
+          el.closest?.("fieldset")?.querySelector?.("legend")?.textContent || ""
+        ].join(" ")
+      );
+      return /\b(security\s*code|verification\s*code|one[- ]time|otp)\b/.test(blob);
+    });
+    const labeledBoxes = labeled.filter(isOtpCharInput);
+    if (labeledBoxes.length >= 4) return labeledBoxes.slice(0, 12);
+
+    // Sibling group: several maxlength=1 inputs sharing a parent.
+    const singles = inputs.filter(isOtpCharInput);
+    if (singles.length >= 4) {
+      const byParent = new Map();
+      for (const el of singles) {
+        const parent = el.parentElement;
+        if (!parent) continue;
+        if (!byParent.has(parent)) byParent.set(parent, []);
+        byParent.get(parent).push(el);
+      }
+      let best = [];
+      for (const group of byParent.values()) {
+        if (group.length >= 4 && group.length > best.length) best = group;
+      }
+      if (best.length >= 4) return best.slice(0, 12);
+      // Also try grandparent grouping (each input wrapped in its own div).
+      const byGrand = new Map();
+      for (const el of singles) {
+        const grand = el.parentElement?.parentElement;
+        if (!grand) continue;
+        if (!byGrand.has(grand)) byGrand.set(grand, []);
+        byGrand.get(grand).push(el);
+      }
+      best = [];
+      for (const group of byGrand.values()) {
+        if (group.length >= 4 && group.length > best.length) best = group;
+      }
+      if (best.length >= 4) return best.slice(0, 12);
+      if (singles.length >= 6 && singles.length <= 10) return singles.slice(0, 12);
+    }
+    return [];
+  }
+
   function findGreenhouseSecurityCodeInput() {
+    const boxes = findGreenhouseSecurityCodeBoxes();
+    if (boxes.length === 1) return boxes[0];
+
     const inputs = queryAllDeep('input:not([type="hidden"]):not([type="file"]), textarea');
     for (const el of inputs) {
       if (!isElVisible(el) || el.disabled) continue;
+      if (boxes.includes(el)) continue;
       const blob = normalize(
         [
           questionLabelForControl(el),
@@ -4766,16 +4885,19 @@
           el.getAttribute?.("aria-label") || "",
           el.getAttribute?.("placeholder") || "",
           el.name || "",
-          el.id || ""
+          el.id || "",
+          el.getAttribute?.("autocomplete") || ""
         ].join(" ")
       );
       if (/\b(security\s*code|verification\s*code|one[- ]time|otp|email\s*code)\b/.test(blob)) {
-        return el;
+        const maxLen = Number(el.getAttribute("maxlength") || el.maxLength || 0);
+        if (!maxLen || maxLen >= 4) return el;
       }
     }
     // Fallback: single short text input on a page that mentions security code.
     const bodyText = cleanLabelText(document.body?.innerText || "");
     if (!/\bsecurity\s*code\b/i.test(bodyText)) return null;
+    if (boxes.length >= 4) return null;
     const candidates = inputs.filter(
       (el) =>
         isElVisible(el) &&
@@ -4785,18 +4907,63 @@
           normalize([el.name, el.id, el.getAttribute?.("autocomplete") || ""].join(" "))
         )
     );
-    return candidates.length === 1 ? candidates[0] : candidates[0] || null;
+    const full = candidates.find((el) => {
+      const maxLen = Number(el.getAttribute("maxlength") || el.maxLength || 0);
+      return !maxLen || maxLen >= 4;
+    });
+    return full || null;
   }
 
   async function fillGreenhouseSecurityCode(code) {
-    const value = String(code || "").trim();
+    const value = String(code || "").trim().replace(/\s+/g, "");
     if (!value) return { ok: false, error: "Empty security code" };
-    const el = findGreenhouseSecurityCodeInput();
-    if (!el) return { ok: false, error: "Security code field not found" };
-    suppressLearn(3000);
-    const filled = await fillControl(el, value, null);
-    if (!filled) return { ok: false, error: "Could not fill security code field" };
+    suppressLearn(4000);
+
+    const boxes = findGreenhouseSecurityCodeBoxes();
+    if (boxes.length >= 4) {
+      const chars = value.slice(0, boxes.length).split("");
+      for (let i = 0; i < boxes.length; i += 1) {
+        const ch = chars[i] || "";
+        const el = boxes[i];
+        el.focus();
+        if (!setNativeValue(el, ch)) {
+          // Fallback for stubborn React controlled inputs
+          el.value = ch;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        el.dispatchEvent(
+          new KeyboardEvent("keyup", { bubbles: true, key: ch, code: ch ? `Key${ch.toUpperCase()}` : "Backspace" })
+        );
+        await sleep(40);
+      }
+      const joined = boxes.map((el) => String(el.value || "").slice(0, 1)).join("");
+      if (joined.toLowerCase() !== value.slice(0, boxes.length).toLowerCase()) {
+        // Try paste into the first box — many OTP widgets distribute paste.
+        const first = boxes[0];
+        first.focus();
+        try {
+          const dt = new DataTransfer();
+          dt.setData("text/plain", value);
+          first.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, clipboardData: dt }));
+          await sleep(120);
+        } catch {
+          /* ignore */
+        }
+      }
+      const after = boxes.map((el) => String(el.value || "").slice(0, 1)).join("");
+      if (!after || after.replace(/\s/g, "").length < Math.min(4, value.length)) {
+        return { ok: false, error: "Could not fill multi-box security code fields" };
+      }
+    } else {
+      const el = findGreenhouseSecurityCodeInput();
+      if (!el) return { ok: false, error: "Security code field not found" };
+      const filled = await fillControl(el, value, null);
+      if (!filled) return { ok: false, error: "Could not fill security code field" };
+    }
+
     // Prefer Submit / Resubmit on the verification step.
+    await sleep(200);
     const action = findActionButton();
     if (action?.el && (action.type === "submit" || /submit|resubmit|verify|continue/i.test(action.text || ""))) {
       scrollElIntoView(action.el);

@@ -36,7 +36,7 @@ import { fetchLatestGreenhouseSecurityCode } from "./ms-graph-mail.js";
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-  const AUTOFILL_SCRIPT_BUILD = "2026-08-26.jg01";
+  const AUTOFILL_SCRIPT_BUILD = "2026-08-26.otp03";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -1164,22 +1164,38 @@ async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
 }
 
 /**
- * Greenhouse email OTP: poll Microsoft Graph, fill code, resubmit.
+ * Greenhouse email OTP: poll Microsoft Graph (then Outlook web fallback), fill code, resubmit.
  */
 async function completeGreenhouseEmailVerification(tabId, { afterEpochMs } = {}) {
   await setApplyStatus("Apply: Greenhouse — waiting for security code email (Outlook)…");
-  const mail = await fetchLatestGreenhouseSecurityCode({
-    afterEpochMs: afterEpochMs || Date.now() - 60_000,
-    timeoutMs: 120_000,
-    pollMs: 4000
-  });
+  const since = afterEpochMs || Date.now() - 60_000;
+  let mail = await fetchLatestGreenhouseSecurityCode({
+    afterEpochMs: since,
+    timeoutMs: 45_000,
+    pollMs: 3500
+  }).catch((err) => ({ ok: false, code: "", error: String(err?.message || err) }));
+
+  if (!mail?.ok || !mail.code) {
+    await setApplyStatus("Apply: Greenhouse — Graph missed code; checking Outlook tab…");
+    mail = await scrapeOutlookGreenhouseSecurityCode({
+      afterEpochMs: since,
+      timeoutMs: 60_000
+    }).catch((err) => ({
+      ok: false,
+      code: "",
+      error: String(err?.message || err)
+    }));
+  }
+
   if (!mail?.ok || !mail.code) {
     return {
       ok: false,
-      detail: mail?.error || "No Greenhouse security code found in Outlook."
+      detail:
+        mail?.error ||
+        "No Greenhouse security code found. Connect Outlook (Graph) in the popup, or keep outlook.live.com open signed in."
     };
   }
-  await setApplyStatus(`Apply: Greenhouse — entering security code…`);
+  await setApplyStatus(`Apply: Greenhouse — entering security code ${mail.code}…`);
   await ensureAutofillScript(tabId);
   const fillRes = await sendMessageToTab(
     tabId,
@@ -1224,6 +1240,80 @@ async function completeGreenhouseEmailVerification(tabId, { afterEpochMs } = {})
     ok: false,
     detail: "Security code submitted but Greenhouse success screen was not detected."
   };
+}
+
+/**
+ * Fallback: read Greenhouse OTP from an already-open Outlook web tab.
+ */
+async function scrapeOutlookGreenhouseSecurityCode({ afterEpochMs, timeoutMs = 60_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  const outlookRe = /(^|\.)outlook\.(live|office|office365)\.com$/i;
+
+  const findOutlookTabs = async () => {
+    const tabs = await chrome.tabs.query({});
+    return tabs.filter((t) => {
+      try {
+        return outlookRe.test(new URL(t.url || "").hostname);
+      } catch {
+        return false;
+      }
+    });
+  };
+
+  const extractInTab = async (tabId) => {
+    try {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const text = String(document.body?.innerText || document.body?.textContent || "");
+          if (!/security\s*code/i.test(text) && !/greenhouse/i.test(text)) {
+            return { ok: false, reason: "no_greenhouse_mail_visible" };
+          }
+          const cleaned = text
+            .replace(/\r/g, "")
+            .split(/\n+/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+          const isCode = (token) =>
+            /^[A-Za-z0-9]{6,12}$/.test(token) &&
+            /[A-Za-z]/.test(token) &&
+            /\d/.test(token) &&
+            !/^(security|verification|greenhouse|application|resubmit)$/i.test(token);
+          for (let i = 0; i < cleaned.length; i += 1) {
+            const line = cleaned[i];
+            if (/copy\s+and\s+paste\s+this\s+code|security\s*code/i.test(line)) {
+              for (let j = i; j < Math.min(i + 6, cleaned.length); j += 1) {
+                if (isCode(cleaned[j])) return { ok: true, code: cleaned[j] };
+              }
+            }
+            if (isCode(line)) return { ok: true, code: line };
+          }
+          const m = text.match(/\b([A-Za-z0-9]{8})\b/);
+          if (m && isCode(m[1])) return { ok: true, code: m[1] };
+          return { ok: false, reason: "code_not_found" };
+        }
+      });
+      return result || { ok: false };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  };
+
+  let lastError = "Outlook web tab not found. Open outlook.live.com signed in.";
+  while (Date.now() < deadline) {
+    const tabs = await findOutlookTabs();
+    for (const tab of tabs) {
+      if (!tab?.id) continue;
+      const hit = await extractInTab(tab.id);
+      if (hit?.ok && hit.code) {
+        return { ok: true, code: hit.code, source: "outlook_tab" };
+      }
+      if (hit?.error) lastError = hit.error;
+      else if (hit?.reason) lastError = hit.reason;
+    }
+    await sleep(2500);
+  }
+  return { ok: false, code: "", error: lastError };
 }
 
 function looksLikeApplicationUrl(url) {
@@ -1770,9 +1860,10 @@ export async function startMultiStepApplyOnTab(
         : initialSite === "jobgether"
           ? Math.max(Number(maxSteps) || 12, 18)
           : Number(maxSteps) || 12;
-  // Jobgether APPLY lands on Workday/Greenhouse — enable submit once on those boards.
+  // Greenhouse pages always run full Auto Apply (fill → submit → OTP). Other boards
+  // only auto-submit when the caller passes autoSubmit (hosted batch / Apply button).
   let effectiveAutoSubmit =
-    Boolean(autoSubmit) &&
+    (Boolean(autoSubmit) || initialSite === "greenhouse") &&
     (initialSite === "dice" ||
       initialSite === "indeed" ||
       initialSite === "workday" ||
@@ -1812,7 +1903,12 @@ export async function startMultiStepApplyOnTab(
       liveSite = detected;
       siteLabel = applySiteLabel(detected);
       summary.site = detected;
-      if (Boolean(autoSubmit) || initialSite === "jobgether") {
+      if (
+        Boolean(autoSubmit) ||
+        initialSite === "jobgether" ||
+        detected === "greenhouse" ||
+        initialSite === "greenhouse"
+      ) {
         effectiveAutoSubmit = true;
         summary.autoSubmit = true;
       }

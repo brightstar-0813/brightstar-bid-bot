@@ -6848,11 +6848,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           "last_apply_job_dir",
           "last_apply_jd_link"
         ]);
-        const result = await startMultiStepApplyOnTab(message.tabId || null, {
+        const tab =
+          message.tabId != null
+            ? await chrome.tabs.get(message.tabId).catch(() => null)
+            : (await chrome.tabs.query({ active: true, currentWindow: true }))[0] || null;
+        const tabUrl = tab?.url || stored.last_apply_jd_link || "";
+        const greenhousePage = isGreenhouseJob({ jdLink: tabUrl });
+        const result = await startMultiStepApplyOnTab(message.tabId || tab?.id || null, {
+          autoSubmit: greenhousePage || message.autoSubmit === true,
           applyHint: {
             csvRow: stored.last_apply_csv_row,
             jobDir: stored.last_apply_job_dir,
-            jdLink: stored.last_apply_jd_link
+            jdLink: stored.last_apply_jd_link || tabUrl
           }
         });
         const filled = Number(result.filled || result.filledCount || 0);
@@ -6860,6 +6867,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           result.detail ||
           `Apply assist filled ${filled} field(s) across ${result.steps || 1} step(s).`;
         await setStatus(msg);
+        if (result.status === "submitted" && greenhousePage && result.tabId) {
+          await closeApplyTab(result.tabId).catch(() => false);
+        }
         safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
@@ -7439,10 +7449,25 @@ chrome.commands.onCommand.addListener((command) => {
       .catch((err) => setStatus(`Autofill failed: ${String(err?.message || err)}`));
   }
   if (command === "auto-apply-page") {
-    startMultiStepApplyOnTab()
-      .then((r) =>
-        setStatus(r.detail || `Apply assist filled ${r.filled || 0} field(s). Review and submit.`)
-      )
-      .catch((err) => setStatus(`Apply assist failed: ${String(err?.message || err)}`));
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const greenhousePage = isGreenhouseJob({ jdLink: tab?.url || "" });
+        const r = await startMultiStepApplyOnTab(tab?.id || null, {
+          autoSubmit: greenhousePage
+        });
+        await setStatus(
+          r.detail ||
+            (r.status === "submitted"
+              ? "Application submitted."
+              : `Apply assist filled ${r.filled || 0} field(s). Review and submit.`)
+        );
+        if (r.status === "submitted" && greenhousePage && r.tabId) {
+          await closeApplyTab(r.tabId).catch(() => false);
+        }
+      } catch (err) {
+        await setStatus(`Apply assist failed: ${String(err?.message || err)}`);
+      }
+    })();
   }
 });

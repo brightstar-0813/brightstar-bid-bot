@@ -224,59 +224,63 @@ export async function fetchLatestGreenhouseSecurityCode(opts = {}) {
   while (Date.now() < deadline) {
     try {
       const accessToken = await getValidAccessToken();
-      // Prefer $search for subject; fall back to recent inbox scan.
-      const searchUrl =
-        `${GRAPH_BASE}/me/messages?` +
-        new URLSearchParams({
-          $search: `"Security code"`,
-          $select: "id,subject,from,receivedDateTime,bodyPreview,body",
-          $top: "15",
-          $orderby: "receivedDateTime desc"
-        }).toString();
-
-      let res = await fetch(searchUrl, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          ConsistencyLevel: "eventual"
-        }
-      });
-
-      if (!res.ok) {
-        // Fallback without $search (some tenants restrict it).
-        const listUrl =
-          `${GRAPH_BASE}/me/mailFolders/inbox/messages?` +
-          new URLSearchParams({
-            $select: "id,subject,from,receivedDateTime,bodyPreview,body",
-            $top: "25",
-            $orderby: "receivedDateTime desc"
-          }).toString();
-        res = await fetch(listUrl, {
+      // Do NOT combine $search with $orderby — Graph rejects that combo.
+      const attempts = [
+        {
+          url:
+            `${GRAPH_BASE}/me/messages?` +
+            new URLSearchParams({
+              $search: `"Security code" greenhouse`,
+              $select: "id,subject,from,receivedDateTime,bodyPreview,body",
+              $top: "20"
+            }).toString(),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            ConsistencyLevel: "eventual"
+          }
+        },
+        {
+          url:
+            `${GRAPH_BASE}/me/mailFolders/inbox/messages?` +
+            new URLSearchParams({
+              $select: "id,subject,from,receivedDateTime,bodyPreview,body",
+              $top: "40",
+              $orderby: "receivedDateTime desc"
+            }).toString(),
           headers: { Authorization: `Bearer ${accessToken}` }
-        });
+        }
+      ];
+
+      let messages = [];
+      for (const attempt of attempts) {
+        const res = await fetch(attempt.url, { headers: attempt.headers });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          lastError = json.error?.message || `Graph mail failed (${res.status})`;
+          continue;
+        }
+        messages = Array.isArray(json.value) ? json.value : [];
+        if (messages.length) break;
       }
 
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(json.error?.message || `Graph mail failed (${res.status})`);
+      if (!messages.length && lastError) {
+        throw new Error(lastError);
       }
 
-      const messages = Array.isArray(json.value) ? json.value : [];
       const ranked = messages
         .map((msg) => {
-          const from =
-            String(msg.from?.emailAddress?.address || "").toLowerCase() +
-            " " +
-            String(msg.from?.emailAddress?.name || "").toLowerCase();
+          const fromAddr = String(msg.from?.emailAddress?.address || "").toLowerCase();
+          const fromName = String(msg.from?.emailAddress?.name || "").toLowerCase();
+          const from = `${fromAddr} ${fromName}`;
           const subject = String(msg.subject || "");
           const received = Date.parse(msg.receivedDateTime || "") || 0;
           const greenhouseLike =
             /greenhouse/i.test(from) ||
-            /greenhouse-mail\.io/i.test(from) ||
-            /security\s*code/i.test(subject) ||
-            /greenhouse/i.test(subject);
+            /greenhouse-mail\.io/i.test(fromAddr) ||
+            /security\s*code/i.test(subject);
           return { msg, from, subject, received, greenhouseLike };
         })
-        .filter((row) => row.greenhouseLike && row.received >= afterEpochMs - 30_000)
+        .filter((row) => row.greenhouseLike && row.received >= afterEpochMs - 120_000)
         .sort((a, b) => b.received - a.received);
 
       for (const row of ranked) {
@@ -290,7 +294,8 @@ export async function fetchLatestGreenhouseSecurityCode(opts = {}) {
             code,
             subject: row.subject,
             receivedDateTime: row.msg.receivedDateTime || "",
-            from: row.msg.from?.emailAddress?.address || ""
+            from: row.msg.from?.emailAddress?.address || "",
+            source: "graph"
           };
         }
       }

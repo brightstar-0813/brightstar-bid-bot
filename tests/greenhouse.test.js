@@ -130,6 +130,16 @@ After you enter the code, resubmit your application.
 `;
   assert.equal(extractGreenhouseSecurityCode(sample), "0wPbvHmX");
 
+  const salesloft = `
+Hi Edwin,
+Copy and paste this code into the security code field on your application:
+
+unntl0Uc
+
+After you enter the code, resubmit your application.
+`;
+  assert.equal(extractGreenhouseSecurityCode(salesloft), "unntl0Uc");
+
   const html = `
 <p>Copy and paste this code into the security code field on your application:</p>
 <p style="font-size:24px"><b>Ab12Cd34</b></p>
