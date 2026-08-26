@@ -1902,7 +1902,11 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
+      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}).` +
+        (result.droppedNonUs
+          ? ` Dropped ${result.droppedNonUs} non-US.`
+          : "") +
+        ` Filters use the job URL (Dice / Greenhouse / …). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
     );
 
     try {

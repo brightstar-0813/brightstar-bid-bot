@@ -39,6 +39,30 @@ test("US filter accepts Remote US style Greenhouse locations", () => {
     isUnitedStatesJob({ location: "Warsaw", remoteRestrictedTo: "Remote" }),
     false
   );
+  // US-remote capture bots (Builtin etc.): bare Remote is US
+  assert.equal(
+    isUnitedStatesJob({
+      location: "Remote",
+      remoteRestrictedTo: "Remote",
+      source: "builtin",
+      jdLink: "https://builtin.com/job/foo"
+    }),
+    true
+  );
+  assert.equal(
+    isUnitedStatesJob({
+      location: "Remote",
+      remoteRestrictedTo: "Remote",
+      source: "greenhouse",
+      jdLink: "https://boards.greenhouse.io/acme/1"
+    }),
+    true
+  );
+  // Bare Remote without capture source/URL stays non-US
+  assert.equal(
+    isUnitedStatesJob({ location: "Remote", remoteRestrictedTo: "Remote", source: "" }),
+    false
+  );
 });
 
 test("Greenhouse URLs and channel filter", () => {

@@ -308,33 +308,68 @@ function textLooksNonUsCountry(text) {
 }
 
 /**
- * Job boards whose postings are US-only. A row from these sources is treated as
- * US even when the location is a bare city (e.g. Dice "Boston"), empty, or
- * "Remote" — unless the location/remote explicitly names a foreign country.
+ * Job boards / capture bots whose exports are US-remote (or US-only).
+ * Bare "Remote" / city-only locations are treated as US unless a foreign country
+ * is explicitly named. Classification of Dice/Greenhouse/etc. remains URL-only.
  */
-const US_ONLY_SOURCES = new Set(["dice"]);
+const US_REMOTE_CAPTURE_SOURCES = new Set([
+  "dice",
+  "builtin",
+  "greenhouse",
+  "jobright",
+  "jobgether",
+  "linkedin",
+  "indeed",
+  "workday",
+  "myworkday"
+]);
+
+/** Hostnames from US-remote capture bots / boards (URL wins over CSV source label). */
+const US_REMOTE_CAPTURE_HOST_RE =
+  /(^|\.)(dice\.com|builtin\.com|greenhouse\.io|linkedin\.com|indeed\.com|jobright\.ai|jobgether\.com|myworkdayjobs\.com|workdayjobs\.com)$/i;
+
+/** @deprecated use isUsRemoteCaptureSource — kept for older callers */
+const US_ONLY_SOURCES = US_REMOTE_CAPTURE_SOURCES;
 
 export function isUsOnlySource(source) {
+  return isUsRemoteCaptureSource(source);
+}
+
+export function isUsRemoteCaptureSource(source) {
   const src = String(source || "").toLowerCase().trim();
   if (!src) return false;
-  if (US_ONLY_SOURCES.has(src)) return true;
-  // Some exports prefix/suffix the board name (e.g. "dice.com", "dice_run3").
-  for (const board of US_ONLY_SOURCES) {
+  if (US_REMOTE_CAPTURE_SOURCES.has(src)) return true;
+  for (const board of US_REMOTE_CAPTURE_SOURCES) {
     if (src.includes(board)) return true;
   }
   return false;
 }
 
+function isUsRemoteCaptureUrl(jdLink = "") {
+  return US_REMOTE_CAPTURE_HOST_RE.test(jobLinkHost(jdLink));
+}
+
+function looksBareRemote(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  return /^(fully\s+)?remote(\s*[-,]?\s*(work|only|role|position|job))?$|^work\s+from\s+home$|^wfh$/i.test(
+    t
+  );
+}
+
 /**
- * Conservative US filter using location + remote_restricted_to / work_arrangement.
- * When the row comes from a US-only board (e.g. Dice), trust the source and only
- * drop it if the location clearly names a foreign country.
- * @param {{ location?: string, remoteRestrictedTo?: string, source?: string }} fields
+ * Conservative US filter using location + remote fields + capture-bot source/URL.
+ * When the row comes from a US-remote capture bot (Builtin, Dice, Greenhouse, …)
+ * or a known board URL, trust Remote / city-only locations unless a foreign
+ * country is explicit.
+ * @param {{ location?: string, remoteRestrictedTo?: string, source?: string, jdLink?: string }} fields
  */
 export function isUnitedStatesJob(fields) {
   const location = String(fields.location || "").trim();
   const remote = String(fields.remoteRestrictedTo || "").trim();
   const combined = `${location} ${remote}`.trim();
+  const captureUs =
+    isUsRemoteCaptureSource(fields.source) || isUsRemoteCaptureUrl(fields.jdLink);
 
   const usSignal = textLooksUs(location) || textLooksUs(remote) || textLooksUs(combined);
   if (usSignal) {
@@ -360,12 +395,29 @@ export function isUnitedStatesJob(fields) {
     return false;
   }
 
-  // US-only board (Dice etc.): city-only, empty, or "Remote" locations are US.
-  if (isUsOnlySource(fields.source)) {
+  // US-remote capture bots (Builtin/Dice/Greenhouse/…): Remote or city-only → US.
+  // Indeed/LinkedIn can include non-US posts — only accept when location is empty/Remote
+  // (explicit foreign already returned false above).
+  if (captureUs) {
+    const softBoard =
+      /\b(indeed|linkedin)\b/i.test(String(fields.source || "")) ||
+      /(^|\.)(indeed\.com|linkedin\.com)$/i.test(jobLinkHost(fields.jdLink));
+    if (softBoard) {
+      if (!location && !remote) return false;
+      if (looksBareRemote(location) || looksBareRemote(remote) || looksBareRemote(combined)) {
+        return true;
+      }
+      // City-only on Indeed/LI without US marker — leave to textLooksUs above; reject here.
+      return false;
+    }
     return true;
   }
 
-  // Bare "Remote" with empty location — do not treat as US
+  // Bare Remote without a capture-bot source/URL — do not treat as US
+  if (looksBareRemote(location) || looksBareRemote(remote) || looksBareRemote(combined)) {
+    return false;
+  }
+
   return false;
 }
 
@@ -553,7 +605,14 @@ export function parseJobsCsv(csvText) {
       continue;
     }
 
-    if (!isUnitedStatesJob({ location, remoteRestrictedTo, source: source || id })) {
+    if (
+      !isUnitedStatesJob({
+        location,
+        remoteRestrictedTo,
+        source: source || id,
+        jdLink
+      })
+    ) {
       droppedNonUs += 1;
       continue;
     }
