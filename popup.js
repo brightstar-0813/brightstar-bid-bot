@@ -1288,8 +1288,11 @@ function syncChannelFilterButtons() {
     btn.classList.toggle("active", key === channelFilter);
   }
   if (diceInterleaveHintEl) {
-    // Always visible — auto-apply is per Dice job, not only when Dice filter is selected.
     diceInterleaveHintEl.hidden = false;
+    diceInterleaveHintEl.textContent =
+      channelFilter === "all"
+        ? "All: build resume + cover letter only — no auto-apply. Pick Dice, Workday, Greenhouse, Ashby, or Lever to auto-apply after each build."
+        : "Dice / Workday / Greenhouse / Ashby / Lever / Jobgether→ATS: build → autofill → Submit → next. Other external ATS links are never auto-submitted.";
   }
 }
 
@@ -1358,7 +1361,7 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
           ? `Showing Lever jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "etc"
           ? `Showing other boards — ${queueCache.length} in queue.`
-          : `Showing all US jobs — ${queueCache.length} in queue.`
+          : `Showing all US jobs — ${queueCache.length} in queue. Start builds files only (no auto-apply).`
   );
 }
 

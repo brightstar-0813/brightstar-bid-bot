@@ -111,6 +111,13 @@ const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const DEFAULT_CHANNEL_FILTER = "dice";
 
+/** All-channel batch runs generate files only — never auto-apply. */
+async function isBatchAutoApplyEnabled() {
+  const data = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
+  const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
+  return channel !== "all";
+}
+
 /** A row is retried this many times before the batch moves on without it. */
 const MAX_JOB_ATTEMPTS = 2;
 /** Retries of the resume prompt inside one chat before the row is failed.
@@ -5415,11 +5422,14 @@ async function runBatchLoop(outputDir) {
 
       const queue = await getQueue();
       const activePerson = await getActivePerson().catch(() => null);
+      const batchAutoApply = await isBatchAutoApplyEnabled();
 
       // Hosted Dice/Indeed/Workday/Greenhouse/Jobgether jobs: apply already-built rows that are not Applied yet (no ChatGPT).
-      // Gated by job type, not the visible source filter.
+      // Gated by job type, not the visible source filter — except All channel (build only).
       // Only the active person's rows (profileId / Applications-* folder).
-      const backlog = queue.find((j) => isHostedApplyBacklogJob(j, activePerson));
+      const backlog = batchAutoApply
+        ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson))
+        : null;
       if (backlog) {
         const backlogBoard = isIndeedHostedApplyJob(backlog)
           ? "Indeed"
@@ -5629,21 +5639,24 @@ async function runBatchLoop(outputDir) {
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
         // Hosted Dice, Indeed, Workday, Greenhouse, and Jobgether jobs: generate → auto-apply+submit → close tab → next.
-        const hostedApplyBoard = isIndeedHostedApplyJob(next)
-          ? "Indeed"
-          : isWorkdayJob(next)
-            ? "Workday"
-            : isGreenhouseJob(next)
-              ? "Greenhouse"
-              : isAshbyJob(next)
-                ? "Ashby"
-                : isLeverJob(next)
-                  ? "Lever"
-                  : isJobgetherJob(next)
-                    ? "Jobgether"
-                    : isDiceJob(next)
-                      ? "Dice"
-                      : "";
+        // All channel: generate files only — no auto-apply.
+        const hostedApplyBoard = batchAutoApply
+          ? isIndeedHostedApplyJob(next)
+            ? "Indeed"
+            : isWorkdayJob(next)
+              ? "Workday"
+              : isGreenhouseJob(next)
+                ? "Greenhouse"
+                : isAshbyJob(next)
+                  ? "Ashby"
+                  : isLeverJob(next)
+                    ? "Lever"
+                    : isJobgetherJob(next)
+                      ? "Jobgether"
+                      : isDiceJob(next)
+                        ? "Dice"
+                        : ""
+          : "";
         if (hostedApplyBoard && !batchControl.stop) {
           const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,
