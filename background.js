@@ -7045,20 +7045,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (type === "open_job_url") {
-    (async () => {
-      try {
-        const url = String(message.url || "").trim();
-        if (!url) throw new Error("Missing URL.");
-        const tab = await chrome.tabs.create({ url, active: true });
-        safeSendResponse(sendResponse, { ok: true, tabId: tab?.id || null });
-      } catch (err) {
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
-  }
-
   if (type === "hydrate_job_dirs") {
     (async () => {
       try {

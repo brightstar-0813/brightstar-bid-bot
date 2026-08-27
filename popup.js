@@ -1396,7 +1396,6 @@ function badgeClass(status) {
 }
 
 const ACTION_ICON_PATHS = {
-  open: '<path d="M14 3h7v7m0-7-9 9"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
   apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
@@ -1613,14 +1612,6 @@ function renderQueue() {
     const actions = document.createElement("div");
     actions.className = "actions";
 
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.className = "secondary";
-    setIconButton(openBtn, "open", "Open job");
-    openBtn.title = "Open job";
-    openBtn.disabled = !job.jdLink;
-    openBtn.addEventListener("click", () => openJob(job));
-
     const revealBtn = document.createElement("button");
     revealBtn.type = "button";
     revealBtn.className = "secondary";
@@ -1648,7 +1639,6 @@ function renderQueue() {
       batchState === "running" || job.status === "running" || job.status === "done" || job.applied;
     removeBtn.addEventListener("click", () => removeJobFromBatch(job));
 
-    actions.appendChild(openBtn);
     actions.appendChild(revealBtn);
     actions.appendChild(removeBtn);
 
@@ -1957,14 +1947,6 @@ async function onCsvSelected(file) {
   } catch (err) {
     setStatus(`CSV parse failed: ${String(err.message || err)}`);
   }
-}
-
-async function openJob(job) {
-  if (!job?.jdLink) {
-    setStatus("No JD link for this job.");
-    return;
-  }
-  await chrome.runtime.sendMessage({ type: "open_job_url", url: job.jdLink });
 }
 
 async function removeJobFromBatch(job) {
