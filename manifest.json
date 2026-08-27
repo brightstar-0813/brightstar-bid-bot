@@ -124,7 +124,7 @@
         "default": "Ctrl+Shift+U",
         "mac": "Command+Shift+U"
       },
-      "description": "Auto Apply on current page (Greenhouse includes Submit)"
+      "description": "Auto Apply on current page (Submit only if Allow Submit toggle is on)"
     }
   }
 }

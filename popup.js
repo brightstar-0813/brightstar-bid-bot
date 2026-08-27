@@ -68,6 +68,7 @@ import {
   parseQaBankPayload,
   loadBundledQaBank
 } from "./qa-store.js";
+import { formatAutofillSummary } from "./autofill-summary.js";
 import {
   THEMES,
   loadAndApplyTheme,
@@ -522,6 +523,7 @@ const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
+const allowSubmitToggleEl = document.getElementById("allowSubmitToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
 const qaImportBtn = document.getElementById("qaImportBtn");
@@ -1180,6 +1182,7 @@ async function loadSettings() {
 
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
+  if (allowSubmitToggleEl) allowSubmitToggleEl.checked = Boolean(data.allowSubmitOnAssist);
   await refreshQaBank().catch(() => {});
   await hydrateJobDirsInUi().catch(() => {});
 }
@@ -1269,7 +1272,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">${filterLabel} · US ${allUsJobsCache.length} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · GH ${greenhouseTotal} · Ashby ${ashbyTotal} · Lever ${leverTotal} · Etc ${etcTotal} · batch ${batchState}</p>
+    <p class="summary-meta">Showing ${queueCache.length} of ${allUsJobsCache.length} US jobs (${filterLabel}) · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · GH ${greenhouseTotal} · Ashby ${ashbyTotal} · Lever ${leverTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -2628,29 +2631,45 @@ async function importBundledQaBank() {
 }
 
 async function autofillThisPage() {
-  setStatus("Autofilling the current page…");
-  const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
-  if (!res?.ok) {
-    setStatus(res?.error || "Autofill failed. Focus the application tab first.");
-    return;
+  autofillPageBtn.disabled = true;
+  autoApplyPageBtn.disabled = true;
+  try {
+    setStatus("Autofilling the current page…");
+    const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
+    if (!res?.ok) {
+      setStatus(res?.error || "Autofill failed. Focus the application tab first.");
+      return;
+    }
+    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete.");
+  } finally {
+    autofillPageBtn.disabled = false;
+    autoApplyPageBtn.disabled = false;
   }
-  const filled = res.filled || res.filledCount || 0;
-  const uploaded = res.uploaded || res.uploadedCount || 0;
-  setStatus(
-    `Autofilled ${filled} field(s)` +
-      (uploaded ? `, uploaded ${uploaded} file(s)` : "") +
-      " on the active page."
-  );
 }
 
 async function autoApplyThisPage() {
-  setStatus("Auto Apply: filling (profile → bank → OpenAI leftovers) and Next — stops before Submit…");
-  const res = await chrome.runtime.sendMessage({ type: "autofill_multi_step" });
-  if (!res?.ok) {
-    setStatus(res?.error || "Auto Apply failed. Focus the application tab first.");
-    return;
+  const allowSubmit = Boolean(allowSubmitToggleEl?.checked);
+  autofillPageBtn.disabled = true;
+  autoApplyPageBtn.disabled = true;
+  try {
+    setStatus(
+      allowSubmit
+        ? "Auto Apply: filling and advancing (Submit enabled on supported ATS)…"
+        : "Auto Apply: filling and advancing — stops before Submit…"
+    );
+    const res = await chrome.runtime.sendMessage({
+      type: "autofill_multi_step",
+      allowSubmitOnAssist: allowSubmit
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || "Auto Apply failed. Focus the application tab first.");
+      return;
+    }
+    setStatus(res.status || res.detail || res.statusText || formatAutofillSummary(res) || "Auto Apply finished.");
+  } finally {
+    autofillPageBtn.disabled = false;
+    autoApplyPageBtn.disabled = false;
   }
-  setStatus(res.status || res.detail || `Auto Apply filled ${res.filled || 0} field(s). Review and submit.`);
 }
 
 async function clearJobsList({ confirmPrompt = true } = {}) {
@@ -2697,6 +2716,13 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
 }
 
 async function resetWorkflow() {
+  const n = queueCache.length || allUsJobsCache.length;
+  const ok = window.confirm(
+    n
+      ? `Reset batch state and clear all ${n} job(s) from the queue?`
+      : "Reset batch state and clear the job queue?"
+  );
+  if (!ok) return;
   try {
     const res = await chrome.runtime.sendMessage({ type: "reset_generation_state" });
     if (!res?.ok) throw new Error(res?.error || "Failed to reset.");
@@ -2911,6 +2937,9 @@ qaExportBtn?.addEventListener("click", () => {
 });
 qaLearnToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ qa_learn_enabled: Boolean(qaLearnToggleEl.checked) }).catch(() => {});
+});
+allowSubmitToggleEl?.addEventListener("change", () => {
+  chrome.storage.local.set({ allowSubmitOnAssist: Boolean(allowSubmitToggleEl.checked) }).catch(() => {});
 });
 aiProviderChatgptBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));

@@ -19,60 +19,6 @@
   },
   {
     "profileId": "custom-steven-avon",
-    "question": "On some pages we embed content from social networks and other services. As a result, your personal data may be passed on to the operator of the portal from which the content originates, so that the operator can analyse your behaviour.",
-    "answer": "Yes",
-    "fieldType": "checkbox",
-    "source": "ai",
-    "site": "jobs.paessler.com",
-    "timesUsed": 0
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "Autofill from resumeUpload your resume here to autofill key application fields.Upload fileAutofill completed!Please review the information we filled in for you below.Drop your resume here!Parsing your resume. Autofilling key fields...",
-    "answer": "5208604529",
-    "fieldType": "text",
-    "source": "user",
-    "site": "jobs.ashbyhq.com",
-    "timesUsed": 0
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "Add Resume* Select Type or paste your Resume here Cancel Save Steven_Avon_Resume.pdf remove",
-    "answer": "New Jersey",
-    "fieldType": "select",
-    "source": "user",
-    "site": "jobs.jobvite.com",
-    "timesUsed": 0
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "Type or paste your Resume here",
-    "answer": "Experienced Salesforce Administrator with over 10 years in the field, specializing in the design and implementation of Salesforce solutions for various industries, including legal services. Proven track record of enhancing system functionality, user experience, and compliance through strategic partnerships and technical expertise.",
-    "fieldType": "textarea",
-    "source": "ai",
-    "site": "jobs.jobvite.com",
-    "timesUsed": 0
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "First Name*",
-    "answer": "Steven",
-    "fieldType": "text",
-    "source": "ai",
-    "site": "jobs.jobvite.com",
-    "timesUsed": 0
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "Last Name*",
-    "answer": "Avon",
-    "fieldType": "text",
-    "source": "ai",
-    "site": "jobs.jobvite.com",
-    "timesUsed": 0
-  },
-  {
-    "profileId": "custom-steven-avon",
     "question": "Desired Salary",
     "answer": "$100000",
     "fieldType": "text",
@@ -87,24 +33,6 @@
     "fieldType": "text",
     "source": "ai",
     "site": "jobs.ashbyhq.com",
-    "timesUsed": 1
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "Name",
-    "answer": "Steven Avon",
-    "fieldType": "text",
-    "source": "ai",
-    "site": "jobs.ashbyhq.com",
-    "timesUsed": 1
-  },
-  {
-    "profileId": "custom-steven-avon",
-    "question": "paste any linkedin profile url e g https www linkedin com in xxxxx to find work emails instantly find any email",
-    "answer": "https://www.linkedin.com/in/steven-avon-183739a8",
-    "fieldType": "text",
-    "source": "ai",
-    "site": "jobright.ai",
     "timesUsed": 1
   },
   {

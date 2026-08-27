@@ -10,8 +10,10 @@ import {
   exportQa,
   importQa,
   parseQaBankPayload,
-  loadBundledQaBank
+  loadBundledQaBank,
+  findQaMatch
 } from "./qa-store.js";
+import { isJunkQaRecord } from "./autofill-junk.js";
 import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
 
 const SHARED_ID = "";
@@ -50,7 +52,12 @@ const els = {
   importBundledBtn: document.getElementById("importBundledBtn"),
   importInput: document.getElementById("importInput"),
   remapImportToggle: document.getElementById("remapImportToggle"),
-  clearBtn: document.getElementById("clearBtn")
+  clearBtn: document.getElementById("clearBtn"),
+  testMatchInput: document.getElementById("testMatchInput"),
+  testMatchBtn: document.getElementById("testMatchBtn"),
+  testMatchResult: document.getElementById("testMatchResult"),
+  scanJunkBtn: document.getElementById("scanJunkBtn"),
+  deleteJunkBtn: document.getElementById("deleteJunkBtn")
 };
 
 const ACTION_ICON_PATHS = {
@@ -97,9 +104,16 @@ let editingId = null;
 let currentPage = 1;
 let pageSize = DEFAULT_PAGE_SIZE;
 
-function setStatus(message, isError = false) {
-  els.status.textContent = message;
-  els.status.style.color = isError ? "var(--danger)" : "var(--ok)";
+/** @type {string[]} */
+let junkScanIds = [];
+
+function setStatus(message, tone = "ok") {
+  els.status.textContent = message || "";
+  els.status.classList.remove("is-ok", "is-warn", "is-err", "is-idle");
+  if (!message) return;
+  if (tone === "err") els.status.classList.add("is-err");
+  else if (tone === "warn") els.status.classList.add("is-warn");
+  else els.status.classList.add("is-ok");
 }
 
 function urlProfileId() {
@@ -159,7 +173,9 @@ function rowsForView() {
   const view = filterProfileId();
   const type = String(els.filterType.value || "").trim();
   const q = String(els.searchInput.value || "").trim().toLowerCase();
+  const junkOnly = junkScanIds.length > 0;
   return allRows.filter((row) => {
+    if (junkOnly && !junkScanIds.includes(row.id)) return false;
     if (view !== ALL_ID && (row.profileId || "") !== view) return false;
     if (type && normalizeFieldType(row.fieldType) !== type) return false;
     if (q) {
@@ -295,6 +311,12 @@ function renderList() {
     scope.textContent = profileLabel(row.profileId || "");
     meta.appendChild(scope);
 
+    if (row.lastUsedAt) {
+      const lastUsed = document.createElement("span");
+      lastUsed.textContent = `last used ${new Date(row.lastUsedAt).toLocaleDateString()}`;
+      meta.appendChild(lastUsed);
+    }
+
     const used = document.createElement("span");
     used.textContent = `used ${Number(row.timesUsed || 0)}×`;
     meta.appendChild(used);
@@ -349,7 +371,7 @@ async function saveForm() {
   const question = String(els.formQuestion.value || "").trim();
   const answer = String(els.formAnswer.value || "").trim();
   if (!question || !answer) {
-    setStatus("Enter both a question and an answer.", true);
+    setStatus("Enter both a question and an answer.", "err");
     return;
   }
 
@@ -428,6 +450,70 @@ async function clearShown() {
   setStatus("Cleared.");
 }
 
+function activeProfileIdForMatch() {
+  const view = filterProfileId();
+  if (view === ALL_ID) return els.formScope.value || "";
+  if (view === SHARED_ID) return "";
+  return view;
+}
+
+async function runTestMatch() {
+  const question = String(els.testMatchInput?.value || "").trim();
+  if (!question) {
+    setStatus("Paste a live form question to test.", "warn");
+    return;
+  }
+  const match = await findQaMatch(activeProfileIdForMatch(), question);
+  if (!match) {
+    if (els.testMatchResult) {
+      els.testMatchResult.hidden = false;
+      els.testMatchResult.textContent = `No match ≥ 82% for: ${question.slice(0, 120)}`;
+    }
+    setStatus("No Q&A bank match above the 0.82 threshold.", "warn");
+    return;
+  }
+  const pct = Math.round(match.score * 100);
+  if (els.testMatchResult) {
+    els.testMatchResult.hidden = false;
+    els.testMatchResult.textContent = `Match ${pct}% → "${match.record.question}" → "${String(match.record.answer).slice(0, 120)}"`;
+  }
+  setStatus(`Best match ${pct}% (threshold 82%).`, "ok");
+}
+
+function junkRowsForView() {
+  const view = filterProfileId();
+  return allRows.filter((row) => {
+    if (view !== ALL_ID && (row.profileId || "") !== view) return false;
+    return isJunkQaRecord(row);
+  });
+}
+
+async function scanForJunk() {
+  junkScanIds = junkRowsForView().map((row) => row.id);
+  if (!junkScanIds.length) {
+    if (els.deleteJunkBtn) els.deleteJunkBtn.hidden = true;
+    setStatus("No junk entries found in this view.", "ok");
+    return;
+  }
+  if (els.deleteJunkBtn) els.deleteJunkBtn.hidden = false;
+  currentPage = 1;
+  renderList();
+  setStatus(`Found ${junkScanIds.length} suspicious ${junkScanIds.length === 1 ? "entry" : "entries"}.`, "warn");
+}
+
+async function deleteJunkResults() {
+  if (!junkScanIds.length) return;
+  const ok = window.confirm(`Delete ${junkScanIds.length} junk ${junkScanIds.length === 1 ? "entry" : "entries"}?`);
+  if (!ok) return;
+  for (const id of junkScanIds) {
+    await deleteQa(id);
+  }
+  junkScanIds = [];
+  if (els.deleteJunkBtn) els.deleteJunkBtn.hidden = true;
+  await reload();
+  setStatus("Deleted junk entries.");
+}
+
 async function loadPageSizePreference() {
   try {
     const stored = await chrome.storage.local.get(PAGE_SIZE_KEY);
@@ -461,29 +547,38 @@ els.pageSize.addEventListener("change", () => {
   renderList();
 });
 els.saveBtn.addEventListener("click", () => {
-  saveForm().catch((err) => setStatus(String(err.message || err), true));
+  saveForm().catch((err) => setStatus(String(err.message || err), "err"));
 });
 els.cancelEditBtn.addEventListener("click", () => {
   resetForm();
   renderList();
 });
 els.exportBtn.addEventListener("click", () => {
-  exportShown().catch((err) => setStatus(String(err.message || err), true));
+  exportShown().catch((err) => setStatus(String(err.message || err), "err"));
 });
 els.importBtn.addEventListener("click", () => els.importInput.click());
 els.importInput.addEventListener("change", () => {
   const file = els.importInput.files?.[0];
   importFromFile(file)
-    .catch((err) => setStatus(`Import failed: ${String(err.message || err)}`, true))
+    .catch((err) => setStatus(`Import failed: ${String(err.message || err)}`, "err"))
     .finally(() => {
       els.importInput.value = "";
     });
 });
 els.importBundledBtn.addEventListener("click", () => {
-  importBundled().catch((err) => setStatus(`Bundled import failed: ${String(err.message || err)}`, true));
+  importBundled().catch((err) => setStatus(`Bundled import failed: ${String(err.message || err)}`, "err"));
 });
 els.clearBtn.addEventListener("click", () => {
-  clearShown().catch((err) => setStatus(String(err.message || err), true));
+  clearShown().catch((err) => setStatus(String(err.message || err), "err"));
+});
+els.testMatchBtn?.addEventListener("click", () => {
+  runTestMatch().catch((err) => setStatus(String(err.message || err), "err"));
+});
+els.scanJunkBtn?.addEventListener("click", () => {
+  scanForJunk().catch((err) => setStatus(String(err.message || err), "err"));
+});
+els.deleteJunkBtn?.addEventListener("click", () => {
+  deleteJunkResults().catch((err) => setStatus(String(err.message || err), "err"));
 });
 
 let reloadTimer = 0;
@@ -506,6 +601,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     initSelects();
     await reload();
   } catch (err) {
-    setStatus(`Could not load Q&A bank: ${String(err.message || err)}`, true);
+    setStatus(`Could not load Q&A bank: ${String(err.message || err)}`, "err");
   }
 })();

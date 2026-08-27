@@ -10,6 +10,12 @@ import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillE
 import { outputDirFromPerson } from "./resume-profile.js";
 import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
+import {
+  isJunkAutofillAnswer,
+  isJunkQuestionLabel,
+  normalizeChoiceAnswerValue
+} from "./autofill-junk.js";
+import { formatAutofillSummary } from "./autofill-summary.js";
 import { getEnv } from "./env.js";
 import { DEFAULT_OPENAI_MODEL } from "./openai.js";
 import { normalizeJobLink } from "./sheets.js";
@@ -891,10 +897,15 @@ function matchExtraAnswer(questionLabel, extras = {}, options = []) {
   return best;
 }
 
-function isJunkAutofillAnswer(text) {
-  const t = String(text || "").trim().toLowerCase();
-  if (!t) return true;
-  return /format paragraph|heading dropdown|we want to hear from you/.test(t);
+async function notifyAutofillToast(tabId, payload = {}) {
+  const text = payload.text || formatAutofillSummary(payload);
+  const variant = payload.variant || (Number(payload.unmatchedAfterSecondPass ?? payload.unmatched ?? 0) > 0 ? "warn" : "ok");
+  await sendMessageToAllFrames(tabId, {
+    type: "autofill_show_toast",
+    text,
+    variant,
+    ...payload
+  }).catch(() => {});
 }
 
 /** Shared Braintrust wrapper text should not make two client essays look like the same question. */
@@ -967,6 +978,8 @@ async function resolveQuestionAnswers(
   const certs = parseCertificationList(applicantInfo.certifications);
 
   for (const q of list) {
+    if (isJunkQuestionLabel(q.label)) continue;
+
     const certAnswer =
       !choice && isCertificationQuestion(q.label)
         ? answerCertificationQuestion(q.label, certs)
@@ -987,19 +1000,21 @@ async function resolveQuestionAnswers(
 
     let match = null;
     try {
-      match = await findQaMatch(profileId, q.label);
+      match = await findQaMatch(profileId, q.label, { fieldType: q.fieldType || "" });
     } catch {
       match = null;
     }
-    const bankAnswer = String(match?.record?.answer || "").trim();
+    let bankAnswer = String(match?.record?.answer || "").trim();
+    if (choice) bankAnswer = normalizeChoiceAnswerValue(bankAnswer) || bankAnswer;
     const essayLike = Boolean(q.multiline) || q.fieldType === "textarea";
     const bankOk =
       bankAnswer &&
-      !isJunkAutofillAnswer(bankAnswer) &&
+      !isJunkAutofillAnswer(bankAnswer, { questionLabel: q.label }) &&
       bankAnswerFitsQuestion(q.label, bankAnswer) &&
       (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question));
     if (bankOk) {
-      resolved.push({ id: q.id, answer: bankAnswer, source: "bank" });
+      const answerOut = choice ? normalizeChoiceAnswerValue(bankAnswer) || bankAnswer : bankAnswer;
+      resolved.push({ id: q.id, answer: answerOut, source: "bank" });
       recordQaUsage(match.record.id).catch(() => {});
       bankHits += 1;
       continue;
@@ -1008,10 +1023,13 @@ async function resolveQuestionAnswers(
     const extra = matchExtraAnswer(q.label, extras, choice ? q.options || [] : []);
     if (
       extra?.answer &&
-      !isJunkAutofillAnswer(extra.answer) &&
+      !isJunkAutofillAnswer(extra.answer, { questionLabel: q.label }) &&
       bankAnswerFitsQuestion(q.label, extra.answer)
     ) {
-      resolved.push({ id: q.id, answer: extra.answer, source: "extra" });
+      const extraOut = choice
+        ? normalizeChoiceAnswerValue(extra.answer) || extra.answer
+        : extra.answer;
+      resolved.push({ id: q.id, answer: extraOut, source: "extra" });
       extraHits += 1;
       saveQa({
         profileId: profileId || "",
@@ -1984,7 +2002,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
   const filledTotal = result.filledCount + leftover.extraFilled + second.extraFilled;
   const controlCount = Number(result.fillableCount || 0) || Math.max(filledTotal, 1);
 
-  return {
+  const summaryPayload = {
     ok: Boolean(result.ok) || filledTotal > 0,
     tabId: tab.id,
     tabUrl: tab.url || "",
@@ -2001,6 +2019,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     unmatchedChoiceQuestions: result.unmatchedChoiceQuestions,
     unmatchedAfterFirst,
     unmatchedAfterSecondPass: second.unmatchedAfter,
+    unmatched: second.unmatchedAfter,
     secondPassFilled: second.extraFilled,
     fillRate:
       controlCount > 0 ? Math.round((Math.min(filledTotal, controlCount) / controlCount) * 100) : 0,
@@ -2009,6 +2028,9 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     uploadCoverName: docs?.coverLetter?.fileName || "",
     uploadCsvRow: hasCsvRow(csvRow) ? Number(csvRow) : ""
   };
+  summaryPayload.statusText = formatAutofillSummary(summaryPayload);
+  await notifyAutofillToast(tab.id, summaryPayload);
+  return summaryPayload;
 }
 
 /**
@@ -2037,7 +2059,7 @@ export async function startMultiStepApplyOnTab(
   const initialSite = applySiteFromUrl(tab.url || "");
   let liveSite = initialSite;
   let stepBudget = stepBudgetForSite(initialSite, maxSteps);
-  // Assist (manual Autofill/Auto Apply) never submits. Batch Dice/etc. pass autoSubmit.
+  // Assist mode stops before Submit unless caller passes autoSubmit with assistMode false.
   let effectiveAutoSubmit = assistMode
     ? false
     : resolveEffectiveAutoSubmit(initialSite, autoSubmit);
@@ -2689,6 +2711,27 @@ export async function startMultiStepApplyOnTab(
 
     if (advanced.advanced) {
       noAdvance = 0;
+      const thirdPass = await runSecondFillPass(
+        currentTabId,
+        extras,
+        metricsPersonId,
+        metricsSiteHost() || liveSite,
+        applicantInfo
+      );
+      summary.filled += Number(thirdPass.extraFilled || 0);
+      summary.filledCount = summary.filled;
+      summary.bankHits += Number(thirdPass.bankHits || 0);
+      summary.extraFilled += Number(thirdPass.extraFilled || 0);
+      summary.aiHits += Number(thirdPass.aiHits || 0);
+      summary.unmatchedAfterSecondPass = Number(thirdPass.unmatchedAfter ?? summary.unmatchedAfterSecondPass);
+      summary.secondPassFilled += Number(thirdPass.extraFilled || 0);
+      await notifyAutofillToast(currentTabId, {
+        filledCount: summary.filled,
+        bankHits: summary.bankHits,
+        aiHits: summary.aiHits,
+        unmatchedAfterSecondPass: summary.unmatchedAfterSecondPass,
+        text: `Step ${step + 1}/${stepBudget} — ${formatAutofillSummary(summary)}`
+      });
     } else {
       noAdvance += 1;
       if (noAdvance >= 2) {

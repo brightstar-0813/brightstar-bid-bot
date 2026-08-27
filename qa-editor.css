@@ -66,10 +66,37 @@ body.ctx-window.editor-page {
   white-space: normal;
 }
 
-.editor-status {
+.editor-status.status-bar {
   min-height: 1.3em;
   margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2, var(--section-bg));
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.editor-status.status-bar.is-ok {
   color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+}
+
+.editor-status.status-bar.is-warn {
+  color: var(--gold, var(--accent));
+  border-color: color-mix(in srgb, var(--gold, var(--accent)) 35%, var(--line));
+}
+
+.editor-status.status-bar.is-err {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.browse-tools {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .qa-editor .section {
@@ -97,10 +124,10 @@ body.ctx-window.editor-page {
 }
 
 .section-form {
-  border-color: rgba(245, 197, 66, 0.22);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line-strong));
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--section-bg) 82%, rgba(245, 197, 66, 0.1)),
+    color-mix(in srgb, var(--section-bg) 82%, color-mix(in srgb, var(--accent) 10%, transparent)),
     color-mix(in srgb, var(--section-bg) 92%, transparent)
   );
 }

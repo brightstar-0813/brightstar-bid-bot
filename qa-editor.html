@@ -21,7 +21,7 @@
         </div>
       </header>
 
-      <p id="status" class="editor-status" role="status"></p>
+      <p id="status" class="editor-status status-bar" role="status"></p>
 
       <section class="section section-browse" aria-labelledby="browseTitle">
         <div class="section-header">
@@ -45,7 +45,17 @@
             <span>Search</span>
             <input id="searchInput" type="search" placeholder="Filter by question or answer" />
           </label>
+          <label class="field span-2">
+            <span>Test match — paste a live form question</span>
+            <textarea id="testMatchInput" rows="2" placeholder="e.g. Are you authorized to work in the US without sponsorship?"></textarea>
+          </label>
         </div>
+        <div class="qa-toolbar browse-tools">
+          <button type="button" id="testMatchBtn" class="ghost compact">Test match</button>
+          <button type="button" id="scanJunkBtn" class="ghost compact">Scan for junk</button>
+          <button type="button" id="deleteJunkBtn" class="ghost danger compact" hidden>Delete junk results</button>
+        </div>
+        <p class="hint" id="testMatchResult" hidden></p>
         <p class="hint count-hint" id="countHint">0 saved</p>
       </section>
 

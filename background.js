@@ -34,6 +34,7 @@ import {
   handleQaLearnCapture,
   answerQuestionsFromBank
 } from "./autofill-runner.js";
+import { formatAutofillSummary } from "./autofill-summary.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -7077,18 +7078,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         const result = await autofillActiveTab(message.tabId || null);
-        const filled = Number(result.filled || result.filledCount || 0);
-        const uploaded = Number(result.uploaded || result.uploadedCount || 0);
-        const parts = [`Autofilled ${filled} field(s)`];
-        if (uploaded) parts.push(`uploaded ${uploaded} file(s)`);
-        if (result.bankHits) parts.push(`${result.bankHits} from Q&A bank`);
-        if (result.aiHits) parts.push(`${result.aiHits} from OpenAI`);
-        const skipped = Array.isArray(result.uploadSkipped) ? result.uploadSkipped : [];
-        if (!uploaded && skipped.some((s) => s?.reason === "no-docs")) {
-          parts.push("no resume PDF in cache — generate this job first");
-        }
-        await setStatus(`${parts.join(", ")} on the current page.`);
-        safeSendResponse(sendResponse, { ok: true, filled, ...result });
+        const statusText = result.statusText || formatAutofillSummary(result);
+        await setStatus(`${statusText} on the current page.`);
+        safeSendResponse(sendResponse, { ok: true, ...result, statusText });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }
@@ -7102,17 +7094,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const stored = await chrome.storage.local.get([
           "last_apply_csv_row",
           "last_apply_job_dir",
-          "last_apply_jd_link"
+          "last_apply_jd_link",
+          "allowSubmitOnAssist"
         ]);
+        const allowSubmit = Boolean(
+          message.allowSubmitOnAssist ?? stored.allowSubmitOnAssist
+        );
         const tab =
           message.tabId != null
             ? await chrome.tabs.get(message.tabId).catch(() => null)
             : (await chrome.tabs.query({ active: true, currentWindow: true }))[0] || null;
         const tabUrl = tab?.url || stored.last_apply_jd_link || "";
-        // Assist Auto Apply never auto-submits (including Greenhouse) — review manually.
         const result = await startMultiStepApplyOnTab(message.tabId || tab?.id || null, {
-          autoSubmit: false,
-          assistMode: true,
+          autoSubmit: allowSubmit,
+          assistMode: !allowSubmit,
           applyHint: {
             csvRow: stored.last_apply_csv_row,
             jobDir: stored.last_apply_job_dir,
@@ -7712,17 +7707,18 @@ chrome.commands.onCommand.addListener((command) => {
   }
   if (command === "autofill-page") {
     autofillActiveTab()
-      .then((r) => setStatus(`Autofilled ${r.filled || r.filledCount || 0} field(s).`))
+      .then((r) => setStatus(r.statusText || formatAutofillSummary(r) || `Autofilled ${r.filled || 0} field(s).`))
       .catch((err) => setStatus(`Autofill failed: ${String(err?.message || err)}`));
   }
   if (command === "auto-apply-page") {
     (async () => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        // Assist shortcut never auto-submits — stop before Submit for review.
+        const { allowSubmitOnAssist } = await chrome.storage.local.get(["allowSubmitOnAssist"]);
+        const allowSubmit = Boolean(allowSubmitOnAssist);
         const r = await startMultiStepApplyOnTab(tab?.id || null, {
-          autoSubmit: false,
-          assistMode: true
+          autoSubmit: allowSubmit,
+          assistMode: !allowSubmit
         });
         await setStatus(
           r.detail ||

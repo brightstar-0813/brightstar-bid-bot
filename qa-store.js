@@ -7,6 +7,8 @@
  * New AI answers are written back here, building the bank over time.
  */
 
+import { isJunkAutofillAnswer, isJunkQuestionLabel } from "./autofill-junk.js";
+
 export const QA_FIELD_TYPES = [
   { value: "text", label: "Text field" },
   { value: "textarea", label: "Text area (long text)" },
@@ -152,7 +154,7 @@ async function getRecordsForProfiles(profileIds) {
  * the similarity threshold.
  * @returns {Promise<{ record: object, score: number, exact: boolean } | null>}
  */
-export async function findQaMatch(profileId, question, { threshold = 0.82 } = {}) {
+export async function findQaMatch(profileId, question, { threshold = 0.82, fieldType = "" } = {}) {
   const norm = normalizeQuestion(question);
   if (!norm) return null;
 
@@ -160,11 +162,20 @@ export async function findQaMatch(profileId, question, { threshold = 0.82 } = {}
   const records = await getRecordsForProfiles([...new Set(profiles)]);
   if (!records.length) return null;
 
+  const wantType = normalizeFieldType(fieldType);
   let best = null;
   for (const rec of records) {
     if (!rec || !rec.answer) continue;
+    if (isJunkQuestionLabel(rec.question) || isJunkAutofillAnswer(rec.answer, { questionLabel: rec.question })) {
+      continue;
+    }
     const recNorm = rec.questionNorm || normalizeQuestion(rec.question);
-    const score = questionSimilarity(norm, recNorm);
+    let score = questionSimilarity(norm, recNorm);
+    if (wantType) {
+      const recType = normalizeFieldType(rec.fieldType);
+      if (recType === wantType) score += 0.04;
+      else if (isChoiceFieldType(wantType) !== isChoiceFieldType(recType)) score -= 0.12;
+    }
     if (!best || score > best.score) best = { record: rec, score, exact: recNorm === norm };
   }
 
@@ -329,10 +340,40 @@ export async function loadBundledQaBank() {
  *   When `remapProfileId` is a string (including ""), every row is saved under
  *   that person. Omit it to keep each record's original profileId.
  */
+function dedupeImportRecords(records) {
+  const out = [];
+  for (const rec of records) {
+    const norm = normalizeQuestion(rec.question);
+    if (!norm) continue;
+    let merged = false;
+    for (let i = 0; i < out.length; i += 1) {
+      const existingNorm = normalizeQuestion(out[i].question);
+      if (questionSimilarity(norm, existingNorm) < 0.95) continue;
+      const keep =
+        Number(rec.timesUsed || 0) > Number(out[i].timesUsed || 0) ? rec : out[i];
+      const other = keep === rec ? out[i] : rec;
+      out[i] = {
+        ...keep,
+        answer: String(keep.answer || other.answer || "").trim(),
+        fieldType: normalizeFieldType(keep.fieldType || other.fieldType || "text"),
+        site: keep.site || other.site || "",
+        source: keep.source || other.source || "user"
+      };
+      merged = true;
+      break;
+    }
+    if (!merged) out.push(rec);
+  }
+  return out;
+}
+
 export async function importQa(records, { remapProfileId } = {}) {
-  const list = parseQaBankPayload(records);
+  const list = dedupeImportRecords(parseQaBankPayload(records));
   let imported = 0;
   for (const rec of list) {
+    if (isJunkQuestionLabel(rec.question) || isJunkAutofillAnswer(rec.answer, { questionLabel: rec.question })) {
+      continue;
+    }
     const saved = await saveQa({
       profileId: remapProfileId != null ? String(remapProfileId) : rec.profileId || "",
       question: rec.question,

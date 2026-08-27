@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-27.safe01";
+  const SCRIPT_BUILD = "2026-08-27.enh01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -16,6 +16,66 @@
   let learnEnabled = true;
   let learnSuppressUntil = 0;
   const learnSentByQuestion = new Map();
+  const MAX_UNMATCHED_TEXT = 40;
+  const MAX_UNMATCHED_CHOICE = 60;
+
+  let autofillToastEl = null;
+  let autofillToastTimer = null;
+
+  function showAutofillToast(message, { variant = "info", ms = 4000 } = {}) {
+    const text = String(message || "").trim();
+    if (!text) return;
+    if (!autofillToastEl) {
+      autofillToastEl = document.createElement("div");
+      autofillToastEl.setAttribute("data-brightstar-autofill-toast", "1");
+      Object.assign(autofillToastEl.style, {
+        position: "fixed",
+        zIndex: "2147483646",
+        top: "16px",
+        right: "16px",
+        maxWidth: "420px",
+        padding: "12px 14px",
+        background: variant === "warn" ? "#5c4a12" : variant === "err" ? "#5c1a1a" : "#1a2332",
+        color: "#f5f7fa",
+        font: "13px/1.45 system-ui, -apple-system, Segoe UI, sans-serif",
+        borderRadius: "8px",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.28)",
+        whiteSpace: "pre-wrap",
+        pointerEvents: "none"
+      });
+      (document.body || document.documentElement).appendChild(autofillToastEl);
+    }
+    autofillToastEl.style.background =
+      variant === "warn" ? "#5c4a12" : variant === "err" ? "#5c1a1a" : "#1a2332";
+    autofillToastEl.textContent = text;
+    if (autofillToastTimer) {
+      clearTimeout(autofillToastTimer);
+      autofillToastTimer = null;
+    }
+    autofillToastTimer = setTimeout(() => {
+      if (autofillToastEl?.parentNode) autofillToastEl.parentNode.removeChild(autofillToastEl);
+      autofillToastEl = null;
+      autofillToastTimer = null;
+    }, ms);
+  }
+
+  function isJunkLearnLabel(label) {
+    const raw = String(label || "").trim();
+    if (!raw) return true;
+    if (/^(first name|last name|email|phone|name)\*?$/i.test(raw.replace(/\s+/g, " "))) return true;
+    return /upload your resume|autofill from resume|drop your resume|choose file|drag and drop|upload file|add resume|paste your resume|format paragraph|heading dropdown|find any email|parsing your resume|autofill completed|remove file/i.test(
+      raw
+    );
+  }
+
+  function stableQuestionId(label, fieldType, el, prefix = "rbq") {
+    const seed = `${String(label || "").slice(0, 500)}|${fieldType || "text"}|${el?.name || ""}|${el?.id || ""}`;
+    const hash = Math.abs(
+      Array.from(seed).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
+    );
+    return `${prefix}_${hash.toString(36)}`;
+  }
+
   function suppressLearn(ms = 2500) {
     learnSuppressUntil = Date.now() + ms;
   }
@@ -390,7 +450,6 @@
       "why do you want",
       "why this role",
       "why this company",
-      "cover letter",
       "additional information",
       "anything else"
     ],
@@ -3260,23 +3319,22 @@
         continue;
       }
 
-      if (questions.length >= 25) break;
+      if (questions.length >= MAX_UNMATCHED_TEXT) break;
 
       const labelForAi = (questionLabel || labelNorm).slice(0, 1000);
-      const id = `rbq_${questions.length}_${Math.abs(
-        Array.from(labelForAi).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
-      )}`;
+      const fieldType = el.tagName === "TEXTAREA" ? "textarea" : "text";
+      const id = stableQuestionId(labelForAi, fieldType, el);
       el.setAttribute("data-resume-bot-qid", id);
       questions.push({
         id,
         label: labelForAi,
         multiline,
-        fieldType: el.tagName === "TEXTAREA" ? "textarea" : "text"
+        fieldType
       });
     }
 
     for (const el of collectRichTextEditors()) {
-      if (questions.length >= 25) break;
+      if (questions.length >= MAX_UNMATCHED_TEXT) break;
       const near = essayQuestionForEditor(el);
       const fromAi = questionTextForAi(el);
       let questionLabel = near || fromAi;
@@ -3291,9 +3349,7 @@
         continue;
       }
       const labelForAi = questionLabel.slice(0, 1000);
-      const id = `rbq_${questions.length}_${Math.abs(
-        Array.from(labelForAi).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
-      )}`;
+      const id = stableQuestionId(labelForAi, "textarea", el);
       el.setAttribute("data-resume-bot-qid", id);
       questions.push({
         id,
@@ -3345,7 +3401,7 @@
     ];
 
     for (const el of nodes) {
-      if (out.length >= 40) break;
+      if (out.length >= MAX_UNMATCHED_CHOICE) break;
       const style = window.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") continue;
       if (el.disabled) continue;
@@ -3371,11 +3427,6 @@
         continue;
       }
 
-      const id = `rbc_${out.length}_${Math.abs(
-        Array.from(labelNorm).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
-      )}`;
-      el.setAttribute("data-resume-bot-choice-qid", id);
-      if (isGroup) groupIds.set(labelNorm, id);
       const fieldType =
         el.tagName === "SELECT"
           ? "select"
@@ -3384,11 +3435,14 @@
             : el.type === "radio"
               ? "radio"
               : "select";
+      const id = stableQuestionId(label, fieldType, el, "rbc");
+      el.setAttribute("data-resume-bot-choice-qid", id);
+      if (isGroup) groupIds.set(labelNorm, id);
       out.push({ id, label: label.slice(0, 1000), options, fieldType, required: isControlRequired(el) });
     }
 
     for (const group of collectChoiceChipGroups()) {
-      if (out.length >= 40) break;
+      if (out.length >= MAX_UNMATCHED_CHOICE) break;
       if (group.selected) continue;
       if (group.buttons.some(isEditorChrome)) continue;
       if ((group.labels || []).some((l) => EDITOR_STYLE_OPTION_RE.test(l))) continue;
@@ -3397,9 +3451,8 @@
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6) continue;
-      const id = `rbc_${out.length}_${Math.abs(
-        Array.from(labelNorm).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
-      )}`;
+      const chipFieldType = group.kind === "yesno" ? "radio" : "select";
+      const id = stableQuestionId(label, chipFieldType, group.buttons[0], "rbc");
       for (const btn of group.buttons) {
         btn.setAttribute("data-resume-bot-choice-qid", id);
       }
@@ -3407,7 +3460,7 @@
         id,
         label: label.slice(0, 1000),
         options: group.labels.filter(Boolean).slice(0, 20),
-        fieldType: group.kind === "yesno" ? "radio" : "select",
+        fieldType: chipFieldType,
         required: false
       });
     }
@@ -3419,7 +3472,7 @@
       )
     ];
     for (const el of comboNodes) {
-      if (out.length >= 40) break;
+      if (out.length >= MAX_UNMATCHED_CHOICE) break;
       if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) continue;
       if (!looksLikeCombobox(el) && !isReactSelectInput(el)) continue;
       const style = window.getComputedStyle(el);
@@ -3465,9 +3518,7 @@
       }
       if (!options.length) continue;
 
-      const id = `rbc_${out.length}_${Math.abs(
-        Array.from(labelNorm).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
-      )}`;
+      const id = stableQuestionId(label, "combobox", el, "rbc");
       el.setAttribute("data-resume-bot-choice-qid", id);
       seenLabels.add(labelNorm);
       out.push({
@@ -3494,8 +3545,10 @@
     const filled = [];
     for (const row of answers) {
       const id = String(row?.id || "").trim();
-      const answer = String(row?.answer || "").trim();
+      let answer = String(row?.answer || "").trim();
       if (!id || !answer) continue;
+      if (/^(y|yes|true|1|agree|i agree)$/i.test(answer)) answer = "Yes";
+      else if (/^(n|no|false|0|disagree)$/i.test(answer)) answer = "No";
       const els = [
         ...document.querySelectorAll(`[data-resume-bot-choice-qid="${CSS.escape(id)}"]`)
       ];
@@ -4210,6 +4263,16 @@
         : await uploadApplicationFiles(uploadFiles);
     const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
     const unmatchedChoiceQuestions = await collectUnmatchedChoiceQuestions();
+
+    const toastParts = [`Filled ${filled.length} field${filled.length === 1 ? "" : "s"}`];
+    if (uploadResult.uploadedCount) {
+      toastParts.push(`uploaded ${uploadResult.uploadedCount} file${uploadResult.uploadedCount === 1 ? "" : "s"}`);
+    }
+    const unmatchedCount = unmatchedQuestions.length + unmatchedChoiceQuestions.length;
+    if (unmatchedCount) toastParts.push(`${unmatchedCount} need Q&A bank / OpenAI`);
+    showAutofillToast(toastParts.join(" · "), {
+      variant: unmatchedCount ? "warn" : "ok"
+    });
 
     return {
       ok: true,
@@ -6201,6 +6264,7 @@
     const label = captureQuestionText(el);
     if (!label) return;
     if (LEARN_SENSITIVE_RE.test(label)) return;
+    if (isJunkLearnLabel(label)) return;
 
     const labelNorm = normalize(label);
     if (!labelNorm || labelNorm.length < 6) return;
@@ -7217,6 +7281,14 @@
         .then((summary) => sendResponse(summary))
         .catch((err) => sendResponse({ ok: false, status: "failed", error: String(err?.message || err) }));
       return true;
+    }
+    if (message?.type === "autofill_show_toast") {
+      showAutofillToast(message.text || "", {
+        variant: message.variant || "info",
+        ms: Number(message.ms) || 4000
+      });
+      sendResponse({ ok: true });
+      return false;
     }
     if (message?.type !== "autofill_application") return undefined;
     autofillApplication(

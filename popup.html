@@ -595,10 +595,14 @@
               <kbd>Ctrl+Shift+U</kbd>
             </button>
           </div>
+          <label class="checkbox-field">
+            <span>Allow Submit on supported ATS (Greenhouse, Ashby, Dice, …)</span>
+            <input type="checkbox" id="allowSubmitToggle" />
+          </label>
           <p class="hint">
-            Autofill fills the current step (profile → Q&amp;A bank → OpenAI for leftover questions).
-            Auto Apply walks Next/Continue and <strong>always stops before Submit</strong> (including Greenhouse) so you can review.
-            Batch Dice / Workday / Greenhouse / Jobgether can still auto-submit after files are built.
+            Autofill fills the current step only (profile → Q&amp;A bank → OpenAI for leftover questions) and never clicks Submit.
+            Auto Apply walks Next/Continue; Submit is clicked only when the toggle above is on and the site supports it.
+            Batch Dice / Workday / Greenhouse / Jobgether still auto-submit after files are built.
           </p>
           <div class="qa-bank-block">
             <div class="qa-bank-head">
@@ -619,6 +623,7 @@
               </div>
               <input type="file" id="qaImportInput" accept="application/json,.json" hidden />
             </div>
+            <p class="hint qa-toolbar-legend">Editor · Bundled · Import · Export</p>
           </div>
         </section>
 

@@ -33,11 +33,11 @@ test("adapter registry maps hosts and policies", () => {
   assert.equal(isEmployerAtsHost("jobs.ashbyhq.com"), true);
 
   assert.equal(resolveEffectiveAutoSubmit("greenhouse", false), true);
-  assert.equal(resolveEffectiveAutoSubmit("ashby", false), true);
-  assert.equal(resolveEffectiveAutoSubmit("lever", false), true);
+  assert.equal(resolveEffectiveAutoSubmit("greenhouse", true), true);
   assert.equal(resolveEffectiveAutoSubmit("workday", false), false);
   assert.equal(resolveEffectiveAutoSubmit("workday", true), true);
   assert.equal(resolveEffectiveAutoSubmit("generic", true), false);
+  assert.equal(resolveEffectiveAutoSubmit("ashby", false), true);
 
   assert.ok(stepBudgetForSite("workday", 12) >= 16);
   assert.ok(getAdapter("greenhouse")?.emailOtp);

@@ -1025,16 +1025,16 @@ export function personToApplicantInfo(person = {}) {
     }
   }
 
-  // Compensation defaults used by Greenhouse / ATS desired-pay fields.
+  // Compensation: only fill when person extras explicitly provide values.
   if (!String(info.salaryExpectation || "").trim()) {
-    info.salaryExpectation =
-      String(extras["desired salary"] || extras["expected salary"] || extras.compensation || "").trim() ||
-      "$120000/yr";
+    info.salaryExpectation = String(
+      extras["desired salary"] || extras["expected salary"] || extras.compensation || ""
+    ).trim();
   }
   if (!String(info.hourlyRate || "").trim()) {
-    info.hourlyRate =
-      String(extras["hourly rate"] || extras["desired hourly"] || extras.hourly || "").trim() ||
-      "$60 per hour";
+    info.hourlyRate = String(
+      extras["hourly rate"] || extras["desired hourly"] || extras.hourly || ""
+    ).trim();
   }
 
   return info;
