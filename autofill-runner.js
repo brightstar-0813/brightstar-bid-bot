@@ -41,7 +41,6 @@ import {
   jobDocsId,
   putJobDocs
 } from "./job-docs-db.js";
-import { fetchLatestGreenhouseSecurityCode } from "./ms-graph-mail.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
@@ -1145,35 +1144,24 @@ async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
 }
 
 /**
- * Greenhouse email OTP: poll Microsoft Graph (then Outlook web fallback), fill code, resubmit.
+ * Greenhouse email OTP: read code from an open Outlook web tab, fill, resubmit.
  */
-async function completeGreenhouseEmailVerification(tabId, { afterEpochMs } = {}) {
-  await setApplyStatus("Apply: Greenhouse — waiting for security code email (Outlook)…");
-  const since = afterEpochMs || Date.now() - 60_000;
-  let mail = await fetchLatestGreenhouseSecurityCode({
-    afterEpochMs: since,
-    timeoutMs: 45_000,
-    pollMs: 3500
-  }).catch((err) => ({ ok: false, code: "", error: String(err?.message || err) }));
-
-  if (!mail?.ok || !mail.code) {
-    await setApplyStatus("Apply: Greenhouse — Graph missed code; checking Outlook tab…");
-    mail = await scrapeOutlookGreenhouseSecurityCode({
-      afterEpochMs: since,
-      timeoutMs: 60_000
-    }).catch((err) => ({
-      ok: false,
-      code: "",
-      error: String(err?.message || err)
-    }));
-  }
+async function completeGreenhouseEmailVerification(tabId) {
+  await setApplyStatus("Apply: Greenhouse — waiting for security code (Outlook tab)…");
+  const mail = await scrapeOutlookGreenhouseSecurityCode({
+    timeoutMs: 90_000
+  }).catch((err) => ({
+    ok: false,
+    code: "",
+    error: String(err?.message || err)
+  }));
 
   if (!mail?.ok || !mail.code) {
     return {
       ok: false,
       detail:
         mail?.error ||
-        "No Greenhouse security code found. Connect Outlook (Graph) in the popup, or keep outlook.live.com open signed in."
+        "No Greenhouse security code found. Keep outlook.live.com open and signed in with the verification email visible."
     };
   }
   await setApplyStatus(`Apply: Greenhouse — entering security code ${mail.code}…`);
@@ -1224,9 +1212,9 @@ async function completeGreenhouseEmailVerification(tabId, { afterEpochMs } = {})
 }
 
 /**
- * Fallback: read Greenhouse OTP from an already-open Outlook web tab.
+ * Read Greenhouse OTP from an already-open Outlook web tab.
  */
-async function scrapeOutlookGreenhouseSecurityCode({ afterEpochMs, timeoutMs = 60_000 } = {}) {
+async function scrapeOutlookGreenhouseSecurityCode({ timeoutMs = 60_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   const outlookRe = /(^|\.)outlook\.(live|office|office365)\.com$/i;
 

@@ -15,8 +15,7 @@
     "alarms",
     "sidePanel",
     "offscreen",
-    "nativeMessaging",
-    "identity"
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

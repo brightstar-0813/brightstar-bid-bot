@@ -7071,46 +7071,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (type === "ms_graph_status") {
-    (async () => {
-      try {
-        const { getGraphAuthStatus, getMsGraphClientId } = await import("./ms-graph-mail.js");
-        const status = await getGraphAuthStatus();
-        const clientId = await getMsGraphClientId();
-        safeSendResponse(sendResponse, { ok: true, ...status, hasClientId: Boolean(clientId) });
-      } catch (err) {
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
-  }
-
-  if (type === "ms_graph_connect") {
-    (async () => {
-      try {
-        const { connectMsGraph } = await import("./ms-graph-mail.js");
-        const result = await connectMsGraph();
-        safeSendResponse(sendResponse, { ok: true, ...result });
-      } catch (err) {
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
-  }
-
-  if (type === "ms_graph_disconnect") {
-    (async () => {
-      try {
-        const { disconnectMsGraph } = await import("./ms-graph-mail.js");
-        await disconnectMsGraph();
-        safeSendResponse(sendResponse, { ok: true });
-      } catch (err) {
-        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
-  }
-
   if (type === "reveal_job_files") {
     (async () => {
       try {

@@ -15,7 +15,7 @@ import {
   DEFAULT_ANNUAL_COMPENSATION,
   DEFAULT_HOURLY_COMPENSATION
 } from "../compensation-format.js";
-import { extractGreenhouseSecurityCode } from "../ms-graph-mail.js";
+import { extractGreenhouseSecurityCode } from "../greenhouse-security-code.js";
 
 test("US filter accepts Remote US style Greenhouse locations", () => {
   assert.equal(

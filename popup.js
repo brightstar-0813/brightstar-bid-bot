@@ -516,9 +516,6 @@ const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
-const msGraphStatusNoteEl = document.getElementById("msGraphStatusNote");
-const msGraphConnectBtn = document.getElementById("msGraphConnectBtn");
-const msGraphDisconnectBtn = document.getElementById("msGraphDisconnectBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
 const qaImportBtn = document.getElementById("qaImportBtn");
 const qaExportBtn = document.getElementById("qaExportBtn");
@@ -1176,7 +1173,6 @@ async function loadSettings() {
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   await refreshQaBank().catch(() => {});
-  await refreshMsGraphStatus().catch(() => {});
   await hydrateJobDirsInUi().catch(() => {});
 }
 
@@ -2573,28 +2569,6 @@ async function refreshQaBank() {
   }
 }
 
-async function refreshMsGraphStatus() {
-  if (!msGraphStatusNoteEl) return;
-  try {
-    const res = await chrome.runtime.sendMessage({ type: "ms_graph_status" });
-    if (!res?.ok) {
-      msGraphStatusNoteEl.textContent = "Unavailable";
-      return;
-    }
-    if (!res.hasClientId) {
-      msGraphStatusNoteEl.textContent = "Set MS_GRAPH_CLIENT_ID";
-      return;
-    }
-    if (res.connected) {
-      msGraphStatusNoteEl.textContent = res.email ? `Connected · ${res.email}` : "Connected";
-    } else {
-      msGraphStatusNoteEl.textContent = "Not connected";
-    }
-  } catch {
-    msGraphStatusNoteEl.textContent = "Unavailable";
-  }
-}
-
 function activePersonLabel() {
   return profilesCache.find((p) => p.id === profileSelectEl.value)?.label || "active person";
 }
@@ -2948,34 +2922,6 @@ qaExportBtn?.addEventListener("click", () => {
 qaLearnToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ qa_learn_enabled: Boolean(qaLearnToggleEl.checked) }).catch(() => {});
 });
-msGraphConnectBtn?.addEventListener("click", () => {
-  setStatus("Connecting Outlook via Microsoft Graph…");
-  chrome.runtime
-    .sendMessage({ type: "ms_graph_connect" })
-    .then(async (res) => {
-      if (!res?.ok) {
-        setStatus(res?.error || "Outlook connect failed.");
-        return;
-      }
-      await refreshMsGraphStatus();
-      setStatus(res.email ? `Outlook connected: ${res.email}` : "Outlook connected.");
-    })
-    .catch((e) => setStatus(`Outlook connect failed: ${String(e.message || e)}`));
-});
-msGraphDisconnectBtn?.addEventListener("click", () => {
-  chrome.runtime
-    .sendMessage({ type: "ms_graph_disconnect" })
-    .then(async (res) => {
-      if (!res?.ok) {
-        setStatus(res?.error || "Disconnect failed.");
-        return;
-      }
-      await refreshMsGraphStatus();
-      setStatus("Outlook disconnected.");
-    })
-    .catch((e) => setStatus(String(e.message || e)));
-});
-
 aiProviderChatgptBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));
 });
