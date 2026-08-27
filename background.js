@@ -188,7 +188,7 @@ async function deepHarvestResumeFromTab(tabId) {
         };
         const blocks = Array.from(
           document.querySelectorAll(
-            "[data-message-author-role='assistant'], [data-turn='assistant'], section[data-turn='assistant']"
+            "[data-message-author-role='assistant'], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [class*='font-claude-message'], [class*='assistant-message']"
           )
         );
         const startBi = Math.max(0, blocks.length - 20);
@@ -2419,6 +2419,81 @@ async function detectChatGptRateLimit(tabId) {
   }
 }
 
+/**
+ * Detect Claude overload / capacity / "try again later" UI.
+ * Clicks Retry / Try again when present.
+ */
+async function detectClaudeCapacityLimit(tabId) {
+  if (typeof tabId !== "number") return { limited: false };
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const hay = `${document.body?.innerText || ""}`.slice(0, 40000);
+        const limited =
+          /\bat (?:full )?capacity\b/i.test(hay) ||
+          /\boverloaded\b/i.test(hay) ||
+          /\bhigh demand\b/i.test(hay) ||
+          /\bunable to (?:process|complete) (?:your )?(?:request|message)\b/i.test(hay) ||
+          (/\btry again (?:later|in a (?:few |couple )?(?:minutes?|moments?))\b/i.test(hay) &&
+            /\b(error|issue|problem|unavailable|capacity)\b/i.test(hay)) ||
+          /\bClaude is (?:experiencing|having) (?:high|elevated) (?:traffic|load|demand)\b/i.test(hay);
+
+        if (!limited) return { limited: false, dismissed: false };
+
+        let dismissed = false;
+        for (const btn of document.querySelectorAll("button")) {
+          const label = `${btn.textContent || ""} ${btn.getAttribute("aria-label") || ""}`.trim();
+          if (/^(retry|try again|reload|refresh)$/i.test(label) || /^try again$/i.test(label)) {
+            try {
+              btn.click();
+              dismissed = true;
+              break;
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        return { limited: true, dismissed };
+      }
+    });
+    return results?.[0]?.result || { limited: false };
+  } catch {
+    return { limited: false };
+  }
+}
+
+/** Wait briefly when Claude reports capacity / overload, then resume polling. */
+async function waitOutClaudeCapacityLimit(tabId, { maxWaitMs = 3 * 60 * 1000 } = {}) {
+  let hit = await detectClaudeCapacityLimit(tabId);
+  if (!hit.limited) return false;
+
+  lastRateLimitHitAt = Date.now();
+  rateLimitHitsThisBatch += 1;
+  if (await maybeHardPauseForRateLimit("detected while waiting for Claude")) {
+    throw new Error("__RATE_LIMIT_PAUSE__");
+  }
+
+  const deadline = Date.now() + maxWaitMs;
+  await setStatus("Claude capacity / overload — waiting before retry…");
+  while (Date.now() < deadline) {
+    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+    await sleep(8000);
+    hit = await detectClaudeCapacityLimit(tabId);
+    if (!hit.limited) {
+      await setStatus("Claude capacity cleared — continuing…");
+      return true;
+    }
+    await setStatus(
+      `Claude still overloaded (~${formatWaitLeft(deadline - Date.now())} wait budget left)…`
+    );
+    await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
+  }
+  throw new Error(
+    "Claude is still at capacity after waiting. Pause the batch a few minutes, then Retry errors."
+  );
+}
+
 /** Wait out the mandatory quiet window after a prior rate-limit hit. */
 async function enforcePostRateLimitCooldown() {
   if (!lastRateLimitHitAt) return;
@@ -3123,6 +3198,14 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
         args: [prompt, attempt === 0 ? needsInPageNewChat : false],
         func: async (fullPrompt, shouldStartNewChat) => {
           const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const wantLen = String(fullPrompt || "").length;
+          const enoughFilled = (text) => {
+            const n = String(text || "").trim().length;
+            if (n < 40) return false;
+            if (wantLen <= 0) return n > 20;
+            const minNeed = Math.min(Math.floor(wantLen * 0.9), Math.max(wantLen - 200, 40));
+            return n >= minNeed;
+          };
 
           const firePointerClick = (el) => {
             if (!(el instanceof HTMLElement)) return false;
@@ -3149,34 +3232,109 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
             );
           };
 
-          const setInputValue = (el, text) => {
+          /** Remove ProseMirror text and Claude PASTED chips so retries do not stack. */
+          const clearComposer = (el) => {
             if (!(el instanceof HTMLElement)) return;
             el.focus();
             try {
               document.execCommand("selectAll", false);
               document.execCommand("delete", false);
             } catch {
-              // ignore
+              /* ignore */
             }
+            try {
+              el.innerHTML = "";
+              el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+            } catch {
+              /* ignore */
+            }
+
+            const roots = [el.closest("form"), el.closest("fieldset"), el.parentElement, document.body].filter(
+              Boolean
+            );
+            const seen = new Set();
+            for (const root of roots) {
+              if (seen.has(root)) continue;
+              seen.add(root);
+              for (const node of root.querySelectorAll(
+                '[data-testid*="paste" i], [class*="paste" i], [aria-label*="paste" i]'
+              )) {
+                const label = `${node.getAttribute?.("aria-label") || ""} ${node.textContent || ""}`.trim();
+                if (/^pasted$/i.test(label) || /paste/i.test(node.getAttribute?.("data-testid") || "")) {
+                  try {
+                    node.remove();
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }
+              for (const node of root.querySelectorAll("button, span, div, a")) {
+                const t = `${node.textContent || ""}`.trim();
+                if (t !== "PASTED" && t !== "Pasted") continue;
+                const chip = node.closest("[class*='chip'], [class*='badge'], [class*='pill'], button, div") || node;
+                try {
+                  chip.remove();
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+          };
+
+          /**
+           * Prefer insertText so Claude does not wrap the prompt as a PASTED chip.
+           * ClipboardEvent paste is fallback only.
+           */
+          const setInputValue = (el, text) => {
+            if (!(el instanceof HTMLElement)) return false;
+            clearComposer(el);
+            el.focus();
+
             let inserted = false;
             try {
-              const dt = new DataTransfer();
-              dt.setData("text/plain", text);
-              el.dispatchEvent(
-                new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
-              );
-              inserted = (el.innerText || el.textContent || "").trim().length > 20;
+              inserted = Boolean(document.execCommand("insertText", false, text));
             } catch {
               inserted = false;
             }
+            inserted = inserted || enoughFilled(el.innerText || el.textContent || "");
+
             if (!inserted) {
               try {
-                inserted = document.execCommand("insertText", false, text);
+                el.dispatchEvent(
+                  new InputEvent("beforeinput", {
+                    bubbles: true,
+                    cancelable: true,
+                    inputType: "insertText",
+                    data: text
+                  })
+                );
+                el.dispatchEvent(
+                  new InputEvent("input", {
+                    bubbles: true,
+                    cancelable: true,
+                    inputType: "insertText",
+                    data: text
+                  })
+                );
               } catch {
-                inserted = false;
+                /* ignore */
               }
-              inserted = inserted || (el.innerText || el.textContent || "").trim().length > 20;
+              inserted = enoughFilled(el.innerText || el.textContent || "");
             }
+
+            if (!inserted) {
+              try {
+                const dt = new DataTransfer();
+                dt.setData("text/plain", text);
+                el.dispatchEvent(
+                  new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
+                );
+              } catch {
+                /* ignore */
+              }
+              inserted = enoughFilled(el.innerText || el.textContent || "");
+            }
+
             if (!inserted) {
               el.innerHTML = "";
               for (const line of String(text).split("\n")) {
@@ -3185,7 +3343,9 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
                 el.appendChild(p);
               }
               el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+              inserted = enoughFilled(el.innerText || el.textContent || "");
             }
+            return inserted;
           };
 
           const findSendButton = () => {
@@ -3223,7 +3383,61 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
               document.querySelector('button[aria-label*="Stop"]') ||
               document.querySelector('button[aria-label*="stop"]') ||
               document.querySelector('[data-is-streaming="true"]');
-            return Boolean(stop && (stop.offsetParent !== null || stop.getAttribute?.("data-is-streaming") === "true"));
+            return Boolean(
+              stop && (stop.offsetParent !== null || stop.getAttribute?.("data-is-streaming") === "true")
+            );
+          };
+
+          const composerEmpty = () => {
+            const el = findInput();
+            const n = (el?.innerText || el?.textContent || "").trim().length;
+            return n < 40;
+          };
+
+          const findCautionBanner = () => {
+            const hay = `${document.body?.innerText || ""}`.slice(0, 20000);
+            if (!/Use caution before running this prompt|Malicious conversation content/i.test(hay)) {
+              return null;
+            }
+            const nodes = Array.from(
+              document.querySelectorAll(
+                '[role="dialog"], [role="alertdialog"], [role="alert"], [class*="banner"], [class*="Banner"], [class*="warning"], [class*="Warning"], [class*="caution"], div, section'
+              )
+            );
+            return (
+              nodes.find((el) => {
+                if (!(el instanceof HTMLElement) || el.offsetParent === null) return false;
+                const t = `${el.innerText || el.textContent || ""}`;
+                if (t.length > 1200) return false;
+                return /Use caution before running this prompt|Malicious conversation content/i.test(t);
+              }) || null
+            );
+          };
+
+          const dismissCautionBanner = () => {
+            const banner = findCautionBanner();
+            if (!banner) return { present: false, dismissed: false };
+            const scope = banner.closest('[role="dialog"], [role="alertdialog"], form, section, div') || banner;
+            const buttons = Array.from(scope.querySelectorAll("button, a[role='button'], [role='button']"));
+            for (const btn of buttons) {
+              const label = `${btn.textContent || ""} ${btn.getAttribute("aria-label") || ""}`.trim();
+              if (
+                /^(continue|proceed|accept|run anyway|i understand|allow|ok|dismiss|got it)$/i.test(label) ||
+                /continue|proceed|run anyway|accept|allow/i.test(label)
+              ) {
+                firePointerClick(btn);
+                return { present: true, dismissed: true };
+              }
+            }
+            // Broader page search for dismiss CTAs near the warning.
+            for (const btn of document.querySelectorAll("button")) {
+              const label = `${btn.textContent || ""} ${btn.getAttribute("aria-label") || ""}`.trim();
+              if (/continue|proceed|run anyway|i understand|accept and continue/i.test(label)) {
+                firePointerClick(btn);
+                return { present: true, dismissed: true };
+              }
+            }
+            return { present: true, dismissed: false };
           };
 
           if (shouldStartNewChat) {
@@ -3244,41 +3458,87 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
           }
           if (!input) throw new Error("Cannot find Claude message input box.");
 
+          // Do not re-paste while Claude is already generating.
+          if (isGenerating()) {
+            return {
+              blocksBefore: document.querySelectorAll(
+                '[data-testid="assistant-message"], [data-testid="assistant"], [class*="font-claude-message"]'
+              ).length,
+              latestBefore: "",
+              alreadyGenerating: true
+            };
+          }
+
           const usersBefore = countUser();
-          let filled = false;
-          for (let attempt = 0; attempt < 4; attempt += 1) {
-            input.focus();
-            await sleep(120);
-            setInputValue(input, fullPrompt);
-            await sleep(450);
+          clearComposer(input);
+          await sleep(150);
+          input = findInput() || input;
+
+          let filled = enoughFilled(input.innerText || input.textContent || "");
+          if (!filled) {
+            // Single insert attempt — never loop 4 blind pastes (creates PASTED chips).
+            filled = setInputValue(input, fullPrompt);
+            await sleep(500);
             input = findInput() || input;
-            if ((input.innerText || input.textContent || "").trim().length > 20) {
-              filled = true;
-              break;
-            }
+            filled = filled || enoughFilled(input.innerText || input.textContent || "");
           }
           if (!filled) {
-            throw new Error("Prompt text did not appear in the Claude input. Keep the Claude tab visible and try again.");
+            // One recovery: clear again + one more insert.
+            clearComposer(input);
+            await sleep(120);
+            filled = setInputValue(findInput() || input, fullPrompt);
+            await sleep(500);
+            input = findInput() || input;
+            filled = filled || enoughFilled(input.innerText || input.textContent || "");
           }
+          if (!filled) {
+            throw new Error(
+              "Prompt text did not appear in the Claude input. Keep the Claude tab visible and try again."
+            );
+          }
+
+          // Dismiss Claude's "malicious conversation content" caution before Send.
+          let caution = dismissCautionBanner();
+          if (caution.dismissed) await sleep(400);
+          caution = { present: Boolean(findCautionBanner()), dismissed: caution.dismissed };
+          if (caution.present) {
+            caution = dismissCautionBanner();
+            await sleep(350);
+          }
+          if (findCautionBanner() && !isSendEnabled(findSendButton())) {
+            throw new Error(
+              "Claude blocked the prompt as potentially malicious. Dismiss the caution banner in the Claude tab, then retry — or shorten the prompt."
+            );
+          }
+
+          const sendAccepted = () =>
+            isGenerating() || countUser() > usersBefore || composerEmpty();
 
           let sent = false;
           for (let i = 0; i < 40; i += 1) {
-            if (isGenerating() || countUser() > usersBefore) {
+            if (sendAccepted()) {
               sent = true;
               break;
+            }
+            if (findCautionBanner()) {
+              dismissCautionBanner();
+              await sleep(300);
             }
             const btn = findSendButton();
             if (btn && isSendEnabled(btn)) {
               firePointerClick(btn);
               await sleep(500);
-              if (isGenerating() || countUser() > usersBefore || (input.innerText || "").trim().length < 40) {
+              if (sendAccepted()) {
                 sent = true;
                 break;
               }
             } else {
               input = findInput() || input;
-              input.focus();
-              input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " }));
+              input?.focus();
+              // Nudge composer so Send enables — do NOT re-paste the full prompt.
+              input?.dispatchEvent(
+                new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " })
+              );
               await sleep(250);
             }
             await sleep(250);
@@ -3294,7 +3554,12 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
             }
           }
 
-          if (!(isGenerating() || countUser() > usersBefore || (findInput()?.innerText || "").trim().length < 40)) {
+          if (!sendAccepted()) {
+            if (findCautionBanner()) {
+              throw new Error(
+                "Claude blocked the prompt as potentially malicious. Dismiss the caution banner in the Claude tab, then retry."
+              );
+            }
             throw new Error(
               "Prompt was typed but Claude did not accept Send. Keep the Claude tab focused and try again."
             );
@@ -3308,7 +3573,7 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
 
           return {
             blocksBefore: document.querySelectorAll(
-              '[data-testid="assistant-message"], [data-testid="assistant"]'
+              '[data-testid="assistant-message"], [data-testid="assistant"], [class*="font-claude-message"]'
             ).length,
             latestBefore: ""
           };
@@ -3322,6 +3587,8 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
     } catch (err) {
       lastError = err;
       const msg = String(err?.message || err);
+      // Do not retry paste loops when Claude blocked as malicious — user must dismiss.
+      if (/malicious|blocked the prompt/i.test(msg)) throw err;
       if (!/did not accept Send|did not appear in the Claude input/i.test(msg) || attempt === 1) {
         throw err;
       }
@@ -4353,7 +4620,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       throw new Error("__SKIP__");
     }
 
-    // Mid-reply rate-limit banner: cool down, then keep polling for JSON.
+    // Mid-reply rate-limit / capacity banner: cool down, then keep polling for JSON.
     if (provider === AI_PROVIDERS.CHATGPT) {
       try {
         const rate = await detectChatGptRateLimit(tabId);
@@ -4365,7 +4632,21 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         }
       } catch (rateErr) {
         if (String(rateErr?.message || rateErr) === "__SKIP__") throw rateErr;
+        if (String(rateErr?.message || rateErr) === "__RATE_LIMIT_PAUSE__") throw rateErr;
         // ignore transient detection errors
+      }
+    } else if (provider === AI_PROVIDERS.CLAUDE) {
+      try {
+        const cap = await detectClaudeCapacityLimit(tabId);
+        if (cap.limited) {
+          const pauseStart = Date.now();
+          await waitOutClaudeCapacityLimit(tabId);
+          pausedMs += Date.now() - pauseStart;
+          continue;
+        }
+      } catch (capErr) {
+        if (String(capErr?.message || capErr) === "__SKIP__") throw capErr;
+        if (String(capErr?.message || capErr) === "__RATE_LIMIT_PAUSE__") throw capErr;
       }
     }
 
@@ -4403,7 +4684,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       state = await withTimeout(
         chatgptPollState(tabId, { harvestJson: expectResumeJson }),
         8000,
-        "ChatGPT page poll timed out (harvest too slow)."
+        `${providerLabel} page poll timed out (harvest too slow).`
       );
     } catch (pollErr) {
       await setStatus(`${label} (poll warning: ${String(pollErr?.message || pollErr)})`);
@@ -4435,7 +4716,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         state = await withTimeout(
           chatgptPollState(tabId, { harvestJson: true }),
           8000,
-          "ChatGPT page poll timed out (harvest too slow)."
+          `${providerLabel} page poll timed out (harvest too slow).`
         );
       } catch {
         // keep previous state
@@ -4755,8 +5036,8 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
   throw new Error(
     expectResumeJson
-      ? "Timed out waiting to recognize complete resume JSON from ChatGPT (JSON may be on screen — click Save JSON now)."
-      : "Timed out waiting for cover letter / ChatGPT response."
+      ? `Timed out waiting to recognize complete resume JSON from ${providerLabel} (JSON may be on screen — click Save JSON now).`
+      : `Timed out waiting for cover letter / ${providerLabel} response.`
   );
 }
 

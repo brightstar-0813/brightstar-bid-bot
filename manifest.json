@@ -38,6 +38,11 @@
       "run_at": "document_idle"
     },
     {
+      "matches": ["https://claude.ai/*"],
+      "js": ["content-claude.js"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": [
         "https://boards.greenhouse.io/*",
         "https://job-boards.greenhouse.io/*",
