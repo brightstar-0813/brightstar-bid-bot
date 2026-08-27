@@ -338,6 +338,47 @@ html[data-theme="jade-boardroom"] {
   --theme-swatch-ring: rgba(255, 255, 255, 0.5);
 }
 
+/*
+ * Derived semantic tokens — recompute from theme primaries so popup / editor /
+ * preview stay consistent without hardcoding navy-gold RGB in component CSS.
+ */
+html {
+  --accent: var(--gold);
+  --accent-soft-04: color-mix(in srgb, var(--gold) 4%, transparent);
+  --accent-soft-08: color-mix(in srgb, var(--gold) 8%, transparent);
+  --accent-soft-10: color-mix(in srgb, var(--gold) 10%, transparent);
+  --accent-soft-14: color-mix(in srgb, var(--gold) 14%, transparent);
+  --accent-soft-16: color-mix(in srgb, var(--gold) 16%, transparent);
+  --accent-soft-18: color-mix(in srgb, var(--gold) 18%, transparent);
+  --accent-soft-22: color-mix(in srgb, var(--gold) 22%, transparent);
+  --accent-border-32: color-mix(in srgb, var(--gold) 32%, transparent);
+  --accent-border-35: color-mix(in srgb, var(--gold) 35%, transparent);
+  --accent-border-45: color-mix(in srgb, var(--gold) 45%, transparent);
+  --accent-border-55: color-mix(in srgb, var(--gold) 55%, transparent);
+  --status-bar-bg: color-mix(in srgb, var(--navy-950) 72%, var(--navy-800));
+  --surface-sticky: color-mix(in srgb, var(--bg-bottom) 88%, transparent);
+  --surface-card: color-mix(in srgb, var(--control-bg) 92%, var(--navy-900));
+  --warn: color-mix(in srgb, var(--gold-bright) 70%, #fff8dc);
+  --warn-dot: var(--gold);
+  --status-idle-dot: var(--faint);
+  --ok-dot: var(--ok);
+  --err-dot: var(--danger);
+  --ok-fg: var(--ok);
+  --ok-border: color-mix(in srgb, var(--ok) 45%, transparent);
+  --err-fg: var(--danger);
+  --err-border: var(--danger-line);
+  --notice-bg: var(--accent-soft-14);
+  --notice-border: var(--accent-border-45);
+  --pill-muted-bg: color-mix(in srgb, var(--navy-700) 85%, transparent);
+  --pill-muted-fg: var(--muted);
+  --file-btn-bg: var(--btn-ghost-hover);
+  --ats-panel-bg: color-mix(in srgb, var(--control-bg) 88%, var(--navy-950));
+  --ats-panel-border: var(--line-strong);
+  --font-size-ui: 12.5px;
+  --font-size-ui-sm: 11px;
+  --font-size-ui-xs: 10.5px;
+}
+
 /* Theme picker UI */
 .theme-picker {
   display: flex;

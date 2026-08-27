@@ -82,3 +82,51 @@ export function watchThemeChanges(onChange) {
   chrome.storage.onChanged.addListener(handler);
   return () => chrome.storage.onChanged.removeListener(handler);
 }
+
+/**
+ * Mount theme swatches into a container. Shared by popup, Q&A editor, and preview.
+ * @param {HTMLElement | null} container
+ * @param {{ onSelect?: (theme: { id: string, label: string }) => void }} [options]
+ */
+export function mountThemeSwatches(container, options = {}) {
+  if (!container) return () => {};
+  container.replaceChildren();
+  for (const theme of THEMES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "theme-swatch";
+    btn.dataset.theme = theme.id;
+    btn.title = `${theme.label} — ${theme.blurb}`;
+    btn.setAttribute("aria-label", theme.label);
+    btn.setAttribute("aria-pressed", "false");
+    btn.addEventListener("click", () => {
+      setTheme(theme.id)
+        .then((id) => {
+          syncThemeSwatchPressed(container, id);
+          options.onSelect?.(theme);
+        })
+        .catch(() => {});
+    });
+    container.appendChild(btn);
+  }
+
+  function sync(id) {
+    syncThemeSwatchPressed(container, id);
+  }
+
+  loadAndApplyTheme()
+    .then(sync)
+    .catch(() => sync(DEFAULT_THEME));
+  const unwatch = watchThemeChanges(sync);
+  return () => {
+    unwatch();
+    container.replaceChildren();
+  };
+}
+
+function syncThemeSwatchPressed(container, activeId) {
+  const id = normalizeTheme(activeId);
+  container.querySelectorAll(".theme-swatch").forEach((btn) => {
+    btn.setAttribute("aria-pressed", btn.dataset.theme === id ? "true" : "false");
+  });
+}

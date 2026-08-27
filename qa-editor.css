@@ -30,6 +30,7 @@ body.ctx-window.editor-page {
 .editor-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin: 0;
   padding: 4px 2px 16px;
@@ -41,54 +42,93 @@ body.ctx-window.editor-page {
   gap: 12px;
 }
 
+.qa-editor .editor-header .topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .qa-editor .editor-header .brand-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
 }
 
 .qa-editor .editor-header h1 {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 750;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .qa-editor .editor-header .hype {
-  margin: 4px 0 0;
-  max-width: 36em;
+  margin: 2px 0 0;
+}
+
+.qa-editor .editor-header .hype-muted {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-ui-sm);
   font-weight: 500;
   letter-spacing: 0.01em;
   text-transform: none;
   line-height: 1.35;
   white-space: normal;
+  max-width: 36em;
 }
 
 .editor-status.status-bar {
   min-height: 1.3em;
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--surface-2, var(--section-bg));
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--status-bar-bg);
   border: 1px solid var(--line);
   color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.editor-status.status-bar::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--status-idle-dot);
+  flex: 0 0 auto;
 }
 
 .editor-status.status-bar.is-ok {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  color: var(--ok-fg);
+  border-color: var(--ok-border);
+}
+
+.editor-status.status-bar.is-ok::before {
+  background: var(--ok-dot);
+  box-shadow: 0 0 8px var(--ok-dot);
 }
 
 .editor-status.status-bar.is-warn {
-  color: var(--gold, var(--accent));
-  border-color: color-mix(in srgb, var(--gold, var(--accent)) 35%, var(--line));
+  color: var(--warn);
+  border-color: var(--accent-border-35);
+}
+
+.editor-status.status-bar.is-warn::before {
+  background: var(--warn-dot);
 }
 
 .editor-status.status-bar.is-err {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  color: var(--err-fg);
+  border-color: var(--err-border);
+}
+
+.editor-status.status-bar.is-err::before {
+  background: var(--err-dot);
+  box-shadow: 0 0 8px var(--err-dot);
 }
 
 .browse-tools {
@@ -303,12 +343,12 @@ body.ctx-window.editor-page {
 
 .qa-source-ai {
   color: var(--gold-bright);
-  border-color: rgba(245, 197, 66, 0.35);
+  border-color: var(--accent-border-35);
 }
 
 .qa-source-user {
   color: var(--ok);
-  border-color: rgba(134, 239, 172, 0.35);
+  border-color: var(--ok-border);
 }
 
 /* Pagination */

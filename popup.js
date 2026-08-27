@@ -69,13 +69,7 @@ import {
   loadBundledQaBank
 } from "./qa-store.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
-import {
-  THEMES,
-  loadAndApplyTheme,
-  setTheme,
-  watchThemeChanges,
-  normalizeTheme
-} from "./theme.js";
+import { mountThemeSwatches } from "./theme.js";
 
 const DEFAULT_OUTPUT_DIR = "Applications";
 const QUEUE_KEY = "job_queue";
@@ -2979,39 +2973,10 @@ if (UI_CONTEXT === "popup") {
   openAsWindowBtn && (openAsWindowBtn.hidden = true);
 }
 
-function syncThemeSwatches(activeId) {
-  const id = normalizeTheme(activeId);
-  themeSwatchesEl?.querySelectorAll(".theme-swatch").forEach((btn) => {
-    const pressed = btn.dataset.theme === id;
-    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
-  });
-}
-
 function initThemePicker() {
-  if (!themeSwatchesEl) return;
-  themeSwatchesEl.replaceChildren();
-  for (const theme of THEMES) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "theme-swatch";
-    btn.dataset.theme = theme.id;
-    btn.title = `${theme.label} — ${theme.blurb}`;
-    btn.setAttribute("aria-label", theme.label);
-    btn.setAttribute("aria-pressed", "false");
-    btn.addEventListener("click", () => {
-      setTheme(theme.id)
-        .then((id) => {
-          syncThemeSwatches(id);
-          setStatus(`Theme: ${theme.label}`);
-        })
-        .catch((e) => setStatus(String(e.message || e)));
-    });
-    themeSwatchesEl.appendChild(btn);
-  }
-  loadAndApplyTheme()
-    .then((id) => syncThemeSwatches(id))
-    .catch(() => syncThemeSwatches("midnight-gold"));
-  watchThemeChanges((id) => syncThemeSwatches(id));
+  mountThemeSwatches(themeSwatchesEl, {
+    onSelect: (theme) => setStatus(`Theme: ${theme.label}`)
+  });
 }
 
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");

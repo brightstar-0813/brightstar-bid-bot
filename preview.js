@@ -6,7 +6,7 @@ import {
 } from "./templates/index.js";
 import { getActivePerson } from "./profiles.js";
 import { isResumePreviewable, sampleResumeForPerson } from "./templates/preview-sample.js";
-import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
+import { loadAndApplyTheme, watchThemeChanges, mountThemeSwatches } from "./theme.js";
 
 const PREVIEW_SOURCE_KEY = "template_preview_source";
 
@@ -22,8 +22,17 @@ let templateId = new URLSearchParams(location.search).get("template") || DEFAULT
 let source = "sample";
 let hasLastResume = false;
 
-function setStatus(message) {
-  statusEl.textContent = message || "";
+function setStatus(message, tone = "") {
+  const text = String(message || "").trim();
+  statusEl.textContent = text;
+  statusEl.classList.remove("is-ok", "is-warn", "is-err", "is-empty");
+  if (!text) {
+    statusEl.classList.add("is-empty");
+    return;
+  }
+  if (tone === "err") statusEl.classList.add("is-err");
+  else if (tone === "warn") statusEl.classList.add("is-warn");
+  else statusEl.classList.add("is-ok");
 }
 
 pageEl.addEventListener("load", () => {
@@ -91,7 +100,7 @@ async function initSource() {
 
 async function setSource(next) {
   if (next === "last" && !hasLastResume) {
-    setStatus("No generated resume yet — showing sample layout.");
+    setStatus("No generated resume yet — showing sample layout.", "warn");
     source = "sample";
   } else {
     source = next;
@@ -153,8 +162,11 @@ window.addEventListener("keydown", (event) => {
 
 loadAndApplyTheme().catch(() => {});
 watchThemeChanges();
+mountThemeSwatches(document.getElementById("themeSwatches"), {
+  onSelect: (theme) => setStatus(`Theme: ${theme.label}`)
+});
 
 populateTemplates();
 initSource()
   .then(renderPreview)
-  .catch((err) => setStatus(`Preview failed: ${String(err?.message || err)}`));
+  .catch((err) => setStatus(`Preview failed: ${String(err?.message || err)}`, "err"));

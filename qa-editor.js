@@ -14,7 +14,7 @@ import {
   findQaMatch
 } from "./qa-store.js";
 import { isJunkQaRecord } from "./autofill-junk.js";
-import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
+import { loadAndApplyTheme, watchThemeChanges, mountThemeSwatches } from "./theme.js";
 
 const SHARED_ID = "";
 const ALL_ID = "__all__";
@@ -595,6 +595,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   try {
     await loadAndApplyTheme();
     watchThemeChanges();
+    mountThemeSwatches(document.getElementById("themeSwatches"), {
+      onSelect: (theme) => setStatus(`Theme: ${theme.label}`)
+    });
     wireStaticIcons();
     await loadPageSizePreference();
     profiles = await getResumeProfiles();
