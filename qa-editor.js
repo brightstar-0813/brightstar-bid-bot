@@ -16,6 +16,8 @@ import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
 
 const SHARED_ID = "";
 const ALL_ID = "__all__";
+const PAGE_SIZE_KEY = "qa_editor_page_size";
+const DEFAULT_PAGE_SIZE = 25;
 
 const els = {
   status: document.getElementById("status"),
@@ -23,28 +25,77 @@ const els = {
   filterType: document.getElementById("filterType"),
   searchInput: document.getElementById("searchInput"),
   countHint: document.getElementById("countHint"),
+  formSection: document.getElementById("formSection"),
   formTitle: document.getElementById("formTitle"),
+  formHint: document.getElementById("formHint"),
+  editBanner: document.getElementById("editBanner"),
+  editBannerText: document.getElementById("editBannerText"),
   formQuestion: document.getElementById("formQuestion"),
   formAnswer: document.getElementById("formAnswer"),
   formFieldType: document.getElementById("formFieldType"),
   formScope: document.getElementById("formScope"),
   saveBtn: document.getElementById("saveBtn"),
   cancelEditBtn: document.getElementById("cancelEditBtn"),
+  savedSub: document.getElementById("savedSub"),
   qaList: document.getElementById("qaList"),
+  pagination: document.getElementById("pagination"),
+  pageFirst: document.getElementById("pageFirst"),
+  pagePrev: document.getElementById("pagePrev"),
+  pageNext: document.getElementById("pageNext"),
+  pageLast: document.getElementById("pageLast"),
+  pageMeta: document.getElementById("pageMeta"),
+  pageSize: document.getElementById("pageSize"),
   exportBtn: document.getElementById("exportBtn"),
   importBtn: document.getElementById("importBtn"),
   importBundledBtn: document.getElementById("importBundledBtn"),
   importInput: document.getElementById("importInput"),
   remapImportToggle: document.getElementById("remapImportToggle"),
-  clearBtn: document.getElementById("clearBtn"),
-  closeBtn: document.getElementById("closeBtn")
+  clearBtn: document.getElementById("clearBtn")
 };
+
+const ACTION_ICON_PATHS = {
+  cancel: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
+  bundled:
+    '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.27 6.96 8.73 5.05 8.73-5.05M12 22.08V12"/>',
+  import: '<path d="M12 3v12"/><path d="m7 10 5-5 5 5"/><path d="M5 21h14"/>',
+  export: '<path d="M12 3v12"/><path d="m7 14 5 5 5-5"/><path d="M5 21h14"/>',
+  first: '<path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/><path d="M5 5v14"/>',
+  prev: '<path d="m15 18-6-6 6-6"/>',
+  next: '<path d="m9 18 6-6-6-6"/>',
+  last: '<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/><path d="M19 5v14"/>'
+};
+
+function setIconButton(button, icon, label) {
+  if (!button) return;
+  button.classList.add("icon-button");
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICON_PATHS[icon] || ""}</svg>`;
+}
+
+function wireStaticIcons() {
+  setIconButton(els.cancelEditBtn, "cancel", "Cancel edit");
+  setIconButton(els.saveBtn, "save", "Save Q&A");
+  setIconButton(els.importBundledBtn, "bundled", "Load bundled bank");
+  setIconButton(els.exportBtn, "export", "Export JSON");
+  setIconButton(els.importBtn, "import", "Import JSON");
+  setIconButton(els.clearBtn, "remove", "Clear this bank");
+  setIconButton(els.pageFirst, "first", "First page");
+  setIconButton(els.pagePrev, "prev", "Previous page");
+  setIconButton(els.pageNext, "next", "Next page");
+  setIconButton(els.pageLast, "last", "Last page");
+}
 
 /** @type {{ id: string, label: string }[]} */
 let profiles = [];
 /** @type {object[]} */
 let allRows = [];
 let editingId = null;
+let currentPage = 1;
+let pageSize = DEFAULT_PAGE_SIZE;
 
 function setStatus(message, isError = false) {
   els.status.textContent = message;
@@ -119,11 +170,22 @@ function rowsForView() {
   });
 }
 
+function totalPagesFor(count) {
+  return Math.max(1, Math.ceil(count / pageSize));
+}
+
+function clampPage(page, totalPages) {
+  return Math.min(Math.max(1, page), totalPages);
+}
+
 function resetForm() {
   editingId = null;
   els.formTitle.textContent = "Add Q&A";
-  els.saveBtn.textContent = "Save Q&A";
-  els.cancelEditBtn.hidden = true;
+  setIconButton(els.saveBtn, "save", "Save Q&A");
+  els.formHint.textContent =
+    "Store the question text as it appears on the form. For dropdowns, save the option text to pick. For checkboxes, save Yes or No.";
+  els.editBanner.hidden = true;
+  els.formSection.classList.remove("is-editing");
   els.formQuestion.value = "";
   els.formAnswer.value = "";
   els.formFieldType.value = "text";
@@ -134,14 +196,48 @@ function resetForm() {
 function startEdit(row) {
   editingId = row.id;
   els.formTitle.textContent = "Edit Q&A";
-  els.saveBtn.textContent = "Update Q&A";
-  els.cancelEditBtn.hidden = false;
+  setIconButton(els.saveBtn, "save", "Update Q&A");
+  els.formHint.textContent = "Update the fields below, then click Update Q&A. Cancel to discard.";
+  els.editBanner.hidden = false;
+  els.editBannerText.textContent = `Editing: ${(row.question || "").slice(0, 80)}${
+    (row.question || "").length > 80 ? "…" : ""
+  }`;
+  els.formSection.classList.add("is-editing");
   els.formQuestion.value = row.question || "";
   els.formAnswer.value = row.answer || "";
   els.formFieldType.value = normalizeFieldType(row.fieldType);
   els.formScope.value = row.profileId || SHARED_ID;
+  els.formSection.scrollIntoView({ behavior: "smooth", block: "start" });
   els.formQuestion.focus();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  renderList();
+}
+
+function renderPagination(filteredCount) {
+  const totalPages = totalPagesFor(filteredCount);
+  currentPage = clampPage(currentPage, totalPages);
+
+  if (filteredCount === 0) {
+    els.pagination.hidden = true;
+    return { start: 0, end: 0, totalPages: 1 };
+  }
+
+  els.pagination.hidden = false;
+  const start = (currentPage - 1) * pageSize;
+  const end = Math.min(start + pageSize, filteredCount);
+  els.pageMeta.textContent = `Page ${currentPage} of ${totalPages} · showing ${start + 1}–${end} of ${filteredCount}`;
+  const atStart = currentPage <= 1;
+  const atEnd = currentPage >= totalPages;
+  els.pageFirst.disabled = atStart;
+  els.pagePrev.disabled = atStart;
+  els.pageNext.disabled = atEnd;
+  els.pageLast.disabled = atEnd;
+  return { start, end, totalPages };
+}
+
+function goToPage(page) {
+  currentPage = page;
+  renderList();
+  els.qaList.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderList() {
@@ -149,16 +245,25 @@ function renderList() {
   const view = filterProfileId();
   const viewLabel = view === ALL_ID ? "all people" : profileLabel(view);
   els.countHint.textContent = `${rows.length} shown · ${allRows.length} total · viewing ${viewLabel}`;
+  if (els.savedSub) {
+    els.savedSub.textContent =
+      rows.length === 0
+        ? "No answers match the current filters"
+        : `${rows.length} matching · page size ${pageSize}`;
+  }
 
+  const { start, end } = renderPagination(rows.length);
   els.qaList.innerHTML = "";
+
   if (!rows.length) {
     els.qaList.innerHTML =
-      '<p class="hint" style="margin:0">No saved answers in this view. Import a JSON bank, load the bundled file, or add one above.</p>';
+      '<p class="qa-empty">No saved answers in this view. Import a JSON bank, load the bundled file, or add one above.</p>';
     return;
   }
 
+  const pageRows = rows.slice(start, end);
   const frag = document.createDocumentFragment();
-  for (const row of rows) {
+  for (const row of pageRows) {
     const item = document.createElement("div");
     item.className = "qa-item";
     if (row.id === editingId) item.classList.add("is-editing");
@@ -205,15 +310,15 @@ function renderList() {
 
     const edit = document.createElement("button");
     edit.type = "button";
-    edit.className = "ghost compact";
-    edit.textContent = "Edit";
+    edit.className = "ghost compact icon-button";
+    setIconButton(edit, "edit", "Edit");
     edit.addEventListener("click", () => startEdit(row));
     actions.appendChild(edit);
 
     const del = document.createElement("button");
     del.type = "button";
-    del.className = "ghost danger compact";
-    del.textContent = "Delete";
+    del.className = "ghost danger compact icon-button";
+    setIconButton(del, "remove", "Delete");
     del.addEventListener("click", async () => {
       if (!window.confirm("Delete this Q&A?")) return;
       await deleteQa(row.id);
@@ -228,6 +333,11 @@ function renderList() {
     frag.appendChild(item);
   }
   els.qaList.appendChild(frag);
+}
+
+function onFiltersChanged() {
+  currentPage = 1;
+  renderList();
 }
 
 async function reload() {
@@ -286,6 +396,7 @@ async function importRecords(records, sourceLabel) {
   );
   if (!ok) return;
   const count = await importQa(list, { remapProfileId });
+  currentPage = 1;
   await reload();
   setStatus(`Imported ${count} Q&A ${count === 1 ? "entry" : "entries"} into ${target}.`);
 }
@@ -312,21 +423,50 @@ async function clearShown() {
     await clearQa(view);
   }
   resetForm();
+  currentPage = 1;
   await reload();
   setStatus("Cleared.");
+}
+
+async function loadPageSizePreference() {
+  try {
+    const stored = await chrome.storage.local.get(PAGE_SIZE_KEY);
+    const n = Number(stored[PAGE_SIZE_KEY]);
+    if ([10, 25, 50, 100].includes(n)) {
+      pageSize = n;
+      els.pageSize.value = String(n);
+    }
+  } catch {
+    /* ignore — default page size */
+  }
 }
 
 els.filterProfile.addEventListener("change", () => {
   const view = filterProfileId();
   if (view && view !== ALL_ID) els.formScope.value = view;
+  onFiltersChanged();
+});
+els.filterType.addEventListener("change", onFiltersChanged);
+els.searchInput.addEventListener("input", onFiltersChanged);
+els.pageFirst.addEventListener("click", () => goToPage(1));
+els.pagePrev.addEventListener("click", () => goToPage(currentPage - 1));
+els.pageNext.addEventListener("click", () => goToPage(currentPage + 1));
+els.pageLast.addEventListener("click", () => {
+  goToPage(totalPagesFor(rowsForView().length));
+});
+els.pageSize.addEventListener("change", () => {
+  pageSize = Number(els.pageSize.value) || DEFAULT_PAGE_SIZE;
+  currentPage = 1;
+  chrome.storage.local.set({ [PAGE_SIZE_KEY]: pageSize }).catch(() => {});
   renderList();
 });
-els.filterType.addEventListener("change", renderList);
-els.searchInput.addEventListener("input", renderList);
 els.saveBtn.addEventListener("click", () => {
   saveForm().catch((err) => setStatus(String(err.message || err), true));
 });
-els.cancelEditBtn.addEventListener("click", resetForm);
+els.cancelEditBtn.addEventListener("click", () => {
+  resetForm();
+  renderList();
+});
 els.exportBtn.addEventListener("click", () => {
   exportShown().catch((err) => setStatus(String(err.message || err), true));
 });
@@ -345,7 +485,6 @@ els.importBundledBtn.addEventListener("click", () => {
 els.clearBtn.addEventListener("click", () => {
   clearShown().catch((err) => setStatus(String(err.message || err), true));
 });
-els.closeBtn.addEventListener("click", () => window.close());
 
 let reloadTimer = 0;
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -361,6 +500,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   try {
     await loadAndApplyTheme();
     watchThemeChanges();
+    wireStaticIcons();
+    await loadPageSizePreference();
     profiles = await getResumeProfiles();
     initSelects();
     await reload();

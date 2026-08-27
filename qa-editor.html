@@ -16,16 +16,20 @@
           <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
           <div class="brand-copy">
             <h1>Q&amp;A bank</h1>
-            <p class="hype">Reusable answers per person — used before OpenAI</p>
+            <p class="hype">Reusable answers per person — matched before OpenAI</p>
           </div>
         </div>
-        <button type="button" id="closeBtn" class="ghost compact">Close</button>
       </header>
 
       <p id="status" class="editor-status" role="status"></p>
 
-      <section class="section">
-        <p class="section-title">Browse</p>
+      <section class="section section-browse" aria-labelledby="browseTitle">
+        <div class="section-header">
+          <div class="section-copy">
+            <p class="section-title" id="browseTitle">Browse</p>
+            <p class="section-sub">Filter which saved answers appear below</p>
+          </div>
+        </div>
         <div class="grid-2">
           <label class="field">
             <span>Show answers for</span>
@@ -42,19 +46,37 @@
             <input id="searchInput" type="search" placeholder="Filter by question or answer" />
           </label>
         </div>
-        <p class="hint" id="countHint">0 saved</p>
+        <p class="hint count-hint" id="countHint">0 saved</p>
       </section>
 
-      <section class="section">
-        <p class="section-title" id="formTitle">Add Q&amp;A</p>
-        <p class="hint">
-          Store the question text as it appears on the form. For dropdowns, save the option text to
-          pick. For checkboxes, save Yes or No.
-        </p>
+      <section class="section section-form" id="formSection" aria-labelledby="formTitle">
+        <div class="section-header">
+          <div class="section-copy">
+            <p class="section-title" id="formTitle">Add Q&amp;A</p>
+            <p class="section-sub" id="formHint">
+              Store the question text as it appears on the form. For dropdowns, save the option text
+              to pick. For checkboxes, save Yes or No.
+            </p>
+          </div>
+        </div>
+        <div class="edit-banner" id="editBanner" hidden>
+          <span id="editBannerText">Editing an existing answer</span>
+          <button
+            type="button"
+            id="cancelEditBtn"
+            class="ghost compact icon-button"
+            title="Cancel edit"
+            aria-label="Cancel edit"
+          ></button>
+        </div>
         <div class="grid-2">
           <label class="field span-2">
             <span>Question</span>
-            <textarea id="formQuestion" rows="2" placeholder="e.g. Are you legally authorized to work in the United States?"></textarea>
+            <textarea
+              id="formQuestion"
+              rows="2"
+              placeholder="e.g. Are you legally authorized to work in the United States?"
+            ></textarea>
           </label>
           <label class="field span-2">
             <span>Answer</span>
@@ -73,28 +95,107 @@
             <select id="formScope"></select>
           </label>
         </div>
-        <div class="qa-toolbar">
-          <button type="button" id="saveBtn" class="primary compact">Save Q&amp;A</button>
-          <button type="button" id="cancelEditBtn" class="ghost compact" hidden>Cancel edit</button>
+        <div class="qa-toolbar form-actions">
+          <button
+            type="button"
+            id="saveBtn"
+            class="primary compact icon-button"
+            title="Save Q&amp;A"
+            aria-label="Save Q&amp;A"
+          ></button>
         </div>
       </section>
 
-      <section class="section">
-        <div class="qa-list-header">
-          <p class="section-title">Saved answers</p>
-          <div class="qa-toolbar">
-            <button type="button" id="importBundledBtn" class="ghost compact">Load bundled bank</button>
-            <button type="button" id="exportBtn" class="ghost compact">Export</button>
-            <button type="button" id="importBtn" class="ghost compact">Import JSON</button>
-            <button type="button" id="clearBtn" class="ghost danger compact">Clear this bank</button>
+      <section class="section section-saved" aria-labelledby="savedTitle">
+        <div class="section-header qa-list-header">
+          <div class="section-copy">
+            <p class="section-title" id="savedTitle">Saved answers</p>
+            <p class="section-sub" id="savedSub">Import, export, or edit entries for this person</p>
+          </div>
+          <div class="qa-toolbar bank-actions">
+            <button
+              type="button"
+              id="importBundledBtn"
+              class="ghost compact icon-button"
+              title="Load bundled bank"
+              aria-label="Load bundled bank"
+            ></button>
+            <button
+              type="button"
+              id="exportBtn"
+              class="ghost compact icon-button"
+              title="Export JSON"
+              aria-label="Export JSON"
+            ></button>
+            <button
+              type="button"
+              id="importBtn"
+              class="ghost compact icon-button"
+              title="Import JSON"
+              aria-label="Import JSON"
+            ></button>
+            <button
+              type="button"
+              id="clearBtn"
+              class="ghost danger compact icon-button"
+              title="Clear this bank"
+              aria-label="Clear this bank"
+            ></button>
             <input type="file" id="importInput" accept="application/json,.json" hidden />
           </div>
         </div>
-        <label class="checkbox-field" title="When off, imported rows keep the profileId from the file (e.g. custom-steven-avon)">
+        <label
+          class="checkbox-field import-remap"
+          title="When off, imported rows keep the profileId from the file (e.g. custom-steven-avon)"
+        >
           <span>Assign imports to the person in Save to</span>
           <input type="checkbox" id="remapImportToggle" checked />
         </label>
         <div class="qa-list qa-editor-list" id="qaList" aria-label="Saved questions and answers"></div>
+        <nav class="qa-pagination" id="pagination" aria-label="Saved answers pages" hidden>
+          <div class="qa-page-nav">
+            <button
+              type="button"
+              id="pageFirst"
+              class="ghost compact icon-button"
+              title="First page"
+              aria-label="First page"
+            ></button>
+            <button
+              type="button"
+              id="pagePrev"
+              class="ghost compact icon-button"
+              title="Previous page"
+              aria-label="Previous page"
+            ></button>
+          </div>
+          <p class="qa-page-meta" id="pageMeta">Page 1 of 1</p>
+          <label class="qa-page-size field compact-field">
+            <span>Per page</span>
+            <select id="pageSize">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <div class="qa-page-nav">
+            <button
+              type="button"
+              id="pageNext"
+              class="ghost compact icon-button"
+              title="Next page"
+              aria-label="Next page"
+            ></button>
+            <button
+              type="button"
+              id="pageLast"
+              class="ghost compact icon-button"
+              title="Last page"
+              aria-label="Last page"
+            ></button>
+          </div>
+        </nav>
       </section>
     </main>
     <script type="module" src="qa-editor.js"></script>
