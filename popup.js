@@ -1015,12 +1015,22 @@ async function persistChatGptPacing() {
   });
 }
 
+const ENGINE_CHIP_ICONS = {
+  chatgpt:
+    '<path d="M21 12a8.5 8.5 0 0 1-8.5 8.5H7l-4 3V12A8.5 8.5 0 1 1 21 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
+  claude:
+    '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/>'
+};
+
 function renderAiProvider(provider) {
   aiProviderCache = normalizeAiProvider(provider);
   const label = aiProviderLabel(aiProviderCache);
   if (aiProviderStateEl) {
-    aiProviderStateEl.textContent = label;
     aiProviderStateEl.dataset.state = aiProviderCache;
+    aiProviderStateEl.title = `Active AI engine: ${label}`;
+    aiProviderStateEl.setAttribute("aria-label", `Active AI engine: ${label}`);
+    const icon = ENGINE_CHIP_ICONS[aiProviderCache] || ENGINE_CHIP_ICONS.chatgpt;
+    aiProviderStateEl.innerHTML = `<svg class="engine-chip-icon" viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="engine-chip-label">${label}</span>`;
   }
   for (const btn of [aiProviderChatgptBtn, aiProviderClaudeBtn]) {
     if (!btn) continue;

@@ -337,7 +337,24 @@
               <p class="section-title">AI engine</p>
               <p class="section-sub">ChatGPT or Claude — switch anytime before Start / Grab</p>
             </div>
-            <span id="aiProviderState" class="state-pill" data-state="chatgpt">ChatGPT</span>
+            <span
+              id="aiProviderState"
+              class="engine-chip"
+              data-state="chatgpt"
+              title="Active AI engine"
+              aria-label="Active AI engine: ChatGPT"
+            >
+              <svg class="engine-chip-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M21 12a8.5 8.5 0 0 1-8.5 8.5H7l-4 3V12A8.5 8.5 0 1 1 21 12Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="engine-chip-label">ChatGPT</span>
+            </span>
           </header>
           <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine">
             <button type="button" class="ai-provider-btn is-active" id="aiProviderChatgpt" data-provider="chatgpt" aria-pressed="true">

@@ -504,7 +504,7 @@ button.primary:hover,
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--line-strong);
-  background: rgba(8, 16, 30, 0.65);
+  background: var(--btn-ghost-bg);
   color: var(--ink-soft);
   font-size: 13px;
   font-weight: 750;
@@ -515,24 +515,62 @@ button.primary:hover,
 
 .ai-provider-btn:hover {
   border-color: var(--accent-border-35);
+  background: var(--btn-ghost-hover);
   color: var(--ink);
 }
 
 .ai-provider-btn.is-active {
   border-color: var(--accent-border-55);
   background: linear-gradient(180deg, var(--accent-soft-18), var(--accent-soft-08));
-  color: var(--gold-bright);
+  color: var(--gold-deep);
   box-shadow: inset 0 0 0 1px var(--accent-soft-18);
+  font-weight: 800;
 }
 
-.state-pill[data-state="chatgpt"] {
-  background: rgba(30, 64, 175, 0.35);
-  color: #bfdbfe;
+html:not([data-theme="daylight-slate"]) .ai-provider-btn.is-active {
+  color: var(--gold-bright);
 }
 
-.state-pill[data-state="claude"] {
-  background: rgba(154, 92, 50, 0.4);
-  color: #fdba74;
+/* Active AI engine chip — high-contrast brand colors + icon */
+.engine-chip {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px 4px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.engine-chip-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.engine-chip-label {
+  line-height: 1;
+}
+
+.engine-chip[data-state="chatgpt"] {
+  background: #0f766e;
+  color: #f0fdfa;
+  border-color: #0d9488;
+  box-shadow: 0 1px 0 color-mix(in srgb, #042f2e 25%, transparent);
+}
+
+.engine-chip[data-state="claude"] {
+  background: #9a3412;
+  color: #fff7ed;
+  border-color: #c2410c;
+  box-shadow: 0 1px 0 color-mix(in srgb, #431407 25%, transparent);
 }
 
 .status-bar {
