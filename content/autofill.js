@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-26.scale01";
+  const SCRIPT_BUILD = "2026-08-27.safe01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -3718,19 +3718,8 @@
       const d = new Date();
       return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
     }
-    if (key === "selfIdentifyLanguage") return "English";
-    if (key === "howDidYouHear") return "Job Board";
-    if (key === "termsConsent") return "yes";
-    if (key === "country") return "United States of America";
-    // Sensible defaults for common yes/no compliance questions when profile is blank.
-    if (key === "workAuthorized") return "yes";
-    if (key === "needsSponsorship") return "no";
-    if (key === "postEmploymentRestrictions") return "no";
-    if (key === "workedForCompanyBefore") return "no";
-    if (key === "relatedToEmployee") return "no";
-    if (key === "governmentEmployee") return "no";
-    if (key === "governmentEthicsRecusal") return "no";
-    if (key === "raceEthnicity") return "not_specified";
+    // Do NOT invent compliance / EEO / how-heard answers when the profile is blank.
+    // Those specific questions are answered by the Q&A bank or OpenAI leftovers instead.
     return "";
   }
 

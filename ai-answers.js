@@ -276,7 +276,8 @@ export async function generateHumanizedApplicationAnswers({
           "Do not invent employers, degrees, visas, certifications, or tools that contradict the resume/profile. " +
           "Certification/credential questions must name only credentials listed in candidateProfile.certifications (or the resume excerpt). " +
           "If the prompt offers options such as \"Application Architect, Administrator, or both\", answer with those options from the listed credentials — never a generic architecture, stakeholder, or collaboration paragraph. " +
-          "If the resume lacks a specific story the question asks for, give a cautious brief answer based on transferable experience — do not fabricate a detailed false project."
+          "If the resume lacks a specific story the question asks for, give a cautious brief answer based on transferable experience — do not fabricate a detailed false project. " +
+          "If the profile and resume do not support a confident answer (especially work authorization, sponsorship, or other compliance facts), OMIT that id from answers rather than guessing."
       },
       {
         role: "user",
@@ -365,10 +366,8 @@ export async function generateConstrainedChoiceAnswers({
         content:
           "You answer US job-application CHOICE questions for a real candidate. " +
           "Each question includes an options array — you MUST set answer to EXACTLY one string from that question's options (character-for-character). " +
-          "Never invent an option. For yes/no style questions prefer honest answers from the profile/resume. " +
-          "Default guidance when profile is silent: eligible to work in the US → Yes option; visa sponsorship needed → No; " +
-          "employment restrictions with current/former employer → No; previously worked for this company → No; " +
-          "related to current employee → No; government employee → No; ethics recusal → No. " +
+          "Never invent an option. For yes/no style questions prefer honest answers grounded in the profile/resume only. " +
+          "If the profile and resume do not support a confident answer for a question, OMIT that id from answers — do not guess Yes/No or invent compliance facts. " +
           'Return ONLY JSON: {"answers":[{"id":"...","answer":"..."}]}.'
       },
       {
@@ -479,8 +478,7 @@ export async function generateFormInventoryAnswers({
           'Yes/no free-text answers must be Title Case "Yes" or "No". ' +
           "Ground answers in candidateProfile / resume; do not invent employers, visas, or certifications. " +
           "Certification questions may only list credentials from candidateProfile.certifications. " +
-          "Default when profile is silent: work eligible US → Yes; sponsorship needed → No; " +
-          "related to employee / prior employer conflict → No."
+          "If the profile and resume do not support a confident answer, OMIT that id from answers — do not guess Yes/No or invent compliance facts."
       },
       {
         role: "user",

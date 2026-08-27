@@ -7163,12 +7163,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             ? await chrome.tabs.get(message.tabId).catch(() => null)
             : (await chrome.tabs.query({ active: true, currentWindow: true }))[0] || null;
         const tabUrl = tab?.url || stored.last_apply_jd_link || "";
-        const alwaysSubmitPage =
-          isGreenhouseJob({ jdLink: tabUrl }) ||
-          isAshbyJob({ jdLink: tabUrl }) ||
-          isLeverJob({ jdLink: tabUrl });
+        // Assist Auto Apply never auto-submits (including Greenhouse) — review manually.
         const result = await startMultiStepApplyOnTab(message.tabId || tab?.id || null, {
-          autoSubmit: alwaysSubmitPage || message.autoSubmit === true,
+          autoSubmit: false,
+          assistMode: true,
           applyHint: {
             csvRow: stored.last_apply_csv_row,
             jobDir: stored.last_apply_job_dir,
@@ -7191,9 +7189,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           result.detail ||
           `Apply assist filled ${filled} field(s) across ${result.steps || 1} step(s).`;
         await setStatus(metricsBits ? `${msg} (${metricsBits})` : msg);
-        if (result.status === "submitted" && alwaysSubmitPage && result.tabId) {
-          await closeApplyTab(result.tabId).catch(() => false);
-        }
         safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
@@ -7778,12 +7773,10 @@ chrome.commands.onCommand.addListener((command) => {
     (async () => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const alwaysSubmitPage =
-          isGreenhouseJob({ jdLink: tab?.url || "" }) ||
-          isAshbyJob({ jdLink: tab?.url || "" }) ||
-          isLeverJob({ jdLink: tab?.url || "" });
+        // Assist shortcut never auto-submits — stop before Submit for review.
         const r = await startMultiStepApplyOnTab(tab?.id || null, {
-          autoSubmit: alwaysSubmitPage
+          autoSubmit: false,
+          assistMode: true
         });
         await setStatus(
           r.detail ||
@@ -7791,9 +7784,6 @@ chrome.commands.onCommand.addListener((command) => {
               ? "Application submitted."
               : `Apply assist filled ${r.filled || 0} field(s). Review and submit.`)
         );
-        if (r.status === "submitted" && alwaysSubmitPage && r.tabId) {
-          await closeApplyTab(r.tabId).catch(() => false);
-        }
       } catch (err) {
         await setStatus(`Apply assist failed: ${String(err?.message || err)}`);
       }

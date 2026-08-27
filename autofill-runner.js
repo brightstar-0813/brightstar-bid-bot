@@ -46,7 +46,7 @@ import { fetchLatestGreenhouseSecurityCode } from "./ms-graph-mail.js";
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-26.scale01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-27.safe01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -879,7 +879,7 @@ function matchExtraAnswer(questionLabel, extras = {}, options = []) {
     if (qNorm.includes(kNorm) || kNorm.includes(qNorm)) score = Math.max(score, 0.86);
     if (!best || score > best.score) best = { answer: v, score, key };
   }
-  if (!best || best.score < 0.55) return null;
+  if (!best || best.score < 0.78) return null;
 
   if (Array.isArray(options) && options.length) {
     const want = normalizeQuestion(best.answer);
@@ -2026,10 +2026,12 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
 /**
  * Multi-step apply: fill → click Next/Continue → wait → refill.
  * Stops before Submit unless autoSubmit is true on a supported in-site flow.
+ * Assist mode (popup Autofill/Auto Apply / Ctrl+Shift+U) never auto-submits —
+ * even on Greenhouse/Ashby/Lever — so redirects cannot flip submit on.
  */
 export async function startMultiStepApplyOnTab(
   tabId = null,
-  { maxSteps = 12, applyHint = {}, autoSubmit = false } = {}
+  { maxSteps = 12, applyHint = {}, autoSubmit = false, assistMode = false } = {}
 ) {
   const tab = tabId
     ? await chrome.tabs.get(tabId).catch(() => null)
@@ -2047,7 +2049,10 @@ export async function startMultiStepApplyOnTab(
   const initialSite = applySiteFromUrl(tab.url || "");
   let liveSite = initialSite;
   let stepBudget = stepBudgetForSite(initialSite, maxSteps);
-  let effectiveAutoSubmit = resolveEffectiveAutoSubmit(initialSite, autoSubmit);
+  // Assist (manual Autofill/Auto Apply) never submits. Batch Dice/etc. pass autoSubmit.
+  let effectiveAutoSubmit = assistMode
+    ? false
+    : resolveEffectiveAutoSubmit(initialSite, autoSubmit);
   let siteLabel = applySiteLabel(initialSite);
   const summary = {
     ok: true,
@@ -2068,6 +2073,7 @@ export async function startMultiStepApplyOnTab(
     tabId: currentTabId,
     tabUrl: tab.url || "",
     autoSubmit: effectiveAutoSubmit,
+    assistMode: Boolean(assistMode),
     site: initialSite
   };
 
@@ -2091,10 +2097,11 @@ export async function startMultiStepApplyOnTab(
       siteLabel = applySiteLabel(detected);
       summary.site = detected;
       if (
-        Boolean(autoSubmit) ||
-        initialSite === "jobgether" ||
-        getAdapter(detected)?.alwaysAutoSubmit ||
-        getAdapter(initialSite)?.alwaysAutoSubmit
+        !assistMode &&
+        (Boolean(autoSubmit) ||
+          initialSite === "jobgether" ||
+          getAdapter(detected)?.alwaysAutoSubmit ||
+          getAdapter(initialSite)?.alwaysAutoSubmit)
       ) {
         effectiveAutoSubmit = resolveEffectiveAutoSubmit(detected, true);
         summary.autoSubmit = effectiveAutoSubmit;

@@ -2680,7 +2680,7 @@ async function autofillThisPage() {
 }
 
 async function autoApplyThisPage() {
-  setStatus("Auto Apply: filling and advancing steps (stops before Submit)…");
+  setStatus("Auto Apply: filling (profile → bank → OpenAI leftovers) and Next — stops before Submit…");
   const res = await chrome.runtime.sendMessage({ type: "autofill_multi_step" });
   if (!res?.ok) {
     setStatus(res?.error || "Auto Apply failed. Focus the application tab first.");
