@@ -6,6 +6,7 @@ import {
 } from "./templates/index.js";
 import { getActivePerson } from "./profiles.js";
 import { isResumePreviewable, sampleResumeForPerson } from "./templates/preview-sample.js";
+import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
 
 const PREVIEW_SOURCE_KEY = "template_preview_source";
 
@@ -149,6 +150,9 @@ window.addEventListener("keydown", (event) => {
     templateSelectEl.dispatchEvent(new Event("change"));
   }
 });
+
+loadAndApplyTheme().catch(() => {});
+watchThemeChanges();
 
 populateTemplates();
 initSource()

@@ -61,7 +61,7 @@ body.ctx-window.editor-page {
 
 .qa-item {
   border: 1px solid var(--line-strong);
-  background: rgba(7, 13, 24, 0.55);
+  background: var(--subblock-bg);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
 }

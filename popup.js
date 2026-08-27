@@ -68,6 +68,13 @@ import {
   parseQaBankPayload,
   loadBundledQaBank
 } from "./qa-store.js";
+import {
+  THEMES,
+  loadAndApplyTheme,
+  setTheme,
+  watchThemeChanges,
+  normalizeTheme
+} from "./theme.js";
 
 const DEFAULT_OUTPUT_DIR = "Applications";
 const QUEUE_KEY = "job_queue";
@@ -520,6 +527,7 @@ const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
 const qaImportBtn = document.getElementById("qaImportBtn");
 const qaExportBtn = document.getElementById("qaExportBtn");
 const qaImportInput = document.getElementById("qaImportInput");
+const themeSwatchesEl = document.getElementById("themeSwatches");
 
 let profilesCache = [];
 let templatesCache = [];
@@ -2942,6 +2950,41 @@ if (UI_CONTEXT === "popup") {
   openAsWindowBtn && (openAsWindowBtn.hidden = true);
 }
 
+function syncThemeSwatches(activeId) {
+  const id = normalizeTheme(activeId);
+  themeSwatchesEl?.querySelectorAll(".theme-swatch").forEach((btn) => {
+    const pressed = btn.dataset.theme === id;
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  });
+}
+
+function initThemePicker() {
+  if (!themeSwatchesEl) return;
+  themeSwatchesEl.replaceChildren();
+  for (const theme of THEMES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "theme-swatch";
+    btn.dataset.theme = theme.id;
+    btn.title = `${theme.label} — ${theme.blurb}`;
+    btn.setAttribute("aria-label", theme.label);
+    btn.setAttribute("aria-pressed", "false");
+    btn.addEventListener("click", () => {
+      setTheme(theme.id)
+        .then((id) => {
+          syncThemeSwatches(id);
+          setStatus(`Theme: ${theme.label}`);
+        })
+        .catch((e) => setStatus(String(e.message || e)));
+    });
+    themeSwatchesEl.appendChild(btn);
+  }
+  loadAndApplyTheme()
+    .then((id) => syncThemeSwatches(id))
+    .catch(() => syncThemeSwatches("midnight-gold"));
+  watchThemeChanges((id) => syncThemeSwatches(id));
+}
+
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
 if (keepOpenBtn) setIconButton(keepOpenBtn, "panel", "Keep open in side panel");
 
@@ -2959,6 +3002,7 @@ if (qaImportBundledBtn) setIconButton(qaImportBundledBtn, "bundled", "Load bundl
 if (qaImportBtn) setIconButton(qaImportBtn, "import", "Import JSON");
 if (qaExportBtn) setIconButton(qaExportBtn, "export", "Export JSON");
 
+initThemePicker();
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
 
 chrome.storage.onChanged.addListener((changes, area) => {

@@ -12,6 +12,7 @@ import {
   parseQaBankPayload,
   loadBundledQaBank
 } from "./qa-store.js";
+import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
 
 const SHARED_ID = "";
 const ALL_ID = "__all__";
@@ -358,6 +359,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 (async () => {
   try {
+    await loadAndApplyTheme();
+    watchThemeChanges();
     profiles = await getResumeProfiles();
     initSelects();
     await reload();

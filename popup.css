@@ -1,31 +1,4 @@
-:root {
-  --navy-950: #070d18;
-  --navy-900: #0b1220;
-  --navy-850: #0d1829;
-  --navy-800: #102038;
-  --navy-700: #163056;
-  --ink: #e8eef8;
-  --ink-soft: #c5d0e0;
-  --muted: #8b9bb0;
-  --faint: #5c6d82;
-  --line: rgba(245, 197, 66, 0.12);
-  --line-strong: rgba(148, 175, 210, 0.18);
-  --gold: #f5c542;
-  --gold-bright: #ffe08a;
-  --gold-deep: #c49212;
-  --gold-ink: #1a1304;
-  --danger: #f0a0a0;
-  --danger-line: rgba(248, 113, 113, 0.35);
-  --ok: #86efac;
-  --ok-bg: rgba(20, 83, 45, 0.55);
-  --err-bg: rgba(127, 29, 29, 0.55);
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
-  --ring: 0 0 0 2px var(--navy-950), 0 0 0 4px var(--gold);
-  --font: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
-}
+/* Color tokens live in themes.css — keep structure/layout rules here. */
 
 * {
   box-sizing: border-box;
@@ -45,9 +18,9 @@ body {
   color: var(--ink);
   font: 12.5px/1.4 var(--font);
   background:
-    radial-gradient(1200px 420px at 12% -10%, rgba(245, 197, 66, 0.09), transparent 55%),
-    radial-gradient(800px 360px at 110% 0%, rgba(56, 132, 214, 0.12), transparent 50%),
-    linear-gradient(180deg, #0a1424 0%, var(--navy-950) 48%, #060b14 100%);
+    radial-gradient(1200px 420px at 12% -10%, var(--glow-a), transparent 55%),
+    radial-gradient(800px 360px at 110% 0%, var(--glow-b), transparent 50%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 48%, var(--bg-bottom) 100%);
 }
 
 body.ctx-panel,
@@ -74,7 +47,7 @@ body.ctx-window {
   flex-wrap: nowrap;
   padding: 10px 14px 10px;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(18, 32, 54, 0.92), rgba(11, 18, 32, 0.78));
+  background: var(--topbar-bg);
   backdrop-filter: blur(10px);
 }
 
@@ -92,8 +65,8 @@ body.ctx-window {
   border-radius: 11px;
   flex: 0 0 auto;
   box-shadow:
-    0 0 0 1px rgba(245, 197, 66, 0.42),
-    0 0 20px rgba(245, 197, 66, 0.22),
+    0 0 0 1px var(--brand-ring),
+    0 0 20px var(--brand-glow),
     0 8px 18px rgba(0, 0, 0, 0.4);
 }
 
@@ -136,7 +109,7 @@ h1 {
   flex-direction: column;
   gap: 10px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(245, 197, 66, 0.35) transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 
 .app-body::-webkit-scrollbar {
@@ -144,7 +117,7 @@ h1 {
 }
 
 .app-body::-webkit-scrollbar-thumb {
-  background: rgba(245, 197, 66, 0.28);
+  background: var(--scrollbar);
   border-radius: 999px;
 }
 
@@ -153,29 +126,27 @@ h1 {
   padding: 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, rgba(22, 40, 68, 0.45), rgba(11, 20, 36, 0.72));
+  background: var(--section-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow);
 }
 
 .section-hero {
-  border-color: rgba(245, 197, 66, 0.22);
-  background:
-    linear-gradient(180deg, rgba(40, 32, 12, 0.28), rgba(11, 20, 36, 0.78));
+  border-color: var(--section-hero-border);
+  background: var(--section-hero-bg);
 }
 
 .section-apply {
-  border-color: rgba(245, 197, 66, 0.26);
+  border-color: var(--section-apply-border);
 }
 
 .section-style {
-  border-color: rgba(245, 197, 66, 0.28);
+  border-color: var(--section-style-border);
 }
 
 .section-muted {
   box-shadow: none;
-  background: rgba(11, 20, 36, 0.45);
-  border-color: rgba(148, 175, 210, 0.12);
+  background: var(--section-muted-bg);
+  border-color: var(--line-strong);
 }
 
 .section-header {
@@ -204,11 +175,11 @@ h1 {
   color: var(--gold-ink);
   font-size: 11px;
   font-weight: 800;
-  box-shadow: 0 0 0 1px rgba(245, 197, 66, 0.35);
+  box-shadow: 0 0 0 1px var(--brand-ring);
 }
 
 .step-muted {
-  background: #1b2b44;
+  background: var(--step-muted-bg);
   color: var(--muted);
   box-shadow: none;
 }
@@ -223,7 +194,7 @@ h1 {
 }
 
 .section-muted .section-title {
-  color: #b7c7dc;
+  color: var(--title-muted);
 }
 
 .section-sub {
@@ -248,7 +219,7 @@ h1 {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(7, 13, 24, 0.55);
+  background: var(--subblock-bg);
 }
 
 .subblock:last-of-type {
@@ -312,9 +283,9 @@ select,
 textarea,
 button {
   width: 100%;
-  border: 1px solid rgba(148, 175, 210, 0.22);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
-  background: rgba(7, 13, 24, 0.72);
+  background: var(--control-bg);
   color: var(--ink);
   padding: 7px 10px;
   font: inherit;
@@ -324,7 +295,7 @@ button {
 input:hover,
 select:hover,
 textarea:hover {
-  border-color: rgba(245, 197, 66, 0.32);
+  border-color: var(--control-hover-border);
 }
 
 input:focus,
@@ -368,9 +339,9 @@ button {
   font-size: 12.5px;
   line-height: 1.2;
   padding: 8px 10px;
-  background: #17263d;
+  background: var(--btn-bg);
   color: var(--ink);
-  border-color: rgba(148, 175, 210, 0.28);
+  border-color: var(--btn-border);
 }
 
 button.ghost,
@@ -379,7 +350,7 @@ button.secondary {
   font-weight: 650;
   padding: 7px 9px;
   color: var(--ink-soft);
-  background: rgba(16, 32, 56, 0.7);
+  background: var(--btn-ghost-bg);
 }
 
 button.danger {
@@ -389,17 +360,17 @@ button.danger {
 }
 
 button:hover {
-  background: #203452;
+  background: var(--btn-ghost-hover);
 }
 
 button.ghost:hover,
 button.secondary:hover {
-  background: #1b304c;
+  background: var(--btn-secondary-hover);
   color: var(--ink);
 }
 
 button.danger:hover {
-  background: rgba(127, 29, 29, 0.4);
+  background: var(--btn-danger-hover);
 }
 
 button:disabled {
@@ -415,11 +386,16 @@ button.primary,
 #savePerson,
 #csvSourceSave,
 #indeedCaptureStart {
-  background: linear-gradient(180deg, #ffe08a 0%, var(--gold) 48%, var(--gold-deep) 100%);
-  border-color: #e8b423;
+  background: linear-gradient(
+    180deg,
+    var(--btn-primary-top) 0%,
+    var(--btn-primary-mid) 48%,
+    var(--btn-primary-bottom) 100%
+  );
+  border-color: var(--btn-primary-border);
   color: var(--gold-ink);
   font-weight: 800;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 6px 14px rgba(245, 197, 66, 0.18);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 6px 14px var(--btn-primary-glow);
 }
 
 button.primary:hover,
@@ -429,7 +405,7 @@ button.primary:hover,
 #savePerson:hover,
 #csvSourceSave:hover,
 #indeedCaptureStart:hover {
-  background: linear-gradient(180deg, #fff0b3, #f0bc2e);
+  background: linear-gradient(180deg, var(--btn-primary-hover-top), var(--btn-primary-hover-bottom));
   color: var(--gold-ink);
 }
 
@@ -457,7 +433,7 @@ button.primary:hover,
   text-align: left;
   font-size: 12px;
   color: var(--ink-soft);
-  background: rgba(7, 13, 24, 0.45);
+  background: var(--panel-toggle-bg);
 }
 
 .panel-toggle::after {
@@ -476,12 +452,12 @@ button.primary:hover,
 }
 
 .panel-toggle:hover {
-  background: rgba(27, 48, 76, 0.8);
+  background: var(--panel-toggle-hover);
   color: var(--ink);
 }
 
 .panel-toggle[aria-expanded="true"] {
-  border-color: rgba(245, 197, 66, 0.35);
+  border-color: var(--control-hover-border);
   color: var(--gold-bright);
 }
 
@@ -490,7 +466,7 @@ button.primary:hover,
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: rgba(4, 8, 16, 0.62);
+  background: var(--panel-body-bg);
 }
 
 .hint {
@@ -666,7 +642,7 @@ input[type="file"]::file-selector-button {
   overflow: auto;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: rgba(7, 13, 24, 0.7);
+  background: var(--control-bg);
   margin-top: 2px;
   scrollbar-width: thin;
 }
@@ -1126,7 +1102,7 @@ input[type="file"]::file-selector-button {
   gap: 6px;
   padding: 6px;
   border-radius: var(--radius-sm);
-  background: rgba(7, 13, 24, 0.72);
+  background: var(--control-bg);
   border: 1px solid var(--line-strong);
 }
 
@@ -1138,7 +1114,7 @@ input[type="file"]::file-selector-button {
   font-weight: 750;
   line-height: 1.15;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.55);
+  background: var(--btn-ghost-bg);
   color: var(--ink-soft);
   border: 1px solid transparent;
   white-space: nowrap;
@@ -1147,20 +1123,20 @@ input[type="file"]::file-selector-button {
 }
 
 .channel-btn.active {
-  background: linear-gradient(180deg, #ffe08a, var(--gold));
-  border-color: rgba(245, 197, 66, 0.35);
+  background: linear-gradient(180deg, var(--btn-primary-top), var(--gold));
+  border-color: var(--brand-ring);
   color: var(--gold-ink);
-  box-shadow: 0 2px 8px rgba(245, 197, 66, 0.22);
+  box-shadow: 0 2px 8px var(--btn-primary-glow);
 }
 
 .channel-btn:hover {
-  background: #1e293b;
+  background: var(--btn-secondary-hover);
   color: var(--ink);
-  border-color: rgba(148, 175, 210, 0.22);
+  border-color: var(--control-border);
 }
 
 .channel-btn.active:hover {
-  background: linear-gradient(180deg, #fff0b3, #f0bc2e);
+  background: linear-gradient(180deg, var(--btn-primary-hover-top), var(--btn-primary-hover-bottom));
   color: var(--gold-ink);
 }
 
@@ -1173,7 +1149,7 @@ input[type="file"]::file-selector-button {
 }
 
 .channel-btn.active:focus-visible {
-  box-shadow: 0 2px 8px rgba(245, 197, 66, 0.22), var(--ring);
+  box-shadow: 0 2px 8px var(--btn-primary-glow), var(--ring);
 }
 
 .channel-btn[hidden] {
@@ -1238,7 +1214,7 @@ input[type="file"]::file-selector-button {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(7, 13, 24, 0.55);
+  background: var(--subblock-bg);
   border: 1px solid var(--line);
   color: var(--ink-soft);
   font-size: 10.5px;
@@ -1361,7 +1337,7 @@ input[type="file"]::file-selector-button {
   padding: 6px 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: rgba(7, 13, 24, 0.55);
+  background: var(--subblock-bg);
 }
 
 .checkbox-field span {
@@ -1380,7 +1356,7 @@ input[type="file"]::file-selector-button {
   margin: 0 0 10px;
   padding: 8px;
   border-radius: var(--radius-sm);
-  background: rgba(7, 13, 24, 0.5);
+  background: var(--subblock-bg);
   border: 1px solid var(--line);
 }
 
@@ -1483,7 +1459,7 @@ input[type="file"]::file-selector-button {
   letter-spacing: 0.02em;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--kbd-bg);
   color: inherit;
   opacity: 0.78;
 }
