@@ -7307,7 +7307,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             await setStatus("Apply skipped — no job link.");
             return;
           }
-          await persistJobContextForAutofill(jobMeta);
           const located = await locateJobFolder({
             csvRow: jobMeta.csvRow,
             jobDir: jobMeta.jobDir || "",
@@ -7322,25 +7321,60 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             }
           }
           await persistJobContextForAutofill(jobMeta);
-          const result = await openJobAndApply(href, {
-            openOnly: true,
-            csvRow: jobMeta.csvRow,
-            jobDir: jobMeta.jobDir || "",
-            jdLink: jobMeta.jdLink || href
-          });
-          const status =
-            result?.detail ||
-            `Row ${jobMeta.csvRow}: opened job link (autofill is off — apply manually).`;
+          const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+          const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
+          const sheetFailed = Boolean(sheet?.error);
+          const sheetLabel = sheetFailed
+            ? `Sheet Applied failed: ${sheet.error}`
+            : sheet?.skipped
+              ? ""
+              : `Sheet: ${sheet.status || (appliedDate ? `Applied ${appliedDate}` : "Applied")}`;
+          if (!sheetFailed && jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+            await updateQueueJob(jobMeta.csvRow, {
+              applied: true,
+              appliedDate,
+              jobDir: jobMeta.jobDir || "",
+              hasFiles: Boolean(jobMeta.jobDir)
+            }).catch(() => {});
+          }
+          const sheetStatus = sheetFailed
+            ? sheetLabel || "Sheet update failed."
+            : sheetLabel
+              ? `${sheetLabel}. Opening job link…`
+              : "Marked Applied. Opening job link…";
           reply({
-            ok: true,
-            applied: false,
+            ok: !sheetFailed,
+            applied: !sheetFailed,
             started: false,
             openedOnly: true,
             autofillSkipped: true,
+            appliedDate: sheetFailed ? "" : appliedDate,
             jobDir: jobMeta.jobDir || "",
-            status
+            status: sheetStatus
           });
-          await setStatus(status);
+          if (sheetFailed) {
+            await setStatus(sheetStatus);
+            return;
+          }
+          await setStatus(sheetStatus);
+          try {
+            const result = await openJobAndApply(href, {
+              openOnly: true,
+              csvRow: jobMeta.csvRow,
+              jobDir: jobMeta.jobDir || "",
+              jdLink: jobMeta.jdLink || href
+            });
+            await setStatus(
+              sheetLabel
+                ? `${sheetLabel}. ${result?.detail || "Opened job link."}`
+                : result?.detail ||
+                  `Row ${jobMeta.csvRow}: marked Applied and opened job link.`
+            );
+          } catch (err) {
+            await setStatus(
+              `${sheetLabel || "Marked Applied"}. Job link failed: ${String(err?.message || err)}`
+            );
+          }
           return;
         }
         const folderPromise = locateJobFolder({

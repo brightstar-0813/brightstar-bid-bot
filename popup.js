@@ -2145,11 +2145,8 @@ async function applyAssist(job) {
     setStatus("No JD link for this job.");
     return;
   }
-  setStatus(
-    autofillEnabledCache
-      ? "Marking Applied on the Google Sheet…"
-      : "Opening job link…"
-  );
+
+  setStatus("Marking Applied on the Google Sheet…");
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
@@ -2165,22 +2162,35 @@ async function applyAssist(job) {
       salary: job.salary || ""
     }
   });
+
   if (res?.applied) {
     job.applied = true;
     job.appliedDate = res.appliedDate || formatApplicationDateTime();
     if (res.jobDir) job.jobDir = res.jobDir;
     if (res.resumeName) job.resumeName = res.resumeName;
     if (res.coverName) job.coverName = res.coverName;
+    const csvRow = Number(job.csvRow);
+    queueCache = queueCache.map((j) =>
+      Number(j.csvRow) === csvRow
+        ? {
+            ...j,
+            applied: true,
+            appliedDate: job.appliedDate,
+            jobDir: job.jobDir || j.jobDir,
+            resumeName: job.resumeName || j.resumeName,
+            coverName: job.coverName || j.coverName
+          }
+        : j
+    );
     await persistQueue();
   }
-  if (res?.autofillSkipped || res?.openedOnly) {
-    setStatus(res.status || "Opened job link — autofill is off.");
+
+  if (!res?.ok) {
+    setStatus(res?.error || res?.status || "Apply failed.");
     return;
   }
-  if (!res?.ok) {
-    setStatus(
-      `Opened job link. Autofill: ${res?.error || "focus the application tab and click Auto Apply."}`
-    );
+  if (res?.autofillSkipped || res?.openedOnly) {
+    setStatus(res.status || "Marked Applied and opened job link.");
     return;
   }
   setStatus(res.status || "Apply started — sheet marked, filling the form in the job tab.");
