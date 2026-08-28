@@ -3114,7 +3114,7 @@ autofillEnabledToggleEl?.addEventListener("change", () => {
   const enabled = Boolean(autofillEnabledToggleEl.checked);
   syncAutofillUi(enabled);
   chrome.storage.local.set({ [AUTOFILL_ENABLED_KEY]: enabled }).catch(() => {});
-  setStatus(enabled ? "Autofill enabled." : "Autofill disabled — batch will skip apply steps.");
+  setStatus(enabled ? "Autofill enabled." : "Autofill disabled — manual apply off; Dice batch auto-apply still runs.");
 });
 aiProviderChatgptBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));

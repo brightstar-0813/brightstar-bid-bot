@@ -122,16 +122,19 @@ const AUTOFILL_ENABLED_KEY = "autofill_enabled";
 
 /** All-channel batch runs generate files only — never auto-apply. */
 async function isBatchAutoApplyEnabled() {
-  const data = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY, AUTOFILL_ENABLED_KEY]);
-  if (data[AUTOFILL_ENABLED_KEY] === false) return false;
+  const data = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
   const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
   return channel !== "all";
 }
 
-/** Manual autofill, keyboard shortcuts, and batch apply steps. Default on. */
+/** Manual Apply assist and non-Dice hosted batch apply. Dice batch always auto-applies. Default on. */
 async function isAutofillEnabled() {
   const data = await chrome.storage.local.get([AUTOFILL_ENABLED_KEY]);
   return data[AUTOFILL_ENABLED_KEY] !== false;
+}
+
+function isDiceBatchAutoApply(board = "") {
+  return String(board || "").trim() === "Dice";
 }
 
 /** A row is retried this many times before the batch moves on without it. */
@@ -1171,7 +1174,7 @@ async function markJobSkippedAsDuplicate(csvRow, reason, { lockSheetSkip = true 
  * On incomplete apply, pause (keep tab open) so Start can retry.
  */
 async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
-  if (!(await isAutofillEnabled())) {
+  if (!isDiceBatchAutoApply(board) && !(await isAutofillEnabled())) {
     await setStatus(`Row ${jobMeta.csvRow}: autofill disabled — files ready, apply skipped.`);
     return { status: "skipped", detail: "Autofill disabled", tabId: null, needsPause: false };
   }
