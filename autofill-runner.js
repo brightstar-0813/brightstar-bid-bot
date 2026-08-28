@@ -7,12 +7,14 @@
  */
 
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson, personToAtsCredentials, DEFAULT_ATS_PASSWORD } from "./profiles.js";
+import { applyCompleteness } from "./person-profile-form.js";
 import { outputDirFromPerson } from "./resume-profile.js";
 import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
 import {
   isJunkAutofillAnswer,
   isJunkQuestionLabel,
+  isSensitiveProfileQuestion,
   normalizeChoiceAnswerValue
 } from "./autofill-junk.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
@@ -51,7 +53,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-27.safe01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-29.panel01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -906,6 +908,302 @@ async function notifyAutofillToast(tabId, payload = {}) {
     variant,
     ...payload
   }).catch(() => {});
+}
+
+const panelAbortByTab = new Map();
+
+/** Known ATS hosts and apply URL paths — show the in-page panel even before fields render. */
+const ATS_HOST_RE =
+  /(?:greenhouse|lever|indeed|myworkdayjobs|icims|taleo|successfactors|bamboohr|ashbyhq|smartrecruiters|jobvite|ultipro|dice|jobgether|braintrust|usebraintrust)\./i;
+const APPLY_PATH_RE = /\/(apply|application|job_app|careers\/apply)/i;
+
+export function looksLikeApplyUrl(url = "") {
+  const href = String(url || "").trim();
+  if (!href) return false;
+  try {
+    const u = new URL(href);
+    if (ATS_HOST_RE.test(u.hostname)) return true;
+    if (APPLY_PATH_RE.test(u.pathname)) return true;
+  } catch {
+    /* ignore */
+  }
+  return /\/apply\//i.test(href);
+}
+
+export function shouldOfferAutofillPanel(probe = {}, url = "") {
+  if (looksLikeApplyUrl(url)) return true;
+  if (probe?.isApplicationForm) return true;
+  if (Number(probe?.fillableCount || 0) >= 1) return true;
+  if (probe?.hasFormFields) return true;
+  return false;
+}
+
+async function ensureAutofillPanelScript(tabId) {
+  const ping = async () => {
+    try {
+      const pong = await chrome.tabs.sendMessage(tabId, { type: "autofill_panel_ping" });
+      return Boolean(pong?.ok);
+    } catch {
+      return false;
+    }
+  };
+  if (await ping()) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content/autofill-panel.js"]
+    });
+  } catch {
+    /* ignore */
+  }
+  await sleep(200);
+}
+
+export async function ensureAutofillPanelOnTab(tabId) {
+  if (!tabId) return;
+  await ensureAutofillPanelScript(tabId);
+}
+
+export async function resolveAssistTab(tabId = null) {
+  if (tabId != null) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.id) return tab;
+  }
+  return getCurrentApplicationTab();
+}
+
+/** Show the Jobright-style in-page autofill sidebar on a tab. */
+export async function showAutofillPanelOnTab(tabId, { expand = true } = {}) {
+  if (!tabId) return false;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await ensureAutofillPanelScript(tabId);
+    try {
+      const pong = await chrome.tabs.sendMessage(tabId, { type: "autofill_panel_ping" });
+      if (pong?.ok) {
+        await chrome.tabs.sendMessage(tabId, { type: "autofill_panel_show", expand });
+        return true;
+      }
+    } catch {
+      /* retry after inject settles */
+    }
+    await sleep(180);
+  }
+  return false;
+}
+
+async function emitAutofillProgress(tabId, event = {}) {
+  if (!tabId) return;
+  await ensureAutofillPanelScript(tabId).catch(() => {});
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "autofill_progress", ...event });
+  } catch {
+    /* panel not mounted */
+  }
+}
+
+function reportAutofillProgress(tabId, onProgress, event = {}) {
+  if (typeof onProgress === "function") {
+    try {
+      onProgress(event);
+    } catch {
+      /* ignore */
+    }
+  }
+  emitAutofillProgress(tabId, event).catch(() => {});
+}
+
+function mergeScanFrameResults(frameResults = []) {
+  let best = { ok: false, fields: [], fillableCount: 0, stepLabel: "", isApplicationForm: false };
+  for (const row of frameResults) {
+    const count = Array.isArray(row.fields) ? row.fields.length : 0;
+    const bestCount = Array.isArray(best.fields) ? best.fields.length : 0;
+    if (row.ok && count >= bestCount) best = row;
+    else if (!best.ok && row.isApplicationForm) best = { ...row, fields: row.fields || [] };
+  }
+  return best;
+}
+
+function collectScanFieldsFromFrames(frameResults = []) {
+  const seen = new Set();
+  const out = [];
+  for (const row of frameResults) {
+    for (const field of row?.fields || []) {
+      const key = `${field.id || ""}|${field.label || ""}|${field.type || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(field);
+    }
+  }
+  return out;
+}
+
+/**
+ * Persist scraped question/answer pairs from a form scan into the per-person Q&A bank.
+ * Skips profile-mapped fields (contact, EEO, etc.) and JD-specific essays.
+ */
+export async function bankScrapedQaFromFields(fields = [], { profileId = "", site = "" } = {}) {
+  let banked = 0;
+  for (const field of fields) {
+    const label = String(field?.label || "").trim();
+    let answer = String(field?.currentValue || "").trim();
+    if (!label || !answer || answer === "checked") continue;
+    if (field.profileKey || field.type === "file") continue;
+    if (isJunkQuestionLabel(label) || isSensitiveProfileQuestion(label)) continue;
+    if (isJunkAutofillAnswer(answer, { questionLabel: label })) continue;
+
+    const fieldType = field.type || "text";
+    const choiceLike = ["select", "radio", "checkbox", "choice"].includes(fieldType);
+    if (choiceLike) answer = normalizeChoiceAnswerValue(answer) || answer;
+
+    const q = { label, fieldType, multiline: fieldType === "textarea" };
+    if (!shouldBankAnswer(q, answer, fieldType)) continue;
+    if (!bankAnswerFitsQuestion(label, answer)) continue;
+
+    const saved = await saveQa({
+      profileId: profileId || "",
+      question: label,
+      answer,
+      fieldType,
+      source: "scraped",
+      site: site || "",
+      silent: true
+    }).catch(() => null);
+    if (saved) banked += 1;
+  }
+  if (banked > 0) {
+    try {
+      await chrome.storage.local.set({ qa_bank_version: Date.now() });
+    } catch {
+      /* ignore */
+    }
+  }
+  return { banked };
+}
+
+export async function scanFieldsOnTab(tabId) {
+  await ensureAutofillScript(tabId);
+  const { applicantInfo, extras } = await getApplicantInfoForAutofill();
+  const frameResults = await sendMessageToAllFrames(tabId, {
+    type: "scan_application_fields",
+    applicantInfo,
+    extras
+  });
+  const scan = mergeScanFrameResults(frameResults);
+  const person = await getActivePerson();
+  const { complete, missing } = applyCompleteness(person || {});
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const site = tab?.url ? hostnameFromUrl(tab.url) : "";
+  const scrapedFields = collectScanFieldsFromFrames(frameResults);
+  bankScrapedQaFromFields(scrapedFields, { profileId: person?.id || "", site }).catch(() => {});
+  const stored = await chrome.storage.local.get(["last_job_title", "last_job_company"]);
+  return {
+    ...scan,
+    profileIncomplete: !complete,
+    profileMissing: missing,
+    jobTitle: stored.last_job_title || "",
+    jobCompany: stored.last_job_company || ""
+  };
+}
+
+export async function probeApplicationFormOnTab(tabId) {
+  await ensureAutofillScript(tabId);
+  const frames = await sendMessageToAllFrames(tabId, { type: "probe_application_form" }, { attempts: 1 });
+  const best = frames.reduce(
+    (a, b) => (Number(b.fillableCount || 0) > Number(a.fillableCount || 0) ? b : a),
+    { isApplicationForm: false, fillableCount: 0 }
+  );
+  return best;
+}
+
+export function cancelJobrightStyleAutofill(tabId) {
+  const ctrl = panelAbortByTab.get(tabId);
+  if (ctrl) ctrl.cancelled = true;
+  emitAutofillProgress(tabId, { phase: "cancelled", statusText: "Cancelled.", progressPct: 0 }).catch(
+    () => {}
+  );
+}
+
+/**
+ * Jobright-style autofill: scan inventory, fill all steps, auto Next + Submit when allowed.
+ */
+export async function startJobrightStyleAutofill(
+  tabId = null,
+  { autoSubmit = true, applyHint = {} } = {}
+) {
+  const tab = tabId
+    ? await chrome.tabs.get(tabId).catch(() => null)
+    : await getCurrentApplicationTab();
+  if (!tab?.id) {
+    throw new Error("No application tab found. Open the job application page first.");
+  }
+  if (!/^https?:\/\//i.test(tab.url || "")) {
+    throw new Error("Cannot autofill this page. Open an http(s) application form.");
+  }
+
+  const ctrl = { cancelled: false };
+  panelAbortByTab.set(tab.id, ctrl);
+
+  try {
+    await ensureAutofillPanelScript(tab.id);
+    reportAutofillProgress(tab.id, null, {
+      phase: "start",
+      progressPct: 0,
+      statusText: "Scanning page…"
+    });
+
+    const scan = await scanFieldsOnTab(tab.id);
+    const totalFields = Math.max(1, scan.fields?.length || 0);
+    reportAutofillProgress(tab.id, null, {
+      phase: "scan",
+      fields: scan.fields || [],
+      stepLabel: scan.stepLabel || "",
+      progressPct: 0,
+      statusText: scan.fields?.length
+        ? `${scan.fields.length} field${scan.fields.length === 1 ? "" : "s"} detected`
+        : "Scan complete"
+    });
+
+    if (ctrl.cancelled) {
+      return { ok: false, status: "cancelled", detail: "Cancelled." };
+    }
+
+    const result = await startMultiStepApplyOnTab(tab.id, {
+      autoSubmit,
+      assistMode: false,
+      applyHint,
+      shouldAbort: () => ctrl.cancelled,
+      onProgress: (event) => {
+        reportAutofillProgress(tab.id, null, {
+          ...event,
+          progressPct:
+            event.progressPct ??
+            (event.filledCount != null
+              ? Math.min(99, Math.round((Number(event.filledCount) / totalFields) * 100))
+              : undefined)
+        });
+      }
+    });
+
+    if (ctrl.cancelled || result.status === "cancelled") {
+      reportAutofillProgress(tab.id, null, {
+        phase: "cancelled",
+        statusText: "Cancelled.",
+        progressPct: 0
+      });
+      return { ...result, ok: false, status: "cancelled", detail: "Cancelled." };
+    }
+
+    await scanFieldsOnTab(tab.id).catch(() => {});
+
+    reportAutofillProgress(tab.id, null, {
+      phase: "done",
+      progressPct: 100,
+      statusText: result.detail || formatAutofillSummary(result)
+    });
+    return result;
+  } finally {
+    panelAbortByTab.delete(tab?.id);
+  }
 }
 
 /** Shared Braintrust wrapper text should not make two client essays look like the same question. */
@@ -2072,6 +2370,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
   };
   summaryPayload.statusText = formatAutofillSummary(summaryPayload);
   await notifyAutofillToast(tab.id, summaryPayload);
+  await scanFieldsOnTab(tab.id).catch(() => {});
   return summaryPayload;
 }
 
@@ -2083,7 +2382,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
  */
 export async function startMultiStepApplyOnTab(
   tabId = null,
-  { maxSteps = 12, applyHint = {}, autoSubmit = false, assistMode = false } = {}
+  { maxSteps = 12, applyHint = {}, autoSubmit = false, assistMode = false, onProgress = null, shouldAbort = null } = {}
 ) {
   const tab = tabId
     ? await chrome.tabs.get(tabId).catch(() => null)
@@ -2189,6 +2488,16 @@ export async function startMultiStepApplyOnTab(
   }
 
   for (let step = 0; step < stepBudget; step += 1) {
+    if (typeof shouldAbort === "function" && shouldAbort()) {
+      summary.status = "cancelled";
+      summary.detail = "Autofill cancelled.";
+      reportAutofillProgress(currentTabId, onProgress, {
+        phase: "cancelled",
+        statusText: "Cancelled.",
+        progressPct: 0
+      });
+      return summary;
+    }
     const currentTab = await chrome.tabs.get(currentTabId).catch(() => null);
     syncLiveSiteFromUrl(currentTab?.url || "");
     if (
@@ -2419,6 +2728,12 @@ export async function startMultiStepApplyOnTab(
     const fillStepLabel = workdayStepHint
       ? `${siteLabel} · ${workdayStepHint}`
       : siteLabel;
+    reportAutofillProgress(currentTabId, onProgress, {
+      phase: "step",
+      step: step + 1,
+      stepLabel: workdayStepHint || fillStepLabel,
+      statusText: `Step ${step + 1}/${stepBudget} — filling…`
+    });
     await setApplyStatus(`Apply: ${fillStepLabel} (${step + 1}/${stepBudget}) — filling form...`);
     const fillRes = await startAutofillOnTab(currentTabId, applyHint);
     summary.filled += Number(fillRes?.filledCount || 0);
@@ -2442,6 +2757,20 @@ export async function startMultiStepApplyOnTab(
     summary.steps = step + 1;
     summary.tabId = currentTabId;
     summary.tabUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || summary.tabUrl;
+
+    reportAutofillProgress(currentTabId, onProgress, {
+      phase: "filled",
+      step: step + 1,
+      filledCount: summary.filled,
+      bankHits: summary.bankHits,
+      aiHits: summary.aiHits,
+      statusText: formatAutofillSummary({
+        filledCount: fillRes?.filledCount,
+        bankHits: fillRes?.bankHits,
+        aiHits: fillRes?.aiHits,
+        unmatchedAfterSecondPass: fillRes?.unmatchedAfterSecondPass
+      })
+    });
 
     probe = await getApplyActionFromTab(currentTabId).catch(() => ({ best: null, anyForm: false }));
     if (probe.workdayWizard?.current) {
@@ -2644,6 +2973,11 @@ export async function startMultiStepApplyOnTab(
     }
 
     await setApplyStatus(`Apply: clicking ${probe.best.action.text || actionType}...`);
+    reportAutofillProgress(currentTabId, onProgress, {
+      phase: "advance",
+      action: probe.best.action.type,
+      statusText: `Clicking ${probe.best.action.text || actionType}…`
+    });
     const clickRes = await sendMessageToTab(
       currentTabId,
       { type: "click_apply_action", preferredType: actionType, autoSubmit: false },

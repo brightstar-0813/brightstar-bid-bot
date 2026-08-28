@@ -16,6 +16,15 @@ const YES_NO_QUESTION_RE =
 
 const PHONE_ANSWER_RE = /^[\d\s().+-]{7,20}$/;
 
+/** Identity / PII / secrets — never store in the exportable Q&A bank. */
+const SENSITIVE_PROFILE_QUESTION_RE =
+  /\b(password|otp|captcha|ssn|social security|credit card|card number|cvv|routing|account number|search|first name|last name|full name|middle name|legal name|email|e-mail|phone|mobile|telephone|address|street|city|state|province|zip|postal|country|linkedin|github|portfolio|website|date of birth|dob|birthday|salary|compensation|desired pay|expected pay|disability|veteran|military|\brace\b|ethnic|gender|\bsex\b|hispanic|latino|felony|conviction|criminal)\b/i;
+
+/** @param {string} label */
+export function isSensitiveProfileQuestion(label) {
+  return SENSITIVE_PROFILE_QUESTION_RE.test(String(label || "").trim());
+}
+
 /** @param {string} text */
 export function isJunkAutofillAnswer(text, { questionLabel = "" } = {}) {
   const t = String(text || "").trim();

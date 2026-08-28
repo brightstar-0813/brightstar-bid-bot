@@ -72,11 +72,43 @@
       "js": ["content/autofill.js"],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://*.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://*.lever.co/*",
+        "https://*.indeed.com/*",
+        "https://indeed.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.icims.com/*",
+        "https://*.taleo.net/*",
+        "https://*.successfactors.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.jobvite.com/*",
+        "https://*.ultipro.com/*",
+        "https://www.dice.com/*",
+        "https://*.dice.com/*",
+        "https://www.jobgether.com/*",
+        "https://jobgether.com/*",
+        "https://*.jobgether.com/*",
+        "https://www.braintrust.com/*",
+        "https://*.braintrust.com/*",
+        "https://app.usebraintrust.com/*",
+        "https://*.usebraintrust.com/*"
+      ],
+      "js": ["content/autofill-panel.js"],
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content/page-bridge.js"],
+      "resources": ["content/page-bridge.js", "content/autofill-panel.css", "icons/brightstar-icon.svg"],
       "matches": ["https://*.icims.com/*", "https://*/*", "http://*/*"]
     }
   ],

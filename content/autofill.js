@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-27.enh01";
+  const SCRIPT_BUILD = "2026-08-29.panel01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -4722,6 +4722,249 @@
     return error ? cleanLabelText(error.textContent).slice(0, 180) : "";
   }
 
+  function getControlCurrentValue(el) {
+    if (!el) return "";
+    const type = (el.type || "").toLowerCase();
+    if (type === "checkbox" || type === "radio") return el.checked ? "checked" : "";
+    if (el.tagName === "SELECT") {
+      const opt = el.options?.[el.selectedIndex];
+      return opt ? cleanLabelText(opt.textContent) : "";
+    }
+    return String(el.value ?? "").trim();
+  }
+
+  function inferFieldType(el) {
+    const type = (el.type || "").toLowerCase();
+    if (type === "file") return "file";
+    if (el.tagName === "SELECT") return "select";
+    if (type === "radio") return "radio";
+    if (type === "checkbox") return "checkbox";
+    if (isReactSelectInput(el) || looksLikeCombobox(el)) return "select";
+    if (el.tagName === "TEXTAREA") return "textarea";
+    if (type === "date" || type === "month") return "date";
+    return "text";
+  }
+
+  function detectStepLabel() {
+    const wd = isWorkdayPage() ? detectWorkdayWizardState() : null;
+    if (wd?.current) return wd.current;
+    const currentEl = queryAllDeep('[aria-current="step"], [aria-current="page"]').find((el) => {
+      const t = cleanLabelText(el.textContent || el.getAttribute?.("aria-label") || "");
+      return t && t.length <= 48;
+    });
+    if (currentEl) {
+      return cleanLabelText(currentEl.textContent || currentEl.getAttribute("aria-label") || "").slice(
+        0,
+        60
+      );
+    }
+    const heading = document.querySelector("h1, h2, [role='heading']");
+    return cleanLabelText(heading?.textContent || "").slice(0, 60);
+  }
+
+  function matchExtraForScan(label, extras = {}, options = []) {
+    const qNorm = normalize(label);
+    if (!qNorm) return null;
+    let best = null;
+    for (const [key, value] of Object.entries(extras || {})) {
+      const v = String(value || "").trim();
+      if (!v) continue;
+      const kNorm = normalize(key);
+      if (!kNorm) continue;
+      let score = 0;
+      if (qNorm === kNorm) score = 1;
+      else if (qNorm.includes(kNorm) || kNorm.includes(qNorm)) score = 0.86;
+      else continue;
+      if (!best || score > best.score) best = { score, key };
+    }
+    if (!best || best.score < 0.78) return null;
+    if (Array.isArray(options) && options.length) {
+      const hit = options.some((opt) => normalize(opt) === qNorm);
+      if (!hit && !options.some((opt) => normalize(opt).includes(qNorm))) return null;
+    }
+    return "extra";
+  }
+
+  /** Read the user's current answer from a control (for scrape → Q&A bank). */
+  function readFilledAnswer(el) {
+    if (!el) return "";
+    const tag = el.tagName.toLowerCase();
+    if (tag === "select") {
+      const opt = el.options?.[el.selectedIndex];
+      const t = cleanLabelText(opt?.textContent || opt?.value || "");
+      return /^(select\.\.\.?|please select|choose|--)$/i.test(t) ? "" : t;
+    }
+    const type = (el.type || "text").toLowerCase();
+    if (type === "checkbox") return el.checked ? "Yes" : "";
+    if (type === "radio") {
+      if (!el.checked) return "";
+      return cleanLabelText(questionTextForAi(el) || radioOptionLabel(el) || el.value);
+    }
+    return String(el.value ?? "").trim();
+  }
+
+  /**
+   * Dry-run inventory of fillable fields for the autofill panel (no values written).
+   */
+  async function scanApplicationFields(applicantInfo = {}, extras = {}) {
+    const probe = probeApplicationForm();
+    if (!probe.isApplicationForm && !probe.hasFormFields) {
+      return {
+        ok: false,
+        error: "No application form detected",
+        isApplicationForm: false,
+        fillableCount: probe.fillableCount || 0
+      };
+    }
+
+    const fields = [];
+    const seen = new Set();
+
+    const pushField = (row) => {
+      const key = `${row.label}|${row.type}|${row.id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      fields.push(row);
+    };
+
+    for (const el of collectFillableControls()) {
+      if (isHistoryFilled(el)) continue;
+      const label = (questionTextForAi(el) || labelTextForControl(el) || "").trim();
+      if (!label || label.length < 2) continue;
+
+      const profileKey = matchApplicantKeyFromControl(el);
+      const fieldType = inferFieldType(el);
+      const currentValue = readFilledAnswer(el);
+      const hasValue = Boolean(currentValue);
+      const options =
+        fieldType === "select" || fieldType === "radio" ? collectControlOptions(el).slice(0, 24) : [];
+
+      let matchSource = "unmatched";
+      if (hasValue) {
+        matchSource = "filled";
+      } else if (profileKey) {
+        const val = resolveApplicantValue(applicantInfo, profileKey);
+        matchSource = val ? "profile" : "unmatched";
+      } else if (matchExtraForScan(label, extras, options)) {
+        matchSource = "extra";
+      }
+
+      pushField({
+        id: stableQuestionId(label, fieldType, el),
+        label: label.slice(0, 200),
+        type: fieldType,
+        required: isControlRequired(el),
+        matchSource,
+        profileKey: profileKey || null,
+        currentValue: currentValue.slice(0, 100),
+        options
+      });
+    }
+
+    for (const group of collectChoiceChipGroups()) {
+      if (group.kind === "start") continue;
+      const label = group.question || "";
+      if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
+      const options = (group.labels || []).slice(0, 24);
+      const profileKey = matchApplicantKey(label);
+
+      if (group.selected) {
+        if (profileKey) continue;
+        let selectedValue = "";
+        for (let i = 0; i < (group.buttons || []).length; i += 1) {
+          const btn = group.buttons[i];
+          if (isChoiceButtonSelected(btn) || btn.checked) {
+            selectedValue = group.labels?.[i] || chipChoiceText(btn);
+            break;
+          }
+        }
+        if (!selectedValue) continue;
+        pushField({
+          id: stableQuestionId(label, "select", group.buttons?.[0], "rbc"),
+          label: label.slice(0, 200),
+          type: "select",
+          required: true,
+          matchSource: "filled",
+          profileKey: null,
+          currentValue: selectedValue.slice(0, 200),
+          options
+        });
+        continue;
+      }
+
+      let matchSource = "unmatched";
+      if (profileKey && resolveApplicantValue(applicantInfo, profileKey)) matchSource = "profile";
+      else if (matchExtraForScan(label, extras, options)) matchSource = "extra";
+      pushField({
+        id: stableQuestionId(label, "select", group.buttons?.[0], "rbc"),
+        label: label.slice(0, 200),
+        type: "select",
+        required: true,
+        matchSource,
+        profileKey: profileKey || null,
+        currentValue: "",
+        options
+      });
+    }
+
+    for (const el of collectFileInputs()) {
+      const label = labelTextForControl(el) || "Resume upload";
+      pushField({
+        id: stableQuestionId(label, "file", el),
+        label: label.slice(0, 200),
+        type: "file",
+        required: isControlRequired(el),
+        matchSource: "profile",
+        profileKey: "resumeUpload",
+        currentValue: "",
+        options: []
+      });
+    }
+
+    const unmatchedText = collectUnmatchedQuestions(applicantInfo);
+    for (const q of unmatchedText) {
+      pushField({
+        id: q.id,
+        label: q.label,
+        type: q.fieldType || "text",
+        required: true,
+        matchSource: "unmatched",
+        profileKey: null,
+        currentValue: "",
+        options: []
+      });
+    }
+
+    const unmatchedChoice = await collectUnmatchedChoiceQuestions();
+    for (const q of unmatchedChoice) {
+      pushField({
+        id: q.id,
+        label: q.label,
+        type: q.fieldType || "select",
+        required: q.required !== false,
+        matchSource: "unmatched",
+        profileKey: null,
+        currentValue: "",
+        options: (q.options || []).slice(0, 24)
+      });
+    }
+
+    const snapshot = getApplyActionSnapshot();
+    const actionButton = snapshot.action
+      ? { type: snapshot.action.type, label: snapshot.action.text || snapshot.action.type }
+      : null;
+
+    return {
+      ok: true,
+      stepLabel: detectStepLabel(),
+      fields,
+      fillableCount: probe.fillableCount,
+      isApplicationForm: probe.isApplicationForm,
+      actionButton,
+      validationReason: probe.validationReason || ""
+    };
+  }
+
   /**
    * Re-collect still-empty unmatched fields for a second bank/AI/inventory pass.
    */
@@ -7212,6 +7455,12 @@
     }
     if (message?.type === "collect_unmatched_fields") {
       collectUnmatchedFieldsPayload(message.applicantInfo || {})
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+      return true;
+    }
+    if (message?.type === "scan_application_fields") {
+      scanApplicationFields(message.applicantInfo || {}, message.extras || {})
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;

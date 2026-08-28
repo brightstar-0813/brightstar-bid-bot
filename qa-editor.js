@@ -13,6 +13,7 @@ import {
   loadBundledQaBank,
   findQaMatch
 } from "./qa-store.js";
+import { confirmDialog } from "./ui-dialog.js";
 import { isJunkQaRecord } from "./autofill-junk.js";
 import { loadAndApplyTheme, watchThemeChanges, mountThemeSwatches } from "./theme.js";
 
@@ -303,8 +304,18 @@ function renderList() {
     meta.appendChild(typeTag);
 
     const src = document.createElement("span");
+    const sourceLabel =
+      row.source === "user"
+        ? "manual"
+        : row.source === "scraped"
+          ? "scraped"
+          : row.source === "extra"
+            ? "extra"
+            : row.source === "profile"
+              ? "profile"
+              : "ai";
     src.className = `qa-source-tag ${row.source === "user" ? "qa-source-user" : "qa-source-ai"}`;
-    src.textContent = row.source === "user" ? "manual" : "ai";
+    src.textContent = sourceLabel;
     meta.appendChild(src);
 
     const scope = document.createElement("span");
@@ -342,7 +353,15 @@ function renderList() {
     del.className = "ghost danger compact icon-button";
     setIconButton(del, "remove", "Delete");
     del.addEventListener("click", async () => {
-      if (!window.confirm("Delete this Q&A?")) return;
+      if (
+        !(await confirmDialog({
+          title: "Delete Q&A?",
+          message: "This answer will be removed from the bank.",
+          confirmText: "Delete",
+          danger: true
+        }))
+      )
+        return;
       await deleteQa(row.id);
       if (editingId === row.id) resetForm();
       await reload();
@@ -412,10 +431,11 @@ async function importRecords(records, sourceLabel) {
   const list = parseQaBankPayload(records);
   const remapProfileId = importRemapId();
   const target = remapProfileId != null ? profileLabel(remapProfileId) : "original profile IDs in the file";
-  const ok = window.confirm(
-    `Import ${list.length} answer${list.length === 1 ? "" : "s"} from ${sourceLabel} into ${target}?\n\n` +
-      "Identity answers in the file (name, phone, LinkedIn) will be used for leftover form questions."
-  );
+  const ok = await confirmDialog({
+    title: "Import Q&A bank?",
+    message: `Import ${list.length} answer${list.length === 1 ? "" : "s"} from ${sourceLabel} into ${target}.`,
+    confirmText: "Import"
+  });
   if (!ok) return;
   const count = await importQa(list, { remapProfileId });
   currentPage = 1;
@@ -437,7 +457,12 @@ async function importBundled() {
 async function clearShown() {
   const view = filterProfileId();
   const label = view === ALL_ID ? "ALL people (entire bank)" : profileLabel(view);
-  const ok = window.confirm(`Delete every Q&A shown for ${label}? This cannot be undone.`);
+  const ok = await confirmDialog({
+    title: "Clear Q&A bank?",
+    message: `Delete every Q&A shown for ${label}. This cannot be undone.`,
+    confirmText: "Delete all",
+    danger: true
+  });
   if (!ok) return;
   if (view === ALL_ID) {
     await clearQa(null);
@@ -503,7 +528,12 @@ async function scanForJunk() {
 
 async function deleteJunkResults() {
   if (!junkScanIds.length) return;
-  const ok = window.confirm(`Delete ${junkScanIds.length} junk ${junkScanIds.length === 1 ? "entry" : "entries"}?`);
+  const ok = await confirmDialog({
+    title: "Delete junk entries?",
+    message: `Remove ${junkScanIds.length} junk ${junkScanIds.length === 1 ? "entry" : "entries"}.`,
+    confirmText: "Delete",
+    danger: true
+  });
   if (!ok) return;
   for (const id of junkScanIds) {
     await deleteQa(id);

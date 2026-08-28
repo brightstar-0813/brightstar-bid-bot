@@ -63,6 +63,11 @@ import {
   namesLikelyDifferent
 } from "./resume-profile.js";
 import {
+  mergeExtractedProfileIntoPerson,
+  isEditingBuiltin as isBuiltinPersonId
+} from "./person-profile-form.js";
+import { openProfileEditor } from "./open-profile-editor.js";
+import {
   saveCsvFileHandle,
   clearCsvFileHandle,
   readPinnedCsvText
@@ -82,6 +87,7 @@ import {
 } from "./qa-store.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { mountThemeSwatches } from "./theme.js";
+import { confirmDialog } from "./ui-dialog.js";
 
 const DEFAULT_OUTPUT_DIR = "Applications";
 const QUEUE_KEY = "job_queue";
@@ -411,45 +417,12 @@ const profileSelectEl = document.getElementById("profileSelect");
 const presetSelectEl = document.getElementById("presetSelect");
 const templateSelectEl = document.getElementById("templateSelect");
 const deleteProfileBtn = document.getElementById("deleteProfile");
-const togglePersonPanelBtn = document.getElementById("togglePersonPanel");
-const personPanelBody = document.getElementById("personPanelBody");
-const personLabelEl = document.getElementById("personLabel");
-const personNameEl = document.getElementById("personName");
-const personEmailEl = document.getElementById("personEmail");
-const personPhoneEl = document.getElementById("personPhone");
-const personLinkedinEl = document.getElementById("personLinkedin");
-const personPortfolioEl = document.getElementById("personPortfolio");
-const personPasswordEl = document.getElementById("personPassword");
-const personLocationEl = document.getElementById("personLocation");
-const personAddressEl = document.getElementById("personAddress");
-const personZipEl = document.getElementById("personZip");
-const personGenderEl = document.getElementById("personGender");
-const personEthnicityEl = document.getElementById("personEthnicity");
-const personDisabilityEl = document.getElementById("personDisability");
-const personVeteranEl = document.getElementById("personVeteran");
-const personCitizenshipEl = document.getElementById("personCitizenship");
-const personWorkAuthorizedEl = document.getElementById("personWorkAuthorized");
-const personSponsorshipEl = document.getElementById("personSponsorship");
-const personHispanicLatinoEl = document.getElementById("personHispanicLatino");
-const personAutofillExtrasEl = document.getElementById("personAutofillExtras");
-const personResumePrefixEl = document.getElementById("personResumePrefix");
-const personSignatureTitleEl = document.getElementById("personSignatureTitle");
-const personMasterResumeEl = document.getElementById("personMasterResume");
-const personRequiredExperienceEl = document.getElementById("personRequiredExperience");
-const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
-const personResumePromptEl = document.getElementById("personResumePrompt");
-const personCoverPromptEl = document.getElementById("personCoverPrompt");
-const activeRoleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
+const editProfileBtn = document.getElementById("editProfileBtn");
+const openQaFromPersonBtn = document.getElementById("openQaFromPersonBtn");
 const personResumeFileEl = document.getElementById("personResumeFile");
-const replaceResumeFromFileBtn = document.getElementById("replaceResumeFromFile");
-const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
 const personImportNoticeEl = document.getElementById("personImportNotice");
-const clearMasterResumeBtn = document.getElementById("clearMasterResume");
 const loadPresetBtn = document.getElementById("loadPreset");
-const savePersonBtn = document.getElementById("savePerson");
-const savePersonAsNewBtn = document.getElementById("savePersonAsNew");
-const personSaveStatusEl = document.getElementById("personSaveStatus");
-const personSaveHintEl = document.getElementById("personSaveHint");
+const activeRoleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
 
 const csvFileEl = document.getElementById("csvFile");
 const csvSummaryEl = document.getElementById("csvSummary");
@@ -610,51 +583,20 @@ async function syncActiveTrackUi({ savedTrack } = {}) {
   setActiveRoleTrackUi(activeTrack);
 }
 
-function applyTrackTemplatesToForm(roleTrack, person) {
-  const track = normalizeRoleTrackId(roleTrack);
-  const source = person || profilesCache.find((p) => p.id === editingPersonId);
-  personResumePromptEl.value = resolvePromptTemplateForTrack(source || { roleTrack: track }, track);
-  personCoverPromptEl.value = resolveCoverLetterTemplateForTrack(source || { roleTrack: track }, track);
+function applyTrackTemplatesToForm(_roleTrack, _person) {
+  /* Prompts live in profile editor — session track only in popup. */
 }
 
-function readActiveRoleTrack() {
-  const activeBtn = activeRoleTrackBtns.find((btn) => btn.classList.contains("is-active"));
-  return normalizeRoleTrackId(activeBtn?.dataset?.track || "sf");
-}
-
-async function applyActiveRoleTrackChange({ fromUser = true, track: nextTrack } = {}) {
+async function applyActiveRoleTrackChange({ track: nextTrack } = {}) {
   const track = normalizeRoleTrackId(nextTrack ?? readActiveRoleTrack());
-  const person = profilesCache.find((p) => p.id === editingPersonId) || (await getActivePerson());
+  const person = profilesCache.find((p) => p.id === profileSelectEl.value) || (await getActivePerson());
   const savedTrack = resolveRoleTrackForPerson(person);
-
-  if (fromUser) {
-    const replacePrompt =
-      promptNeedsPersonTemplate(personResumePromptEl.value) ||
-      isTrackDefaultPrompt(personResumePromptEl.value);
-    const replaceCover =
-      isTrackDefaultCoverLetter(personCoverPromptEl.value) ||
-      !String(personCoverPromptEl.value || "").trim();
-    if (!replacePrompt || !replaceCover) {
-      const ok = window.confirm(
-        `Replace prompts with the ${getRoleTrack(track).label} template? Unsaved prompt edits will be lost until you Save person.`
-      );
-      if (!ok) {
-        const revertTrack = (await getSessionRoleTrack()) || savedTrack;
-        setActiveRoleTrackUi(revertTrack);
-        return;
-      }
-    }
-  }
 
   setActiveRoleTrackUi(track);
   await setSessionRoleTrack(track);
-  applyTrackTemplatesToForm(track, person);
   await syncActiveTrackUi({ savedTrack });
-  setStatus(
-    track === savedTrack
-      ? `Engineering track: ${getRoleTrack(track).label}`
-      : `Engineering track: ${getRoleTrack(track).label} — active for this session (Save person to keep as default)`
-  );
+  const label = getRoleTrack(track).label;
+  setStatus(track === savedTrack ? `Track: ${label}` : `Track: ${label} (session only)`);
 }
 
 async function resetActiveTrackForPerson(person) {
@@ -689,79 +631,67 @@ function setPersonImportNotice(message, { ok = true } = {}) {
   }
 }
 
-function clearPersonContactFields() {
-  personLabelEl.value = "";
-  personNameEl.value = "";
-  personEmailEl.value = "";
-  personPhoneEl.value = "";
-  personLinkedinEl.value = "";
-  if (personPortfolioEl) personPortfolioEl.value = "";
-  if (personPasswordEl) personPasswordEl.value = DEFAULT_ATS_PASSWORD;
-  personLocationEl.value = "";
-  personAddressEl.value = "";
-  personZipEl.value = "";
-  personResumePrefixEl.value = "";
-  personSignatureTitleEl.value = "";
-  personRequiredExperienceEl.value = "";
-}
-
-function clearPersonEeoFields() {
-  setSelectValue(personGenderEl, "");
-  setSelectValue(personEthnicityEl, "");
-  setSelectValue(personDisabilityEl, "");
-  setSelectValue(personVeteranEl, "");
-  setSelectValue(personCitizenshipEl, "");
-  setSelectValue(personWorkAuthorizedEl, "");
-  setSelectValue(personSponsorshipEl, "");
-  setSelectValue(personHispanicLatinoEl, "");
-  personAutofillExtrasEl.value = "";
-}
-
-function promptNeedsPersonTemplate(prompt) {
-  const p = String(prompt || "");
-  if (!p.trim()) return true;
-  if (!p.includes("{MASTER_RESUME}") || !p.includes("{NAME}") || !p.includes("{JD}")) return true;
-  if (/sandeep\s+mahankali|d.?mario\s+lewis/i.test(p)) return true;
-  if (isTrackDefaultPrompt(p)) return true;
-  return false;
-}
-
-function applyExtractedProfileToForm(parsed, resumeText, { resetEeo = true } = {}) {
-  clearPersonContactFields();
-  if (resetEeo) clearPersonEeoFields();
-  personMasterResumeEl.value = resumeText;
-
-  if (parsed.name) {
-    personNameEl.value = parsed.name;
-    personLabelEl.value = parsed.name;
-    personResumePrefixEl.value = resumeFilePrefixFromName(parsed.name);
-  }
-  if (parsed.email) personEmailEl.value = parsed.email;
-  if (parsed.phone) personPhoneEl.value = parsed.phone;
-  if (parsed.linkedin) personLinkedinEl.value = parsed.linkedin;
-  if (parsed.location) personLocationEl.value = parsed.location;
-  if (parsed.address) personAddressEl.value = parsed.address;
-  if (parsed.zip) personZipEl.value = parsed.zip;
-  if (parsed.headline) personSignatureTitleEl.value = parsed.headline;
-  if (parsed.employers?.length) {
-    personRequiredExperienceEl.value = requiredExperienceToText(parsed.employers);
-  }
-  if (resetEeo || promptNeedsPersonTemplate(personResumePromptEl.value)) {
-    applyTrackTemplatesToForm(readActiveRoleTrack(), profilesCache.find((p) => p.id === editingPersonId));
-  }
-  const cover = String(personCoverPromptEl.value || "");
+function ensurePromptsOnPerson(person, { resetEeo = false } = {}) {
+  const next = { ...person };
+  const track = next.roleTrack || readActiveRoleTrack();
   if (
     resetEeo ||
-    isTrackDefaultCoverLetter(cover) ||
+    !String(next.promptTemplate || "").trim() ||
+    !next.promptTemplate.includes("{JD}") ||
+    isTrackDefaultPrompt(next.promptTemplate)
+  ) {
+    next.promptTemplate = getTrackPromptTemplate(track, next);
+  }
+  const cover = String(next.coverLetterPrompt || "");
+  if (
+    resetEeo ||
     !cover.trim() ||
     !cover.includes("{JD}") ||
-    /sandeep\s+mahankali|matthew\s+dale|d.?mario\s+lewis/i.test(cover)
+    isTrackDefaultCoverLetter(cover)
   ) {
-    personCoverPromptEl.value = resolveCoverLetterTemplateForTrack(
-      profilesCache.find((p) => p.id === editingPersonId) || { roleTrack: readActiveRoleTrack() },
-      readActiveRoleTrack()
-    );
+    next.coverLetterPrompt = resolveCoverLetterTemplateForTrack(next, track);
   }
+  if (!next.templateId) next.templateId = templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
+  return next;
+}
+
+async function persistImportedPerson(merged, { asNew = false } = {}) {
+  const person = ensurePromptsOnPerson(merged, { resetEeo: asNew });
+  if (asNew) {
+    const saved = await addCustomProfile({
+      label: person.label || person.name,
+      name: person.name || person.label,
+      email: person.email,
+      phone: person.phone,
+      linkedin: person.linkedin,
+      portfolio: person.portfolio,
+      password: person.password,
+      location: person.location,
+      address: person.address,
+      zip: person.zip,
+      gender: person.gender,
+      ethnicity: person.ethnicity,
+      disability: person.disability,
+      veteran: person.veteran,
+      citizenship: person.citizenship,
+      workAuthorized: person.workAuthorized,
+      sponsorship: person.sponsorship,
+      hispanicLatino: person.hispanicLatino,
+      autofillExtras: person.autofillExtras,
+      masterResume: person.masterResume,
+      requiredExperience: person.requiredExperience,
+      promptTemplate: person.promptTemplate,
+      coverLetterPrompt: person.coverLetterPrompt,
+      resumeFilePrefix: person.resumeFilePrefix || resumeFilePrefixFromName(person.name),
+      templateId: person.templateId,
+      signatureTitle: person.signatureTitle,
+      roleTrack: person.roleTrack || readActiveRoleTrack()
+    });
+    await setActivePersonId(saved.id);
+    return saved;
+  }
+  const result = await savePersonProfile({ ...person, id: person.id || profileSelectEl.value });
+  return result?.profile || result;
 }
 
 async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {}) {
@@ -770,92 +700,48 @@ async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {})
     throw new Error("Not enough text to build a person. Upload a text-based PDF / DOCX, or paste the resume.");
   }
   const parsed = extractProfileFromResumeText(resumeText);
-  const current = profilesCache.find((p) => p.id === editingPersonId);
+  const profileId = profileSelectEl.value;
+  const current = profilesCache.find((p) => p.id === profileId) || (await getActivePerson());
   const asNew =
-    isEditingBuiltin() ||
+    isBuiltinPersonId(profileId) ||
     Boolean(parsed.name && current?.name && namesLikelyDifferent(current.name, parsed.name));
-  applyExtractedProfileToForm(parsed, resumeText, { resetEeo: asNew });
-
-  personPanelBody.hidden = false;
-  togglePersonPanelBtn.setAttribute("aria-expanded", "true");
-  syncSaveButtonLabels();
+  const merged = mergeExtractedProfileIntoPerson(current, parsed, resumeText, { resetEeo: asNew });
+  if (parsed.name && !merged.resumeFilePrefix) {
+    merged.resumeFilePrefix = resumeFilePrefixFromName(parsed.name);
+  }
+  merged.roleTrack = merged.roleTrack || readActiveRoleTrack();
 
   const filled = parsed.filled.length ? parsed.filled.join(", ") : "master resume text only";
-  let notice = `Used only values found in ${sourceLabel}: ${filled}. Other fields left blank.`;
   if (!parsed.name) {
-    notice += " Add a display name from the resume, then Save person.";
+    const notice = `Imported ${sourceLabel} text. Open Edit profile to add a display name and save.`;
     setPersonImportNotice(notice, { ok: true });
-    setPersonSaveStatus(notice, { ok: true });
-    setStatus(`Resume imported — name not found in file. Detected: ${filled}.`);
+    setStatus(`Resume imported — name not found. Detected: ${filled}.`);
+    await openProfileEditor({ profileId: current?.id, tab: "resume" });
     return parsed;
   }
 
-  setPersonImportNotice(`${notice} Saving as Active person…`, { ok: true });
+  setPersonImportNotice(`Saving ${parsed.name} from ${sourceLabel}…`, { ok: true });
   setStatus(`Imported ${parsed.name} from ${sourceLabel}. Saving…`);
-  const saved = await savePerson({
-    asNew,
-    successMessage: `Ready to bid as ${parsed.name}. Filled from file: ${filled}. Nothing else was invented.`
-  });
-  if (saved) {
+  try {
+    const saved = await persistImportedPerson({ ...merged, id: asNew ? null : current?.id }, { asNew });
+    await refreshProfiles(saved.id);
+    await syncPersonContext(saved);
     setPersonImportNotice(
-      `Ready to bid as ${saved.label || parsed.name}. From file: ${filled}. Blank fields were not in the upload.`,
+      `Ready to bid as ${saved.label || parsed.name}. From file: ${filled}.`,
       { ok: true }
     );
-  } else {
-    setPersonImportNotice(
-      `${notice} Review the fields and click Save person.`,
-      { ok: false }
-    );
-  }
-  return parsed;
-}
-
-function setPersonSaveStatus(message, { ok = true } = {}) {
-  if (!personSaveStatusEl) return;
-  if (!message) {
-    personSaveStatusEl.hidden = true;
-    personSaveStatusEl.textContent = "";
-    personSaveStatusEl.className = "person-save-status";
-    return;
-  }
-  personSaveStatusEl.hidden = false;
-  personSaveStatusEl.textContent = message;
-  personSaveStatusEl.className = `person-save-status ${ok ? "ok" : "err"}`;
-  try {
-    personSaveStatusEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  } catch {
-    // ignore
+    return parsed;
+  } catch (err) {
+    setPersonImportNotice(String(err.message || err), { ok: false });
+    await openProfileEditor({ profileId: current?.id, tab: "resume" });
+    throw err;
   }
 }
 
-function isEditingBuiltin() {
-  return BUILTIN_PROFILES.some((b) => b.id === editingPersonId && b.kind !== "coverLetter");
-}
-
-function syncSaveButtonLabels() {
-  if (!savePersonBtn || !savePersonAsNewBtn) return;
-  if (isEditingBuiltin()) {
-    savePersonBtn.textContent = "Save as my person";
-    savePersonAsNewBtn.textContent = "Duplicate as new";
-    if (personSaveHintEl) {
-      personSaveHintEl.textContent =
-        "Built-in preset is read-only. Save as my person keeps your tailor prompt; each CSV job fills {JD} automatically.";
-    }
-  } else if (editingPersonId) {
-    savePersonBtn.textContent = "Save changes";
-    savePersonAsNewBtn.textContent = "Duplicate as new";
-    if (personSaveHintEl) {
-      personSaveHintEl.textContent =
-        "Save your tailor prompt here. Job descriptions come from the CSV per row — do not paste JDs into this box.";
-    }
-  } else {
-    savePersonBtn.textContent = "Save person";
-    savePersonAsNewBtn.textContent = "Duplicate as new";
-    if (personSaveHintEl) {
-      personSaveHintEl.textContent =
-        "Paste the resume tailor prompt once (include {JD} as a placeholder). CSV supplies each job’s JD automatically.";
-    }
-  }
+async function openProfileEditorFromPopup({ tab = "apply", presetId = "" } = {}) {
+  const profileId = profileSelectEl?.value || "";
+  await openProfileEditor({ profileId, tab, presetId });
+  setStatus("Opened profile editor.");
 }
 
 function populateTemplateSelect(selectedId) {
@@ -906,114 +792,6 @@ function populateProfileSelect(selectedId) {
   profileSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_PROFILE_ID;
   syncDeleteButton();
   syncActivePersonChip();
-}
-
-function extrasToText(extras) {
-  if (!extras || typeof extras !== "object") return "";
-  return Object.entries(extras)
-    .filter(([k, v]) => String(k).trim() && String(v).trim())
-    .map(([k, v]) => `${k} = ${v}`)
-    .join("\n");
-}
-
-function textToExtras(text) {
-  const out = {};
-  for (const line of String(text || "").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const m = trimmed.match(/^([^=:]+)\s*[=:]\s*(.+)$/);
-    if (!m) continue;
-    const key = m[1].trim().toLowerCase();
-    const value = m[2].trim();
-    if (key && value) out[key] = value;
-  }
-  return out;
-}
-
-function setSelectValue(el, value) {
-  if (!el) return;
-  const v = String(value || "");
-  el.value = v;
-  if (el.value !== v && v) {
-    // Match by option text when value attribute differs.
-    for (const opt of el.options) {
-      if (opt.value === v || opt.textContent.trim() === v) {
-        el.value = opt.value;
-        break;
-      }
-    }
-  }
-}
-
-function fillPersonForm(person) {
-  editingPersonId = person?.id || null;
-  personLabelEl.value = person?.label || "";
-  personNameEl.value = person?.name || person?.label || "";
-  personEmailEl.value = person?.email || "";
-  personPhoneEl.value = person?.phone || "";
-  personLinkedinEl.value = person?.linkedin || "";
-  if (personPortfolioEl) personPortfolioEl.value = person?.portfolio || "";
-  if (personPasswordEl) personPasswordEl.value = person?.password || DEFAULT_ATS_PASSWORD;
-  personLocationEl.value = person?.location || "";
-  personAddressEl.value = person?.address || "";
-  personZipEl.value = person?.zip || "";
-  setSelectValue(personGenderEl, person?.gender);
-  setSelectValue(personEthnicityEl, person?.ethnicity);
-  setSelectValue(personDisabilityEl, person?.disability);
-  setSelectValue(personVeteranEl, person?.veteran);
-  setSelectValue(personCitizenshipEl, person?.citizenship);
-  setSelectValue(personWorkAuthorizedEl, person?.workAuthorized);
-  setSelectValue(personSponsorshipEl, person?.sponsorship);
-  setSelectValue(personHispanicLatinoEl, person?.hispanicLatino);
-  personAutofillExtrasEl.value = extrasToText(person?.autofillExtras);
-  personResumePrefixEl.value = person?.resumeFilePrefix || "";
-  personSignatureTitleEl.value = person?.signatureTitle || "";
-  personMasterResumeEl.value = person?.masterResume || "";
-  personRequiredExperienceEl.value = requiredExperienceToText(person?.requiredExperience || []);
-  const savedTrack = person?.roleTrack || resolveRoleTrackForPerson(person);
-  setActiveRoleTrackUi(savedTrack);
-  personResumePromptEl.value = person?.promptTemplate || "";
-  personCoverPromptEl.value = person?.coverLetterPrompt || "";
-  masterResumeFileHintEl.textContent = person?.masterResume
-    ? `Master resume loaded (${person.masterResume.length} chars).`
-    : "";
-  syncSaveButtonLabels();
-  setPersonSaveStatus("");
-}
-
-function readPersonForm({ asNew = false } = {}) {
-  return {
-    id: asNew ? null : editingPersonId,
-    label: personLabelEl.value.trim(),
-    name: personNameEl.value.trim() || personLabelEl.value.trim(),
-    email: personEmailEl.value.trim(),
-    phone: personPhoneEl.value.trim(),
-    linkedin: personLinkedinEl.value.trim(),
-    portfolio: personPortfolioEl?.value?.trim() || "",
-    password: personPasswordEl?.value?.trim() || DEFAULT_ATS_PASSWORD,
-    location: personLocationEl.value.trim(),
-    address: personAddressEl.value.trim(),
-    zip: personZipEl.value.trim(),
-    gender: personGenderEl.value.trim(),
-    ethnicity: personEthnicityEl.value.trim(),
-    disability: personDisabilityEl.value.trim(),
-    veteran: personVeteranEl.value.trim(),
-    citizenship: personCitizenshipEl.value.trim(),
-    workAuthorized: personWorkAuthorizedEl.value.trim(),
-    sponsorship: personSponsorshipEl.value.trim(),
-    hispanicLatino: personHispanicLatinoEl.value.trim(),
-    autofillExtras: textToExtras(personAutofillExtrasEl.value),
-    resumeFilePrefix: personResumePrefixEl.value.trim() || "Resume",
-    signatureTitle: personSignatureTitleEl.value.trim(),
-    masterResume: personMasterResumeEl.value,
-    requiredExperience: normalizeRequiredExperienceInput(personRequiredExperienceEl.value),
-    roleTrack: readActiveRoleTrack(),
-    promptTemplate: personResumePromptEl.value,
-    coverLetterPrompt: personCoverPromptEl.value,
-    templateId: templateSelectEl.value || DEFAULT_TEMPLATE_ID,
-    spreadsheetUrl: spreadsheetUrlEl?.value?.trim() || "",
-    sheetsWebAppUrl: sheetsWebAppUrlEl?.value?.trim() || ""
-  };
 }
 
 async function refreshProfiles(selectedId) {
@@ -1071,14 +849,23 @@ async function persistActivePersonSheetFromUi() {
   }
 }
 
-async function loadActivePersonIntoForm() {
-  const person = await getActivePerson();
-  fillPersonForm(person);
-  await resetActiveTrackForPerson(person);
-  syncSaveButtonLabels();
+async function syncPersonContext(person) {
   syncActivePersonChip();
   await syncOutputDirFromPerson(person);
   await syncSheetConfigFromPerson(person);
+  const rules = resolveExperienceRulesForPerson(person);
+  await chrome.storage.local.set({
+    resume_file_prefix: person.resumeFilePrefix || "Resume",
+    experience_validation_rules: rules,
+    experience_validation_person: person.name || person.label || ""
+  });
+}
+
+async function loadActivePersonIntoForm() {
+  const person = await getActivePerson();
+  editingPersonId = person?.id || null;
+  await syncPersonContext(person);
+  await resetActiveTrackForPerson(person);
 }
 
 async function persistJobFields() {
@@ -1826,19 +1613,23 @@ function renderQueue() {
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     const inactiveJob = Boolean(job.inactive) || /^inactive job$/i.test(String(job.error || "").trim());
-    applyBtn.className = job.applied ? "secondary" : inactiveJob ? "secondary" : "primary";
-    applyBtn.disabled = inactiveJob;
+    const filesReady = Boolean(job.jobDir || job.hasFiles) || job.status === "done";
+    const applyDisabled = inactiveJob || !filesReady;
+    applyBtn.className = job.applied ? "secondary" : applyDisabled ? "secondary" : "primary";
+    applyBtn.disabled = applyDisabled;
     setIconButton(
       applyBtn,
       "apply",
-      inactiveJob ? "Inactive job" : job.applied ? "Apply again" : "Apply to job"
+      inactiveJob ? "Inactive job" : !filesReady ? "Build files first" : job.applied ? "Apply again" : "Apply to job"
     );
     applyBtn.title = inactiveJob
       ? "This job posting is no longer available."
-      : job.applied
-        ? `${appliedDocsTitle(job)}\nClick to apply again.`
-        : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
-    if (!inactiveJob) {
+      : !filesReady
+        ? "Resume and cover letter are not ready yet — wait until status is Done, or run Start to build files."
+        : job.applied
+          ? `${appliedDocsTitle(job)}\nClick to apply again.`
+          : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
+    if (!applyDisabled) {
       applyBtn.addEventListener("click", () => applyAssist(job));
     }
     applyWrap.appendChild(applyBtn);
@@ -2130,7 +1921,15 @@ async function onCsvSelected(file) {
 
 async function removeJobFromBatch(job) {
   const label = `${job?.company || "Unknown company"} — ${job?.title || "Untitled"}`;
-  if (!window.confirm(`Remove this job from the batch?\n\n${label}`)) return;
+  if (
+    !(await confirmDialog({
+      title: "Remove job?",
+      message: label,
+      confirmText: "Remove",
+      danger: true
+    }))
+  )
+    return;
   const result = await chrome.runtime.sendMessage({
     type: "remove_queue_job",
     csvRow: job.csvRow
@@ -2293,166 +2092,15 @@ async function retryErrorJobs() {
   }
 }
 
-async function savePerson({ asNew = false, successMessage = "" } = {}) {
-  // Keep the editor open so the user can see success/error next to the button.
-  personPanelBody.hidden = false;
-  togglePersonPanelBtn.setAttribute("aria-expanded", "true");
-
-  const person = readPersonForm({ asNew });
-
-  if (!person.label?.trim() && !person.name?.trim()) {
-    setPersonSaveStatus("Enter a display name (or full name) before saving.", { ok: false });
-    personLabelEl.focus();
-    setStatus("Display name required to save person.");
-    return null;
-  }
-  if (!person.promptTemplate?.trim()) {
-    setPersonSaveStatus(
-      "Paste your resume tailor prompt (ChatGPT instructions). Do not paste job descriptions here — those come from the CSV.",
-      { ok: false }
-    );
-    personResumePromptEl.focus();
-    setStatus("Resume tailor prompt is required.");
-    return null;
-  }
-  if (!person.promptTemplate.includes("{JD}")) {
-    setPersonSaveStatus(
-      "Add the {JD} placeholder in your tailor prompt. The extension replaces it with each CSV job’s description automatically.",
-      { ok: false }
-    );
-    personResumePromptEl.focus();
-    setStatus("Add {JD} placeholder for auto CSV job descriptions.");
-    return null;
-  }
-  if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
-    setPersonSaveStatus(
-      "Your prompt uses {MASTER_RESUME}. Paste resume text or upload .txt / .pdf / .docx first.",
-      { ok: false }
-    );
-    personMasterResumeEl.focus();
-    setStatus("Master resume required for {MASTER_RESUME}.");
-    return null;
-  }
-
-  // Auto-fill required employers from FIXED COMPANY HISTORY when the field is blank.
-  if (!person.requiredExperience?.length) {
-    const detected = parseRequiredExperienceFromPrompt(person.promptTemplate);
-    if (detected.length) {
-      person.requiredExperience = detected;
-      personRequiredExperienceEl.value = requiredExperienceToText(detected);
-    }
-  }
-  if ((person.requiredExperience || []).length < 1 && !person.masterResume?.trim()) {
-    setPersonSaveStatus(
-      "List required experience employers (one per line), or upload a master resume so they can be detected.",
-      { ok: false }
-    );
-    personRequiredExperienceEl.focus();
-    setStatus("Required experience employers needed.");
-    return null;
-  }
-
-  savePersonBtn.disabled = true;
-  savePersonAsNewBtn.disabled = true;
-  setPersonSaveStatus("Saving…");
-  try {
-    let saved;
-    let created = false;
-    let fromBuiltin = false;
-
-    if (asNew) {
-      saved = await addCustomProfile({
-        label: person.label || person.name,
-        name: person.name || person.label,
-        email: person.email,
-        phone: person.phone,
-        linkedin: person.linkedin,
-        portfolio: person.portfolio,
-        password: person.password,
-        location: person.location,
-        address: person.address,
-        zip: person.zip,
-        gender: person.gender,
-        ethnicity: person.ethnicity,
-        disability: person.disability,
-        veteran: person.veteran,
-        citizenship: person.citizenship,
-        workAuthorized: person.workAuthorized,
-        sponsorship: person.sponsorship,
-        hispanicLatino: person.hispanicLatino,
-        autofillExtras: person.autofillExtras,
-        masterResume: person.masterResume,
-        requiredExperience: person.requiredExperience,
-        promptTemplate: person.promptTemplate,
-        coverLetterPrompt: person.coverLetterPrompt,
-        resumeFilePrefix: person.resumeFilePrefix,
-        templateId: person.templateId,
-        signatureTitle: person.signatureTitle,
-        roleTrack: person.roleTrack
-      });
-      await setActivePersonId(saved.id);
-      created = true;
-    } else {
-      const result = await savePersonProfile(person);
-      // Support both new { profile, created } shape and legacy bare profile
-      saved = result?.profile || result;
-      created = Boolean(result?.created);
-      fromBuiltin = Boolean(result?.fromBuiltin);
-    }
-
-    await chrome.storage.local.set({
-      selected_template_id: person.templateId,
-      resume_file_prefix: person.resumeFilePrefix || saved.resumeFilePrefix,
-      selected_profile_id: saved.id,
-      active_person_id: saved.id,
-      experience_validation_rules: resolveExperienceRulesForPerson({
-        ...saved,
-        requiredExperience: person.requiredExperience || saved.requiredExperience
-      }),
-      experience_validation_person: saved.name || saved.label || ""
-    });
-    await syncOutputDirFromPerson(saved);
-    await refreshProfiles(saved.id);
-    fillPersonForm({ ...saved, builtin: false });
-    await resetActiveTrackForPerson(saved);
-
-    let msg = successMessage;
-    if (!msg) {
-      if (asNew || created) {
-        msg = fromBuiltin
-          ? `Saved as your person “${saved.label}” (custom). It is now the Active person.`
-          : `Created “${saved.label}” and set it as Active person.`;
-      } else {
-        msg = `Saved changes for “${saved.label}”. Ready to run CSV batch.`;
-      }
-    }
-    setPersonSaveStatus(msg, { ok: true });
-    setStatus(msg);
-    return saved;
-  } catch (err) {
-    const message = String(err.message || err);
-    setPersonSaveStatus(message, { ok: false });
-    setStatus(message);
-    return null;
-  } finally {
-    savePersonBtn.disabled = false;
-    savePersonAsNewBtn.disabled = false;
-    syncSaveButtonLabels();
-  }
-}
-
 async function onMasterResumeFile(file) {
   if (!file) return;
-  masterResumeFileHintEl.textContent = `Reading ${file.name}…`;
   setPersonImportNotice(`Reading ${file.name}…`);
   try {
     const { text, fileName } = await extractMasterResumeFromFile(file);
     await importPersonFromResumeText(text, { sourceLabel: fileName });
-    masterResumeFileHintEl.textContent = `Loaded ${fileName} (${text.length} chars) and applied to this person.`;
     if (personResumeFileEl) personResumeFileEl.value = "";
   } catch (err) {
     const message = String(err.message || err);
-    masterResumeFileHintEl.textContent = message;
     setPersonImportNotice(message, { ok: false });
     setStatus(message);
   }
@@ -2464,21 +2112,7 @@ async function loadPresetIntoEditor() {
     setStatus("Pick a built-in preset first.");
     return;
   }
-  const preset = getBuiltinPreset(id);
-  if (!preset) {
-    setStatus("Preset not found.");
-    return;
-  }
-  fillPersonForm({
-    ...preset,
-    id:
-      editingPersonId && !BUILTIN_PROFILES.some((b) => b.id === editingPersonId)
-        ? editingPersonId
-        : preset.id
-  });
-  personPanelBody.hidden = false;
-  togglePersonPanelBtn.setAttribute("aria-expanded", "true");
-  setStatus(`Loaded preset "${preset.label}" into editor. Add/upload master resume text, then Save person.`);
+  await openProfileEditorFromPopup({ presetId: id, tab: "prompts" });
 }
 
 async function removeSelectedProfile() {
@@ -2488,7 +2122,15 @@ async function removeSelectedProfile() {
     setStatus("Built-in profiles cannot be deleted.");
     return;
   }
-  if (!window.confirm(`Delete person "${selected.label}"?`)) return;
+  if (
+    !(await confirmDialog({
+      title: "Delete person?",
+      message: `"${selected.label}" will be removed permanently.`,
+      confirmText: "Delete",
+      danger: true
+    }))
+  )
+    return;
   try {
     await deleteCustomProfile(profileId);
     await refreshProfiles(DEFAULT_PROFILE_ID);
@@ -2632,21 +2274,49 @@ async function openDetachedWindow() {
 }
 
 function dockOutOfPopup() {
-  const detach = () =>
-    openDetachedWindow().catch((err) =>
-      setStatus(`Could not keep the bot open: ${String(err?.message || err)}`)
-    );
+  const fail = (err) =>
+    setStatus(`Could not switch to side panel: ${String(err?.message || err)}`);
 
-  if (currentWindowId == null || typeof chrome.sidePanel?.open !== "function") {
-    detach();
+  if (UI_CONTEXT === "window") {
+    chrome.windows
+      .getCurrent()
+      .then((win) =>
+        chrome.runtime.sendMessage({
+          type: "dock_to_side_panel",
+          sourceWindowId: win?.id ?? null
+        })
+      )
+      .then((res) => {
+        if (!res?.ok) throw new Error(res?.error || "Could not open side panel.");
+        window.close();
+      })
+      .catch(fail);
     return;
   }
 
-  // sidePanel.open() only works inside the click gesture, so it must not be
-  // preceded by an await.
+  if (currentWindowId == null || typeof chrome.sidePanel?.open !== "function") {
+    chrome.runtime
+      .sendMessage({ type: "dock_to_side_panel" })
+      .then((res) => {
+        if (!res?.ok) throw new Error(res?.error || "Could not open side panel.");
+        window.close();
+      })
+      .catch(fail);
+    return;
+  }
+
+  // sidePanel.open() only works inside the click gesture from the toolbar popup.
   Promise.resolve(chrome.sidePanel.open({ windowId: currentWindowId }))
     .then(() => window.close())
-    .catch(detach);
+    .catch(() => {
+      chrome.runtime
+        .sendMessage({ type: "dock_to_side_panel" })
+        .then((res) => {
+          if (!res?.ok) throw new Error(res?.error || "Could not open side panel.");
+          window.close();
+        })
+        .catch(fail);
+    });
 }
 
 async function openAsWindowApp() {
@@ -2796,11 +2466,11 @@ async function importQaRecords(records, sourceLabel) {
   const list = parseQaBankPayload(records);
   const profileId = profileSelectEl?.value || "";
   const target = activePersonLabel();
-  const ok = window.confirm(
-    `Import ${list.length} answer${list.length === 1 ? "" : "s"} from ${sourceLabel} into ${target}?\n\n` +
-      "Leftover form questions will reuse these answers before calling OpenAI. " +
-      "Identity answers in the file (name, phone, LinkedIn) will apply to this person."
-  );
+  const ok = await confirmDialog({
+    title: "Import Q&A bank?",
+    message: `Import ${list.length} answer${list.length === 1 ? "" : "s"} from ${sourceLabel} into ${target}.`,
+    confirmText: "Import"
+  });
   if (!ok) return;
   const count = await importQa(list, { remapProfileId: profileId });
   await refreshQaBank();
@@ -2826,13 +2496,13 @@ async function autofillThisPage() {
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
   try {
-    setStatus("Autofilling the current page…");
+    setStatus("Opening panel and autofilling the application tab…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
     if (!res?.ok) {
-      setStatus(res?.error || "Autofill failed. Focus the application tab first.");
+      setStatus(res?.error || "Autofill failed. Click the application tab, then try again.");
       return;
     }
-    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete.");
+    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete — check the panel on the application page.");
   } finally {
     autofillPageBtn.disabled = false;
     autoApplyPageBtn.disabled = false;
@@ -2871,11 +2541,12 @@ async function autoApplyThisPage() {
 async function clearJobsList({ confirmPrompt = true } = {}) {
   if (confirmPrompt) {
     const n = queueCache.length || allUsJobsCache.length;
-    const ok = window.confirm(
-      n
-        ? `Clear all ${n} job(s) from the list? This cannot be undone.`
-        : "Clear the job list and CSV state?"
-    );
+    const ok = await confirmDialog({
+      title: "Clear job list?",
+      message: n ? `Remove all ${n} job(s). This cannot be undone.` : "Clear the job list and CSV state?",
+      confirmText: "Clear",
+      danger: true
+    });
     if (!ok) return false;
   }
 
@@ -2913,11 +2584,14 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
 
 async function resetWorkflow() {
   const n = queueCache.length || allUsJobsCache.length;
-  const ok = window.confirm(
-    n
-      ? `Reset batch state and clear all ${n} job(s) from the queue?`
-      : "Reset batch state and clear the job queue?"
-  );
+  const ok = await confirmDialog({
+    title: "Reset workflow?",
+    message: n
+      ? `Reset batch state and clear all ${n} job(s) from the queue.`
+      : "Reset batch state and clear the job queue.",
+    confirmText: "Reset",
+    danger: true
+  });
   if (!ok) return;
   try {
     const res = await chrome.runtime.sendMessage({ type: "reset_generation_state" });
@@ -2954,20 +2628,22 @@ function setManualPanelOpen(open, { persist = true } = {}) {
   }
 }
 
-togglePersonPanelBtn.addEventListener("click", () => {
-  const open = personPanelBody.hidden;
-  personPanelBody.hidden = !open;
-  togglePersonPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) syncSaveButtonLabels();
-});
+function readActiveRoleTrack() {
+  const activeBtn = activeRoleTrackBtns.find((btn) => btn.classList.contains("is-active"));
+  return normalizeRoleTrackId(activeBtn?.dataset?.track || "sf");
+}
 
 toggleManualPanelBtn.addEventListener("click", () => {
   setManualPanelOpen(manualPanelBody.hidden);
 });
 
+editProfileBtn?.addEventListener("click", () => {
+  openProfileEditorFromPopup({ tab: "apply" }).catch((e) => setStatus(String(e.message || e)));
+});
+openQaFromPersonBtn?.addEventListener("click", () => {
+  openQaEditor().catch((e) => setStatus(String(e.message || e)));
+});
 loadPresetBtn.addEventListener("click", () => loadPresetIntoEditor().catch((e) => setStatus(String(e.message || e))));
-savePersonBtn.addEventListener("click", () => savePerson({ asNew: false }));
-savePersonAsNewBtn.addEventListener("click", () => savePerson({ asNew: true }));
 deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
 
 activeRoleTrackBtns.forEach((btn) => {
@@ -2975,51 +2651,15 @@ activeRoleTrackBtns.forEach((btn) => {
     const track = normalizeRoleTrackId(btn.dataset.track);
     if (track === readActiveRoleTrack()) return;
     setActiveRoleTrackUi(track);
-    applyActiveRoleTrackChange({ fromUser: true, track }).catch((e) =>
+    applyActiveRoleTrackChange({ track }).catch((e) =>
       setStatus(String(e.message || e))
     );
   });
 });
 
-detectRequiredExperienceBtn?.addEventListener("click", () => {
-  const fromPrompt = parseRequiredExperienceFromPrompt(personResumePromptEl.value);
-  const fromResume = parseEmployersFromResume(personMasterResumeEl.value);
-  const detected = fromPrompt.length ? fromPrompt : fromResume;
-  if (!detected.length) {
-    setPersonSaveStatus(
-      "No employers found. Upload a resume, or type companies manually (one per line).",
-      { ok: false }
-    );
-    return;
-  }
-  personRequiredExperienceEl.value = requiredExperienceToText(detected);
-  setPersonSaveStatus(
-    `Detected ${detected.length} employer entr${detected.length === 1 ? "y" : "ies"} from the ${fromPrompt.length ? "prompt" : "resume"}.`,
-    { ok: true }
-  );
-});
-
-clearMasterResumeBtn.addEventListener("click", () => {
-  personMasterResumeEl.value = "";
-  if (personResumeFileEl) personResumeFileEl.value = "";
-  if (masterResumeFileHintEl) masterResumeFileHintEl.textContent = "";
-});
-replaceResumeFromFileBtn?.addEventListener("click", () => {
-  personResumeFileEl?.click();
-});
 personResumeFileEl?.addEventListener("change", () => {
   const file = personResumeFileEl.files?.[0];
   onMasterResumeFile(file).catch((e) => setStatus(String(e.message || e)));
-});
-personMasterResumeEl?.addEventListener("paste", () => {
-  window.setTimeout(() => {
-    const text = String(personMasterResumeEl.value || "").trim();
-    if (text.length < 80) return;
-    importPersonFromResumeText(text, { sourceLabel: "pasted resume" }).catch((e) => {
-      setPersonImportNotice(String(e.message || e), { ok: false });
-      setStatus(String(e.message || e));
-    });
-  }, 0);
 });
 
 csvFileEl.addEventListener("change", () => {
@@ -3186,10 +2826,15 @@ if (UI_CONTEXT === "popup") {
     })
     .catch(() => {});
 } else if (UI_CONTEXT === "panel") {
-  keepOpenBtn && (keepOpenBtn.hidden = true);
-} else {
-  keepOpenBtn && (keepOpenBtn.hidden = true);
-  openAsWindowBtn && (openAsWindowBtn.hidden = true);
+  if (keepOpenBtn) keepOpenBtn.hidden = true;
+  if (openAsWindowBtn) openAsWindowBtn.hidden = false;
+} else if (UI_CONTEXT === "window") {
+  if (keepOpenBtn) {
+    keepOpenBtn.hidden = false;
+    keepOpenBtn.title = "Dock to Chrome side panel";
+    keepOpenBtn.setAttribute("aria-label", "Dock to Chrome side panel");
+  }
+  if (openAsWindowBtn) openAsWindowBtn.hidden = true;
 }
 
 function initThemePicker() {
@@ -3199,7 +2844,11 @@ function initThemePicker() {
 }
 
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
-if (keepOpenBtn) setIconButton(keepOpenBtn, "panel", "Keep open in side panel");
+if (keepOpenBtn) {
+  const panelLabel =
+    UI_CONTEXT === "window" ? "Dock to Chrome side panel" : "Keep open in side panel";
+  setIconButton(keepOpenBtn, "panel", panelLabel);
+}
 
 if (batchStartBtn) setIconButton(batchStartBtn, "start", "Start");
 if (batchPauseBtn) setIconButton(batchPauseBtn, "pause", "Pause");
@@ -3220,6 +2869,9 @@ loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || er
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes.allowSubmitOnAssist && allowSubmitToggleEl && changes.allowSubmitOnAssist.newValue !== undefined) {
+    allowSubmitToggleEl.checked = Boolean(changes.allowSubmitOnAssist.newValue);
+  }
   if (changes.qa_bank_version) refreshQaBank().catch(() => {});
   if (changes.qa_learn_enabled && qaLearnToggleEl && changes.qa_learn_enabled.newValue !== undefined) {
     qaLearnToggleEl.checked = changes.qa_learn_enabled.newValue !== false;

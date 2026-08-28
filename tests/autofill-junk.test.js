@@ -5,6 +5,7 @@ import {
   isJunkAutofillAnswer,
   isJunkQuestionLabel,
   isJunkQaRecord,
+  isSensitiveProfileQuestion,
   normalizeChoiceAnswerValue
 } from "../autofill-junk.js";
 
@@ -41,6 +42,12 @@ test("isJunkQaRecord combines question and answer checks", () => {
     }),
     false
   );
+});
+
+test("isSensitiveProfileQuestion rejects identity and EEO fields", () => {
+  assert.equal(isSensitiveProfileQuestion("Email address"), true);
+  assert.equal(isSensitiveProfileQuestion("Are you a veteran?"), true);
+  assert.equal(isSensitiveProfileQuestion("How many years of Salesforce experience do you have?"), false);
 });
 
 test("normalizeChoiceAnswerValue maps common variants", () => {

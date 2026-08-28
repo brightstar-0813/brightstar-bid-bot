@@ -7,6 +7,7 @@
     <script src="theme-boot.js"></script>
     <link rel="stylesheet" href="themes.css" />
     <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="ui-dialog.css" />
   </head>
   <body>
     <main class="app">
@@ -97,8 +98,12 @@
             <span>Add or update from resume file</span>
             <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
           </label>
-          <p class="hint">One upload fills contact, prompt, and employers from the file. Use Edit below only to review or tweak.</p>
+          <p class="hint">One upload fills contact, prompt, and employers from the file. Open <strong>Edit profile</strong> to review or tweak all fields.</p>
           <div id="personImportNotice" class="person-import-notice" hidden></div>
+          <div class="row row-2">
+            <button type="button" id="editProfileBtn" class="primary">Edit profile</button>
+            <button type="button" id="openQaFromPersonBtn" class="ghost">Q&amp;A bank</button>
+          </div>
           <div class="row-split">
             <label class="field grow">
               <span>Load preset into editor</span>
@@ -106,240 +111,7 @@
                 <option value="">— Built-in presets —</option>
               </select>
             </label>
-            <button type="button" id="loadPreset" class="ghost compact">Load</button>
-          </div>
-          <button type="button" class="panel-toggle" id="togglePersonPanel" aria-expanded="false">
-            Edit person / master resume / prompts
-          </button>
-          <div class="panel-body" id="personPanelBody" hidden>
-            <div class="subblock">
-              <p class="subsection-title">Contact</p>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Display name</span>
-                  <input id="personLabel" type="text" placeholder="Jane Doe" autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>Full name</span>
-                  <input id="personName" type="text" placeholder="Jane Doe" autocomplete="off" />
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Email</span>
-                  <input id="personEmail" type="email" autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>Phone</span>
-                  <input id="personPhone" type="text" autocomplete="off" />
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>LinkedIn</span>
-                  <input id="personLinkedin" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>Portfolio / website</span>
-                  <input id="personPortfolio" type="url" placeholder="https://your-portfolio.com" autocomplete="off" />
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Location (city / region)</span>
-                  <input id="personLocation" type="text" placeholder="City, State" autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>ATS password (MyWorkday)</span>
-                  <input id="personPassword" type="password" placeholder="Brightstar@0813" autocomplete="off" />
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Street address</span>
-                  <input id="personAddress" type="text" placeholder="Street address" autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>ZIP / postal code</span>
-                  <input id="personZip" type="text" placeholder="ZIP" autocomplete="off" />
-                </label>
-              </div>
-            </div>
-
-            <div class="subblock">
-              <p class="subsection-title">Application / EEO autofill</p>
-              <p class="hint">Used on common voluntary self-ID and eligibility questions. Leave blank to skip.</p>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Gender</span>
-                  <select id="personGender">
-                    <option value="">—</option>
-                    <option>Male</option>
-                    <option>Female</option>
-                    <option>Non-binary</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Ethnicity / race</span>
-                  <select id="personEthnicity">
-                    <option value="">—</option>
-                    <option>White</option>
-                    <option>Black or African American</option>
-                    <option>Hispanic or Latino</option>
-                    <option>Asian</option>
-                    <option>Native American or Alaska Native</option>
-                    <option>Native Hawaiian or Pacific Islander</option>
-                    <option>Two or more races</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Disability</span>
-                  <select id="personDisability">
-                    <option value="">—</option>
-                    <option>No, I do not have a disability</option>
-                    <option>Yes, I have a disability</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Veteran status</span>
-                  <select id="personVeteran">
-                    <option value="">—</option>
-                    <option>I am not a protected veteran</option>
-                    <option>I identify as a protected veteran</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Citizenship</span>
-                  <select id="personCitizenship">
-                    <option value="">—</option>
-                    <option>US Citizen</option>
-                    <option>Permanent Resident</option>
-                    <option>Non-citizen authorized to work</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Authorized to work in the US?</span>
-                  <select id="personWorkAuthorized">
-                    <option value="">—</option>
-                    <option>Yes</option>
-                    <option>No</option>
-                  </select>
-                </label>
-              </div>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Need visa sponsorship?</span>
-                  <select id="personSponsorship">
-                    <option value="">—</option>
-                    <option>No</option>
-                    <option>Yes</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Hispanic / Latino?</span>
-                  <select id="personHispanicLatino">
-                    <option value="">—</option>
-                    <option>No</option>
-                    <option>Yes</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </label>
-              </div>
-              <label class="field">
-                <span>Extra autofill values (optional — one per line: label = value)</span>
-                <textarea
-                  id="personAutofillExtras"
-                  class="prompt-input"
-                  placeholder="Examples:&#10;desired salary = 140000&#10;security clearance = None&#10;willing to relocate = Yes"
-                  rows="3"
-                ></textarea>
-              </label>
-              <p class="hint">Extras match leftover questions by label. The Q&amp;A bank (Apply section) stores reusable answers per person. Learn mode saves what you type on forms.</p>
-            </div>
-
-            <div class="subblock">
-              <p class="subsection-title">Resume &amp; files</p>
-              <div class="grid-2">
-                <label class="field">
-                  <span>Resume PDF prefix</span>
-                  <input id="personResumePrefix" type="text" placeholder="Jane_Resume" autocomplete="off" />
-                </label>
-                <label class="field">
-                  <span>Signature title</span>
-                  <input id="personSignatureTitle" type="text" placeholder="Salesforce Developer" autocomplete="off" />
-                </label>
-              </div>
-              <label class="field">
-                <span>Master resume text</span>
-                <textarea
-                  id="personMasterResume"
-                  class="prompt-input"
-                  placeholder="Filled automatically from the resume file. Paste here only to correct the extracted text."
-                  rows="4"
-                ></textarea>
-              </label>
-              <div class="row-split">
-                <button type="button" id="replaceResumeFromFile" class="ghost compact">Replace from file</button>
-                <button type="button" id="clearMasterResume" class="ghost compact">Clear text</button>
-              </div>
-              <p class="hint" id="masterResumeFileHint">Same file picker as Person above. Does not invent fields that are missing from the file.</p>
-              <label class="field">
-                <span>Required experience employers (one per line — must all appear on every resume)</span>
-                <textarea
-                  id="personRequiredExperience"
-                  class="prompt-input"
-                  placeholder="Culligan International&#10;Fusion Academy&#10;HexArmor"
-                  rows="5"
-                ></textarea>
-              </label>
-              <div class="row-split">
-                <p class="hint grow">
-                  List every employer GPT must keep. Repeat a company if they held two roles there. Optional:
-                  <code>Company | 2</code>. Blank = auto-detect from FIXED COMPANY HISTORY in the prompt.
-                </p>
-                <button type="button" id="detectRequiredExperience" class="ghost compact">Detect from prompt</button>
-              </div>
-            </div>
-
-            <div class="subblock">
-              <p class="subsection-title">Prompts</p>
-              <label class="field">
-                <span>Resume tailor prompt (instructions for ChatGPT — JD comes from CSV automatically)</span>
-                <textarea
-                  id="personResumePrompt"
-                  class="prompt-input"
-                  placeholder="Paste your resume-tailoring prompt. Put {JD} where each job’s description should be inserted automatically from the CSV. Optional: {MASTER_RESUME}, {JOB_TITLE}, {COMPANY}."
-                  rows="5"
-                ></textarea>
-              </label>
-              <label class="field">
-                <span>Cover letter prompt (optional — JD also auto-filled from CSV via {JD})</span>
-                <textarea
-                  id="personCoverPrompt"
-                  class="prompt-input"
-                  placeholder="Leave blank for built-in CoverLetter. Put {JD} for auto CSV job description. Also: {JOB_TITLE}, {COMPANY}, {NAME}…"
-                  rows="4"
-                ></textarea>
-              </label>
-              <p class="hint" id="personSaveHint">
-                Paste the tailor prompt once (not the JD). Each CSV job’s description replaces {JD} automatically when the batch runs.
-              </p>
-            </div>
-
-            <p id="personSaveStatus" class="person-save-status" hidden></p>
-            <div class="row row-2 person-save-row">
-              <button type="button" id="savePerson" class="primary">Save person</button>
-              <button type="button" id="savePersonAsNew" class="ghost">Duplicate as new</button>
-            </div>
+            <button type="button" id="loadPreset" class="ghost compact">Open preset</button>
           </div>
         </section>
 
@@ -646,15 +418,16 @@
             <input type="checkbox" id="allowSubmitToggle" />
           </label>
           <div class="apply-actions">
-            <button type="button" id="autofillPage" class="ghost" title="Fill the current step only — never clicks Next or Submit">
-              Fill step
+            <button type="button" id="autofillPage" class="primary" title="Open the in-page panel and fill the current step — never clicks Next or Submit">
+              Autofill
               <kbd>Ctrl+Shift+Y</kbd>
             </button>
-            <button type="button" id="autoApplyPage" class="primary" title="Walk Next/Continue through the form; submits when Allow auto submit is on">
+            <button type="button" id="autoApplyPage" class="ghost" title="Walk Next/Continue through the form; submits when Allow auto submit is on">
               Auto Apply
               <kbd>Ctrl+Shift+U</kbd>
             </button>
           </div>
+          <p class="hint"><strong>Autofill</strong> opens the panel on the application tab and fills this step. <strong>Auto Apply</strong> advances through multi-step forms (stops before Submit unless allowed above).</p>
           <div class="qa-bank-block">
             <div class="qa-bank-head">
               <p class="subsection-title">Q&amp;A bank</p>

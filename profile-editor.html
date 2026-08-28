@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Profile — Brightstar Bid bot</title>
+    <script src="theme-boot.js"></script>
+    <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="profile-editor.css" />
+    <link rel="stylesheet" href="ui-dialog.css" />
+  </head>
+  <body class="ctx-window editor-page">
+    <main class="editor profile-editor">
+      <header class="editor-header">
+        <div class="editor-header-top">
+          <div class="brand">
+            <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
+            <div class="brand-copy">
+              <h1>Profile editor</h1>
+              <p class="hype hype-muted">One person record — used for autofill and resume bids</p>
+            </div>
+          </div>
+          <div class="editor-header-actions">
+            <button type="submit" form="profileForm" id="savePersonTop" class="primary compact">Save</button>
+            <div class="theme-picker" role="group" aria-label="Theme">
+              <div class="theme-swatches" id="themeSwatches"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-toolbar">
+          <div class="row-split profile-person-row">
+            <label class="field grow person-field">
+              <span>Editing profile</span>
+              <select id="profileSelect" aria-label="Select person profile"></select>
+            </label>
+            <button
+              type="button"
+              id="savePersonAsNew"
+              class="ghost compact"
+              title="Create a separate copy under a new name"
+            >
+              Save as new
+            </button>
+            <button type="button" id="deleteProfile" class="ghost danger compact" hidden title="Delete this profile">
+              Delete
+            </button>
+          </div>
+          <p id="profileKindNote" class="toolbar-hint" hidden></p>
+        </div>
+
+        <div id="completenessBanner" class="profile-completeness-bar" hidden aria-live="polite"></div>
+
+        <nav class="profile-tabs" role="tablist" aria-label="Profile sections">
+          <button type="button" class="profile-tab is-active" data-tab="apply" role="tab" aria-selected="true">Apply</button>
+          <button type="button" class="profile-tab" data-tab="resume" role="tab" aria-selected="false">Resume</button>
+          <button type="button" class="profile-tab" data-tab="batch" role="tab" aria-selected="false">Bid setup</button>
+        </nav>
+      </header>
+
+      <p id="status" class="editor-status status-bar is-ok" role="status" hidden></p>
+
+      <form id="profileForm" autocomplete="off">
+        <!-- Autofill — Jobright-style accordion categories -->
+        <div class="profile-tab-panel is-active" data-panel="apply" role="tabpanel">
+          <p class="tab-intro">Contact and screener fields filled on job application forms.</p>
+          <div class="profile-acc">
+            <details class="profile-acc-item" open>
+              <summary>Contact</summary>
+              <div class="profile-acc-body">
+                <div class="field-group">
+                  <p class="field-group-title">Name</p>
+                  <div class="grid-2">
+                    <label class="field">
+                      <span>Display name</span>
+                      <input id="personLabel" type="text" autocomplete="off" placeholder="How you appear in the app" />
+                    </label>
+                    <label class="field">
+                      <span>Legal name</span>
+                      <input id="personName" type="text" autocomplete="off" placeholder="Full name on applications" />
+                    </label>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <p class="field-group-title">Reach</p>
+                  <div class="grid-2">
+                    <label class="field">
+                      <span>Email</span>
+                      <input id="personEmail" type="email" autocomplete="off" placeholder="you@email.com" />
+                    </label>
+                    <label class="field">
+                      <span>Phone</span>
+                      <input id="personPhone" type="text" autocomplete="off" placeholder="+1 555 123 4567" />
+                    </label>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <p class="field-group-title">Online</p>
+                  <div class="grid-2">
+                    <label class="field">
+                      <span>LinkedIn</span>
+                      <input id="personLinkedin" type="url" autocomplete="off" placeholder="https://linkedin.com/in/…" />
+                    </label>
+                    <label class="field">
+                      <span>Website</span>
+                      <input id="personPortfolio" type="url" autocomplete="off" placeholder="https://…" />
+                    </label>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <p class="field-group-title">Address</p>
+                  <label class="field">
+                    <span>City / region</span>
+                    <input id="personLocation" type="text" autocomplete="off" placeholder="City, ST" />
+                  </label>
+                  <div class="grid-2">
+                    <label class="field">
+                      <span>Street address</span>
+                      <input id="personAddress" type="text" autocomplete="off" placeholder="123 Main St" />
+                    </label>
+                    <label class="field">
+                      <span>ZIP / postal code</span>
+                      <input id="personZip" type="text" autocomplete="off" placeholder="12345" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="profile-acc-item">
+              <summary>Work authorization</summary>
+              <div class="profile-acc-body">
+                <div class="grid-2">
+                  <label class="field">
+                    <span>Citizenship</span>
+                    <select id="personCitizenship">
+                      <option value="">—</option>
+                      <option>US Citizen</option>
+                      <option>Permanent Resident</option>
+                      <option>Non-citizen authorized to work</option>
+                      <option>Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Work authorized (US)</span>
+                    <select id="personWorkAuthorized">
+                      <option value="">—</option>
+                      <option>Yes</option>
+                      <option>No</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="field field-half">
+                  <span>Visa sponsorship</span>
+                  <select id="personSponsorship">
+                    <option value="">—</option>
+                    <option>No</option>
+                    <option>Yes</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+
+            <details class="profile-acc-item">
+              <summary>Demographics (EEO)</summary>
+              <div class="profile-acc-body">
+                <p class="acc-hint">Optional — leave blank to skip on forms.</p>
+                <div class="grid-2">
+                  <label class="field">
+                    <span>Gender</span>
+                    <select id="personGender">
+                      <option value="">—</option>
+                      <option>Male</option>
+                      <option>Female</option>
+                      <option>Non-binary</option>
+                      <option>Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Race / ethnicity</span>
+                    <select id="personEthnicity">
+                      <option value="">—</option>
+                      <option>White</option>
+                      <option>Black or African American</option>
+                      <option>Hispanic or Latino</option>
+                      <option>Asian</option>
+                      <option>Native American or Alaska Native</option>
+                      <option>Native Hawaiian or Pacific Islander</option>
+                      <option>Two or more races</option>
+                      <option>Prefer not to say</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="grid-2">
+                  <label class="field">
+                    <span>Disability</span>
+                    <select id="personDisability">
+                      <option value="">—</option>
+                      <option>No, I do not have a disability</option>
+                      <option>Yes, I have a disability</option>
+                      <option>Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Veteran status</span>
+                    <select id="personVeteran">
+                      <option value="">—</option>
+                      <option>I am not a protected veteran</option>
+                      <option>I identify as a protected veteran</option>
+                      <option>Prefer not to say</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="field field-half">
+                  <span>Hispanic / Latino</span>
+                  <select id="personHispanicLatino">
+                    <option value="">—</option>
+                    <option>No</option>
+                    <option>Yes</option>
+                    <option>Prefer not to say</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+
+            <details class="profile-acc-item">
+              <summary>Salary &amp; extras</summary>
+              <div class="profile-acc-body">
+                <p class="acc-hint">One per line: <code>label = value</code> — matched to custom form questions.</p>
+                <label class="field">
+                  <span>Extra autofill values</span>
+                  <textarea
+                    id="personAutofillExtras"
+                    class="prompt-input"
+                    placeholder="desired salary = 140000&#10;notice period = 2 weeks"
+                    rows="4"
+                  ></textarea>
+                </label>
+              </div>
+            </details>
+
+            <details class="profile-acc-item">
+              <summary>Portal passwords</summary>
+              <div class="profile-acc-body">
+                <p class="acc-hint">Stored locally for ATS portals (e.g. Workday). Never sent anywhere else.</p>
+                <label class="field">
+                  <span>Workday / ATS password</span>
+                  <input id="personPassword" type="password" autocomplete="off" placeholder="Optional — for autofill only" />
+                </label>
+              </div>
+            </details>
+
+            <details class="profile-acc-item">
+              <summary>
+                Screener Q&amp;A
+                <span id="qaBankNote" class="acc-summary-meta">0 answers</span>
+              </summary>
+              <div class="profile-acc-body">
+                <p class="acc-hint">Saved question → answer pairs. Matched on forms before calling AI.</p>
+                <button type="button" id="openQaEditorBtn" class="primary compact profile-qa-open">Open Q&amp;A bank</button>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- Resume -->
+        <div class="profile-tab-panel" data-panel="resume" role="tabpanel" aria-hidden="true">
+          <p class="tab-intro">Resume text and employers used when tailoring bids per job.</p>
+          <div class="profile-acc">
+            <details class="profile-acc-item" open>
+              <summary>Resume file</summary>
+              <div class="profile-acc-body">
+                <label class="field file-field">
+                  <span>Import (.txt, .pdf, .docx)</span>
+                  <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
+                </label>
+                <p class="hint" id="masterResumeFileHint"></p>
+              </div>
+            </details>
+
+            <details class="profile-acc-item" open>
+              <summary>Resume content</summary>
+              <div class="profile-acc-body">
+                <div class="grid-2">
+                  <label class="field">
+                    <span>PDF file prefix</span>
+                    <input id="personResumePrefix" type="text" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Signature title</span>
+                    <input id="personSignatureTitle" type="text" autocomplete="off" />
+                  </label>
+                </div>
+                <label class="field">
+                  <span>Master resume text</span>
+                  <textarea id="personMasterResume" class="prompt-input" rows="8"></textarea>
+                </label>
+                <div class="row-split">
+                  <button type="button" id="replaceResumeFromFile" class="ghost compact">Replace from file</button>
+                  <button type="button" id="clearMasterResume" class="ghost compact">Clear</button>
+                </div>
+                <label class="field">
+                  <span>Required employers (one per line)</span>
+                  <textarea id="personRequiredExperience" class="prompt-input" rows="4"></textarea>
+                </label>
+                <button type="button" id="detectRequiredExperience" class="ghost compact">Detect employers</button>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- Batch (Brightstar CSV / prompts — not autofill) -->
+        <div class="profile-tab-panel" data-panel="batch" role="tabpanel" aria-hidden="true">
+          <p class="tab-intro">Engineering track, AI prompts, and Google Sheet — for CSV batch bidding.</p>
+          <div class="profile-acc">
+            <details class="profile-acc-item" open>
+              <summary>Track &amp; template</summary>
+              <div class="profile-acc-body">
+                <div class="field">
+                  <span>Engineering track</span>
+                  <div class="role-track-toggle ai-provider-toggle" role="radiogroup" aria-label="Engineering track">
+                    <button type="button" class="ai-provider-btn role-track-btn is-active" data-track="sf" aria-pressed="true">SF</button>
+                    <button type="button" class="ai-provider-btn role-track-btn" data-track="de" aria-pressed="false">DE</button>
+                    <button type="button" class="ai-provider-btn role-track-btn" data-track="fs" aria-pressed="false">FS</button>
+                    <button type="button" class="ai-provider-btn role-track-btn" data-track="ai" aria-pressed="false">AI</button>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>Resume template</span>
+                  <select id="templateSelect"></select>
+                </label>
+              </div>
+            </details>
+
+            <details class="profile-acc-item" open>
+              <summary>AI prompts</summary>
+              <div class="profile-acc-body">
+                <label class="field">
+                  <span>Resume prompt ({JD})</span>
+                  <textarea id="personResumePrompt" class="prompt-input" rows="6"></textarea>
+                </label>
+                <label class="field">
+                  <span>Cover letter prompt ({JD})</span>
+                  <textarea id="personCoverPrompt" class="prompt-input" rows="4"></textarea>
+                </label>
+              </div>
+            </details>
+
+            <details class="profile-acc-item">
+              <summary>Google Sheet</summary>
+              <div class="profile-acc-body">
+                <div class="grid-2 grid-2-stack">
+                  <label class="field">
+                    <span>Spreadsheet URL</span>
+                    <input id="spreadsheetUrl" type="url" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/…" />
+                  </label>
+                  <label class="field">
+                    <span>Apps Script URL</span>
+                    <input id="sheetsWebAppUrl" type="url" autocomplete="off" placeholder="https://script.google.com/macros/…" />
+                  </label>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <p id="personSaveStatus" class="profile-save-status" hidden></p>
+      </form>
+    </main>
+    <script type="module" src="profile-editor.js"></script>
+  </body>
+</html>

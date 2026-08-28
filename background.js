@@ -29,6 +29,16 @@ import {
   setLastGeneratedDocs,
   startAutofillOnTab,
   startMultiStepApplyOnTab,
+  startJobrightStyleAutofill,
+  cancelJobrightStyleAutofill,
+  scanFieldsOnTab,
+  probeApplicationFormOnTab,
+  ensureAutofillPanelOnTab,
+  showAutofillPanelOnTab,
+  resolveAssistTab,
+  getCurrentApplicationTab,
+  looksLikeApplyUrl,
+  shouldOfferAutofillPanel,
   openJobAndApply,
   closeApplyTab,
   probeJobLinkInactive,
@@ -64,6 +74,7 @@ import {
   setExperienceValidationRules
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
+import { openProfileEditor } from "./open-profile-editor.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import {
   parseJobsCsv,
@@ -678,7 +689,58 @@ async function openBotAppWindow() {
   return { ok: true, created: true, windowId: created?.id ?? null };
 }
 
+/** Move UI from detached window app → Chrome side panel on a normal browser window. */
+async function dockToSidePanel(sourceWindowId = null) {
+  if (typeof chrome.sidePanel?.open !== "function") {
+    throw new Error("Side panel is not supported in this Chrome version.");
+  }
+
+  const normalWindows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const sourceId = sourceWindowId != null ? Number(sourceWindowId) : null;
+  const target =
+    normalWindows.find((w) => w.focused && w.id !== sourceId) ||
+    normalWindows.find((w) => w.id !== sourceId) ||
+    normalWindows[0];
+  if (!target?.id) {
+    throw new Error("Open a regular Chrome browser window first, then try again.");
+  }
+
+  await configureSidePanel();
+  await chrome.sidePanel.open({ windowId: target.id });
+
+  const stored = await chrome.storage.local.get(DETACHED_WINDOW_KEY);
+  const detachedId = stored[DETACHED_WINDOW_KEY];
+  const toClose = sourceId && detachedId === sourceId ? sourceId : detachedId;
+  if (toClose != null) {
+    await chrome.windows.remove(toClose).catch(() => {});
+    await chrome.storage.local.remove(DETACHED_WINDOW_KEY).catch(() => {});
+  }
+
+  return { ok: true, windowId: target.id };
+}
+
 configureSidePanel();
+
+const PANEL_SKIP_URL_RE =
+  /^(chrome-extension:|chrome:|about:|https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai)\/)/i;
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete") return;
+  const url = tab?.url || "";
+  if (!/^https?:\/\//i.test(url) || PANEL_SKIP_URL_RE.test(url)) return;
+  (async () => {
+    try {
+      if (!(await isAutofillEnabled())) return;
+      await ensureAutofillPanelOnTab(tabId);
+      const probe = await probeApplicationFormOnTab(tabId).catch(() => ({}));
+      if (shouldOfferAutofillPanel(probe, url)) {
+        await showAutofillPanelOnTab(tabId, { expand: true });
+      }
+    } catch {
+      /* ignore */
+    }
+  })();
+});
 
 chrome.windows.onRemoved.addListener((windowId) => {
   chrome.storage.local.get(DETACHED_WINDOW_KEY).then((data) => {
@@ -6218,7 +6280,9 @@ async function autofillActiveTab(tabId = null) {
   if (!(await isAutofillEnabled())) {
     throw new Error("Autofill is disabled. Turn it on in Apply assist.");
   }
-  return startAutofillOnTab(tabId);
+  const tab = await resolveAssistTab(tabId);
+  if (tab?.id) await showAutofillPanelOnTab(tab.id, { expand: true });
+  return startAutofillOnTab(tab?.id || tabId);
 }
 
 async function findActiveIndeedTab() {
@@ -6834,11 +6898,21 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
   }
 })();
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const type = message?.type;
+  const senderTabId = sender?.tab?.id ?? null;
 
   if (type === "open_app_window") {
     openBotAppWindow()
+      .then((result) => safeSendResponse(sendResponse, result))
+      .catch((err) =>
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
+      );
+    return true;
+  }
+
+  if (type === "dock_to_side_panel") {
+    dockToSidePanel(message.sourceWindowId ?? null)
       .then((result) => safeSendResponse(sendResponse, result))
       .catch((err) =>
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
@@ -7191,12 +7265,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const allowSubmit = Boolean(
           message.allowSubmitOnAssist ?? stored.allowSubmitOnAssist
         );
-        const tab =
-          message.tabId != null
-            ? await chrome.tabs.get(message.tabId).catch(() => null)
-            : (await chrome.tabs.query({ active: true, currentWindow: true }))[0] || null;
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
         const tabUrl = tab?.url || stored.last_apply_jd_link || "";
-        const result = await startMultiStepApplyOnTab(message.tabId || tab?.id || null, {
+        if (tab?.id) await showAutofillPanelOnTab(tab.id, { expand: true });
+        const result = await startMultiStepApplyOnTab(tab?.id || null, {
           autoSubmit: allowSubmit,
           assistMode: !allowSubmit,
           applyHint: {
@@ -7222,6 +7294,168 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           `Apply assist filled ${filled} field(s) across ${result.steps || 1} step(s).`;
         await setStatus(metricsBits ? `${msg} (${metricsBits})` : msg);
         safeSendResponse(sendResponse, { ok: true, filled, ...result, status: msg });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_scan") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        if (!tab?.id) {
+          safeSendResponse(sendResponse, { ok: false, error: "No application tab found." });
+          return;
+        }
+        const result = await scanFieldsOnTab(tab.id);
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_probe") {
+    (async () => {
+      try {
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        if (!tab?.id || !/^https?:\/\//i.test(tab.url || "")) {
+          safeSendResponse(sendResponse, { ok: true, isApplicationForm: false });
+          return;
+        }
+        const probe = await probeApplicationFormOnTab(tab.id);
+        safeSendResponse(sendResponse, { ok: true, ...probe });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_start") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
+        const stored = await chrome.storage.local.get([
+          "last_apply_csv_row",
+          "last_apply_job_dir",
+          "last_apply_jd_link",
+          "allowSubmitOnAssist"
+        ]);
+        const allowSubmit = Boolean(
+          message.allowSubmitOnAssist ?? stored.allowSubmitOnAssist ?? true
+        );
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        const tabUrl = tab?.url || stored.last_apply_jd_link || "";
+        const result = await startJobrightStyleAutofill(tab?.id || null, {
+          autoSubmit: allowSubmit,
+          applyHint: {
+            csvRow: stored.last_apply_csv_row,
+            jobDir: stored.last_apply_job_dir,
+            jdLink: stored.last_apply_jd_link || tabUrl
+          }
+        });
+        const statusText = result.detail || formatAutofillSummary(result);
+        await setStatus(statusText);
+        safeSendResponse(sendResponse, {
+          ok: result.status !== "cancelled",
+          ...result,
+          statusText
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_cancel") {
+    (async () => {
+      try {
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        if (tab?.id) cancelJobrightStyleAutofill(tab.id);
+        safeSendResponse(sendResponse, { ok: true });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_open") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        if (!tab?.id || !/^https?:\/\//i.test(tab.url || "")) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Click the job application tab first, then try again."
+          });
+          return;
+        }
+        const shown = await showAutofillPanelOnTab(tab.id, { expand: message.expand !== false });
+        safeSendResponse(sendResponse, {
+          ok: shown,
+          tabId: tab.id,
+          error: shown ? "" : "Could not open panel on that tab — refresh the page and retry."
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "open_profile_editor") {
+    (async () => {
+      try {
+        const person = await getActivePerson().catch(() => null);
+        const result = await openProfileEditor({
+          profileId: message.profileId || person?.id || "",
+          tab: message.tab || "apply",
+          presetId: message.presetId || ""
+        });
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "open_popup") {
+    (async () => {
+      try {
+        const tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+        if (tab?.windowId != null && chrome.sidePanel?.open) {
+          await chrome.sidePanel.open({ windowId: tab.windowId });
+        } else {
+          await chrome.action.openPopup?.();
+        }
+        safeSendResponse(sendResponse, { ok: true });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }
