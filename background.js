@@ -722,7 +722,7 @@ async function dockToSidePanel(sourceWindowId = null) {
 configureSidePanel();
 
 const PANEL_SKIP_URL_RE =
-  /^(chrome-extension:|chrome:|about:|https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai)\/)/i;
+  /^(chrome-extension:|chrome:|about:|https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|outlook\.(office|live)\.com|mail\.google\.com|www\.google\.com)\/)/i;
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
@@ -731,11 +731,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   (async () => {
     try {
       if (!(await isAutofillEnabled())) return;
-      await ensureAutofillPanelOnTab(tabId);
       const probe = await probeApplicationFormOnTab(tabId).catch(() => ({}));
-      if (shouldOfferAutofillPanel(probe, url)) {
-        await showAutofillPanelOnTab(tabId, { expand: true });
-      }
+      if (!shouldOfferAutofillPanel(probe, url)) return;
+      await ensureAutofillPanelOnTab(tabId);
+      await showAutofillPanelOnTab(tabId, { expand: true });
     } catch {
       /* ignore */
     }

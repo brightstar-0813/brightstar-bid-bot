@@ -270,6 +270,78 @@ export function buildEducationHistory(resumeData = {}, applicantInfo = {}) {
   ];
 }
 
+function normalizeStoredWorkEntry(raw = {}) {
+  return {
+    company: String(raw.company || "").trim(),
+    title: String(raw.title || "").trim(),
+    location: String(raw.location || "").trim(),
+    startMonth: String(raw.startMonth || raw.start?.monthNum || "").trim(),
+    startYear: String(raw.startYear || raw.start?.year || "").trim(),
+    endMonth: String(raw.endMonth || raw.end?.monthNum || "").trim(),
+    endYear: String(raw.endYear || raw.end?.year || "").trim(),
+    current: Boolean(raw.current),
+    summary: String(raw.summary || "").trim()
+  };
+}
+
+function normalizeStoredEducationEntry(raw = {}) {
+  return {
+    school: String(raw.school || "").trim(),
+    degree: String(raw.degree || "").trim(),
+    fieldOfStudy: String(raw.fieldOfStudy || "").trim(),
+    startMonth: String(raw.startMonth || raw.start?.monthNum || "").trim(),
+    startYear: String(raw.startYear || raw.start?.year || "").trim(),
+    endMonth: String(raw.endMonth || raw.end?.monthNum || "").trim(),
+    endYear: String(raw.endYear || raw.end?.year || "").trim()
+  };
+}
+
+export function normalizeWorkHistory(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(normalizeStoredWorkEntry).filter((row) => row.company || row.title);
+}
+
+export function normalizeEducationHistory(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(normalizeStoredEducationEntry).filter((row) => row.school || row.degree);
+}
+
+/** Convert profile-editor work entries to autofill payload shape. */
+export function workHistoryForAutofill(entries = []) {
+  return normalizeWorkHistory(entries).map((job, index) => {
+    const start = dateBundle(job.startMonth, job.startYear);
+    const end = dateBundle(job.endMonth, job.endYear);
+    return {
+      index,
+      company: job.company,
+      title: job.title,
+      location: job.location,
+      dates: [start.display, end.display].filter(Boolean).join(" – "),
+      current: job.current,
+      start,
+      end,
+      summary: job.summary,
+      bullets: []
+    };
+  });
+}
+
+export function educationHistoryForAutofill(entries = []) {
+  return normalizeEducationHistory(entries).map((edu, index) => {
+    const start = dateBundle(edu.startMonth || "08", edu.startYear);
+    const end = dateBundle(edu.endMonth || "05", edu.endYear);
+    return {
+      index,
+      school: edu.school,
+      degree: edu.degree,
+      fieldOfStudy: edu.fieldOfStudy,
+      current: false,
+      start,
+      end
+    };
+  });
+}
+
 export function hasFormHistory(workHistory = [], educationHistory = []) {
   return (Array.isArray(workHistory) && workHistory.length > 0) ||
     (Array.isArray(educationHistory) && educationHistory.length > 0);

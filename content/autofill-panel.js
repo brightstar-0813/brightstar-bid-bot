@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-08-29.panel02";
+  const PANEL_BUILD = "2026-08-29.panel03";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -12,17 +12,35 @@
   const APPLY_PATH_RE = /\/(apply|application|job_app|careers\/apply)/i;
 
   function looksLikeApplyContext() {
-    if (ATS_HOST_RE.test(location.hostname)) return true;
+    const pathQuery = `${location.pathname}${location.search}`;
+    const host = location.hostname.toLowerCase();
+
     if (APPLY_PATH_RE.test(location.pathname)) return true;
-    return /\/apply\//i.test(location.href);
+    if (/\/apply\//i.test(pathQuery)) return true;
+    if (/[?&]apply(?:=|&|$)/i.test(location.search)) return true;
+    if (/myworkdayjobs\.com$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
+    if (/greenhouse\.io$/i.test(host) && /\/(embed\/)?job_app\b|\/jobs\/[^/]+\/apply/i.test(pathQuery)) {
+      return true;
+    }
+    if (/lever\.co$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
+    if (/indeed\.com$/i.test(host) && /(indeedapply|viewjob.*apply|from=smartapply)/i.test(pathQuery)) {
+      return true;
+    }
+    if (/ashbyhq\.com$/i.test(host) && /\/application\b/i.test(pathQuery)) return true;
+    return false;
+  }
+
+  function isAtsHost() {
+    return ATS_HOST_RE.test(location.hostname);
   }
 
   function shouldShowPanel(probe) {
-    if (looksLikeApplyContext()) return true;
     if (probe?.isApplicationForm) return true;
-    if (Number(probe?.fillableCount || 0) >= 1) return true;
-    if (probe?.hasFormFields) return true;
-    return false;
+    return looksLikeApplyContext();
+  }
+
+  function shouldInitPanel() {
+    return looksLikeApplyContext() || isAtsHost();
   }
 
   async function isAutofillEnabled() {
@@ -285,12 +303,7 @@
 
   async function initPanelVisibility() {
     if (!(await isAutofillEnabled())) return;
-
-    if (looksLikeApplyContext()) {
-      showPanelTab({ expand: true });
-      runScan().catch(() => {});
-      return;
-    }
+    if (!shouldInitPanel()) return;
 
     if (await probeAndMaybeShow({ expand: true })) return;
 

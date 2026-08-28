@@ -2,7 +2,7 @@
  * Jobright-style step wizard for Resume tab — import, work history, education.
  */
 
-import { monthCandidates, dateBundle } from "./history.js";
+import { normalizeWorkHistory, normalizeEducationHistory } from "./history.js";
 
 const MONTHS = [
   "January",
@@ -162,76 +162,32 @@ function eduEntryHtml(entry, index) {
 }
 
 function normalizeWorkEntry(raw = {}) {
-  return {
-    company: String(raw.company || "").trim(),
-    title: String(raw.title || "").trim(),
-    location: String(raw.location || "").trim(),
-    startMonth: String(raw.startMonth || raw.start?.monthNum || "").trim(),
-    startYear: String(raw.startYear || raw.start?.year || "").trim(),
-    endMonth: String(raw.endMonth || raw.end?.monthNum || "").trim(),
-    endYear: String(raw.endYear || raw.end?.year || "").trim(),
-    current: Boolean(raw.current),
-    summary: String(raw.summary || "").trim()
+  return normalizeWorkHistory([raw])[0] || {
+    company: "",
+    title: "",
+    location: "",
+    startMonth: "",
+    startYear: "",
+    endMonth: "",
+    endYear: "",
+    current: false,
+    summary: ""
   };
 }
 
 function normalizeEducationEntry(raw = {}) {
-  return {
-    school: String(raw.school || "").trim(),
-    degree: String(raw.degree || "").trim(),
-    fieldOfStudy: String(raw.fieldOfStudy || "").trim(),
-    startMonth: String(raw.startMonth || raw.start?.monthNum || "").trim(),
-    startYear: String(raw.startYear || raw.start?.year || "").trim(),
-    endMonth: String(raw.endMonth || raw.end?.monthNum || "").trim(),
-    endYear: String(raw.endYear || raw.end?.year || "").trim()
+  return normalizeEducationHistory([raw])[0] || {
+    school: "",
+    degree: "",
+    fieldOfStudy: "",
+    startMonth: "",
+    startYear: "",
+    endMonth: "",
+    endYear: ""
   };
 }
 
-export function normalizeWorkHistory(list) {
-  if (!Array.isArray(list)) return [];
-  return list.map(normalizeWorkEntry).filter((row) => row.company || row.title);
-}
-
-export function normalizeEducationHistory(list) {
-  if (!Array.isArray(list)) return [];
-  return list.map(normalizeEducationEntry).filter((row) => row.school || row.degree);
-}
-
-/** Convert stored flat entries to autofill history.js shape. */
-export function workHistoryForAutofill(entries = []) {
-  return normalizeWorkHistory(entries).map((job, index) => {
-    const start = dateBundle(job.startMonth, job.startYear);
-    const end = dateBundle(job.endMonth, job.endYear);
-    return {
-      index,
-      company: job.company,
-      title: job.title,
-      location: job.location,
-      dates: [start.display, end.display].filter(Boolean).join(" – "),
-      current: job.current,
-      start,
-      end,
-      summary: job.summary,
-      bullets: []
-    };
-  });
-}
-
-export function educationHistoryForAutofill(entries = []) {
-  return normalizeEducationHistory(entries).map((edu, index) => {
-    const start = dateBundle(edu.startMonth || "08", edu.startYear);
-    const end = dateBundle(edu.endMonth || "05", edu.endYear);
-    return {
-      index,
-      school: edu.school,
-      degree: edu.degree,
-      fieldOfStudy: edu.fieldOfStudy,
-      current: false,
-      start,
-      end
-    };
-  });
-}
+export { normalizeWorkHistory, normalizeEducationHistory };
 
 export function seedWorkHistoryFromEmployers(employers = []) {
   const names = (Array.isArray(employers) ? employers : [])
@@ -388,5 +344,3 @@ export function initResumeWizard(root, { onStepChange } = {}) {
 
   setStep(0);
 }
-
-export { monthCandidates };

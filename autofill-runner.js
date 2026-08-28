@@ -9,11 +9,7 @@
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson, personToAtsCredentials, DEFAULT_ATS_PASSWORD } from "./profiles.js";
 import { applyCompleteness } from "./person-profile-form.js";
 import { outputDirFromPerson } from "./resume-profile.js";
-import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
-import {
-  workHistoryForAutofill,
-  educationHistoryForAutofill
-} from "./resume-wizard.js";
+import { buildWorkHistory, buildEducationHistory, hasFormHistory, workHistoryForAutofill, educationHistoryForAutofill } from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
 import {
   isJunkAutofillAnswer,
@@ -916,9 +912,7 @@ async function notifyAutofillToast(tabId, payload = {}) {
 
 const panelAbortByTab = new Map();
 
-/** Known ATS hosts and apply URL paths — show the in-page panel even before fields render. */
-const ATS_HOST_RE =
-  /(?:greenhouse|lever|indeed|myworkdayjobs|icims|taleo|successfactors|bamboohr|ashbyhq|smartrecruiters|jobvite|ultipro|dice|jobgether|braintrust|usebraintrust)\./i;
+/** Apply URL paths — panel auto-opens only on apply flows, not whole ATS homepages. */
 const APPLY_PATH_RE = /\/(apply|application|job_app|careers\/apply)/i;
 
 export function looksLikeApplyUrl(url = "") {
@@ -926,20 +920,33 @@ export function looksLikeApplyUrl(url = "") {
   if (!href) return false;
   try {
     const u = new URL(href);
-    if (ATS_HOST_RE.test(u.hostname)) return true;
+    const pathQuery = `${u.pathname}${u.search}`;
+    const host = u.hostname.toLowerCase();
+
     if (APPLY_PATH_RE.test(u.pathname)) return true;
+    if (/\/apply\//i.test(pathQuery)) return true;
+    if (/[?&]apply(?:=|&|$)/i.test(u.search)) return true;
+
+    if (/myworkdayjobs\.com$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
+    if (/greenhouse\.io$/i.test(host) && /\/(embed\/)?job_app\b|\/jobs\/[^/]+\/apply/i.test(pathQuery)) {
+      return true;
+    }
+    if (/lever\.co$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
+    if (/indeed\.com$/i.test(host) && /(indeedapply|viewjob.*apply|from=smartapply)/i.test(pathQuery)) {
+      return true;
+    }
+    if (/ashbyhq\.com$/i.test(host) && /\/application\b/i.test(pathQuery)) return true;
+
+    return false;
   } catch {
-    /* ignore */
+    return /\/apply\//i.test(href);
   }
-  return /\/apply\//i.test(href);
 }
 
+/** Auto-show in-page panel only on apply URLs or confirmed application forms — not generic inputs. */
 export function shouldOfferAutofillPanel(probe = {}, url = "") {
-  if (looksLikeApplyUrl(url)) return true;
   if (probe?.isApplicationForm) return true;
-  if (Number(probe?.fillableCount || 0) >= 1) return true;
-  if (probe?.hasFormFields) return true;
-  return false;
+  return looksLikeApplyUrl(url);
 }
 
 async function ensureAutofillPanelScript(tabId) {
