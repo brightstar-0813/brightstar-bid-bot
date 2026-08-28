@@ -2954,7 +2954,7 @@ async function findExistingApplyTab(jdLink) {
 
 export async function openJobAndApply(
   url,
-  { multiStep = true, csvRow, jobDir, jdLink, autoSubmit = false } = {}
+  { multiStep = true, csvRow, jobDir, jdLink, autoSubmit = false, openOnly = false } = {}
 ) {
   const href = String(url || "").trim();
   if (!href) throw new Error("Missing job URL.");
@@ -2998,6 +2998,14 @@ export async function openJobAndApply(
       unavailable = await probeTabJobUnavailable(tab.id);
       if (unavailable) return unavailable;
     }
+  }
+  if (openOnly) {
+    return {
+      status: "opened",
+      tabId: tab.id,
+      detail: "Job link opened.",
+      openedOnly: true
+    };
   }
   if (multiStep) {
     return startMultiStepApplyOnTab(tab.id, { applyHint, autoSubmit: Boolean(autoSubmit) });

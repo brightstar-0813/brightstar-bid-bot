@@ -2145,7 +2145,11 @@ async function applyAssist(job) {
     setStatus("No JD link for this job.");
     return;
   }
-  setStatus("Marking Applied on the Google Sheet…");
+  setStatus(
+    autofillEnabledCache
+      ? "Marking Applied on the Google Sheet…"
+      : "Opening job link…"
+  );
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
@@ -2168,6 +2172,10 @@ async function applyAssist(job) {
     if (res.resumeName) job.resumeName = res.resumeName;
     if (res.coverName) job.coverName = res.coverName;
     await persistQueue();
+  }
+  if (res?.autofillSkipped || res?.openedOnly) {
+    setStatus(res.status || "Opened job link — autofill is off.");
+    return;
   }
   if (!res?.ok) {
     setStatus(

@@ -7301,13 +7301,46 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         }
         if (!(await isAutofillEnabled())) {
+          const href = String(message.url || jobMeta.jdLink || "").trim();
+          if (!href) {
+            reply({ ok: false, applied: false, started: false, error: "Missing job URL." });
+            await setStatus("Apply skipped — no job link.");
+            return;
+          }
+          await persistJobContextForAutofill(jobMeta);
+          const located = await locateJobFolder({
+            csvRow: jobMeta.csvRow,
+            jobDir: jobMeta.jobDir || "",
+            jdLink: jobMeta.jdLink,
+            company: jobMeta.companyName || jobMeta.company || "",
+            title: jobMeta.jobTitle || jobMeta.title || ""
+          }).catch(() => null);
+          if (located?.jobDir) {
+            jobMeta.jobDir = located.jobDir;
+            if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+              await updateQueueJob(jobMeta.csvRow, { jobDir: located.jobDir, hasFiles: true }).catch(() => {});
+            }
+          }
+          await persistJobContextForAutofill(jobMeta);
+          const result = await openJobAndApply(href, {
+            openOnly: true,
+            csvRow: jobMeta.csvRow,
+            jobDir: jobMeta.jobDir || "",
+            jdLink: jobMeta.jdLink || href
+          });
+          const status =
+            result?.detail ||
+            `Row ${jobMeta.csvRow}: opened job link (autofill is off — apply manually).`;
           reply({
-            ok: false,
+            ok: true,
             applied: false,
             started: false,
-            error: "Autofill is disabled. Turn it on in Apply assist."
+            openedOnly: true,
+            autofillSkipped: true,
+            jobDir: jobMeta.jobDir || "",
+            status
           });
-          await setStatus("Apply skipped — autofill is disabled.");
+          await setStatus(status);
           return;
         }
         const folderPromise = locateJobFolder({
