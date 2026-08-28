@@ -32,10 +32,24 @@
 
         <div class="profile-toolbar">
           <div class="row-split profile-person-row">
-            <label class="field grow person-field">
+            <div class="field grow person-field profile-picker">
               <span>Editing profile</span>
-              <select id="profileSelect" aria-label="Select person profile"></select>
-            </label>
+              <div class="profile-picker-wrap">
+                <button
+                  type="button"
+                  id="profilePickerBtn"
+                  class="profile-picker-btn"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  aria-controls="profilePickerMenu"
+                >
+                  <span id="profilePickerLabel">Add a new profile</span>
+                  <span class="profile-picker-caret" aria-hidden="true"></span>
+                </button>
+                <ul id="profilePickerMenu" class="profile-picker-menu" role="listbox" hidden></ul>
+                <input type="hidden" id="profileSelect" value="__new__" />
+              </div>
+            </div>
             <button
               type="button"
               id="savePersonAsNew"

@@ -102,15 +102,102 @@ body.ctx-window.editor-page {
   margin: 0;
 }
 
-.profile-toolbar select {
-  color: var(--ink);
-  background-color: var(--control-bg);
-  -webkit-text-fill-color: var(--ink);
+.profile-picker-wrap {
+  position: relative;
+  width: 100%;
 }
 
-.profile-toolbar select option {
+.profile-picker-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  height: auto;
+  padding: 8px 12px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
   color: var(--ink);
-  background-color: var(--control-bg);
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.profile-picker-btn:hover {
+  border-color: var(--control-hover-border);
+}
+
+.profile-picker-btn[aria-expanded="true"] {
+  border-color: var(--gold);
+  box-shadow: var(--ring);
+}
+
+#profilePickerLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.profile-picker-caret {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--muted);
+}
+
+.profile-picker-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--control-bg);
+  box-shadow: var(--shadow);
+}
+
+.profile-picker-menu[hidden] {
+  display: none !important;
+}
+
+.profile-picker-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+}
+
+.profile-picker-option:hover,
+.profile-picker-option.is-active {
+  background: color-mix(in srgb, var(--subblock-bg) 88%, transparent);
+}
+
+.profile-picker-option-label {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.profile-picker-option-meta {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .toolbar-hint {

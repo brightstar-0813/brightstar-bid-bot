@@ -47,6 +47,9 @@ import {
 const NEW_PROFILE_ID = "__new__";
 const formRoot = document.getElementById("profileForm");
 const profileSelectEl = document.getElementById("profileSelect");
+const profilePickerBtn = document.getElementById("profilePickerBtn");
+const profilePickerLabel = document.getElementById("profilePickerLabel");
+const profilePickerMenu = document.getElementById("profilePickerMenu");
 const deleteProfileBtn = document.getElementById("deleteProfile");
 const statusEl = document.getElementById("status");
 const completenessBannerEl = document.getElementById("completenessBanner");
@@ -197,21 +200,37 @@ function syncSaveButtonLabels() {
   if (savePersonTopBtn) savePersonTopBtn.textContent = label;
 }
 
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function profileOptionLabel(profile) {
+  if (!profile) return "Add a new profile";
+  return profile.builtin ? profile.label : `${profile.label} (custom)`;
+}
+
+function setProfilePickerOpen(open) {
+  if (!profilePickerBtn || !profilePickerMenu) return;
+  profilePickerMenu.hidden = !open;
+  profilePickerBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function syncProfilePickerLabel(selectedId) {
+  if (!profilePickerLabel) return;
+  if (selectedId === NEW_PROFILE_ID || !selectedId) {
+    profilePickerLabel.textContent = "Add a new profile";
+    return;
+  }
+  const profile = profilesCache.find((p) => p.id === selectedId);
+  profilePickerLabel.textContent = profileOptionLabel(profile) || "Add a new profile";
+}
+
 function populateProfileSelect(selectedId) {
   if (!profileSelectEl) return;
-  profileSelectEl.innerHTML = "";
-
-  const newOpt = document.createElement("option");
-  newOpt.value = NEW_PROFILE_ID;
-  newOpt.textContent = "+ New profile…";
-  profileSelectEl.appendChild(newOpt);
-
-  for (const profile of profilesCache) {
-    const option = document.createElement("option");
-    option.value = profile.id;
-    option.textContent = profile.builtin ? profile.label : `${profile.label} (custom)`;
-    profileSelectEl.appendChild(option);
-  }
 
   const validIds = new Set(profilesCache.map((p) => p.id));
   let nextId = NEW_PROFILE_ID;
@@ -226,16 +245,72 @@ function populateProfileSelect(selectedId) {
   }
 
   profileSelectEl.value = nextId;
-  const matched = Array.from(profileSelectEl.options).find((opt) => opt.value === nextId);
-  if (matched) matched.selected = true;
-  else if (profileSelectEl.options.length) profileSelectEl.selectedIndex = 0;
+  syncProfilePickerLabel(nextId);
+
+  if (profilePickerMenu) {
+    const items = [
+      {
+        id: NEW_PROFILE_ID,
+        label: "Add a new profile",
+        meta: "Start a blank person record"
+      },
+      ...profilesCache.map((profile) => ({
+        id: profile.id,
+        label: profileOptionLabel(profile),
+        meta: profile.builtin ? "Built-in starter" : "Your saved profile"
+      }))
+    ];
+    profilePickerMenu.innerHTML = items
+      .map(
+        (item) => `
+      <li role="option" class="profile-picker-option${item.id === nextId ? " is-active" : ""}" data-profile-id="${escapeHtml(item.id)}" aria-selected="${item.id === nextId ? "true" : "false"}">
+        <span class="profile-picker-option-label">${escapeHtml(item.label)}</span>
+        <span class="profile-picker-option-meta">${escapeHtml(item.meta)}</span>
+      </li>`
+      )
+      .join("");
+  }
 
   const selected =
-    profileSelectEl.value === NEW_PROFILE_ID
-      ? null
-      : profilesCache.find((p) => p.id === profileSelectEl.value);
+    nextId === NEW_PROFILE_ID ? null : profilesCache.find((p) => p.id === nextId);
   if (deleteProfileBtn) deleteProfileBtn.hidden = !(selected && !selected.builtin);
   updateProfileKindNote(selected);
+}
+
+function onProfilePickerSelect(profileId) {
+  setProfilePickerOpen(false);
+  if (profileId === NEW_PROFILE_ID) {
+    startNewProfile().catch((err) => setStatus(String(err.message || err), "err"));
+    return;
+  }
+  loadProfileById(profileId).catch((err) => setStatus(String(err.message || err), "err"));
+}
+
+function wireProfilePicker() {
+  if (!profilePickerBtn || !profilePickerMenu || profilePickerBtn.dataset.bound === "1") return;
+  profilePickerBtn.dataset.bound = "1";
+
+  profilePickerBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setProfilePickerOpen(profilePickerMenu.hidden);
+  });
+
+  profilePickerMenu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-profile-id]");
+    if (!option) return;
+    event.stopPropagation();
+    onProfilePickerSelect(option.dataset.profileId);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(".profile-picker-wrap")) return;
+    setProfilePickerOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setProfilePickerOpen(false);
+  });
 }
 
 function populateTemplateSelect(selectedId) {
@@ -312,7 +387,10 @@ async function loadPersonIntoForm(person) {
   populateTemplateSelect(person?.templateId || DEFAULT_TEMPLATE_ID);
   fillPersonForm(formRoot, person, { roleTrack: track });
   fillResumeWizard(formRoot, person);
-  if (profileSelectEl && person?.id) profileSelectEl.value = person.id;
+  if (profileSelectEl) {
+    profileSelectEl.value = person?.id || NEW_PROFILE_ID;
+    syncProfilePickerLabel(profileSelectEl.value);
+  }
   syncSaveButtonLabels();
   renderCompleteness(person);
   updateProfileKindNote(person);
@@ -477,14 +555,6 @@ async function openQaEditor() {
   }
 }
 
-profileSelectEl?.addEventListener("change", () => {
-  if (profileSelectEl.value === NEW_PROFILE_ID) {
-    startNewProfile().catch((err) => setStatus(String(err.message || err), "err"));
-    return;
-  }
-  loadProfileById(profileSelectEl.value).catch((err) => setStatus(String(err.message || err), "err"));
-});
-
 deleteProfileBtn?.addEventListener("click", async () => {
   const profileId = profileSelectEl.value;
   const selected = profilesCache.find((p) => p.id === profileId);
@@ -589,6 +659,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function init() {
   wireProfileTabs();
+  wireProfilePicker();
   initThemePicker(document.getElementById("themeSwatches"));
   initResumeWizard(formRoot);
   setActiveTab(normalizeTab(initialTab));
