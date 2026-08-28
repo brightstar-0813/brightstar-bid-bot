@@ -66,8 +66,7 @@ const clearMasterResumeBtn = document.getElementById("clearMasterResume");
 const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
 const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
 const roleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
-const tabBtns = Array.from(document.querySelectorAll(".profile-tab"));
-const tabPanels = Array.from(document.querySelectorAll(".profile-tab-panel"));
+const profileTabsEl = document.getElementById("profileTabs");
 
 let profilesCache = [];
 let editingPersonId = null;
@@ -144,7 +143,10 @@ function updateEditorUrl(tab, profileId) {
 function setActiveTab(tabId) {
   const tab = normalizeTab(tabId);
   activeTab = tab;
-  for (const btn of tabBtns) {
+  const tabButtons = profileTabsEl
+    ? Array.from(profileTabsEl.querySelectorAll(".profile-tab[data-tab]"))
+    : [];
+  for (const btn of tabButtons) {
     const isActive = btn.dataset.tab === tab;
     btn.classList.toggle("is-active", isActive);
     btn.setAttribute("aria-selected", isActive ? "true" : "false");
@@ -152,13 +154,40 @@ function setActiveTab(tabId) {
   }
   const panels = formRoot
     ? Array.from(formRoot.querySelectorAll(":scope > .profile-tab-panel"))
-    : tabPanels;
+    : [];
   for (const panel of panels) {
     const isActive = panel.dataset.panel === tab;
     panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
     panel.setAttribute("aria-hidden", isActive ? "false" : "true");
   }
   updateEditorUrl(tab, profileSelectEl?.value || editingPersonId || "");
+}
+
+function wireProfileTabs() {
+  if (!profileTabsEl || profileTabsEl.dataset.bound === "1") return;
+  profileTabsEl.dataset.bound = "1";
+  profileTabsEl.addEventListener("click", (event) => {
+    const btn = event.target.closest(".profile-tab[data-tab]");
+    if (!btn || !profileTabsEl.contains(btn)) return;
+    event.preventDefault();
+    setActiveTab(btn.dataset.tab);
+  });
+  profileTabsEl.addEventListener("keydown", (event) => {
+    const tabs = Array.from(profileTabsEl.querySelectorAll(".profile-tab[data-tab]"));
+    const currentIndex = tabs.findIndex((btn) => btn.classList.contains("is-active"));
+    if (currentIndex < 0) return;
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = Math.min(currentIndex + 1, tabs.length - 1);
+    else if (event.key === "ArrowLeft") nextIndex = Math.max(currentIndex - 1, 0);
+    else return;
+    event.preventDefault();
+    const nextTab = tabs[nextIndex]?.dataset?.tab;
+    if (nextTab) {
+      setActiveTab(nextTab);
+      tabs[nextIndex]?.focus();
+    }
+  });
 }
 
 function syncSaveButtonLabels() {
@@ -208,6 +237,9 @@ function populateProfileSelect(selectedId) {
   } else {
     const nextId = validIds.has(selectedId) ? selectedId : profilesCache[0]?.id || DEFAULT_PROFILE_ID;
     profileSelectEl.value = validIds.has(nextId) ? nextId : NEW_PROFILE_ID;
+  }
+  if (!profileSelectEl.value && profileSelectEl.options.length) {
+    profileSelectEl.selectedIndex = 0;
   }
 
   const selected =
@@ -455,10 +487,6 @@ async function openQaEditor() {
   }
 }
 
-tabBtns.forEach((btn) => {
-  btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
-});
-
 profileSelectEl?.addEventListener("change", () => {
   if (profileSelectEl.value === NEW_PROFILE_ID) {
     startNewProfile().catch((err) => setStatus(String(err.message || err), "err"));
@@ -570,6 +598,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 async function init() {
+  wireProfileTabs();
   initThemePicker(document.getElementById("themeSwatches"));
   initResumeWizard(formRoot);
   setActiveTab(normalizeTab(initialTab));

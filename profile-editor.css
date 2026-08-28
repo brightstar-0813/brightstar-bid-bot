@@ -282,9 +282,12 @@ body.ctx-window.editor-page {
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--subblock-bg) 88%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 30;
 }
 
-.profile-tab {
+.profile-tabs .profile-tab {
   appearance: none;
   background: transparent;
   border: none;
@@ -295,9 +298,19 @@ body.ctx-window.editor-page {
   font-weight: 700;
   color: var(--muted);
   cursor: pointer;
+  width: 100%;
+  min-height: 36px;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 
-.profile-tab.is-active {
+.profile-tabs .profile-tab:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--section-bg) 70%, transparent);
+}
+
+.profile-tabs .profile-tab.is-active {
   color: var(--accent);
   background: var(--section-bg);
   box-shadow: var(--shadow);
@@ -331,7 +344,11 @@ body.ctx-window.editor-page {
   display: none;
 }
 
-.profile-editor #profileForm > .profile-tab-panel.is-active {
+.profile-editor #profileForm > .profile-tab-panel[hidden] {
+  display: none !important;
+}
+
+.profile-editor #profileForm > .profile-tab-panel.is-active:not([hidden]) {
   display: block;
 }
 
