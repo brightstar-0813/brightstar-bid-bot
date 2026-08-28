@@ -19,12 +19,12 @@ import {
   mergeExtractedProfileIntoPerson,
   requiredExperienceToText
 } from "./person-profile-form.js";
+import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
-  extractMasterResumeFromFile,
+  namesLikelyDifferent,
   extractProfileFromResumeText,
-  MASTER_RESUME_ACCEPT
-} from "./master-resume-file.js";
-import { namesLikelyDifferent } from "./resume-profile.js";
+  parseEmployersFromResume
+} from "./resume-profile.js";
 import {
   normalizeRoleTrackId,
   resolveRoleTrackForPerson,
@@ -33,10 +33,7 @@ import {
   isTrackDefaultPrompt,
   isTrackDefaultCoverLetter
 } from "./role-tracks.js";
-import {
-  parseRequiredExperienceFromPrompt,
-  parseEmployersFromResume
-} from "./experience-rules.js";
+import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
 import { getQaCount } from "./qa-store.js";
 import { confirmDialog } from "./ui-dialog.js";
 import { showToast } from "./ui-toast.js";
