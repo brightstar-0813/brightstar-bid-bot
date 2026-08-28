@@ -53,9 +53,9 @@
         <div id="completenessBanner" class="profile-completeness-bar" hidden aria-live="polite"></div>
 
         <nav class="profile-tabs" role="tablist" aria-label="Profile sections">
-          <button type="button" class="profile-tab is-active" data-tab="apply" role="tab" aria-selected="true">Apply</button>
-          <button type="button" class="profile-tab" data-tab="resume" role="tab" aria-selected="false">Resume</button>
-          <button type="button" class="profile-tab" data-tab="batch" role="tab" aria-selected="false">Bid setup</button>
+          <button type="button" class="profile-tab is-active" data-tab="apply" role="tab" aria-selected="true" aria-controls="profilePanelApply">Apply</button>
+          <button type="button" class="profile-tab" data-tab="resume" role="tab" aria-selected="false" aria-controls="profilePanelResume" tabindex="-1">Resume</button>
+          <button type="button" class="profile-tab" data-tab="batch" role="tab" aria-selected="false" aria-controls="profilePanelBatch" tabindex="-1">Bid setup</button>
         </nav>
       </header>
 
@@ -63,7 +63,7 @@
 
       <form id="profileForm" autocomplete="off">
         <!-- Autofill — Jobright-style accordion categories -->
-        <div class="profile-tab-panel is-active" data-panel="apply" role="tabpanel">
+        <div class="profile-tab-panel is-active" data-panel="apply" id="profilePanelApply" role="tabpanel">
           <p class="tab-intro">Contact and screener fields filled on job application forms.</p>
           <div class="profile-acc">
             <details class="profile-acc-item" open>
@@ -265,7 +265,7 @@
         </div>
 
         <!-- Resume -->
-        <div class="profile-tab-panel" data-panel="resume" role="tabpanel" aria-hidden="true">
+        <div class="profile-tab-panel" data-panel="resume" id="profilePanelResume" role="tabpanel" hidden aria-hidden="true">
           <p class="tab-intro">Resume text and employers used when tailoring bids per job.</p>
           <div class="profile-acc">
             <details class="profile-acc-item" open>
@@ -311,7 +311,7 @@
         </div>
 
         <!-- Batch (Brightstar CSV / prompts — not autofill) -->
-        <div class="profile-tab-panel" data-panel="batch" role="tabpanel" aria-hidden="true">
+        <div class="profile-tab-panel" data-panel="batch" id="profilePanelBatch" role="tabpanel" hidden aria-hidden="true">
           <p class="tab-intro">Engineering track, AI prompts, and Google Sheet — for CSV batch bidding.</p>
           <div class="profile-acc">
             <details class="profile-acc-item" open>

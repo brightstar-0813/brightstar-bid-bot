@@ -140,13 +140,21 @@ function setActiveTab(tabId) {
     const isActive = btn.dataset.tab === tab;
     btn.classList.toggle("is-active", isActive);
     btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    btn.tabIndex = isActive ? 0 : -1;
   }
-  for (const panel of tabPanels) {
+  const panels = formRoot
+    ? Array.from(formRoot.querySelectorAll(".profile-tab-panel"))
+    : tabPanels;
+  for (const panel of panels) {
     const isActive = panel.dataset.panel === tab;
     panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
     panel.setAttribute("aria-hidden", isActive ? "false" : "true");
   }
   updateEditorUrl(tab, profileSelectEl?.value || editingPersonId || "");
+  const activePanel = panels.find((panel) => panel.dataset.panel === tab);
+  activePanel?.scrollIntoView({ block: "start", behavior: "smooth" });
+  formRoot?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function syncSaveButtonLabels() {

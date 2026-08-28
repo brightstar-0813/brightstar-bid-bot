@@ -324,7 +324,11 @@ body.ctx-window.editor-page {
   display: none !important;
 }
 
-.profile-tab-panel.is-active {
+.profile-tab-panel[hidden] {
+  display: none !important;
+}
+
+.profile-editor .profile-tab-panel.is-active {
   display: block !important;
 }
 
