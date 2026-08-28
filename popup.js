@@ -1520,6 +1520,29 @@ function badgeClass(status) {
   return "badge badge-pending";
 }
 
+/** Display order for batch stream: done → pending (running first) → error → skipped. */
+function queueStatusSortKey(job) {
+  const s = String(job?.status || "pending").toLowerCase();
+  if (s === "done") return [0, Number(job.csvRow || 0)];
+  if (s === "running") return [1, 0, Number(job.csvRow || 0)];
+  if (s === "pending") return [1, 1, Number(job.csvRow || 0)];
+  if (s === "error" || s === "failed") return [2, Number(job.csvRow || 0)];
+  if (s === "skipped") return [3, Number(job.csvRow || 0)];
+  return [1, 2, Number(job.csvRow || 0)];
+}
+
+function sortQueueForDisplay(jobs) {
+  return [...jobs].sort((a, b) => {
+    const ka = queueStatusSortKey(a);
+    const kb = queueStatusSortKey(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+      const diff = (ka[i] ?? 0) - (kb[i] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  });
+}
+
 const ACTION_ICON_PATHS = {
   files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
   apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
@@ -1638,7 +1661,7 @@ function renderQueue() {
 
   const currentRow = resolveCurrentWorkCsvRow();
 
-  for (const job of queueCache) {
+  for (const job of sortQueueForDisplay(queueCache)) {
     const item = document.createElement("div");
     item.className = "queue-item";
     item.dataset.csvRow = String(job.csvRow);
