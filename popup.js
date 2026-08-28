@@ -538,6 +538,8 @@ let templatesCache = [];
 let queueCache = [];
 let lastStatusText = "";
 let lastQueueFollowRow = null;
+let queueListScrollTop = 0;
+let queueScrollProgrammatic = false;
 let allUsJobsCache = [];
 let channelFilter = DEFAULT_CHANNEL_FILTER;
 let batchState = "idle";
@@ -1411,6 +1413,25 @@ function resolveCurrentWorkCsvRow() {
   return m ? Number(m[1]) : null;
 }
 
+/** Batch is actively generating/applying — queue list scroll stays user-controlled. */
+function isBatchQueueScrollingLocked() {
+  return (
+    batchState === "running" ||
+    batchState === "paused" ||
+    document.body.classList.contains("is-busy")
+  );
+}
+
+function restoreQueueListScroll() {
+  if (!queueListEl) return;
+  queueScrollProgrammatic = true;
+  const max = Math.max(0, queueListEl.scrollHeight - queueListEl.clientHeight);
+  queueListEl.scrollTop = Math.min(queueListScrollTop, max);
+  requestAnimationFrame(() => {
+    queueScrollProgrammatic = false;
+  });
+}
+
 /** Scroll only inside the queue list — never move the outer app-body scroll. */
 function scrollQueueItemIntoView(container, item, { smooth = false, padding = 4 } = {}) {
   if (!container || !item) return;
@@ -1429,15 +1450,24 @@ function scrollQueueItemIntoView(container, item, { smooth = false, padding = 4 
   next = Math.max(0, Math.min(next, container.scrollHeight - container.clientHeight));
 
   if (smooth && typeof container.scrollTo === "function") {
+    queueScrollProgrammatic = true;
     container.scrollTo({ top: next, behavior: "smooth" });
+    requestAnimationFrame(() => {
+      queueScrollProgrammatic = false;
+    });
   } else {
+    queueScrollProgrammatic = true;
     container.scrollTop = next;
+    requestAnimationFrame(() => {
+      queueScrollProgrammatic = false;
+    });
   }
 }
 
-/** Keep the queue list scrolled to the job currently being worked. */
+/** Keep the queue list scrolled to the job currently being worked (idle review only). */
 function followQueueToCurrentWork({ force = false } = {}) {
   if (!queueListEl) return;
+  if (isBatchQueueScrollingLocked() && !force) return;
   const row = resolveCurrentWorkCsvRow();
   if (row == null || !Number.isFinite(row)) {
     lastQueueFollowRow = null;
@@ -1456,6 +1486,7 @@ function followQueueToCurrentWork({ force = false } = {}) {
 }
 
 function renderQueue() {
+  if (queueListEl) queueListScrollTop = queueListEl.scrollTop;
   queueListEl.innerHTML = "";
   if (!queueCache.length) {
     const empty = document.createElement("div");
@@ -1464,6 +1495,7 @@ function renderQueue() {
       "<p>Queue is empty</p><span>Upload a CSV, then review before Start</span>";
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
+    queueListScrollTop = 0;
     return;
   }
 
@@ -1638,22 +1670,38 @@ function renderQueue() {
     applyBtn.type = "button";
     const inactiveJob = Boolean(job.inactive) || /^inactive job$/i.test(String(job.error || "").trim());
     const filesReady = Boolean(job.jobDir || job.hasFiles) || job.status === "done";
-    const applyDisabled = inactiveJob || !filesReady;
-    applyBtn.className = job.applied ? "secondary" : applyDisabled ? "secondary" : "primary";
-    applyBtn.disabled = applyDisabled;
+    // Sheet status Ready (built, not Applied) often lands as skipped-duplicate with no local
+    // jobDir on this CSV row — still allow Apply so missed apps can be finished.
+    const sheetReadyContinue =
+      !job.applied &&
+      job.status === "skipped" &&
+      Boolean(String(job.jdLink || "").trim());
+    const canApply = !inactiveJob && (filesReady || sheetReadyContinue);
+    applyBtn.className = job.applied ? "secondary" : canApply ? "primary" : "secondary";
+    applyBtn.disabled = !canApply;
     setIconButton(
       applyBtn,
       "apply",
-      inactiveJob ? "Inactive job" : !filesReady ? "Build files first" : job.applied ? "Apply again" : "Apply to job"
+      inactiveJob
+        ? "Inactive job"
+        : !canApply
+          ? "Build files first"
+          : job.applied
+            ? "Apply again"
+            : sheetReadyContinue && !filesReady
+              ? "Continue apply (auto apply)"
+              : "Apply to job"
     );
     applyBtn.title = inactiveJob
       ? "This job posting is no longer available."
-      : !filesReady
+      : !canApply
         ? "Resume and cover letter are not ready yet — wait until status is Done, or run Start to build files."
         : job.applied
           ? `${appliedDocsTitle(job)}\nClick to apply again.`
-          : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
-    if (!applyDisabled) {
+          : sheetReadyContinue && !filesReady
+            ? "Sheet shows Ready (not Applied). Runs hosted auto-apply: open job, autofill, and submit when allowed."
+            : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
+    if (canApply) {
       applyBtn.addEventListener("click", () => applyAssist(job));
     }
     applyWrap.appendChild(applyBtn);
@@ -1669,6 +1717,10 @@ function renderQueue() {
     queueListEl.appendChild(item);
   }
 
+  if (isBatchQueueScrollingLocked()) {
+    restoreQueueListScroll();
+    return;
+  }
   followQueueToCurrentWork();
 }
 
@@ -1989,10 +2041,11 @@ async function applyAssist(job) {
     return;
   }
 
-  setStatus("Marking Applied on the Google Sheet…");
+  setStatus("Starting apply…");
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
+    autoSubmit: Boolean(allowSubmitToggleEl?.checked),
     job: {
       csvRow: job.csvRow,
       jobDir: job.jobDir || "",
@@ -2002,7 +2055,10 @@ async function applyAssist(job) {
       company: job.company || "",
       jdLink: job.jdLink,
       jdText: job.jdText || "",
-      salary: job.salary || ""
+      salary: job.salary || "",
+      status: job.status || "",
+      error: job.error || "",
+      applied: Boolean(job.applied)
     }
   });
 
@@ -2030,6 +2086,11 @@ async function applyAssist(job) {
 
   if (!res?.ok) {
     setStatus(res?.error || res?.status || "Apply failed.");
+    return;
+  }
+  if (res?.hostedAutoApply) {
+    await loadSettings().catch(() => {});
+    setStatus(res.status || "Auto apply running — watch the status bar.");
     return;
   }
   if (res?.autofillSkipped || res?.openedOnly) {
@@ -2621,6 +2682,15 @@ async function resetWorkflow() {
 }
 
 // Events
+queueListEl?.addEventListener(
+  "scroll",
+  () => {
+    if (queueScrollProgrammatic || !queueListEl) return;
+    queueListScrollTop = queueListEl.scrollTop;
+  },
+  { passive: true }
+);
+
 profileSelectEl.addEventListener("change", () => {
   syncActivePersonChip();
   onProfileChange().catch((e) => setStatus(String(e.message || e)));

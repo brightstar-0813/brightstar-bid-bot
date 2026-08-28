@@ -1214,7 +1214,7 @@ async function markJobSkippedAsDuplicate(csvRow, reason, { lockSheetSkip = true 
  * Hosted-board interleaved flow: auto-apply with submit after files exist.
  * On incomplete apply, pause (keep tab open) so Start can retry.
  */
-async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
+async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDuplicateCheck = false } = {}) {
   if (!isDiceBatchAutoApply(board) && !(await isAutofillEnabled())) {
     await setStatus(`Row ${jobMeta.csvRow}: autofill disabled — files ready, apply skipped.`);
     return { status: "skipped", detail: "Autofill disabled", tabId: null, needsPause: false };
@@ -1244,10 +1244,11 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
     return { status: "unavailable", detail, tabId: null, needsPause: false };
   }
 
-  const linkDup = await isJobLinkAlreadyCovered(jdLink, {
-    excludeCsvRow: jobMeta.csvRow
-  });
-  if (linkDup.covered) {
+  if (!skipDuplicateCheck) {
+    const linkDup = await isJobLinkAlreadyCovered(jdLink, {
+      excludeCsvRow: jobMeta.csvRow
+    });
+    if (linkDup.covered) {
     const queueSnap = await getQueue().catch(() => []);
     const prior = (queueSnap || []).find((j) => Number(j.csvRow) === Number(jobMeta.csvRow));
     const recheckAfterReadySkip = isRetriableReadyRowCompanySkip(prior);
@@ -1261,12 +1262,13 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
     await setStatus(
       `Row ${jobMeta.csvRow}: skipped duplicate job link. Continuing…`
     );
-    return {
-      status: "skipped",
-      detail: linkDup.reason || "Duplicate job link",
-      tabId: null,
-      needsPause: false
-    };
+      return {
+        status: "skipped",
+        detail: linkDup.reason || "Duplicate job link",
+        tabId: null,
+        needsPause: false
+      };
+    }
   }
 
   // Clearing a prior false-positive sheet skip so apply can proceed.
@@ -1452,6 +1454,25 @@ function isRetriableReadyRowCompanySkip(j) {
 function isIndeedHostedApplyJob(j) {
   if (!isIndeedJob(j || {})) return false;
   return isExplicitlyHostedIndeedJob(j);
+}
+
+function resolveHostedApplyBoard(j = {}) {
+  if (isDiceJob(j)) return "Dice";
+  if (isIndeedHostedApplyJob(j)) return "Indeed";
+  if (isWorkdayJob(j)) return "Workday";
+  if (isGreenhouseJob(j)) return "Greenhouse";
+  if (isAshbyJob(j)) return "Ashby";
+  if (isLeverJob(j)) return "Lever";
+  if (isJobgetherJob(j)) return "Jobgether";
+  return "";
+}
+
+/** Skipped as sheet/queue duplicate but not Applied — user can continue auto-apply. */
+function isSkippedSheetDuplicateJob(j) {
+  if (!j || j.applied || j.inactive) return false;
+  if (String(j.status || "") !== "skipped") return false;
+  if (!String(j.jdLink || "").trim()) return false;
+  return /duplicate|already on google sheet|already earlier in this csv/i.test(String(j.error || ""));
 }
 
 function isHostedApplyBacklogJob(j, person = null) {
@@ -7486,6 +7507,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await setStatus(`Row ${jobMeta.csvRow}: inactive job — apply skipped.`);
           return;
         }
+
+        const queueJob = { ...(prior || {}), ...jobMeta };
+        queueJob.jdLink = String(message.url || queueJob.jdLink || "").trim();
+        const hostedBoard = resolveHostedApplyBoard(queueJob);
+        const continueHostedApply =
+          isSkippedSheetDuplicateJob(prior || queueJob) &&
+          hostedBoard &&
+          (await isAutofillEnabled());
+
+        if (continueHostedApply) {
+          const located = await locateJobFolder({
+            csvRow: queueJob.csvRow,
+            jobDir: queueJob.jobDir || "",
+            jdLink: queueJob.jdLink,
+            company: queueJob.companyName || queueJob.company || "",
+            title: queueJob.jobTitle || queueJob.title || ""
+          }).catch(() => null);
+          if (located?.jobDir) {
+            queueJob.jobDir = located.jobDir;
+            if (queueJob.csvRow != null && queueJob.csvRow !== "") {
+              await updateQueueJob(queueJob.csvRow, {
+                jobDir: located.jobDir,
+                hasFiles: true
+              }).catch(() => {});
+            }
+          }
+          await persistJobContextForAutofill(queueJob);
+          reply({
+            ok: true,
+            started: true,
+            applied: false,
+            hostedAutoApply: true,
+            status: `${hostedBoard} auto apply started for row ${queueJob.csvRow}…`
+          });
+          const applyRes = await runHostedInterleavedApply(queueJob, hostedBoard, {
+            skipDuplicateCheck: true
+          });
+          const msg =
+            applyRes?.status === "submitted"
+              ? `Row ${queueJob.csvRow}: submitted and marked Applied.`
+              : applyRes?.detail ||
+                `${hostedBoard} auto apply finished (${applyRes?.status || "needs review"}).`;
+          await setStatus(msg);
+          return;
+        }
+
         if (!(await isAutofillEnabled())) {
           const href = String(message.url || jobMeta.jdLink || "").trim();
           if (!href) {
@@ -7571,6 +7638,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           title: jobMeta.jobTitle || jobMeta.title || ""
         }).catch(() => null);
         await persistJobContextForAutofill(jobMeta);
+        const storedAssist = await chrome.storage.local.get(["allowSubmitOnAssist"]);
+        const allowSubmit = Boolean(
+          message.autoSubmit === true ||
+            (message.autoSubmit !== false && storedAssist.allowSubmitOnAssist !== false)
+        );
         const sheet = await markQueueJobAppliedOnSheet(jobMeta);
         const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
         const sheetFailed = Boolean(sheet?.error);
@@ -7619,12 +7691,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const result = await openJobAndApply(message.url, {
           multiStep: message.multiStep !== false,
           autoSubmit:
-            message.autoSubmit === true ||
-            isGreenhouseJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-            isAshbyJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-            isLeverJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-            isWorkdayJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-            isJobgetherJob({ jdLink: jobMeta.jdLink || message.url || "" }),
+            allowSubmit &&
+            (isDiceJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+              isGreenhouseJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+              isAshbyJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+              isLeverJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+              isWorkdayJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
+              isJobgetherJob({ jdLink: jobMeta.jdLink || message.url || "" })),
           csvRow: jobMeta.csvRow,
           jobDir: jobMeta.jobDir || "",
           jdLink: jobMeta.jdLink || message.url || ""
