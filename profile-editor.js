@@ -66,7 +66,10 @@ const clearMasterResumeBtn = document.getElementById("clearMasterResume");
 const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
 const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
 const roleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
-const profileTabsEl = document.getElementById("profileTabs");
+
+function profileTabsNav() {
+  return document.getElementById("profileTabs") || document.querySelector("nav.profile-tabs");
+}
 
 let profilesCache = [];
 let editingPersonId = null;
@@ -143,8 +146,9 @@ function updateEditorUrl(tab, profileId) {
 function setActiveTab(tabId) {
   const tab = normalizeTab(tabId);
   activeTab = tab;
-  const tabButtons = profileTabsEl
-    ? Array.from(profileTabsEl.querySelectorAll(".profile-tab[data-tab]"))
+  const tabsNav = profileTabsNav();
+  const tabButtons = tabsNav
+    ? Array.from(tabsNav.querySelectorAll(".profile-tab[data-tab]"))
     : [];
   for (const btn of tabButtons) {
     const isActive = btn.dataset.tab === tab;
@@ -165,16 +169,17 @@ function setActiveTab(tabId) {
 }
 
 function wireProfileTabs() {
-  if (!profileTabsEl || profileTabsEl.dataset.bound === "1") return;
-  profileTabsEl.dataset.bound = "1";
-  profileTabsEl.addEventListener("click", (event) => {
+  const tabsNav = profileTabsNav();
+  if (!tabsNav || tabsNav.dataset.bound === "1") return;
+  tabsNav.dataset.bound = "1";
+  tabsNav.addEventListener("click", (event) => {
     const btn = event.target.closest(".profile-tab[data-tab]");
-    if (!btn || !profileTabsEl.contains(btn)) return;
+    if (!btn || !tabsNav.contains(btn)) return;
     event.preventDefault();
     setActiveTab(btn.dataset.tab);
   });
-  profileTabsEl.addEventListener("keydown", (event) => {
-    const tabs = Array.from(profileTabsEl.querySelectorAll(".profile-tab[data-tab]"));
+  tabsNav.addEventListener("keydown", (event) => {
+    const tabs = Array.from(tabsNav.querySelectorAll(".profile-tab[data-tab]"));
     const currentIndex = tabs.findIndex((btn) => btn.classList.contains("is-active"));
     if (currentIndex < 0) return;
     let nextIndex = currentIndex;
@@ -368,17 +373,19 @@ async function startNewProfile() {
 }
 
 async function loadProfileById(profileId) {
-  if (!profileId) throw new Error("No profile selected.");
-  await setActivePersonId(profileId);
-  const full = await getProfileById(profileId);
-  if (!full) throw new Error("Profile not found.");
-  const config = await getPersonSheetConfig(profileId);
+  const id = String(profileId || "").trim();
+  if (!id || id === NEW_PROFILE_ID) throw new Error("No profile selected.");
+  const full = await getProfileById(id);
+  if (!full?.id) throw new Error("Profile not found.");
+  const resolvedId = full.id;
+  await setActivePersonId(resolvedId);
+  const config = await getPersonSheetConfig(resolvedId);
   const withSheet = {
     ...full,
     spreadsheetUrl: config?.spreadsheetUrl || full.spreadsheetUrl || "",
     sheetsWebAppUrl: config?.sheetsWebAppUrl || full.sheetsWebAppUrl || ""
   };
-  populateProfileSelect(profileId);
+  populateProfileSelect(resolvedId);
   await loadPersonIntoForm(withSheet);
 }
 
@@ -614,8 +621,12 @@ async function init() {
     }
   }
 
-  const profileId = initialProfileId || profileSelectEl.value || (await getActivePersonId());
-  await loadProfileById(profileId);
+  const profileId = initialProfileId || profileSelectEl?.value || (await getActivePersonId());
+  if (profileId === NEW_PROFILE_ID) {
+    await startNewProfile();
+  } else {
+    await loadProfileById(profileId);
+  }
   setStatus("");
 }
 

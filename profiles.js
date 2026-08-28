@@ -265,7 +265,9 @@ export async function getProfileById(profileId) {
 
 export async function getActivePersonId() {
   const data = await chrome.storage.local.get(ACTIVE_PERSON_ID_KEY);
-  return data[ACTIVE_PERSON_ID_KEY] || DEFAULT_PROFILE_ID;
+  const raw = String(data[ACTIVE_PERSON_ID_KEY] || "").trim();
+  if (!raw || raw === "__new__") return DEFAULT_PROFILE_ID;
+  return raw;
 }
 
 export async function setActivePersonId(profileId) {

@@ -914,6 +914,21 @@ const panelAbortByTab = new Map();
 
 /** Apply URL paths — panel auto-opens only on apply flows, not whole ATS homepages. */
 const APPLY_PATH_RE = /\/(apply|application|job_app|careers\/apply)/i;
+const ATS_HOST_HINT_RE =
+  /(?:greenhouse|lever|indeed|myworkdayjobs|icims|taleo|successfactors|bamboohr|ashbyhq|smartrecruiters|jobvite|ultipro|dice|jobgether|braintrust|usebraintrust)\./i;
+
+export function isAtsHostUrl(url = "") {
+  try {
+    return ATS_HOST_HINT_RE.test(new URL(String(url || "").trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Limit background probes/injections to ATS hosts or apply URLs. */
+export function mightAutoOfferAutofillPanel(url = "") {
+  return looksLikeApplyUrl(url) || isAtsHostUrl(url);
+}
 
 export function looksLikeApplyUrl(url = "") {
   const href = String(url || "").trim();

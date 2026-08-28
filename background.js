@@ -39,6 +39,7 @@ import {
   getCurrentApplicationTab,
   looksLikeApplyUrl,
   shouldOfferAutofillPanel,
+  mightAutoOfferAutofillPanel,
   openJobAndApply,
   closeApplyTab,
   probeJobLinkInactive,
@@ -728,6 +729,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
   const url = tab?.url || "";
   if (!/^https?:\/\//i.test(url) || PANEL_SKIP_URL_RE.test(url)) return;
+  if (!mightAutoOfferAutofillPanel(url)) return;
   (async () => {
     try {
       if (!(await isAutofillEnabled())) return;
