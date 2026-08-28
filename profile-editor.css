@@ -105,12 +105,12 @@ body.ctx-window.editor-page {
 .profile-toolbar select {
   color: var(--ink);
   background-color: var(--control-bg);
+  -webkit-text-fill-color: var(--ink);
 }
 
-.profile-toolbar select option,
-.profile-toolbar select optgroup {
+.profile-toolbar select option {
   color: var(--ink);
-  background: var(--section-bg);
+  background-color: var(--control-bg);
 }
 
 .toolbar-hint {

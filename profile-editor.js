@@ -203,46 +203,32 @@ function populateProfileSelect(selectedId) {
 
   const newOpt = document.createElement("option");
   newOpt.value = NEW_PROFILE_ID;
-  newOpt.textContent = "＋ New profile…";
+  newOpt.textContent = "+ New profile…";
   profileSelectEl.appendChild(newOpt);
 
-  const builtins = profilesCache.filter((p) => p.builtin);
-  const customs = profilesCache.filter((p) => !p.builtin);
-
-  if (builtins.length) {
-    const group = document.createElement("optgroup");
-    group.label = "Starter profiles";
-    for (const profile of builtins) {
-      const option = document.createElement("option");
-      option.value = profile.id;
-      option.textContent = profile.label;
-      group.appendChild(option);
-    }
-    profileSelectEl.appendChild(group);
-  }
-
-  if (customs.length) {
-    const group = document.createElement("optgroup");
-    group.label = "My profiles";
-    for (const profile of customs) {
-      const option = document.createElement("option");
-      option.value = profile.id;
-      option.textContent = profile.label;
-      group.appendChild(option);
-    }
-    profileSelectEl.appendChild(group);
+  for (const profile of profilesCache) {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.builtin ? profile.label : `${profile.label} (custom)`;
+    profileSelectEl.appendChild(option);
   }
 
   const validIds = new Set(profilesCache.map((p) => p.id));
+  let nextId = NEW_PROFILE_ID;
   if (selectedId === NEW_PROFILE_ID) {
-    profileSelectEl.value = NEW_PROFILE_ID;
-  } else {
-    const nextId = validIds.has(selectedId) ? selectedId : profilesCache[0]?.id || DEFAULT_PROFILE_ID;
-    profileSelectEl.value = validIds.has(nextId) ? nextId : NEW_PROFILE_ID;
+    nextId = NEW_PROFILE_ID;
+  } else if (validIds.has(selectedId)) {
+    nextId = selectedId;
+  } else if (validIds.has(DEFAULT_PROFILE_ID)) {
+    nextId = DEFAULT_PROFILE_ID;
+  } else if (profilesCache[0]?.id) {
+    nextId = profilesCache[0].id;
   }
-  if (!profileSelectEl.value && profileSelectEl.options.length) {
-    profileSelectEl.selectedIndex = 0;
-  }
+
+  profileSelectEl.value = nextId;
+  const matched = Array.from(profileSelectEl.options).find((opt) => opt.value === nextId);
+  if (matched) matched.selected = true;
+  else if (profileSelectEl.options.length) profileSelectEl.selectedIndex = 0;
 
   const selected =
     profileSelectEl.value === NEW_PROFILE_ID
