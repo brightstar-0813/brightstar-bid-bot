@@ -4751,7 +4751,9 @@
       "this listing has been removed",
       "404 error|error 404",
       "couldn'?t find (this|that|the) (job|page|posting)",
-      "the (job|position) you(?:'| a)?re looking for"
+      "the (job|position) you(?:'| a)?re looking for",
+      "\\binactive job\\b",
+      "\\bjob (is )?inactive\\b"
     ].join("|"),
     "i"
   );

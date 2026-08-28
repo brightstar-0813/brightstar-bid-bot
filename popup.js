@@ -1470,6 +1470,30 @@ function resolveCurrentWorkCsvRow() {
   return m ? Number(m[1]) : null;
 }
 
+/** Scroll only inside the queue list — never move the outer app-body scroll. */
+function scrollQueueItemIntoView(container, item, { smooth = false, padding = 4 } = {}) {
+  if (!container || !item) return;
+  const containerRect = container.getBoundingClientRect();
+  const itemRect = item.getBoundingClientRect();
+  const above = itemRect.top < containerRect.top + padding;
+  const below = itemRect.bottom > containerRect.bottom - padding;
+  if (!above && !below) return;
+
+  let next = container.scrollTop;
+  if (above) {
+    next += itemRect.top - containerRect.top - padding;
+  } else if (below) {
+    next += itemRect.bottom - containerRect.bottom + padding;
+  }
+  next = Math.max(0, Math.min(next, container.scrollHeight - container.clientHeight));
+
+  if (smooth && typeof container.scrollTo === "function") {
+    container.scrollTo({ top: next, behavior: "smooth" });
+  } else {
+    container.scrollTop = next;
+  }
+}
+
 /** Keep the queue list scrolled to the job currently being worked. */
 function followQueueToCurrentWork({ force = false } = {}) {
   if (!queueListEl) return;
@@ -1484,9 +1508,9 @@ function followQueueToCurrentWork({ force = false } = {}) {
   if (!busy && !force) return;
   const rowChanged = lastQueueFollowRow !== row;
   lastQueueFollowRow = row;
-  // Re-render rebuilds the list (scroll resets); nearest is a no-op when already visible.
+  // Re-render rebuilds the list (scroll resets); keep follow inside .queue-list only.
   requestAnimationFrame(() => {
-    el.scrollIntoView({ block: "nearest", behavior: rowChanged ? "smooth" : "auto" });
+    scrollQueueItemIntoView(queueListEl, el, { smooth: rowChanged });
   });
 }
 
@@ -1671,12 +1695,22 @@ function renderQueue() {
     applyWrap.className = "apply-action";
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
-    applyBtn.className = job.applied ? "secondary" : "primary";
-    setIconButton(applyBtn, "apply", job.applied ? "Apply again" : "Apply to job");
-    applyBtn.title = job.applied
-      ? `${appliedDocsTitle(job)}\nClick to apply again.`
-      : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
-    applyBtn.addEventListener("click", () => applyAssist(job));
+    const inactiveJob = Boolean(job.inactive) || /^inactive job$/i.test(String(job.error || "").trim());
+    applyBtn.className = job.applied ? "secondary" : inactiveJob ? "secondary" : "primary";
+    applyBtn.disabled = inactiveJob;
+    setIconButton(
+      applyBtn,
+      "apply",
+      inactiveJob ? "Inactive job" : job.applied ? "Apply again" : "Apply to job"
+    );
+    applyBtn.title = inactiveJob
+      ? "This job posting is no longer available."
+      : job.applied
+        ? `${appliedDocsTitle(job)}\nClick to apply again.`
+        : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
+    if (!inactiveJob) {
+      applyBtn.addEventListener("click", () => applyAssist(job));
+    }
     applyWrap.appendChild(applyBtn);
 
     const controls = document.createElement("div");

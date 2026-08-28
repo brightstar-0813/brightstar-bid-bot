@@ -26,6 +26,7 @@ import {
   startMultiStepApplyOnTab,
   openJobAndApply,
   closeApplyTab,
+  probeJobLinkInactive,
   resolveUploadDocs,
   setActiveApplyJob,
   hydrateJobsWithFolders,
@@ -980,6 +981,70 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
 
 const MAX_HOSTED_APPLY_ATTEMPTS = 3;
 
+/** True when this queue row is already known to be an inactive / removed posting. */
+function isJobMarkedInactive(j) {
+  if (!j) return false;
+  if (j.inactive) return true;
+  const err = String(j.error || "")
+    .trim()
+    .toLowerCase();
+  return err === "inactive job" || /\binactive\b.*\b(job|posting|listing)\b/.test(err);
+}
+
+/** Mark a queue row inactive — no resume build / apply retries. */
+async function markJobSkippedAsInactive(csvRow, reason = "inactive job", jobMeta = {}) {
+  const detail = String(reason || "inactive job").trim() || "inactive job";
+  const sheet = await markQueueJobAppliedOnSheet(
+    {
+      csvRow,
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      companyName: jobMeta.companyName || jobMeta.company || "",
+      jdLink: jobMeta.jdLink || "",
+      salary: jobMeta.salary || ""
+    },
+    "inactive job"
+  ).catch(() => null);
+  await updateQueueJob(csvRow, {
+    status: "skipped",
+    applied: false,
+    inactive: true,
+    applyAttempted: true,
+    applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+    error: detail
+  }).catch(() => {});
+  return sheet;
+}
+
+/** Mark a built row inactive after apply detected the posting is gone. */
+async function markQueueJobInactive(jobMeta = {}, detail = "inactive job") {
+  const sheetStatus = "inactive job";
+  const sheet = await markQueueJobAppliedOnSheet(
+    {
+      csvRow: jobMeta.csvRow,
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      companyName: jobMeta.companyName || jobMeta.company || "",
+      jdLink: jobMeta.jdLink || "",
+      salary: jobMeta.salary || "",
+      jobDir: jobMeta.jobDir || ""
+    },
+    sheetStatus
+  );
+  await updateQueueJob(jobMeta.csvRow, {
+    applied: false,
+    inactive: true,
+    applyAttempted: true,
+    applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+    error: detail,
+    jobDir: jobMeta.jobDir || ""
+  }).catch(() => {});
+  await setStatus(
+    sheet?.error
+      ? `Row ${jobMeta.csvRow}: inactive job (sheet update failed: ${sheet.error}). Closing tab…`
+      : `Row ${jobMeta.csvRow}: inactive job — marked on sheet. Closing tab…`
+  );
+  return sheet;
+}
+
 /** Queue rows belong to a person via profileId, or via Applications-* jobDir for legacy rows. */
 function jobBelongsToPerson(job, person) {
   if (!person?.id) return true;
@@ -1110,6 +1175,14 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
   const prevAttempts = Number(jobMeta.applyAttempts || 0);
   const companyName = jobMeta.companyName || jobMeta.company || "";
 
+  const queueSnap = await getQueue().catch(() => []);
+  const prior = (queueSnap || []).find((j) => Number(j.csvRow) === Number(jobMeta.csvRow));
+  if (isJobMarkedInactive(prior || jobMeta)) {
+    const detail = prior?.error || jobMeta.error || "inactive job";
+    await setStatus(`Row ${jobMeta.csvRow}: inactive job — skipping apply.`);
+    return { status: "unavailable", detail, tabId: null, needsPause: false };
+  }
+
   const companyDup = await isCompanyAlreadyCovered(companyName, {
     excludeCsvRow: jobMeta.csvRow,
     excludeJdLink: jdLink
@@ -1202,7 +1275,7 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
 
   if (status === "unavailable") {
     const sheetStatus = "inactive job";
-    const sheet = await markQueueJobAppliedOnSheet(
+    await markQueueJobInactive(
       {
         csvRow: jobMeta.csvRow,
         jobTitle: jobMeta.jobTitle || jobMeta.title || "",
@@ -1211,26 +1284,13 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
         salary: jobMeta.salary || "",
         jobDir: jobMeta.jobDir || applyResult?.uploadFolder || ""
       },
-      sheetStatus
-    );
-    await updateQueueJob(jobMeta.csvRow, {
-      applied: false,
-      inactive: true,
-      applyAttempted: true,
-      applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
-      error: sheetStatus,
-      jobDir: applyResult?.uploadFolder || jobMeta.jobDir || ""
-    }).catch(() => {});
-    await setStatus(
-      sheet?.error
-        ? `Row ${jobMeta.csvRow}: inactive job (sheet update failed: ${sheet.error}). Closing tab…`
-        : `Row ${jobMeta.csvRow}: inactive job — marked on sheet. Closing tab…`
+      detail || sheetStatus
     );
     await closeApplyTab(applyResult?.tabId).catch(() => false);
     return {
       ...applyResult,
       status: "unavailable",
-      detail: sheetStatus,
+      detail: detail || sheetStatus,
       needsPause: false
     };
   }
@@ -1346,7 +1406,7 @@ function isHostedApplyBacklogJob(j, person = null) {
     !(isDiceJob(j) || hostedIndeed || workday || greenhouse || ashby || lever || jobgether) ||
     j.status !== "done" ||
     j.applied ||
-    j.inactive ||
+    isJobMarkedInactive(j) ||
     !Boolean(j.jobDir || j.hasFiles) ||
     !String(j.jdLink || "").trim()
   ) {
@@ -5302,6 +5362,19 @@ async function runAutoJob(jobMeta) {
     throw new Error(`__DUPLICATE_SKIP__:${preSkipReason}`);
   }
 
+  const jdLink = String(jobMeta.jdLink || "").trim();
+  if (jdLink) {
+    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+    await setStatus(
+      `Row ${jobMeta.csvRow != null ? `${jobMeta.csvRow}: ` : ""}checking if job posting is still active…`
+    );
+    const inactiveProbe = await probeJobLinkInactive(jdLink);
+    await closeApplyTab(inactiveProbe.tabId).catch(() => false);
+    if (inactiveProbe.unavailable) {
+      throw new Error(`__INACTIVE_SKIP__:${inactiveProbe.detail || "inactive job"}`);
+    }
+  }
+
   const provider = await getStoredAiProvider();
   const providerLabel = aiProviderLabel(provider);
   const tab = await ensureAiTab(provider);
@@ -5775,8 +5848,13 @@ async function runBatchLoop(outputDir) {
       // Rows at the attempt ceiling become "failed" and are never re-picked, so
       // the loop always terminates.
       const next =
-        queue.find((j) => j.status === "pending") ||
-        queue.find((j) => j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS);
+        queue.find((j) => j.status === "pending" && !isJobMarkedInactive(j)) ||
+        queue.find(
+          (j) =>
+            j.status === "error" &&
+            Number(j.attempts || 0) < MAX_JOB_ATTEMPTS &&
+            !isJobMarkedInactive(j)
+        );
       if (!next) {
         const done = queue.filter((j) => j.status === "done").length;
         const failedJobs = queue.filter((j) => j.status === "failed" || j.status === "error");
@@ -5980,6 +6058,17 @@ async function runBatchLoop(outputDir) {
           await setStatus(
             `Row ${next.csvRow}: skipped before generate (${reason}). Continuing…`
           );
+          continue;
+        }
+        if (msg.startsWith("__INACTIVE_SKIP__:")) {
+          const reason = msg.slice("__INACTIVE_SKIP__:".length) || "inactive job";
+          await markJobSkippedAsInactive(next.csvRow, reason, {
+            csvRow: next.csvRow,
+            jobTitle: next.title,
+            companyName: next.company,
+            jdLink: next.jdLink || ""
+          });
+          await setStatus(`Row ${next.csvRow}: inactive job — skipped before generate. Continuing…`);
           continue;
         }
         if (msg === "__RATE_LIMIT_PAUSE__") {
@@ -6322,6 +6411,18 @@ async function runIndeedGrabAndApply({ autoApply = true } = {}) {
           await setStatus(`Indeed: skipped before generate — ${reason}`);
           await setGrab("idle", `Skipped — ${reason}`);
           return { ok: true, job, skipped: true, reason };
+        }
+        if (genMsg.startsWith("__INACTIVE_SKIP__:")) {
+          const reason = genMsg.slice("__INACTIVE_SKIP__:".length) || "inactive job";
+          await markJobSkippedAsInactive(job.csvRow, reason, {
+            csvRow: job.csvRow,
+            jobTitle: job.title,
+            companyName: job.company,
+            jdLink: job.jdLink || ""
+          });
+          await setStatus(`Indeed: inactive job — skipped before generate.`);
+          await setGrab("idle", `Inactive — ${job.company} / ${job.title}`);
+          return { ok: true, job, skipped: true, reason, inactive: true };
         }
         throw genErr;
       }
@@ -7152,6 +7253,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         safeSendResponse(sendResponse, payload);
       };
       try {
+        const queueSnap = await getQueue().catch(() => []);
+        const prior = (queueSnap || []).find((j) => Number(j.csvRow) === Number(jobMeta.csvRow));
+        if (isJobMarkedInactive(prior || jobMeta)) {
+          const detail = prior?.error || jobMeta.error || "inactive job";
+          reply({ ok: false, applied: false, started: false, error: detail });
+          await setStatus(`Row ${jobMeta.csvRow}: inactive job — apply skipped.`);
+          return;
+        }
         const folderPromise = locateJobFolder({
           csvRow: jobMeta.csvRow,
           jobDir: jobMeta.jobDir || "",
@@ -7644,6 +7753,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           }
           await setStatus(
             `Skipped duplicate — ${reason}: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
+          );
+          return;
+        }
+        if (msg.startsWith("__INACTIVE_SKIP__:")) {
+          const reason = msg.slice("__INACTIVE_SKIP__:".length) || "inactive job";
+          const meta = message.jobMeta || {};
+          if (meta.csvRow != null && meta.csvRow !== "") {
+            await markJobSkippedAsInactive(meta.csvRow, reason, meta);
+          }
+          await setStatus(
+            `Skipped inactive job — ${meta.companyName || ""} / ${meta.jobTitle || ""}`
           );
           return;
         }

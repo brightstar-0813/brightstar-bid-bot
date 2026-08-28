@@ -1130,6 +1130,48 @@ async function getApplyActionFromTab(tabId) {
   return pickBestApplyAction(frames);
 }
 
+/** Probe a loaded tab for inactive / removed job postings before autofill. */
+async function probeTabJobUnavailable(tabId) {
+  const id = Number(tabId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  await ensureAutofillScript(id).catch(() => {});
+  const probe = await getApplyActionFromTab(id).catch(() => null);
+  if (!probe?.jobUnavailable) return null;
+  return {
+    status: "unavailable",
+    detail: probe.jobUnavailable || "inactive job",
+    tabId: id,
+    filled: 0,
+    uploaded: 0
+  };
+}
+
+/**
+ * Open a job URL in a background tab and check whether the posting is gone.
+ * Caller should close tabId when done.
+ */
+export async function probeJobLinkInactive(url) {
+  const href = String(url || "").trim();
+  if (!href) return { unavailable: false, detail: "", tabId: null, created: false };
+  const tab = await chrome.tabs.create({ url: href, active: false });
+  try {
+    await waitForTabComplete(tab.id, 35000);
+  } catch {
+    /* probe anyway */
+  }
+  await sleep(APPLY_SETTLE_MS);
+  const unavailable = await probeTabJobUnavailable(tab.id);
+  if (unavailable) {
+    return {
+      unavailable: true,
+      detail: unavailable.detail || "inactive job",
+      tabId: tab.id,
+      created: true
+    };
+  }
+  return { unavailable: false, detail: "", tabId: tab.id, created: true };
+}
+
 async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -2055,6 +2097,32 @@ export async function startMultiStepApplyOnTab(
 
   await rememberApplyTab(tab.id);
 
+  const unavailableAtStart = await probeTabJobUnavailable(tab.id);
+  if (unavailableAtStart) {
+    return {
+      ok: true,
+      steps: 0,
+      filled: 0,
+      filledCount: 0,
+      uploaded: 0,
+      uploadedCount: 0,
+      bankHits: 0,
+      extraFilled: 0,
+      aiHits: 0,
+      unmatchedAfterFirst: 0,
+      unmatchedAfterSecondPass: 0,
+      secondPassFilled: 0,
+      fillRate: 0,
+      status: unavailableAtStart.status,
+      detail: unavailableAtStart.detail,
+      tabId: tab.id,
+      tabUrl: tab.url || "",
+      autoSubmit: Boolean(autoSubmit),
+      assistMode: Boolean(assistMode),
+      site: applySiteFromUrl(tab.url || "")
+    };
+  }
+
   let currentTabId = tab.id;
   const initialSite = applySiteFromUrl(tab.url || "");
   let liveSite = initialSite;
@@ -2917,33 +2985,18 @@ export async function openJobAndApply(
     }
   }
   await sleep(APPLY_SETTLE_MS);
+  let unavailable = await probeTabJobUnavailable(tab.id);
+  if (unavailable) return unavailable;
+
   const live = await chrome.tabs.get(tab.id).catch(() => null);
   if (jobId && /dice\.com/i.test(live?.url || href)) {
-    await ensureAutofillScript(tab.id).catch(() => {});
     let probe = await getApplyActionFromTab(tab.id).catch(() => null);
-    if (probe?.jobUnavailable) {
-      return {
-        status: "unavailable",
-        detail: probe.jobUnavailable || "inactive job",
-        tabId: tab.id,
-        filled: 0,
-        uploaded: 0
-      };
-    }
     if (!probe?.anyForm && !probe?.best?.action) {
       await chrome.tabs.update(tab.id, { url: href });
       await waitForTabComplete(tab.id, 35000).catch(() => {});
       await sleep(APPLY_SETTLE_MS);
-      probe = await getApplyActionFromTab(tab.id).catch(() => null);
-      if (probe?.jobUnavailable) {
-        return {
-          status: "unavailable",
-          detail: probe.jobUnavailable || "inactive job",
-          tabId: tab.id,
-          filled: 0,
-          uploaded: 0
-        };
-      }
+      unavailable = await probeTabJobUnavailable(tab.id);
+      if (unavailable) return unavailable;
     }
   }
   if (multiStep) {
