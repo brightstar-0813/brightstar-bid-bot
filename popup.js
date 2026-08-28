@@ -4,6 +4,7 @@ import {
   getResumeProfiles,
   getBuiltinPreset,
   getActivePerson,
+  getActivePersonId,
   setActivePersonId,
   savePersonProfile,
   addCustomProfile,
@@ -739,7 +740,10 @@ async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {})
 }
 
 async function openProfileEditorFromPopup({ tab = "apply", presetId = "" } = {}) {
-  const profileId = profileSelectEl?.value || "";
+  const profileId =
+    profileSelectEl?.value ||
+    (await getActivePersonId().catch(() => "")) ||
+    "";
   await openProfileEditor({ profileId, tab, presetId });
   setStatus("Opened profile editor.");
 }

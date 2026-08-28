@@ -1,4 +1,4 @@
-import { initThemePicker } from "./theme.js";
+import { mountThemeSwatches } from "./theme.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import {
   getResumeProfiles,
@@ -75,6 +75,7 @@ let profilesCache = [];
 let editingPersonId = null;
 let activeRoleTrack = "sf";
 let activeTab = "apply";
+let editorInitializing = true;
 
 const params = new URLSearchParams(location.search);
 const initialTab = params.get("tab") || "apply";
@@ -387,10 +388,11 @@ async function loadPersonIntoForm(person) {
   populateTemplateSelect(person?.templateId || DEFAULT_TEMPLATE_ID);
   fillPersonForm(formRoot, person, { roleTrack: track });
   fillResumeWizard(formRoot, person);
-  if (profileSelectEl) {
-    profileSelectEl.value = person?.id || NEW_PROFILE_ID;
-    syncProfilePickerLabel(profileSelectEl.value);
-  }
+  const pickerId = person?.id || NEW_PROFILE_ID;
+  if (profileSelectEl) profileSelectEl.value = pickerId;
+  // Rebuild menu + visible label so the closed picker never stays on "Add a new profile"
+  // after loading a real person (built-in or custom).
+  populateProfileSelect(pickerId);
   syncSaveButtonLabels();
   renderCompleteness(person);
   updateProfileKindNote(person);
@@ -645,43 +647,70 @@ formRoot?.addEventListener("input", () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
+  if (area !== "local" || editorInitializing) return;
   if (changes.custom_profiles) {
     refreshProfiles(profileSelectEl?.value).catch(() => {});
   }
   if (changes.active_person_id?.newValue && changes.active_person_id.newValue !== editingPersonId) {
-    loadProfileById(changes.active_person_id.newValue).catch(() => {});
+    const next = String(changes.active_person_id.newValue || "").trim();
+    if (!next || next === NEW_PROFILE_ID) return;
+    loadProfileById(next).catch(() => {});
   }
   if (changes.qa_bank_version) {
     refreshQaBankNote(editingPersonId).catch(() => {});
   }
 });
 
-async function init() {
-  wireProfileTabs();
-  wireProfilePicker();
-  initThemePicker(document.getElementById("themeSwatches"));
-  initResumeWizard(formRoot);
-  setActiveTab(normalizeTab(initialTab));
-  populateTemplateSelect(DEFAULT_TEMPLATE_ID);
-  await refreshProfiles(initialProfileId || (await getActivePersonId()));
+async function resolveEditorProfileId() {
+  // Never trust the hidden input default (__new__) before profiles are loaded.
+  const fromUrl = String(initialProfileId || "").trim();
+  if (fromUrl && fromUrl !== NEW_PROFILE_ID) return fromUrl;
+  if (fromUrl === NEW_PROFILE_ID) return NEW_PROFILE_ID;
 
-  if (initialPresetId) {
-    const preset = getBuiltinPreset(initialPresetId);
-    if (preset) {
-      await loadPersonIntoForm({ ...preset, id: preset.id });
-      setActiveTab("batch");
-      return;
-    }
-  }
+  const activeId = String((await getActivePersonId()) || "").trim();
+  if (activeId && activeId !== NEW_PROFILE_ID) return activeId;
 
-  const profileId = initialProfileId || profileSelectEl?.value || (await getActivePersonId());
-  if (profileId === NEW_PROFILE_ID) {
-    await startNewProfile();
-  } else {
-    await loadProfileById(profileId);
-  }
-  setStatus("");
+  return profilesCache.find((p) => p.id === DEFAULT_PROFILE_ID)?.id || profilesCache[0]?.id || NEW_PROFILE_ID;
 }
 
-init().catch((err) => setStatus(String(err.message || err), "err"));
+async function init() {
+  editorInitializing = true;
+  try {
+    wireProfileTabs();
+    wireProfilePicker();
+    mountThemeSwatches(document.getElementById("themeSwatches"), {
+      onSelect: (theme) => setStatus(`Theme: ${theme.label}`, "ok")
+    });
+    initResumeWizard(formRoot);
+    setActiveTab(normalizeTab(initialTab));
+    populateTemplateSelect(DEFAULT_TEMPLATE_ID);
+
+    profilesCache = await getResumeProfiles();
+    const targetId = await resolveEditorProfileId();
+    populateProfileSelect(targetId);
+
+    if (initialPresetId) {
+      const preset = getBuiltinPreset(initialPresetId);
+      if (preset) {
+        await loadPersonIntoForm({ ...preset, id: preset.id });
+        setActiveTab("batch");
+        return;
+      }
+    }
+
+    // Edit profile from popup → open that person. "Add a new profile" only when chosen.
+    if (targetId === NEW_PROFILE_ID) {
+      await startNewProfile();
+    } else {
+      await loadProfileById(targetId);
+    }
+    setStatus("");
+  } finally {
+    editorInitializing = false;
+  }
+}
+
+init().catch((err) => {
+  editorInitializing = false;
+  setStatus(String(err.message || err), "err");
+});
