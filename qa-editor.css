@@ -415,6 +415,29 @@ body.ctx-window.editor-page {
   margin: 0;
 }
 
+.search-field-wrap {
+  position: relative;
+}
+
+.search-field-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.search-field-wrap input {
+  padding-left: 32px;
+}
+
+.search-field-wrap:focus-within .search-field-icon {
+  color: var(--ink-soft);
+}
+
 .qa-empty {
   margin: 0;
   padding: 16px 12px;
