@@ -120,7 +120,7 @@ const APPS_SCRIPT_SOURCE = `/**
  *
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
- * Dedup: same job link OR same company (normalized) is treated as duplicate.
+ * Dedup: same job link (normalized) is treated as duplicate.
  */
 function doPost(e) {
   try {
@@ -172,9 +172,6 @@ function doPost(e) {
 
     if (jobLink && linkExists_(sheet, jobLink)) {
       return json_({ ok: true, duplicate: true, reason: "link" });
-    }
-    if (companyName && companyExists_(sheet, companyName)) {
-      return json_({ ok: true, duplicate: true, reason: "company" });
     }
 
     sheet.appendRow([

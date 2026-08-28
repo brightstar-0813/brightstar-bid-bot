@@ -198,7 +198,7 @@ After each job’s files finish (batch or one-off), the extension can append a r
 
 **Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). On the hosted **Dice/Indeed** interleaved paths, **Applied** is set only after a confirmed Submit. Duplicate-by-link still skips jobs that are already on the sheet.
 
-**Duplicate prevention:** when you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
+**Duplicate prevention:** dedup uses **job link only** (not company name). When you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
 
 Chrome cannot write from the spreadsheet share link alone:
 
