@@ -224,7 +224,9 @@ export function readPersonFromForm(root, opts = {}) {
     coverLetterPrompt: val("coverLetterPrompt"),
     templateId: opts.templateId || templateEl?.value || "times-classic",
     spreadsheetUrl: val("spreadsheetUrl"),
-    sheetsWebAppUrl: val("sheetsWebAppUrl")
+    sheetsWebAppUrl: val("sheetsWebAppUrl"),
+    workHistory: opts.workHistory || [],
+    educationHistory: opts.educationHistory || []
   };
 }
 
@@ -320,10 +322,12 @@ export function mergeExtractedProfileIntoPerson(person, parsed, resumeText, { re
 
 /**
  * @param {ParentNode} root
- * @param {{ asNew?: boolean, editingPersonId?: string|null, roleTrack?: string, templateId?: string }} [opts]
+ * @param {{ asNew?: boolean, editingPersonId?: string|null, roleTrack?: string, templateId?: string, workHistory?: object[], educationHistory?: object[] }} [opts]
  */
 export async function savePersonFromForm(root, opts = {}) {
   let person = readPersonFromForm(root, opts);
+  if (Array.isArray(opts.workHistory)) person.workHistory = opts.workHistory;
+  if (Array.isArray(opts.educationHistory)) person.educationHistory = opts.educationHistory;
   const validation = validatePerson(person);
   if (!validation.ok) {
     const err = new Error(validation.errors[0]);
@@ -367,7 +371,9 @@ export async function savePersonFromForm(root, opts = {}) {
       signatureTitle: person.signatureTitle,
       roleTrack: person.roleTrack,
       spreadsheetUrl: person.spreadsheetUrl,
-      sheetsWebAppUrl: person.sheetsWebAppUrl
+      sheetsWebAppUrl: person.sheetsWebAppUrl,
+      workHistory: person.workHistory || [],
+      educationHistory: person.educationHistory || []
     });
     return { profile: saved, created: true, fromBuiltin: false };
   }

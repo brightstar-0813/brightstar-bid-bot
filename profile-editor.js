@@ -39,7 +39,15 @@ import {
 } from "./experience-rules.js";
 import { getQaCount } from "./qa-store.js";
 import { confirmDialog } from "./ui-dialog.js";
+import { showToast } from "./ui-toast.js";
+import {
+  fillResumeWizard,
+  initResumeWizard,
+  readResumeWizard,
+  seedWorkHistoryFromEmployers
+} from "./resume-wizard.js";
 
+const NEW_PROFILE_ID = "__new__";
 const formRoot = document.getElementById("profileForm");
 const profileSelectEl = document.getElementById("profileSelect");
 const deleteProfileBtn = document.getElementById("deleteProfile");
@@ -143,18 +151,14 @@ function setActiveTab(tabId) {
     btn.tabIndex = isActive ? 0 : -1;
   }
   const panels = formRoot
-    ? Array.from(formRoot.querySelectorAll(".profile-tab-panel"))
+    ? Array.from(formRoot.querySelectorAll(":scope > .profile-tab-panel"))
     : tabPanels;
   for (const panel of panels) {
     const isActive = panel.dataset.panel === tab;
     panel.classList.toggle("is-active", isActive);
-    panel.hidden = !isActive;
     panel.setAttribute("aria-hidden", isActive ? "false" : "true");
   }
   updateEditorUrl(tab, profileSelectEl?.value || editingPersonId || "");
-  const activePanel = panels.find((panel) => panel.dataset.panel === tab);
-  activePanel?.scrollIntoView({ block: "start", behavior: "smooth" });
-  formRoot?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function syncSaveButtonLabels() {
@@ -165,16 +169,51 @@ function syncSaveButtonLabels() {
 function populateProfileSelect(selectedId) {
   if (!profileSelectEl) return;
   profileSelectEl.innerHTML = "";
-  for (const profile of profilesCache) {
-    const option = document.createElement("option");
-    option.value = profile.id;
-    option.textContent = profile.builtin ? profile.label : `${profile.label} (custom)`;
-    profileSelectEl.appendChild(option);
+
+  const newOpt = document.createElement("option");
+  newOpt.value = NEW_PROFILE_ID;
+  newOpt.textContent = "＋ New profile…";
+  profileSelectEl.appendChild(newOpt);
+
+  const builtins = profilesCache.filter((p) => p.builtin);
+  const customs = profilesCache.filter((p) => !p.builtin);
+
+  if (builtins.length) {
+    const group = document.createElement("optgroup");
+    group.label = "Starter profiles";
+    for (const profile of builtins) {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.label;
+      group.appendChild(option);
+    }
+    profileSelectEl.appendChild(group);
   }
+
+  if (customs.length) {
+    const group = document.createElement("optgroup");
+    group.label = "My profiles";
+    for (const profile of customs) {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.label;
+      group.appendChild(option);
+    }
+    profileSelectEl.appendChild(group);
+  }
+
   const validIds = new Set(profilesCache.map((p) => p.id));
-  const nextId = validIds.has(selectedId) ? selectedId : profilesCache[0]?.id || DEFAULT_PROFILE_ID;
-  profileSelectEl.value = nextId;
-  const selected = profilesCache.find((p) => p.id === profileSelectEl.value);
+  if (selectedId === NEW_PROFILE_ID) {
+    profileSelectEl.value = NEW_PROFILE_ID;
+  } else {
+    const nextId = validIds.has(selectedId) ? selectedId : profilesCache[0]?.id || DEFAULT_PROFILE_ID;
+    profileSelectEl.value = validIds.has(nextId) ? nextId : NEW_PROFILE_ID;
+  }
+
+  const selected =
+    profileSelectEl.value === NEW_PROFILE_ID
+      ? null
+      : profilesCache.find((p) => p.id === profileSelectEl.value);
   if (deleteProfileBtn) deleteProfileBtn.hidden = !(selected && !selected.builtin);
   updateProfileKindNote(selected);
 }
@@ -195,6 +234,12 @@ function populateTemplateSelect(selectedId) {
 
 function updateProfileKindNote(profile) {
   if (!profileKindNoteEl) return;
+  if (profileSelectEl?.value === NEW_PROFILE_ID) {
+    profileKindNoteEl.hidden = false;
+    profileKindNoteEl.className = "toolbar-hint is-warn";
+    profileKindNoteEl.textContent = "New profile — fill in details, then Save or Save as new.";
+    return;
+  }
   const selected = profile || profilesCache.find((p) => p.id === (profileSelectEl?.value || editingPersonId));
   if (!selected) {
     profileKindNoteEl.hidden = true;
@@ -246,12 +291,48 @@ async function loadPersonIntoForm(person) {
   setActiveRoleTrackUi(track);
   populateTemplateSelect(person?.templateId || DEFAULT_TEMPLATE_ID);
   fillPersonForm(formRoot, person, { roleTrack: track });
+  fillResumeWizard(formRoot, person);
   if (profileSelectEl && person?.id) profileSelectEl.value = person.id;
   syncSaveButtonLabels();
   renderCompleteness(person);
   updateProfileKindNote(person);
   await refreshQaBankNote(person?.id);
   setSaveStatus("");
+}
+
+function blankNewPerson() {
+  const track = "sf";
+  return {
+    id: null,
+    label: "",
+    name: "",
+    email: "",
+    phone: "",
+    linkedin: "",
+    portfolio: "",
+    location: "",
+    address: "",
+    zip: "",
+    masterResume: "",
+    requiredExperience: [],
+    workHistory: [],
+    educationHistory: [],
+    roleTrack: track,
+    promptTemplate: getTrackPromptTemplate(track),
+    coverLetterPrompt: resolveCoverLetterTemplateForTrack({ roleTrack: track }, track),
+    templateId: DEFAULT_TEMPLATE_ID,
+    resumeFilePrefix: "Resume",
+    signatureTitle: "",
+    autofillExtras: {},
+    builtin: false
+  };
+}
+
+async function startNewProfile() {
+  editingPersonId = null;
+  populateProfileSelect(NEW_PROFILE_ID);
+  await loadPersonIntoForm(blankNewPerson());
+  setActiveTab("apply");
 }
 
 async function loadProfileById(profileId) {
@@ -292,11 +373,14 @@ async function saveProfile({ asNew = false } = {}) {
   if (savePersonAsNewBtn) savePersonAsNewBtn.disabled = true;
   setSaveStatus("Saving…");
   try {
+    const wizardData = readResumeWizard(formRoot);
     const result = await savePersonFromForm(formRoot, {
-      asNew,
-      editingPersonId: asNew ? null : editingPersonId,
+      asNew: asNew || profileSelectEl?.value === NEW_PROFILE_ID,
+      editingPersonId: asNew || profileSelectEl?.value === NEW_PROFILE_ID ? null : editingPersonId,
       roleTrack: readActiveRoleTrack(),
-      templateId: templateSelectEl?.value
+      templateId: templateSelectEl?.value,
+      workHistory: wizardData.workHistory,
+      educationHistory: wizardData.educationHistory
     });
     const saved = result?.profile || result;
     editingPersonId = saved?.id || editingPersonId;
@@ -304,11 +388,13 @@ async function saveProfile({ asNew = false } = {}) {
     await loadPersonIntoForm(saved);
     const msg = result?.fromBuiltin ? `Saved as ${saved.label}` : `Saved ${saved.label}`;
     setSaveStatus(msg, { ok: true });
+    showToast(msg, { kind: "ok" });
     setStatus("");
     return saved;
   } catch (err) {
     const msg = String(err?.message || err);
     setSaveStatus(msg, { ok: false });
+    showToast(msg, { kind: "err", duration: 4500 });
     setStatus(msg, "err");
     if (err.focusKey) {
       const idMap = {
@@ -341,7 +427,11 @@ async function importFromResumeText(text, { sourceLabel = "resume" } = {}) {
     isEditingBuiltin(editingPersonId) ||
     Boolean(parsed.name && current?.name && namesLikelyDifferent(current.name, parsed.name));
   const merged = mergeExtractedProfileIntoPerson(current, parsed, resumeText, { resetEeo: asNew });
+  if (parsed.employers?.length) {
+    merged.workHistory = seedWorkHistoryFromEmployers(parsed.employers);
+  }
   fillPersonForm(formRoot, merged, { roleTrack: readActiveRoleTrack() });
+  fillResumeWizard(formRoot, merged);
   applyTrackTemplatesToForm(readActiveRoleTrack(), merged);
   setActiveTab("resume");
   renderCompleteness(merged);
@@ -370,6 +460,10 @@ tabBtns.forEach((btn) => {
 });
 
 profileSelectEl?.addEventListener("change", () => {
+  if (profileSelectEl.value === NEW_PROFILE_ID) {
+    startNewProfile().catch((err) => setStatus(String(err.message || err), "err"));
+    return;
+  }
   loadProfileById(profileSelectEl.value).catch((err) => setStatus(String(err.message || err), "err"));
 });
 
@@ -477,6 +571,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function init() {
   initThemePicker(document.getElementById("themeSwatches"));
+  initResumeWizard(formRoot);
   setActiveTab(normalizeTab(initialTab));
   populateTemplateSelect(DEFAULT_TEMPLATE_ID);
   await refreshProfiles(initialProfileId || (await getActivePersonId()));

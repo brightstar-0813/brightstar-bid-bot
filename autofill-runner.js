@@ -10,6 +10,10 @@ import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillE
 import { applyCompleteness } from "./person-profile-form.js";
 import { outputDirFromPerson } from "./resume-profile.js";
 import { buildWorkHistory, buildEducationHistory, hasFormHistory } from "./history.js";
+import {
+  workHistoryForAutofill,
+  educationHistoryForAutofill
+} from "./resume-wizard.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
 import {
   isJunkAutofillAnswer,
@@ -1345,7 +1349,17 @@ async function resolveQuestionAnswers(
   return resolved;
 }
 
-async function loadFormHistory(applicantInfo = {}) {
+async function loadFormHistory(applicantInfo = {}, person = {}) {
+  const storedWork = workHistoryForAutofill(person?.workHistory || []);
+  const storedEdu = educationHistoryForAutofill(person?.educationHistory || []);
+  if (storedWork.length || storedEdu.length) {
+    return {
+      workHistory: storedWork,
+      educationHistory: storedEdu.length
+        ? storedEdu
+        : buildEducationHistory((await getStoredResumeJson()) || {}, applicantInfo)
+    };
+  }
   const resume = (await getStoredResumeJson()) || {};
   return {
     workHistory: buildWorkHistory(resume),
@@ -2279,7 +2293,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
   const hasUploadDocs = Boolean(docs?.resume?.base64 || docs?.coverLetter?.base64);
   let history = { workHistory: [], educationHistory: [] };
   try {
-    history = await loadFormHistory(applicantInfo);
+    history = await loadFormHistory(applicantInfo, person);
   } catch {
     history = { workHistory: [], educationHistory: [] };
   }

@@ -317,6 +317,8 @@ function normalizePerson(p) {
     roleTrack: "sf",
     autofillExtras: {},
     requiredExperience: [],
+    workHistory: [],
+    educationHistory: [],
     spreadsheetUrl: "",
     sheetsWebAppUrl: "",
     builtin: false,
@@ -364,6 +366,8 @@ function normalizePerson(p) {
     roleTrack: normalizeRoleTrackId(p.roleTrack),
     autofillExtras: extras,
     requiredExperience,
+    workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+    educationHistory: Array.isArray(p.educationHistory) ? p.educationHistory : [],
     spreadsheetUrl: p.spreadsheetUrl || "",
     sheetsWebAppUrl: p.sheetsWebAppUrl || "",
     builtin: Boolean(p.builtin),
@@ -535,6 +539,8 @@ export async function addCustomProfile({
   signatureTitle = "",
   autofillExtras = {},
   requiredExperience = [],
+  workHistory = [],
+  educationHistory = [],
   roleTrack = "sf",
   spreadsheetUrl = "",
   sheetsWebAppUrl = ""
@@ -608,6 +614,8 @@ export async function addCustomProfile({
     roleTrack: normalizeRoleTrackId(roleTrack),
     autofillExtras: extras,
     requiredExperience: employers,
+    workHistory: Array.isArray(workHistory) ? workHistory : [],
+    educationHistory: Array.isArray(educationHistory) ? educationHistory : [],
     spreadsheetUrl: String(spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim()
   };
@@ -680,6 +688,8 @@ export async function savePersonProfile(person) {
       }
       return employers;
     })(),
+    workHistory: Array.isArray(person?.workHistory) ? person.workHistory : [],
+    educationHistory: Array.isArray(person?.educationHistory) ? person.educationHistory : [],
     spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(person?.sheetsWebAppUrl || "").trim(),
     kind: "resume"
@@ -1063,6 +1073,15 @@ export function personToApplicantInfo(person = {}) {
   info.needsSponsorship = yesNoToken(person.sponsorship) || String(person.sponsorship || "").trim().toLowerCase();
   info.signatureName = String(person.name || person.label || `${name.firstName} ${name.lastName}`.trim()).trim();
   info.signatureDate = todaysDateMmDdYyyy();
+  const eduRow = Array.isArray(person.educationHistory) ? person.educationHistory[0] : null;
+  if (eduRow) {
+    if (eduRow.school) info.schoolName = String(eduRow.school).trim();
+    if (eduRow.degree) info.highestDegree = String(eduRow.degree).trim();
+    if (eduRow.fieldOfStudy) info.fieldOfStudy = String(eduRow.fieldOfStudy).trim();
+    const gradYear = String(eduRow.endYear || "").trim();
+    const gradMonth = String(eduRow.endMonth || "05").trim().padStart(2, "0");
+    if (gradYear) info.graduationDate = `${gradYear}-${gradMonth}`;
+  }
   info.selfIdentifyLanguage = String(extras.language || extras["self identify language"] || "English").trim() || "English";
   info.howDidYouHear = String(
     extras["how did you hear"] ||

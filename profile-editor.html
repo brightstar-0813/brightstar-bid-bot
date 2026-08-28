@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="popup.css" />
     <link rel="stylesheet" href="profile-editor.css" />
     <link rel="stylesheet" href="ui-dialog.css" />
+    <link rel="stylesheet" href="ui-toast.css" />
   </head>
   <body class="ctx-window editor-page">
     <main class="editor profile-editor">
@@ -265,53 +266,73 @@
         </div>
 
         <!-- Resume -->
-        <div class="profile-tab-panel" data-panel="resume" id="profilePanelResume" role="tabpanel" hidden aria-hidden="true">
-          <p class="tab-intro">Resume text and employers used when tailoring bids per job.</p>
-          <div class="profile-acc">
-            <details class="profile-acc-item" open>
-              <summary>Resume file</summary>
-              <div class="profile-acc-body">
+        <div class="profile-tab-panel" data-panel="resume" id="profilePanelResume" role="tabpanel" aria-hidden="true">
+          <p class="tab-intro">Import your resume, then step through work experience and education — like Jobright.</p>
+          <div class="resume-wizard" id="resumeWizard">
+            <nav class="resume-step-tabs" role="tablist" aria-label="Resume steps">
+              <button type="button" class="resume-step-tab is-active" data-step="0" role="tab" aria-selected="true">1. Import</button>
+              <button type="button" class="resume-step-tab" data-step="1" role="tab" aria-selected="false" tabindex="-1">2. Work</button>
+              <button type="button" class="resume-step-tab" data-step="2" role="tab" aria-selected="false" tabindex="-1">3. Education</button>
+              <button type="button" class="resume-step-tab" data-step="3" role="tab" aria-selected="false" tabindex="-1">4. Details</button>
+            </nav>
+
+            <div class="resume-step-panels">
+              <section class="resume-step-panel is-active" data-step="0" role="tabpanel">
                 <label class="field file-field">
-                  <span>Import (.txt, .pdf, .docx)</span>
+                  <span>Import resume file (.txt, .pdf, .docx)</span>
                   <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
                 </label>
                 <p class="hint" id="masterResumeFileHint"></p>
-              </div>
-            </details>
+                <label class="field">
+                  <span>Or paste master resume text</span>
+                  <textarea id="personMasterResume" class="prompt-input" rows="8" placeholder="Paste full resume text here…"></textarea>
+                </label>
+                <div class="row-split">
+                  <button type="button" id="replaceResumeFromFile" class="ghost compact">Choose file</button>
+                  <button type="button" id="clearMasterResume" class="ghost compact">Clear text</button>
+                </div>
+              </section>
 
-            <details class="profile-acc-item" open>
-              <summary>Resume content</summary>
-              <div class="profile-acc-body">
+              <section class="resume-step-panel" data-step="1" role="tabpanel" hidden>
+                <p class="acc-hint">Add each employer — used to autofill work history on application forms.</p>
+                <div id="resumeWorkList" class="resume-entry-list"></div>
+                <button type="button" id="addWorkEntry" class="ghost compact resume-add-entry">+ Add another job</button>
+              </section>
+
+              <section class="resume-step-panel" data-step="2" role="tabpanel" hidden>
+                <p class="acc-hint">Schools and degrees — matched on education sections of job applications.</p>
+                <div id="resumeEducationList" class="resume-entry-list"></div>
+                <button type="button" id="addEducationEntry" class="ghost compact resume-add-entry">+ Add another school</button>
+              </section>
+
+              <section class="resume-step-panel" data-step="3" role="tabpanel" hidden>
                 <div class="grid-2">
                   <label class="field">
                     <span>PDF file prefix</span>
-                    <input id="personResumePrefix" type="text" autocomplete="off" />
+                    <input id="personResumePrefix" type="text" autocomplete="off" placeholder="LastName_Resume" />
                   </label>
                   <label class="field">
                     <span>Signature title</span>
-                    <input id="personSignatureTitle" type="text" autocomplete="off" />
+                    <input id="personSignatureTitle" type="text" autocomplete="off" placeholder="Senior Engineer" />
                   </label>
                 </div>
                 <label class="field">
-                  <span>Master resume text</span>
-                  <textarea id="personMasterResume" class="prompt-input" rows="8"></textarea>
+                  <span>Required employers for bids (one per line)</span>
+                  <textarea id="personRequiredExperience" class="prompt-input" rows="4" placeholder="Company A&#10;Company B"></textarea>
                 </label>
-                <div class="row-split">
-                  <button type="button" id="replaceResumeFromFile" class="ghost compact">Replace from file</button>
-                  <button type="button" id="clearMasterResume" class="ghost compact">Clear</button>
-                </div>
-                <label class="field">
-                  <span>Required employers (one per line)</span>
-                  <textarea id="personRequiredExperience" class="prompt-input" rows="4"></textarea>
-                </label>
-                <button type="button" id="detectRequiredExperience" class="ghost compact">Detect employers</button>
-              </div>
-            </details>
+                <button type="button" id="detectRequiredExperience" class="ghost compact">Detect from resume / prompt</button>
+              </section>
+            </div>
+
+            <div class="resume-step-actions">
+              <button type="button" id="resumeStepBack" class="ghost compact" disabled>Back</button>
+              <button type="button" id="resumeStepNext" class="primary compact">Next step</button>
+            </div>
           </div>
         </div>
 
         <!-- Batch (Brightstar CSV / prompts — not autofill) -->
-        <div class="profile-tab-panel" data-panel="batch" id="profilePanelBatch" role="tabpanel" hidden aria-hidden="true">
+        <div class="profile-tab-panel" data-panel="batch" id="profilePanelBatch" role="tabpanel" aria-hidden="true">
           <p class="tab-intro">Engineering track, AI prompts, and Google Sheet — for CSV batch bidding.</p>
           <div class="profile-acc">
             <details class="profile-acc-item" open>
