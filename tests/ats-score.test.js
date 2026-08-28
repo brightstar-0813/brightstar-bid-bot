@@ -36,7 +36,8 @@ const strongResume = {
 test("ATS score rewards JD keyword and Salesforce product coverage", () => {
   const strong = evaluateAtsScore(strongResume, {
     jdText: jd,
-    jobTitle: "Salesforce Technical Architect"
+    jobTitle: "Salesforce Technical Architect",
+    roleTrack: "sf"
   });
   const weak = evaluateAtsScore(
     {
@@ -46,7 +47,7 @@ test("ATS score rewards JD keyword and Salesforce product coverage", () => {
       skills: [{ category: "General", items: "Communication" }],
       experience: [{ company: "Acme", bullets: ["Worked with business teams."] }]
     },
-    { jdText: jd, jobTitle: "Salesforce Technical Architect" }
+    { jdText: jd, jobTitle: "Salesforce Technical Architect", roleTrack: "sf" }
   );
 
   assert.ok(strong.score >= 80, `expected strong baseline score, received ${strong.score}`);
@@ -94,4 +95,77 @@ test("boostResumeForAts lifts a weak resume toward the 90+ target", () => {
     `expected ≥${ATS_TARGET_SCORE}, got ${evaluation.score}; missing=${evaluation.missingKeywords}`
   );
   assert.ok(String(data.headline || "").includes("Salesforce"));
+});
+
+test("DE track scores Snowflake and dbt from JD", () => {
+  const deJd = `
+Senior Data Engineer
+Snowflake warehouse, dbt transformations, Apache Airflow orchestration, Kafka streaming.
+`;
+  const deResume = {
+    name: "Candidate",
+    email: "candidate@example.com",
+    headline: "Senior Data Engineer",
+    profile: "Data engineer building Snowflake warehouses with dbt and Airflow pipelines.",
+    skills: [
+      { category: "ETL & Data Pipeline Development", items: "Snowflake, dbt, Apache Airflow" },
+      { category: "Programming Languages", items: "Python, SQL" }
+    ],
+    experience: [
+      {
+        company: "Acme",
+        title: "Senior Data Engineer",
+        bullets: [
+          "Built Snowflake marts and dbt incremental models fed by Airflow DAGs.",
+          "Implemented Kafka consumers for streaming ingestion into the warehouse."
+        ]
+      }
+    ],
+    education: [{ school: "University" }]
+  };
+  const result = evaluateAtsScore(deResume, {
+    jdText: deJd,
+    jobTitle: "Senior Data Engineer",
+    roleTrack: "de"
+  });
+  assert.ok(result.score >= 75, `expected strong DE score, received ${result.score}`);
+  assert.equal(result.missingProducts.length, 0);
+  assert.ok(result.components.domainProducts.matched >= 2);
+});
+
+test("FS track scores React and Node from JD", () => {
+  const fsJd = `
+Senior Full Stack Engineer
+React, TypeScript, Node.js, AWS, Docker, Kubernetes, PostgreSQL.
+`;
+  const fsResume = {
+    name: "Candidate",
+    email: "candidate@example.com",
+    headline: "Senior Full Stack Engineer",
+    profile: "Full stack engineer shipping React and Node.js services on AWS with Docker and Kubernetes.",
+    skills: [
+      { category: "Programming Languages", items: "TypeScript, JavaScript" },
+      { category: "Frontend", items: "React" },
+      { category: "Backend & APIs", items: "Node.js, REST APIs" },
+      { category: "Cloud & DevOps", items: "AWS, Docker, Kubernetes" }
+    ],
+    experience: [
+      {
+        company: "Acme",
+        title: "Senior Full Stack Engineer",
+        bullets: [
+          "Delivered React TypeScript UI backed by Node.js APIs on AWS.",
+          "Containerized services with Docker and deployed via Kubernetes."
+        ]
+      }
+    ],
+    education: [{ school: "University" }]
+  };
+  const result = evaluateAtsScore(fsResume, {
+    jdText: fsJd,
+    jobTitle: "Senior Full Stack Engineer",
+    roleTrack: "fs"
+  });
+  assert.ok(result.score >= 70, `expected strong FS score, received ${result.score}`);
+  assert.ok(result.components.domainProducts.matched >= 3);
 });

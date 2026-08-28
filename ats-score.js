@@ -1,4 +1,4 @@
-import { jdRequiredProducts } from "./resume-json.js";
+import { getRoleTrack, jdRequiredSkills, normalizeRoleTrackId } from "./role-tracks.js";
 
 const STOP_WORDS = new Set(
   [
@@ -94,16 +94,16 @@ function wordStillMissing(word, haystack) {
  * skills, profile, technicalSummary, headline, and recent-role bullets.
  * Does not invent employers, dates, degrees, or certifications.
  */
-export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "" } = {}) {
+export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "", roleTrack = "sf" } = {}) {
   if (!resumeData || typeof resumeData !== "object") {
     return {
       data: resumeData,
-      evaluation: evaluateAtsScore(resumeData, { jdText, jobTitle }),
+      evaluation: evaluateAtsScore(resumeData, { jdText, jobTitle, roleTrack }),
       changed: false
     };
   }
 
-  let evaluation = evaluateAtsScore(resumeData, { jdText, jobTitle });
+  let evaluation = evaluateAtsScore(resumeData, { jdText, jobTitle, roleTrack });
   if (evaluation.score >= ATS_TARGET_SCORE) {
     return { data: resumeData, evaluation, changed: false };
   }
@@ -194,7 +194,7 @@ export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "" } = {
     }
   }
 
-  evaluation = evaluateAtsScore(out, { jdText, jobTitle });
+  evaluation = evaluateAtsScore(out, { jdText, jobTitle, roleTrack });
   return { data: out, evaluation, changed };
 }
 
@@ -202,7 +202,8 @@ export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "" } = {
  * Same-chat re-prompt: force missing JD keywords / products into JSON so the
  * local ATS badge can clear 90+.
  */
-export function buildAtsScoreRetryPrompt(resumeData, evaluation, { jdText = "", jobTitle = "" } = {}) {
+export function buildAtsScoreRetryPrompt(resumeData, evaluation, { jdText = "", jobTitle = "", roleTrack = "sf" } = {}) {
+  const track = getRoleTrack(roleTrack);
   const allJdKeywords = topKeywords(jdText, 50);
   const fromFull = coverage(allJdKeywords, resumeHaystack(resumeData)).missing;
   const missingKw = fromFull.length ? fromFull : evaluation?.missingKeywords || [];
@@ -213,7 +214,7 @@ export function buildAtsScoreRetryPrompt(resumeData, evaluation, { jdText = "", 
     "",
     jobTitle ? `TARGET TITLE: ${jobTitle}` : "",
     missingProducts.length
-      ? `MISSING SALESFORCE / PLATFORM PRODUCTS (must appear in skills AND in at least two recent-role bullets AND in profile): ${missingProducts.join(", ")}`
+      ? `MISSING ${track.domainProductLabel.toUpperCase()} (must appear in skills AND in at least two recent-role bullets AND in profile): ${missingProducts.join(", ")}`
       : "",
     missingKw.length
       ? `MISSING JD KEYWORD TOKENS (each must appear somewhere in the resume text — skills items, profile, and recent-role bullets; never as one-word technicalSummary lines). Use the exact tokens: ${missingKw.join(", ")}`
@@ -233,7 +234,8 @@ export function buildAtsScoreRetryPrompt(resumeData, evaluation, { jdText = "", 
     .join("\n");
 }
 
-export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "" } = {}) {
+export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleTrack = "sf" } = {}) {
+  const trackId = normalizeRoleTrackId(roleTrack);
   const resumeText = collectStrings(resumeData).join(" ");
   const experienceText = collectStrings(resumeData?.experience).join(" ");
   const headlineText = [
@@ -247,9 +249,13 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "" } = {}
   const experienceCoverage = coverage(keywords, experienceText);
   const titleKeywords = topKeywords(jobTitle, 8);
   const titleCoverage = coverage(titleKeywords, headlineText);
-  const requiredProducts = jdRequiredProducts(jdText);
+  const requiredProducts = jdRequiredSkills(jdText, trackId);
   const productMatches = requiredProducts.filter((product) => product.re.test(resumeText));
   const missingProducts = requiredProducts.filter((product) => !product.re.test(resumeText));
+
+  const domainProductsScore = requiredProducts.length
+    ? round((productMatches.length / requiredProducts.length) * 20)
+    : 0;
 
   const components = {
     keywordMatch: {
@@ -264,10 +270,14 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "" } = {}
       matched: titleCoverage.matched.length,
       total: titleKeywords.length
     },
+    domainProducts: {
+      score: domainProductsScore,
+      max: requiredProducts.length ? 20 : 0,
+      matched: productMatches.length,
+      total: requiredProducts.length
+    },
     salesforceProducts: {
-      score: requiredProducts.length
-        ? round((productMatches.length / requiredProducts.length) * 20)
-        : 0,
+      score: domainProductsScore,
       max: requiredProducts.length ? 20 : 0,
       matched: productMatches.length,
       total: requiredProducts.length
@@ -304,6 +314,7 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "" } = {}
     missingKeywords: keywordCoverage.missing.slice(0, 15),
     requiredProducts: requiredProducts.map((product) => product.name),
     missingProducts: missingProducts.map((product) => product.name),
+    roleTrack: trackId,
     evaluatedAt: Date.now()
   };
 }

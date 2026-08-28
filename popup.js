@@ -10,13 +10,25 @@ import {
   deleteCustomProfile,
   BUILTIN_PROFILES,
   COVER_LETTER_PROFILE_ID,
-  GENERIC_SENIOR_PROMPT,
-  GENERIC_COVER_LETTER_PROMPT,
+  getTrackPromptTemplate,
+  getTrackCoverLetterTemplate,
+  resolveRoleTrackForPerson,
+  resolvePromptTemplateForTrack,
+  resolveCoverLetterTemplateForTrack,
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
   resolveExperienceRulesForPerson,
   setPersonSheetConfig
 } from "./profiles.js";
+import {
+  getSessionRoleTrack,
+  setSessionRoleTrack,
+  getRoleTrack,
+  isTrackDefaultPrompt,
+  isTrackDefaultCoverLetter,
+  normalizeRoleTrackId,
+  SESSION_ROLE_TRACK_KEY
+} from "./role-tracks.js";
 import {
   requiredExperienceToText
 } from "./experience-rules.js";
@@ -430,6 +442,7 @@ const personRequiredExperienceEl = document.getElementById("personRequiredExperi
 const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
 const personResumePromptEl = document.getElementById("personResumePrompt");
 const personCoverPromptEl = document.getElementById("personCoverPrompt");
+const activeRoleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
 const personResumeFileEl = document.getElementById("personResumeFile");
 const replaceResumeFromFileBtn = document.getElementById("replaceResumeFromFile");
 const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
@@ -518,6 +531,7 @@ const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const allowSubmitToggleEl = document.getElementById("allowSubmitToggle");
+const autofillEnabledToggleEl = document.getElementById("autofillEnabledToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
 const qaImportBtn = document.getElementById("qaImportBtn");
@@ -534,6 +548,9 @@ let allUsJobsCache = [];
 let channelFilter = DEFAULT_CHANNEL_FILTER;
 let batchState = "idle";
 let editingPersonId = null;
+let autofillEnabledCache = true;
+
+const AUTOFILL_ENABLED_KEY = "autofill_enabled";
 
 if (personResumeFileEl) {
   personResumeFileEl.setAttribute("accept", MASTER_RESUME_ACCEPT);
@@ -578,6 +595,83 @@ function syncBatchPill() {
   if (!el) return;
   el.textContent = batchState || "idle";
   el.dataset.state = batchState || "idle";
+}
+
+function setActiveRoleTrackUi(track) {
+  const active = normalizeRoleTrackId(track);
+  for (const btn of activeRoleTrackBtns) {
+    const isActive = btn.dataset.track === active;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+  }
+}
+
+async function syncActiveTrackUi({ savedTrack } = {}) {
+  if (!activeRoleTrackBtns.length) return;
+  const sessionTrack = await getSessionRoleTrack();
+  const activeTrack = sessionTrack || savedTrack || readActiveRoleTrack();
+  setActiveRoleTrackUi(activeTrack);
+}
+
+function applyTrackTemplatesToForm(roleTrack, person) {
+  const track = normalizeRoleTrackId(roleTrack);
+  const source = person || profilesCache.find((p) => p.id === editingPersonId);
+  personResumePromptEl.value = resolvePromptTemplateForTrack(source || { roleTrack: track }, track);
+  personCoverPromptEl.value = resolveCoverLetterTemplateForTrack(source || { roleTrack: track }, track);
+}
+
+function readActiveRoleTrack() {
+  const activeBtn = activeRoleTrackBtns.find((btn) => btn.classList.contains("is-active"));
+  return normalizeRoleTrackId(activeBtn?.dataset?.track || "sf");
+}
+
+async function applyActiveRoleTrackChange({ fromUser = true, track: nextTrack } = {}) {
+  const track = normalizeRoleTrackId(nextTrack ?? readActiveRoleTrack());
+  const person = profilesCache.find((p) => p.id === editingPersonId) || (await getActivePerson());
+  const savedTrack = resolveRoleTrackForPerson(person);
+
+  if (fromUser) {
+    const replacePrompt =
+      promptNeedsPersonTemplate(personResumePromptEl.value) ||
+      isTrackDefaultPrompt(personResumePromptEl.value);
+    const replaceCover =
+      isTrackDefaultCoverLetter(personCoverPromptEl.value) ||
+      !String(personCoverPromptEl.value || "").trim();
+    if (!replacePrompt || !replaceCover) {
+      const ok = window.confirm(
+        `Replace prompts with the ${getRoleTrack(track).label} template? Unsaved prompt edits will be lost until you Save person.`
+      );
+      if (!ok) {
+        const revertTrack = (await getSessionRoleTrack()) || savedTrack;
+        setActiveRoleTrackUi(revertTrack);
+        return;
+      }
+    }
+  }
+
+  setActiveRoleTrackUi(track);
+  await setSessionRoleTrack(track);
+  applyTrackTemplatesToForm(track, person);
+  await syncActiveTrackUi({ savedTrack });
+  setStatus(
+    track === savedTrack
+      ? `Engineering track: ${getRoleTrack(track).label}`
+      : `Engineering track: ${getRoleTrack(track).label} — active for this session (Save person to keep as default)`
+  );
+}
+
+async function resetActiveTrackForPerson(person) {
+  const savedTrack = resolveRoleTrackForPerson(person);
+  await setSessionRoleTrack(savedTrack);
+  setActiveRoleTrackUi(savedTrack);
+  await syncActiveTrackUi({ savedTrack });
+}
+
+function syncAutofillUi(enabled = autofillEnabledCache) {
+  autofillEnabledCache = Boolean(enabled);
+  if (autofillEnabledToggleEl) autofillEnabledToggleEl.checked = autofillEnabledCache;
+  if (autofillPageBtn) autofillPageBtn.disabled = !autofillEnabledCache;
+  if (autoApplyPageBtn) autoApplyPageBtn.disabled = !autofillEnabledCache;
 }
 
 function setPersonImportNotice(message, { ok = true } = {}) {
@@ -631,6 +725,7 @@ function promptNeedsPersonTemplate(prompt) {
   if (!p.trim()) return true;
   if (!p.includes("{MASTER_RESUME}") || !p.includes("{NAME}") || !p.includes("{JD}")) return true;
   if (/sandeep\s+mahankali|d.?mario\s+lewis/i.test(p)) return true;
+  if (isTrackDefaultPrompt(p)) return true;
   return false;
 }
 
@@ -655,11 +750,20 @@ function applyExtractedProfileToForm(parsed, resumeText, { resetEeo = true } = {
     personRequiredExperienceEl.value = requiredExperienceToText(parsed.employers);
   }
   if (resetEeo || promptNeedsPersonTemplate(personResumePromptEl.value)) {
-    personResumePromptEl.value = GENERIC_SENIOR_PROMPT;
+    applyTrackTemplatesToForm(readActiveRoleTrack(), profilesCache.find((p) => p.id === editingPersonId));
   }
   const cover = String(personCoverPromptEl.value || "");
-  if (resetEeo || !cover.trim() || !cover.includes("{JD}") || /sandeep\s+mahankali|matthew\s+dale|d.?mario\s+lewis/i.test(cover)) {
-    personCoverPromptEl.value = GENERIC_COVER_LETTER_PROMPT;
+  if (
+    resetEeo ||
+    isTrackDefaultCoverLetter(cover) ||
+    !cover.trim() ||
+    !cover.includes("{JD}") ||
+    /sandeep\s+mahankali|matthew\s+dale|d.?mario\s+lewis/i.test(cover)
+  ) {
+    personCoverPromptEl.value = resolveCoverLetterTemplateForTrack(
+      profilesCache.find((p) => p.id === editingPersonId) || { roleTrack: readActiveRoleTrack() },
+      readActiveRoleTrack()
+    );
   }
 }
 
@@ -869,6 +973,8 @@ function fillPersonForm(person) {
   personSignatureTitleEl.value = person?.signatureTitle || "";
   personMasterResumeEl.value = person?.masterResume || "";
   personRequiredExperienceEl.value = requiredExperienceToText(person?.requiredExperience || []);
+  const savedTrack = person?.roleTrack || resolveRoleTrackForPerson(person);
+  setActiveRoleTrackUi(savedTrack);
   personResumePromptEl.value = person?.promptTemplate || "";
   personCoverPromptEl.value = person?.coverLetterPrompt || "";
   masterResumeFileHintEl.textContent = person?.masterResume
@@ -904,6 +1010,7 @@ function readPersonForm({ asNew = false } = {}) {
     signatureTitle: personSignatureTitleEl.value.trim(),
     masterResume: personMasterResumeEl.value,
     requiredExperience: normalizeRequiredExperienceInput(personRequiredExperienceEl.value),
+    roleTrack: readActiveRoleTrack(),
     promptTemplate: personResumePromptEl.value,
     coverLetterPrompt: personCoverPromptEl.value,
     templateId: templateSelectEl.value || DEFAULT_TEMPLATE_ID,
@@ -970,6 +1077,7 @@ async function persistActivePersonSheetFromUi() {
 async function loadActivePersonIntoForm() {
   const person = await getActivePerson();
   fillPersonForm(person);
+  await resetActiveTrackForPerson(person);
   syncSaveButtonLabels();
   syncActivePersonChip();
   await syncOutputDirFromPerson(person);
@@ -1123,6 +1231,7 @@ async function loadSettings() {
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
   await refreshTemplates(data.selected_template_id || DEFAULT_TEMPLATE_ID);
   await loadActivePersonIntoForm();
+  await syncActiveTrackUi({ savedTrack: resolveRoleTrackForPerson(await getActivePerson()) });
 
   jobTitleEl.value = data.last_job_title || "";
   companyNameEl.value = data.last_company_name || "";
@@ -1187,6 +1296,7 @@ async function loadSettings() {
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   if (allowSubmitToggleEl) allowSubmitToggleEl.checked = Boolean(data.allowSubmitOnAssist);
+  syncAutofillUi(data[AUTOFILL_ENABLED_KEY] !== false);
   await refreshQaBank().catch(() => {});
   await hydrateJobDirsInUi().catch(() => {});
 }
@@ -2239,7 +2349,8 @@ async function savePerson({ asNew = false, successMessage = "" } = {}) {
         coverLetterPrompt: person.coverLetterPrompt,
         resumeFilePrefix: person.resumeFilePrefix,
         templateId: person.templateId,
-        signatureTitle: person.signatureTitle
+        signatureTitle: person.signatureTitle,
+        roleTrack: person.roleTrack
       });
       await setActivePersonId(saved.id);
       created = true;
@@ -2265,6 +2376,7 @@ async function savePerson({ asNew = false, successMessage = "" } = {}) {
     await syncOutputDirFromPerson(saved);
     await refreshProfiles(saved.id);
     fillPersonForm({ ...saved, builtin: false });
+    await resetActiveTrackForPerson(saved);
 
     let msg = successMessage;
     if (!msg) {
@@ -2669,6 +2781,10 @@ async function importBundledQaBank() {
 }
 
 async function autofillThisPage() {
+  if (!autofillEnabledCache) {
+    setStatus("Autofill is off. Turn it on in Apply assist.");
+    return;
+  }
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
   try {
@@ -2686,6 +2802,10 @@ async function autofillThisPage() {
 }
 
 async function autoApplyThisPage() {
+  if (!autofillEnabledCache) {
+    setStatus("Autofill is off. Turn it on in Apply assist.");
+    return;
+  }
   const allowSubmit = Boolean(allowSubmitToggleEl?.checked);
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
@@ -2811,6 +2931,17 @@ loadPresetBtn.addEventListener("click", () => loadPresetIntoEditor().catch((e) =
 savePersonBtn.addEventListener("click", () => savePerson({ asNew: false }));
 savePersonAsNewBtn.addEventListener("click", () => savePerson({ asNew: true }));
 deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
+
+activeRoleTrackBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const track = normalizeRoleTrackId(btn.dataset.track);
+    if (track === readActiveRoleTrack()) return;
+    setActiveRoleTrackUi(track);
+    applyActiveRoleTrackChange({ fromUser: true, track }).catch((e) =>
+      setStatus(String(e.message || e))
+    );
+  });
+});
 
 detectRequiredExperienceBtn?.addEventListener("click", () => {
   const fromPrompt = parseRequiredExperienceFromPrompt(personResumePromptEl.value);
@@ -2979,6 +3110,12 @@ qaLearnToggleEl?.addEventListener("change", () => {
 allowSubmitToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ allowSubmitOnAssist: Boolean(allowSubmitToggleEl.checked) }).catch(() => {});
 });
+autofillEnabledToggleEl?.addEventListener("change", () => {
+  const enabled = Boolean(autofillEnabledToggleEl.checked);
+  syncAutofillUi(enabled);
+  chrome.storage.local.set({ [AUTOFILL_ENABLED_KEY]: enabled }).catch(() => {});
+  setStatus(enabled ? "Autofill enabled." : "Autofill disabled — batch will skip apply steps.");
+});
 aiProviderChatgptBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));
 });
@@ -3060,6 +3197,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[AI_PROVIDER_KEY] && changes[AI_PROVIDER_KEY].newValue !== undefined) {
     renderAiProvider(changes[AI_PROVIDER_KEY].newValue);
+  }
+  if (changes[SESSION_ROLE_TRACK_KEY]) {
+    syncActiveTrackUi().catch(() => {});
   }
 });
 

@@ -11,7 +11,22 @@ Generate tailored resumes and cover letters from a CSV of jobs (or one-off JDs) 
 - For each job: **one new chat** on the selected AI engine (ChatGPT or Claude) → resume JSON (JD auto-injected) → save files → **same chat** cover letter → next job
 - Toggle **AI engine** in the bot UI anytime before Start / Grab (stay logged in on that site)
 - During the **cooldown between jobs**, the finished chat is deleted so AI history stays tidy
-- After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, Salesforce products, experience evidence, and resume structure; hover its queue badge for the breakdown
+## Engineering tracks (SF / DE / FS / AI)
+
+Each person has a default **engineering track** that selects the resume engine, JD skill catalog, and default tailor/cover-letter prompts:
+
+| Track | Roles |
+|-------|--------|
+| **SF** | Salesforce (built-in D'mario / Edrwin presets + generic SF template) |
+| **DE** | Data Engineering — Snowflake, dbt, Airflow, Kafka, etc. |
+| **FS** | Full Stack — React, Node.js, TypeScript, cloud, CI/CD |
+| **AI** | AI / ML Evaluation — LLM quality, eval pipelines, Python/SQL |
+
+- Set **Engineering track** under **Active person** (top of Section 1). It applies immediately to **CSV batch** and **manual one-off** runs — prompts and ATS engine switch for the session.
+- Click **Save person** to persist the track and prompts as that person’s default. Changing track without saving is session-only (safe for experiments).
+- Built-in Salesforce presets (D'mario / Edrwin) keep their embedded SF prompts when track is SF; other tracks use the matching track template at runtime.
+
+After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, domain products (Salesforce, data tools, stack, or AI tools depending on track), experience evidence, and resume structure; hover its queue badge for the breakdown
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):
   - `jd.txt`
   - `[Name]_Resume.pdf` (US senior templates — ATS, Silicon Valley, consulting, NYC finance, executive)

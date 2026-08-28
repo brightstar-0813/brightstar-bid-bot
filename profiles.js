@@ -3,6 +3,17 @@ import { PROMPT as edrwinRevolorioPrompt } from "./prompts/edrwin-revolorio.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
+  getTrackAtsAppendix,
+  getTrackCoverLetterTemplate,
+  getTrackPromptTemplate,
+  isTrackDefaultCoverLetter,
+  isTrackDefaultPrompt,
+  normalizeRoleTrackId,
+  resolveEffectiveRoleTrack,
+  resolveRoleTrackForPerson,
+  ROLE_TRACK_LIST
+} from "./role-tracks.js";
+import {
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
   resolveExperienceRulesForPerson
@@ -10,6 +21,16 @@ import {
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
 export const GENERIC_SENIOR_PROMPT = genericSeniorPrompt;
+
+export { resolveEffectiveRoleTrack } from "./role-tracks.js";
+export {
+  ROLE_TRACK_LIST,
+  getTrackPromptTemplate,
+  getTrackCoverLetterTemplate,
+  resolveRoleTrackForPerson,
+  isTrackDefaultPrompt,
+  isTrackDefaultCoverLetter
+} from "./role-tracks.js";
 export const GENERIC_COVER_LETTER_PROMPT = coverLetterPrompt;
 
 /** Default ATS / MyWorkday account password for create-account + sign-in. */
@@ -20,6 +41,7 @@ export const BUILTIN_PROFILES = [
   {
     id: "dmario-lewis",
     label: "D'mario Lewis (Salesforce)",
+    roleTrack: "sf",
     promptTemplate: dmarioLewisPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Lewis_Resume",
@@ -58,6 +80,7 @@ export const BUILTIN_PROFILES = [
   {
     id: "edrwin-revolorio",
     label: "Edrwin Revolorio (Salesforce)",
+    roleTrack: "sf",
     promptTemplate: edrwinRevolorioPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Revolorio_Resume",
@@ -291,6 +314,7 @@ function normalizePerson(p) {
     resumeFilePrefix: "Resume",
     templateId: "times-classic",
     signatureTitle: "",
+    roleTrack: "sf",
     autofillExtras: {},
     requiredExperience: [],
     spreadsheetUrl: "",
@@ -337,6 +361,7 @@ function normalizePerson(p) {
     resumeFilePrefix: p.resumeFilePrefix || "Resume",
     templateId: p.templateId || "times-classic",
     signatureTitle: p.signatureTitle || p.headline || "",
+    roleTrack: normalizeRoleTrackId(p.roleTrack),
     autofillExtras: extras,
     requiredExperience,
     spreadsheetUrl: p.spreadsheetUrl || "",
@@ -384,6 +409,43 @@ export async function getCoverLetterProfile() {
   );
 }
 
+function isBuiltinSfProfile(person) {
+  const id = String(person?.id || "");
+  return id === "dmario-lewis" || id === "edrwin-revolorio";
+}
+
+/** Resume prompt for the active engineering track (session or saved default). */
+export function resolvePromptTemplateForTrack(person, roleTrack) {
+  const track = normalizeRoleTrackId(roleTrack);
+  if (track === "sf" && isBuiltinSfProfile(person)) {
+    return person?.promptTemplate || getTrackPromptTemplate(track);
+  }
+  const personTrack = resolveRoleTrackForPerson(person);
+  if (track !== personTrack) {
+    return getTrackPromptTemplate(track);
+  }
+  const prompt = String(person?.promptTemplate || "").trim();
+  if (prompt && !isTrackDefaultPrompt(prompt)) {
+    return prompt;
+  }
+  return getTrackPromptTemplate(track);
+}
+
+/** Cover letter prompt for the active engineering track. */
+export function resolveCoverLetterTemplateForTrack(person, roleTrack) {
+  const track = normalizeRoleTrackId(roleTrack);
+  const personTrack = resolveRoleTrackForPerson(person);
+  if (track !== personTrack) {
+    return getTrackCoverLetterTemplate(track);
+  }
+  const cover = String(person?.coverLetterPrompt || "").trim();
+  if (cover && !isTrackDefaultCoverLetter(cover)) {
+    return cover;
+  }
+  if (cover) return cover;
+  return getTrackCoverLetterTemplate(track);
+}
+
 function personPlaceholderExtras(person, extras = {}) {
   return {
     jdText: extras.jdText || "",
@@ -403,14 +465,19 @@ function personPlaceholderExtras(person, extras = {}) {
 export async function buildPrompt(profileId, jdText, extras = {}) {
   const profile = profileId ? await getProfileById(profileId) : await getActivePerson();
   const person = normalizePerson(profile);
-  if (!person?.promptTemplate) {
+  const roleTrack = normalizeRoleTrackId(
+    extras.roleTrack ||
+      resolveEffectiveRoleTrack(person, extras.sessionRoleTrack || "")
+  );
+  const promptTemplate = resolvePromptTemplateForTrack(person, roleTrack);
+  if (!promptTemplate) {
     throw new Error("Selected profile has no prompt content.");
   }
-  if (!person.promptTemplate.includes("{JD}")) {
+  if (!promptTemplate.includes("{JD}")) {
     throw new Error("Prompt must include the {JD} placeholder.");
   }
   const body = applyPlaceholders(
-    person.promptTemplate,
+    promptTemplate,
     personPlaceholderExtras(person, {
       jdText,
       jobTitle: extras.jobTitle || "",
@@ -418,33 +485,24 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
       masterResume: extras.masterResume
     })
   );
-  // Appended for every person so ChatGPT mirrors JD tokens the local ATS badge scores.
-  const atsAppendix = `
-
-==================================================
-ATS KEYWORD DENSITY (local match target ≥ 90/100)
-==================================================
-Mirror the job description's exact terminology throughout the JSON — do not paraphrase away keywords.
-- Put the target job title (or its key words) in "headline".
-- Every Tier 0 / must-have technology and every Salesforce product named in the JD must appear in: skills items, profile, AND at least two bullets across the two most recent roles.
-- Prefer JD spellings: "Lightning Web Components", "Service Cloud", "SOQL", "Apex", "MuleSoft", "integration", "architecture", etc.
-- technicalSummary should list the JD's top tools verbatim.
-A resume that covers fewer than ~90% of the JD's distinctive tokens will be boosted and may be re-prompted until it clears 90.
-`.trim();
+  const atsAppendix = getTrackAtsAppendix(roleTrack);
   return `${body}\n\n${atsAppendix}`;
 }
 
-export async function buildCoverLetterPrompt({ jdText, jobTitle, companyName }) {
-  const profile = await getCoverLetterProfile();
+export async function buildCoverLetterPrompt({ jdText, jobTitle, companyName, roleTrack, sessionRoleTrack } = {}) {
   const person = await getActivePerson();
-  if (!profile?.promptTemplate) {
-    throw new Error('CoverLetter profile is missing. Add a cover letter prompt on the active person.');
+  const effectiveTrack = normalizeRoleTrackId(
+    roleTrack || resolveEffectiveRoleTrack(person, sessionRoleTrack || "")
+  );
+  const promptTemplate = resolveCoverLetterTemplateForTrack(person, effectiveTrack);
+  if (!promptTemplate) {
+    throw new Error("CoverLetter profile is missing. Add a cover letter prompt on the active person.");
   }
-  if (!profile.promptTemplate.includes("{JD}")) {
+  if (!promptTemplate.includes("{JD}")) {
     throw new Error("CoverLetter prompt must include the {JD} placeholder.");
   }
   return applyPlaceholders(
-    profile.promptTemplate,
+    promptTemplate,
     personPlaceholderExtras(person, { jdText, jobTitle, companyName })
   );
 }
@@ -477,6 +535,7 @@ export async function addCustomProfile({
   signatureTitle = "",
   autofillExtras = {},
   requiredExperience = [],
+  roleTrack = "sf",
   spreadsheetUrl = "",
   sheetsWebAppUrl = ""
 } = {}) {
@@ -546,6 +605,7 @@ export async function addCustomProfile({
     resumeFilePrefix: String(resumeFilePrefix || slugify(displayName).replace(/-/g, "_") || "Resume"),
     templateId: String(templateId || "times-classic").trim(),
     signatureTitle: String(signatureTitle || "").trim(),
+    roleTrack: normalizeRoleTrackId(roleTrack),
     autofillExtras: extras,
     requiredExperience: employers,
     spreadsheetUrl: String(spreadsheetUrl || "").trim(),
@@ -605,6 +665,7 @@ export async function savePersonProfile(person) {
     resumeFilePrefix: String(person?.resumeFilePrefix || "Resume").trim() || "Resume",
     templateId: String(person?.templateId || "times-classic").trim(),
     signatureTitle: String(person?.signatureTitle || "").trim(),
+    roleTrack: normalizeRoleTrackId(person?.roleTrack),
     autofillExtras:
       person?.autofillExtras && typeof person.autofillExtras === "object" && !Array.isArray(person.autofillExtras)
         ? { ...person.autofillExtras }

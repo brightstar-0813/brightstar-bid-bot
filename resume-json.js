@@ -977,50 +977,14 @@ function coerceResumeObject(value) {
   return null;
 }
 
-/**
- * Salesforce products a JD may demand, with the recruiter/ATS spelling to emit.
- * `group` picks the skills row a missing product is added to.
- */
-const SF_PRODUCT_CATALOG = [
-  { name: "Service Cloud", re: /\bservice cloud\b/i, group: "clouds" },
-  { name: "Sales Cloud", re: /\bsales cloud\b/i, group: "clouds" },
-  { name: "Salesforce Data Cloud", re: /\bdata cloud\b|\bsalesforce genie\b/i, group: "clouds" },
-  { name: "Agentforce", re: /\bagentforce\b/i, group: "clouds" },
-  { name: "Public Sector Solutions (PSS)", re: /\bpublic sector solutions\b|\bPSS\b/i, group: "clouds" },
-  { name: "Experience Cloud", re: /\bexperience cloud\b|\bcommunity cloud\b/i, group: "clouds" },
-  { name: "Health Cloud", re: /\bhealth cloud\b/i, group: "clouds" },
-  { name: "Financial Services Cloud", re: /\bfinancial services cloud\b|\bFSC\b/i, group: "clouds" },
-  { name: "Marketing Cloud", re: /\bmarketing cloud\b|\bpardot\b/i, group: "clouds" },
-  { name: "Revenue Cloud", re: /\brevenue cloud\b/i, group: "clouds" },
-  { name: "Commerce Cloud", re: /\bcommerce cloud\b/i, group: "clouds" },
-  { name: "Nonprofit Cloud", re: /\bnonprofit cloud\b/i, group: "clouds" },
-  { name: "Education Cloud", re: /\beducation cloud\b/i, group: "clouds" },
-  { name: "Field Service (FSL)", re: /\bfield service\b|\bFSL\b/i, group: "clouds" },
-  { name: "Salesforce CPQ", re: /\bCPQ\b/i, group: "platform" },
-  { name: "OmniStudio", re: /\bomnistudio\b|\bomniscript\b|\bvlocity\b/i, group: "platform" },
-  { name: "Document Generation (DocGen)", re: /\bdocgen\b|\bdocument generation\b|\bconga\b|\bdrawloop\b/i, group: "platform" },
-  { name: "MuleSoft", re: /\bmulesoft\b|\banypoint\b/i, group: "platform" },
-  { name: "Salesforce Shield", re: /\bsalesforce shield\b/i, group: "platform" },
-  { name: "Omni-Channel", re: /\bomni-?channel\b/i, group: "platform" },
-  { name: "Tableau", re: /\btableau\b/i, group: "platform" },
-  { name: "Apex", re: /\bapex\b/i, group: "development" },
-  { name: "Lightning Web Components (LWC)", re: /\bLWC\b|\blightning web components?\b/i, group: "development" },
-  { name: "Flow", re: /\bflow builder\b|\brecord-triggered flow\b|\bsalesforce flow\b/i, group: "development" },
-  { name: "SOQL", re: /\bSOQL\b/i, group: "development" }
-];
+import { getRoleTrack, jdRequiredSkills, normalizeRoleTrackId } from "./role-tracks.js";
 
-const GROUP_TO_CATEGORY = {
-  clouds: "Salesforce Clouds",
-  platform: "Salesforce Platform",
-  development: "Salesforce Development"
-};
-
-/** Products the JD actually asks for, in catalog order. */
+/** @deprecated Use jdRequiredSkills(jdText, roleTrack). */
 export function jdRequiredProducts(jdText) {
-  const jd = String(jdText || "");
-  if (!jd.trim()) return [];
-  return SF_PRODUCT_CATALOG.filter((p) => p.re.test(jd));
+  return jdRequiredSkills(jdText, "sf");
 }
+
+export { jdRequiredSkills };
 
 /**
  * Guarantee every Salesforce product named in the JD appears in the skills
@@ -1028,8 +992,9 @@ export function jdRequiredProducts(jdText) {
  * ask is routinely ignored — and a person's stored prompt may predate the rule
  * entirely — so this enforces it after the fact.
  */
-export function enforceJdSkills(data, jdText) {
-  const wanted = jdRequiredProducts(jdText);
+export function enforceJdSkills(data, jdText, roleTrack = "sf") {
+  const track = getRoleTrack(roleTrack);
+  const wanted = jdRequiredSkills(jdText, track.id);
   if (!data || typeof data !== "object" || Array.isArray(data) || !wanted.length) return data;
 
   const out = { ...data };
@@ -1038,11 +1003,9 @@ export function enforceJdSkills(data, jdText) {
     .map((r) => ({ category: String(r.category || "").trim(), items: String(r.items || "").trim() }));
 
   const rowFor = (categoryName) => {
-    const wantCloud = /clouds?$/i.test(categoryName);
     let idx = rows.findIndex((r) => r.category.toLowerCase() === categoryName.toLowerCase());
-    // "Salesforce Clouds" may arrive as "Clouds" / "Salesforce Cloud"; never match "Cloud Architecture".
-    if (idx < 0 && wantCloud) {
-      idx = rows.findIndex((r) => /\bclouds?\b/i.test(r.category) && !/architect/i.test(r.category));
+    if (idx < 0 && track.primaryRowMatcher) {
+      idx = rows.findIndex((r) => track.primaryRowMatcher(r.category));
     }
     if (idx < 0) {
       rows.push({ category: categoryName, items: "" });
@@ -1052,19 +1015,18 @@ export function enforceJdSkills(data, jdText) {
   };
 
   for (const product of wanted) {
-    const idx = rowFor(GROUP_TO_CATEGORY[product.group] || "Salesforce Platform");
+    const categoryName =
+      track.groupToCategory[product.group] || track.primarySkillsCategory || "Technical Skills";
+    const idx = rowFor(categoryName);
     const items = rows[idx].items;
     if (product.re.test(items)) continue;
     rows[idx].items = items ? `${product.name}, ${items}` : product.name;
   }
 
-  // JD-critical products lead their row, and the clouds row leads the table.
-  const cloudsIdx = rows.findIndex(
-    (r) => /\bclouds?\b/i.test(r.category) && !/architect/i.test(r.category)
-  );
-  if (cloudsIdx > 0) {
-    const [cloudsRow] = rows.splice(cloudsIdx, 1);
-    rows.unshift(cloudsRow);
+  const primaryIdx = rows.findIndex((r) => track.primaryRowMatcher(r.category));
+  if (primaryIdx > 0) {
+    const [primaryRow] = rows.splice(primaryIdx, 1);
+    rows.unshift(primaryRow);
   }
 
   out.skills = rows.filter((r) => r.category && r.items);
@@ -1077,8 +1039,8 @@ export function enforceJdSkills(data, jdText) {
  * this drives one targeted re-prompt.
  * @returns {Array<{index:number, company:string, covered:number, need:number, missing:string[]}>}
  */
-export function rolesMissingJdSkills(data, jdText, { roles = 2, minBullets = 2 } = {}) {
-  const wanted = jdRequiredProducts(jdText);
+export function rolesMissingJdSkills(data, jdText, { roles = 2, minBullets = 2, roleTrack = "sf" } = {}) {
+  const wanted = jdRequiredSkills(jdText, normalizeRoleTrackId(roleTrack));
   if (!wanted.length || !Array.isArray(data?.experience)) return [];
   const top = data.experience.slice(0, roles);
   if (!top.length) return [];
@@ -1124,13 +1086,14 @@ export function rolesMissingJdSkills(data, jdText, { roles = 2, minBullets = 2 }
  * the JD's required products. Built in code so it works no matter which prompt
  * template the active person is running.
  */
-export function buildJdSkillsRetryPrompt(data, jdText, { roles = 2, minBullets = 3 } = {}) {
-  const wanted = jdRequiredProducts(jdText).map((p) => p.name);
+export function buildJdSkillsRetryPrompt(data, jdText, { roles = 2, minBullets = 3, roleTrack = "sf" } = {}) {
+  const track = getRoleTrack(roleTrack);
+  const wanted = jdRequiredSkills(jdText, track.id).map((p) => p.name);
   const recent = (Array.isArray(data?.experience) ? data.experience : [])
     .slice(0, roles)
     .map((j) => String(j?.company || "").trim())
     .filter(Boolean);
-  const gaps = rolesMissingJdSkills(data, jdText, { roles, minBullets: 2 });
+  const gaps = rolesMissingJdSkills(data, jdText, { roles, minBullets: 2, roleTrack: track.id });
   const unproven = gaps.find((g) => g.unproven?.length)?.unproven || [];
 
   return [
@@ -1144,8 +1107,8 @@ export function buildJdSkillsRetryPrompt(data, jdText, { roles = 2, minBullets =
     "",
     `1. Each of those roles must contain at least ${minBullets} bullets that name the required skills explicitly and describe real work with them.`,
     "2. Spread the skills across those bullets rather than stuffing them all into one line.",
-    "3. Each such bullet names the business process, the exact feature or capability used, what was personally built or configured, and the outcome. Show internals, not product names alone: Data Cloud means data streams, data model objects, identity resolution, unified profiles, segmentation; Agentforce means agent topics, actions, Prompt Builder, grounding on CRM records, Einstein Trust Layer guardrails; Public Sector Solutions means licensing, permits, benefits, inspections, business rules engine; Document Generation means templates, merge fields, conditional content, batch generation, e-signature handoff; Service Cloud means Cases, Queues, Omni-Channel routing, Entitlements, escalation.",
-    "4. If a product was released after a role ended, place it in the most recent role instead of that older one.",
+    `3. Each such bullet names the business process, the exact feature or capability used, what was personally built or configured, and the outcome. Show internals, not product names alone: ${track.bulletInternalsHint}`,
+    "4. If a technology was released after a role ended, place it in the most recent role instead of that older one.",
     "5. Keep every employer, date, location, title, education entry and certification exactly as they already are. Do not mention clearance, citizenship, visa status, or employment type anywhere.",
     "6. Do not explain what is missing or unsupported. Never write that the resume does not establish something.",
     "",

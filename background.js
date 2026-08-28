@@ -17,8 +17,15 @@ import {
   getActivePerson,
   getAutofillContact,
   resolveExperienceRulesForPerson,
+  resolveRoleTrackForPerson,
   DEFAULT_PROFILE_ID
 } from "./profiles.js";
+import {
+  formatRoleTrackStatus,
+  getSessionRoleTrack,
+  jdRequiredSkills,
+  resolveEffectiveRoleTrack
+} from "./role-tracks.js";
 import { outputDirFromPerson } from "./resume-profile.js";
 import {
   setLastGeneratedDocs,
@@ -40,7 +47,6 @@ import {
   resumeJsonToHtml,
   extractResumeJson,
   enforceJdSkills,
-  jdRequiredProducts,
   rolesMissingJdSkills,
   buildJdSkillsRetryPrompt,
   totalExperienceBullets,
@@ -112,12 +118,20 @@ const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const DEFAULT_CHANNEL_FILTER = "dice";
+const AUTOFILL_ENABLED_KEY = "autofill_enabled";
 
 /** All-channel batch runs generate files only — never auto-apply. */
 async function isBatchAutoApplyEnabled() {
-  const data = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
+  const data = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY, AUTOFILL_ENABLED_KEY]);
+  if (data[AUTOFILL_ENABLED_KEY] === false) return false;
   const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
   return channel !== "all";
+}
+
+/** Manual autofill, keyboard shortcuts, and batch apply steps. Default on. */
+async function isAutofillEnabled() {
+  const data = await chrome.storage.local.get([AUTOFILL_ENABLED_KEY]);
+  return data[AUTOFILL_ENABLED_KEY] !== false;
 }
 
 /** A row is retried this many times before the batch moves on without it. */
@@ -1157,6 +1171,10 @@ async function markJobSkippedAsDuplicate(csvRow, reason, { lockSheetSkip = true 
  * On incomplete apply, pause (keep tab open) so Start can retry.
  */
 async function runHostedInterleavedApply(jobMeta = {}, board = "Dice") {
+  if (!(await isAutofillEnabled())) {
+    await setStatus(`Row ${jobMeta.csvRow}: autofill disabled — files ready, apply skipped.`);
+    return { status: "skipped", detail: "Autofill disabled", tabId: null, needsPause: false };
+  }
   const boardLabel =
     board === "Indeed"
       ? "Indeed"
@@ -5138,7 +5156,9 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       const coverPrompt = await buildCoverLetterPrompt({
         jdText: jobMeta.jdText || "",
         jobTitle: jobMeta.jobTitle || "",
-        companyName: jobMeta.companyName || ""
+        companyName: jobMeta.companyName || "",
+        roleTrack,
+        sessionRoleTrack
       });
       // IMPORTANT: same chat as resume (one chat per position).
       let coverOutput = "";
@@ -5383,6 +5403,13 @@ async function runAutoJob(jobMeta) {
   }
 
   const person = await getActivePerson();
+  const sessionRoleTrack = await getSessionRoleTrack();
+  const personRoleTrack = resolveRoleTrackForPerson(person);
+  const roleTrack = resolveEffectiveRoleTrack(person, sessionRoleTrack);
+  const trackStatus = formatRoleTrackStatus(roleTrack, {
+    sessionOverride: sessionRoleTrack,
+    personTrack: personRoleTrack
+  });
   const experienceRules = await activatePersonExperienceRules(person);
   if (experienceRules?.roles?.length) {
     await setStatus(
@@ -5398,11 +5425,13 @@ async function runAutoJob(jobMeta) {
   const prompt = await buildPrompt(profileId, jobMeta.jdText || "", {
     jobTitle: jobMeta.jobTitle || "",
     companyName: jobMeta.companyName || "",
-    masterResume: person.masterResume || ""
+    masterResume: person.masterResume || "",
+    roleTrack,
+    sessionRoleTrack
   });
 
   await setStatus(
-    `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: opening ONE new ${providerLabel} chat for this position…`
+    `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: Track ${trackStatus} · opening ONE new ${providerLabel} chat…`
   );
 
   if (batchControl.skipCurrent || batchControl.stop) {
@@ -5570,14 +5599,12 @@ async function runAutoJob(jobMeta) {
   // it, and a person's saved prompt may predate that rule — enforce it here.
   {
     const jd = jobMeta.jdText || "";
-    const required = jdRequiredProducts(jd);
+    const required = jdRequiredSkills(jd, roleTrack);
     if (required.length) {
-      resumeData = enforceJdSkills(resumeData, jd);
-      await setStatus(`JD skills enforced: ${required.map((p) => p.name).join(", ")}`);
+      resumeData = enforceJdSkills(resumeData, jd, roleTrack);
+      await setStatus(`JD skills enforced (${trackStatus}): ${required.map((p) => p.name).join(", ")}`);
 
-      // Skills can be injected; bullets cannot. One targeted re-prompt when the
-      // recent roles never prove those skills.
-      const gaps = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2 });
+      const gaps = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2, roleTrack });
       if (gaps.length && !batchControl.skipCurrent && !batchControl.stop) {
         await setStatus(
           `Row ${rowLabel}${jobMeta.companyName}: ${gaps
@@ -5587,18 +5614,17 @@ async function runAutoJob(jobMeta) {
         try {
           const bulletsRaw = await automateChatGpt(
             tab.id,
-            buildJdSkillsRetryPrompt(resumeData, jd, { roles: 2, minBullets: 3 }),
+            buildJdSkillsRetryPrompt(resumeData, jd, { roles: 2, minBullets: 3, roleTrack }),
             {
               newChat: false,
               expectResumeJson: true,
               statusLabel: `Same chat · JD-skill bullets (${jobMeta.companyName || "job"})…`
             }
           );
-          const improved = enforceJdSkills(extractResumeJson(bulletsRaw), jd);
-          // Keep the retry only when it is complete AND actually covers more.
+          const improved = enforceJdSkills(extractResumeJson(bulletsRaw), jd, roleTrack);
           if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
-            const before = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2 }).length;
-            const after = rolesMissingJdSkills(improved, jd, { roles: 2, minBullets: 2 }).length;
+            const before = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2, roleTrack }).length;
+            const after = rolesMissingJdSkills(improved, jd, { roles: 2, minBullets: 2, roleTrack }).length;
             if (after <= before && totalExperienceBullets(improved) >= totalExperienceBullets(resumeData) * 0.8) {
               resumeData = improved;
               await setStatus(
@@ -5620,11 +5646,11 @@ async function runAutoJob(jobMeta) {
   // Local ATS badge: deterministic keyword weave, then up to 2 ChatGPT retries until ≥90.
   const atsJd = jobMeta.jdText || "";
   const atsTitle = jobMeta.jobTitle || jobMeta.title || "";
-  let atsEvaluation = evaluateAtsScore(resumeData, { jdText: atsJd, jobTitle: atsTitle });
+  let atsEvaluation = evaluateAtsScore(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
   {
     let boostPass = 0;
     while (atsEvaluation.score < ATS_TARGET_SCORE && boostPass < 2) {
-      const boosted = boostResumeForAts(resumeData, { jdText: atsJd, jobTitle: atsTitle });
+      const boosted = boostResumeForAts(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
       if (!boosted.changed || boosted.evaluation.score < atsEvaluation.score) break;
       resumeData = boosted.data;
       atsEvaluation = boosted.evaluation;
@@ -5651,15 +5677,15 @@ async function runAutoJob(jobMeta) {
     try {
       const atsRaw = await automateChatGpt(
         tab.id,
-        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, { jdText: atsJd, jobTitle: atsTitle }),
+        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, { jdText: atsJd, jobTitle: atsTitle, roleTrack }),
         {
           newChat: false,
           expectResumeJson: true,
           statusLabel: `Same chat · ATS keyword boost (${jobMeta.companyName || "job"})…`
         }
       );
-      let improved = enforceJdSkills(extractResumeJson(atsRaw), atsJd);
-      const improvedBoost = boostResumeForAts(improved, { jdText: atsJd, jobTitle: atsTitle });
+      let improved = enforceJdSkills(extractResumeJson(atsRaw), atsJd, roleTrack);
+      const improvedBoost = boostResumeForAts(improved, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
       if (improvedBoost.changed) improved = improvedBoost.data;
       const improvedEval = improvedBoost.evaluation;
       if (
@@ -6235,6 +6261,9 @@ async function revealJobFiles({ csvRow, jobDir, jdLink }) {
 }
 
 async function autofillActiveTab(tabId = null) {
+  if (!(await isAutofillEnabled())) {
+    throw new Error("Autofill is disabled. Turn it on in Apply assist.");
+  }
   return startAutofillOnTab(tabId);
 }
 
@@ -7192,6 +7221,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (type === "autofill_multi_step") {
     (async () => {
       try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
         const stored = await chrome.storage.local.get([
           "last_apply_csv_row",
           "last_apply_job_dir",
@@ -7259,6 +7295,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const detail = prior?.error || jobMeta.error || "inactive job";
           reply({ ok: false, applied: false, started: false, error: detail });
           await setStatus(`Row ${jobMeta.csvRow}: inactive job — apply skipped.`);
+          return;
+        }
+        if (!(await isAutofillEnabled())) {
+          reply({
+            ok: false,
+            applied: false,
+            started: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          await setStatus("Apply skipped — autofill is disabled.");
           return;
         }
         const folderPromise = locateJobFolder({
@@ -7826,13 +7872,26 @@ chrome.commands.onCommand.addListener((command) => {
     return;
   }
   if (command === "autofill-page") {
-    autofillActiveTab()
-      .then((r) => setStatus(r.statusText || formatAutofillSummary(r) || `Autofilled ${r.filled || 0} field(s).`))
+    isAutofillEnabled()
+      .then((enabled) => {
+        if (!enabled) {
+          return setStatus("Autofill is disabled. Turn it on in Apply assist.");
+        }
+        return autofillActiveTab()
+          .then((r) =>
+            setStatus(r.statusText || formatAutofillSummary(r) || `Autofilled ${r.filled || 0} field(s).`)
+          )
+          .catch((err) => setStatus(`Autofill failed: ${String(err?.message || err)}`));
+      })
       .catch((err) => setStatus(`Autofill failed: ${String(err?.message || err)}`));
   }
   if (command === "auto-apply-page") {
     (async () => {
       try {
+        if (!(await isAutofillEnabled())) {
+          await setStatus("Autofill is disabled. Turn it on in Apply assist.");
+          return;
+        }
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         const { allowSubmitOnAssist } = await chrome.storage.local.get(["allowSubmitOnAssist"]);
         const allowSubmit = Boolean(allowSubmitOnAssist);
