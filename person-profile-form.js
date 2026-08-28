@@ -326,6 +326,8 @@ export function mergeExtractedProfileIntoPerson(person, parsed, resumeText, { re
  */
 export async function savePersonFromForm(root, opts = {}) {
   let person = readPersonFromForm(root, opts);
+  if (opts.spreadsheetUrl != null) person.spreadsheetUrl = String(opts.spreadsheetUrl).trim();
+  if (opts.sheetsWebAppUrl != null) person.sheetsWebAppUrl = String(opts.sheetsWebAppUrl).trim();
   if (Array.isArray(opts.workHistory)) person.workHistory = opts.workHistory;
   if (Array.isArray(opts.educationHistory)) person.educationHistory = opts.educationHistory;
   const validation = validatePerson(person);

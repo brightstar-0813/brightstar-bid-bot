@@ -427,15 +427,18 @@ body.ctx-window.editor-page {
   gap: 10px;
 }
 
-.profile-editor #profileForm > .profile-tab-panel {
+.profile-editor #profileForm > .profile-tab-panel,
+.profile-editor #inlineProfileForm > .profile-tab-panel {
   display: none;
 }
 
-.profile-editor #profileForm > .profile-tab-panel[hidden] {
+.profile-editor #profileForm > .profile-tab-panel[hidden],
+.profile-editor #inlineProfileForm > .profile-tab-panel[hidden] {
   display: none !important;
 }
 
-.profile-editor #profileForm > .profile-tab-panel.is-active:not([hidden]) {
+.profile-editor #profileForm > .profile-tab-panel.is-active:not([hidden]),
+.profile-editor #inlineProfileForm > .profile-tab-panel.is-active:not([hidden]) {
   display: block;
 }
 

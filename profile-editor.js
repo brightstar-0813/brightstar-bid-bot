@@ -8,7 +8,9 @@ import {
   getBuiltinPreset,
   deleteCustomProfile,
   getPersonSheetConfig,
-  DEFAULT_PROFILE_ID
+  DEFAULT_PROFILE_ID,
+  resolveCoverLetterTemplateForTrack,
+  resolvePromptTemplateForTrack
 } from "./profiles.js";
 import {
   fillPersonForm,
@@ -28,10 +30,7 @@ import {
 import {
   normalizeRoleTrackId,
   resolveRoleTrackForPerson,
-  resolveCoverLetterTemplateForTrack,
-  getTrackPromptTemplate,
-  isTrackDefaultPrompt,
-  isTrackDefaultCoverLetter
+  getTrackPromptTemplate
 } from "./role-tracks.js";
 import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
 import { getQaCount } from "./qa-store.js";
@@ -457,17 +456,20 @@ async function refreshProfiles(selectedId) {
   populateProfileSelect(selectedId || (await getActivePersonId()));
 }
 
-function applyTrackTemplatesToForm(track, person) {
+function applyTrackTemplatesToForm(nextTrack, person, previousTrack) {
+  const base = {
+    ...(person || {}),
+    ...readPersonFromForm(formRoot, {
+      editingPersonId,
+      roleTrack: previousTrack,
+      templateId: templateSelectEl?.value
+    }),
+    roleTrack: previousTrack
+  };
   const resumeEl = formRoot.querySelector("#personResumePrompt");
   const coverEl = formRoot.querySelector("#personCoverPrompt");
-  const currentResume = resumeEl?.value || "";
-  const currentCover = coverEl?.value || "";
-  if (!currentResume.trim() || isTrackDefaultPrompt(currentResume) || !currentResume.includes("{JD}")) {
-    if (resumeEl) resumeEl.value = getTrackPromptTemplate(track, person);
-  }
-  if (!currentCover.trim() || isTrackDefaultCoverLetter(currentCover) || !currentCover.includes("{JD}")) {
-    if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(person || { roleTrack: track }, track);
-  }
+  if (resumeEl) resumeEl.value = resolvePromptTemplateForTrack(base, nextTrack);
+  if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(base, nextTrack);
 }
 
 async function saveProfile({ asNew = false } = {}) {
@@ -579,9 +581,11 @@ deleteProfileBtn?.addEventListener("click", async () => {
 roleTrackBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     const track = normalizeRoleTrackId(btn.dataset.track);
-    if (track === readActiveRoleTrack()) return;
+    const previousTrack = readActiveRoleTrack();
+    if (track === previousTrack) return;
+    const person = profilesCache.find((p) => p.id === editingPersonId);
     setActiveRoleTrackUi(track);
-    applyTrackTemplatesToForm(track, profilesCache.find((p) => p.id === editingPersonId));
+    applyTrackTemplatesToForm(track, person, previousTrack);
   });
 });
 

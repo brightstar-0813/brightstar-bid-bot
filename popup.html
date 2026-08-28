@@ -7,7 +7,9 @@
     <script src="theme-boot.js"></script>
     <link rel="stylesheet" href="themes.css" />
     <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="profile-editor.css" />
     <link rel="stylesheet" href="ui-dialog.css" />
+    <link rel="stylesheet" href="ui-toast.css" />
   </head>
   <body>
     <main class="app">
@@ -42,7 +44,7 @@
 
       <div class="app-body">
         <!-- Active person -->
-        <section class="section">
+        <section class="section" id="personSection">
           <header class="section-header">
             <span class="step" aria-hidden="true">1</span>
             <div class="section-copy">
@@ -98,20 +100,263 @@
             <span>Add or update from resume file</span>
             <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
           </label>
-          <p class="hint">One upload fills contact, prompt, and employers from the file. Open <strong>Edit profile</strong> to review or tweak all fields.</p>
+          <p class="hint">One upload fills contact, prompt, and employers from the file. Use <strong>Edit or add profile</strong> to review fields, save custom copies, or start from a built-in preset.</p>
           <div id="personImportNotice" class="person-import-notice" hidden></div>
-          <div class="row row-2">
-            <button type="button" id="editProfileBtn" class="primary">Edit profile</button>
-            <button type="button" id="openQaFromPersonBtn" class="ghost">Q&amp;A bank</button>
-          </div>
-          <div class="row-split">
-            <label class="field grow">
-              <span>Load preset into editor</span>
-              <select id="presetSelect">
-                <option value="">— Built-in presets —</option>
-              </select>
-            </label>
-            <button type="button" id="loadPreset" class="ghost compact">Open preset</button>
+          <button type="button" class="panel-toggle" id="toggleProfileEditorPanel" aria-expanded="false">
+            Edit or add profile
+          </button>
+          <div class="panel-body profile-editor-panel" id="profileEditorPanelBody" hidden>
+            <div id="inlineProfileEditor" class="inline-profile-editor profile-editor">
+              <div class="inline-profile-toolbar row-split">
+                <button type="submit" form="inlineProfileForm" id="inlineProfileSave" class="primary compact">Save</button>
+                <button type="button" id="inlineProfileSaveAsNew" class="ghost compact" title="Create a separate copy">
+                  Save as new
+                </button>
+                <button type="button" id="inlineProfileDelete" class="ghost danger compact" hidden title="Delete this profile">
+                  Delete
+                </button>
+              </div>
+
+              <div class="profile-toolbar inline-profile-toolbar">
+                <label class="field grow">
+                  <span>Editing profile</span>
+                  <select id="inlineProfileSelect"></select>
+                </label>
+              </div>
+
+              <div id="inlineCompleteness" class="profile-completeness-bar" hidden aria-live="polite"></div>
+
+              <nav class="profile-tabs" role="tablist" aria-label="Profile sections">
+                <button type="button" class="profile-tab is-active" data-tab="apply" role="tab" aria-selected="true">Apply</button>
+                <button type="button" class="profile-tab" data-tab="resume" role="tab" aria-selected="false">Resume</button>
+                <button type="button" class="profile-tab" data-tab="batch" role="tab" aria-selected="false">Bid setup</button>
+              </nav>
+
+              <form id="inlineProfileForm" class="inline-profile-form" autocomplete="off">
+                <div class="profile-tab-panel is-active" data-panel="apply" role="tabpanel">
+                  <div class="profile-acc">
+                    <details class="profile-acc-item" open>
+                      <summary>Contact</summary>
+                      <div class="profile-acc-body">
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>Display name</span>
+                            <input id="personLabel" type="text" autocomplete="off" placeholder="How you appear in the app" />
+                          </label>
+                          <label class="field">
+                            <span>Legal name</span>
+                            <input id="personName" type="text" autocomplete="off" placeholder="Full name on applications" />
+                          </label>
+                        </div>
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>Email</span>
+                            <input id="personEmail" type="email" autocomplete="off" />
+                          </label>
+                          <label class="field">
+                            <span>Phone</span>
+                            <input id="personPhone" type="text" autocomplete="off" />
+                          </label>
+                        </div>
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>LinkedIn</span>
+                            <input id="personLinkedin" type="url" autocomplete="off" />
+                          </label>
+                          <label class="field">
+                            <span>Website</span>
+                            <input id="personPortfolio" type="url" autocomplete="off" />
+                          </label>
+                        </div>
+                        <label class="field">
+                          <span>City / region</span>
+                          <input id="personLocation" type="text" autocomplete="off" />
+                        </label>
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>Street address</span>
+                            <input id="personAddress" type="text" autocomplete="off" />
+                          </label>
+                          <label class="field">
+                            <span>ZIP / postal code</span>
+                            <input id="personZip" type="text" autocomplete="off" />
+                          </label>
+                        </div>
+                      </div>
+                    </details>
+                    <details class="profile-acc-item">
+                      <summary>Work authorization</summary>
+                      <div class="profile-acc-body">
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>Citizenship</span>
+                            <select id="personCitizenship">
+                              <option value="">—</option>
+                              <option>US Citizen</option>
+                              <option>Permanent Resident</option>
+                              <option>Non-citizen authorized to work</option>
+                              <option>Prefer not to say</option>
+                            </select>
+                          </label>
+                          <label class="field">
+                            <span>Work authorized (US)</span>
+                            <select id="personWorkAuthorized">
+                              <option value="">—</option>
+                              <option>Yes</option>
+                              <option>No</option>
+                            </select>
+                          </label>
+                        </div>
+                        <label class="field field-half">
+                          <span>Visa sponsorship</span>
+                          <select id="personSponsorship">
+                            <option value="">—</option>
+                            <option>No</option>
+                            <option>Yes</option>
+                          </select>
+                        </label>
+                      </div>
+                    </details>
+                    <details class="profile-acc-item">
+                      <summary>Demographics (EEO)</summary>
+                      <div class="profile-acc-body">
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>Gender</span>
+                            <select id="personGender">
+                              <option value="">—</option>
+                              <option>Male</option>
+                              <option>Female</option>
+                              <option>Non-binary</option>
+                              <option>Prefer not to say</option>
+                            </select>
+                          </label>
+                          <label class="field">
+                            <span>Race / ethnicity</span>
+                            <select id="personEthnicity">
+                              <option value="">—</option>
+                              <option>White</option>
+                              <option>Black or African American</option>
+                              <option>Hispanic or Latino</option>
+                              <option>Asian</option>
+                              <option>Native American or Alaska Native</option>
+                              <option>Native Hawaiian or Pacific Islander</option>
+                              <option>Two or more races</option>
+                              <option>Prefer not to say</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div class="grid-2">
+                          <label class="field">
+                            <span>Disability</span>
+                            <select id="personDisability">
+                              <option value="">—</option>
+                              <option>No, I do not have a disability</option>
+                              <option>Yes, I have a disability</option>
+                              <option>Prefer not to say</option>
+                            </select>
+                          </label>
+                          <label class="field">
+                            <span>Veteran status</span>
+                            <select id="personVeteran">
+                              <option value="">—</option>
+                              <option>I am not a protected veteran</option>
+                              <option>I identify as a protected veteran</option>
+                              <option>Prefer not to say</option>
+                            </select>
+                          </label>
+                        </div>
+                        <label class="field field-half">
+                          <span>Hispanic / Latino</span>
+                          <select id="personHispanicLatino">
+                            <option value="">—</option>
+                            <option>No</option>
+                            <option>Yes</option>
+                            <option>Prefer not to say</option>
+                          </select>
+                        </label>
+                      </div>
+                    </details>
+                    <details class="profile-acc-item">
+                      <summary>Salary &amp; extras</summary>
+                      <div class="profile-acc-body">
+                        <label class="field">
+                          <span>Extra autofill values</span>
+                          <textarea id="personAutofillExtras" class="prompt-input" rows="3" placeholder="desired salary = 140000"></textarea>
+                        </label>
+                      </div>
+                    </details>
+                    <details class="profile-acc-item">
+                      <summary>Portal passwords</summary>
+                      <div class="profile-acc-body">
+                        <label class="field">
+                          <span>Workday / ATS password</span>
+                          <input id="personPassword" type="password" autocomplete="off" />
+                        </label>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+
+                <div class="profile-tab-panel" data-panel="resume" role="tabpanel" hidden>
+                  <label class="field">
+                    <span>Master resume text</span>
+                    <textarea id="personMasterResume" class="prompt-input" rows="8" placeholder="Paste full resume text…"></textarea>
+                  </label>
+                  <div class="grid-2">
+                    <label class="field">
+                      <span>PDF file prefix</span>
+                      <input id="personResumePrefix" type="text" autocomplete="off" placeholder="LastName_Resume" />
+                    </label>
+                    <label class="field">
+                      <span>Signature title</span>
+                      <input id="personSignatureTitle" type="text" autocomplete="off" placeholder="Senior Engineer" />
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Required employers (one per line)</span>
+                    <textarea id="personRequiredExperience" class="prompt-input" rows="4"></textarea>
+                  </label>
+                  <button type="button" id="detectRequiredExperience" class="ghost compact">Detect from resume / prompt</button>
+                </div>
+
+                <div class="profile-tab-panel" data-panel="batch" role="tabpanel" hidden>
+                  <div class="field">
+                    <span>Engineering track</span>
+                    <div class="role-track-toggle ai-provider-toggle" role="radiogroup" aria-label="Engineering track in editor">
+                      <button type="button" class="ai-provider-btn role-track-btn is-active" data-track="sf" aria-pressed="true">SF</button>
+                      <button type="button" class="ai-provider-btn role-track-btn" data-track="de" aria-pressed="false">DE</button>
+                      <button type="button" class="ai-provider-btn role-track-btn" data-track="fs" aria-pressed="false">FS</button>
+                      <button type="button" class="ai-provider-btn role-track-btn" data-track="ai" aria-pressed="false">AI</button>
+                    </div>
+                  </div>
+                  <label class="field">
+                    <span>Resume template</span>
+                    <select id="inlineTemplateSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Resume prompt ({JD})</span>
+                    <textarea id="personResumePrompt" class="prompt-input" rows="6"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>Cover letter prompt ({JD})</span>
+                    <textarea id="personCoverPrompt" class="prompt-input" rows="4"></textarea>
+                  </label>
+                  <div class="grid-2 grid-2-stack">
+                    <label class="field">
+                      <span>Spreadsheet URL</span>
+                      <input id="inlineSpreadsheetUrl" type="url" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Apps Script URL</span>
+                      <input id="inlineSheetsWebAppUrl" type="url" autocomplete="off" />
+                    </label>
+                  </div>
+                </div>
+
+                <p id="inlineProfileSaveStatus" class="inline-profile-save-status" hidden></p>
+              </form>
+            </div>
           </div>
         </section>
 

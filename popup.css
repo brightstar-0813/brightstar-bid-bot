@@ -131,6 +131,55 @@ h1 {
   border-radius: 999px;
 }
 
+/* Collapsible profile editor inside Person section */
+.profile-editor-panel {
+  padding: 10px;
+}
+
+.profile-editor-panel .inline-profile-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-editor-panel .inline-profile-toolbar {
+  margin: 0;
+}
+
+.profile-editor-panel .inline-profile-toolbar.row-split {
+  align-items: center;
+}
+
+.profile-editor-panel .inline-profile-toolbar.row-split button.compact {
+  flex: 1 1 auto;
+}
+
+.profile-editor-panel .inline-profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-editor-panel .profile-acc-body .grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.inline-profile-save-status {
+  font-size: 12px;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.inline-profile-save-status.ok {
+  color: var(--ok-fg);
+}
+
+.inline-profile-save-status.err {
+  color: var(--err-fg);
+}
+
 .section {
   margin: 0;
   padding: 12px;

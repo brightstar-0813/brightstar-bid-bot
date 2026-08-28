@@ -2,15 +2,12 @@ import {
   DEFAULT_PROFILE_ID,
   DEFAULT_ATS_PASSWORD,
   getResumeProfiles,
-  getBuiltinPreset,
   getActivePerson,
   getActivePersonId,
   setActivePersonId,
   savePersonProfile,
   addCustomProfile,
   deleteCustomProfile,
-  BUILTIN_PROFILES,
-  COVER_LETTER_PROFILE_ID,
   getTrackPromptTemplate,
   getTrackCoverLetterTemplate,
   resolveRoleTrackForPerson,
@@ -67,7 +64,7 @@ import {
   mergeExtractedProfileIntoPerson,
   isEditingBuiltin as isBuiltinPersonId
 } from "./person-profile-form.js";
-import { openProfileEditor } from "./open-profile-editor.js";
+import { createInlineProfileEditor } from "./inline-profile-editor.js";
 import {
   saveCsvFileHandle,
   clearCsvFileHandle,
@@ -98,6 +95,7 @@ const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
+const PROFILE_EDITOR_PANEL_OPEN_KEY = "profile_editor_panel_open";
 const PREVIEW_WINDOW_KEY = "template_preview_window_id";
 const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state"; // legacy; cleared on reset
 const INDEED_GRAB_STATUS_KEY = "indeed_grab_status";
@@ -415,15 +413,40 @@ function linkExists_(sheet, jobLink) {
 
 const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
-const presetSelectEl = document.getElementById("presetSelect");
 const templateSelectEl = document.getElementById("templateSelect");
 const deleteProfileBtn = document.getElementById("deleteProfile");
-const editProfileBtn = document.getElementById("editProfileBtn");
-const openQaFromPersonBtn = document.getElementById("openQaFromPersonBtn");
 const personResumeFileEl = document.getElementById("personResumeFile");
 const personImportNoticeEl = document.getElementById("personImportNotice");
-const loadPresetBtn = document.getElementById("loadPreset");
-const activeRoleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
+const toggleProfileEditorPanelBtn = document.getElementById("toggleProfileEditorPanel");
+const profileEditorPanelBody = document.getElementById("profileEditorPanelBody");
+const inlineProfileEditorEl = document.getElementById("inlineProfileEditor");
+const activeRoleTrackBtns = Array.from(
+  document.querySelectorAll("#personSection .role-track-btn")
+);
+
+let inlineProfileEditor = null;
+if (inlineProfileEditorEl && profileEditorPanelBody) {
+  inlineProfileEditor = createInlineProfileEditor({
+    panelEl: inlineProfileEditorEl,
+    panelBodyEl: profileEditorPanelBody,
+    toggleBtn: toggleProfileEditorPanelBtn,
+    setStatus,
+    setPanelOpen: (open) => {
+      chrome.storage.local.set({ [PROFILE_EDITOR_PANEL_OPEN_KEY]: open }).catch(() => {});
+    },
+    onSaved: async (saved) => {
+      if (!saved?.id) return;
+      await refreshProfiles(saved.id);
+      await syncPersonContext(saved);
+    },
+    onClose: async () => {
+      const id = await getActivePersonId().catch(() => profileSelectEl?.value);
+      await refreshProfiles(id);
+      const person = profilesCache.find((p) => p.id === id) || (await getActivePerson());
+      if (person) await syncPersonContext(person);
+    }
+  });
+}
 
 const csvFileEl = document.getElementById("csvFile");
 const csvSummaryEl = document.getElementById("csvSummary");
@@ -714,10 +737,10 @@ async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {})
 
   const filled = parsed.filled.length ? parsed.filled.join(", ") : "master resume text only";
   if (!parsed.name) {
-    const notice = `Imported ${sourceLabel} text. Open Edit profile to add a display name and save.`;
+    const notice = `Imported ${sourceLabel} text. Expand Edit or add profile to add a display name and save.`;
     setPersonImportNotice(notice, { ok: true });
     setStatus(`Resume imported — name not found. Detected: ${filled}.`);
-    await openProfileEditor({ profileId: current?.id, tab: "resume" });
+    await openProfileEditorFromPopup({ tab: "resume" });
     return parsed;
   }
 
@@ -734,18 +757,23 @@ async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {})
     return parsed;
   } catch (err) {
     setPersonImportNotice(String(err.message || err), { ok: false });
-    await openProfileEditor({ profileId: current?.id, tab: "resume" });
+    await openProfileEditorFromPopup({ tab: "resume" });
     throw err;
   }
 }
 
-async function openProfileEditorFromPopup({ tab = "apply", presetId = "" } = {}) {
-  const profileId =
+async function openProfileEditorFromPopup({ tab = "apply", presetId = "", profileId = "" } = {}) {
+  const id =
+    String(profileId || "").trim() ||
     profileSelectEl?.value ||
     (await getActivePersonId().catch(() => "")) ||
     "";
-  await openProfileEditor({ profileId, tab, presetId });
-  setStatus("Opened profile editor.");
+  if (!inlineProfileEditor) {
+    setStatus("Profile editor panel is unavailable.");
+    return;
+  }
+  await inlineProfileEditor.open({ profileId: id, tab, presetId });
+  setStatus("Editing profile.");
 }
 
 function populateTemplateSelect(selectedId) {
@@ -761,21 +789,6 @@ function populateTemplateSelect(selectedId) {
   }
   const validIds = new Set(templatesCache.map((t) => t.id));
   templateSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_TEMPLATE_ID;
-}
-
-function populatePresetSelect() {
-  presetSelectEl.innerHTML = "";
-  const blank = document.createElement("option");
-  blank.value = "";
-  blank.textContent = "— Built-in presets —";
-  presetSelectEl.appendChild(blank);
-  for (const p of BUILTIN_PROFILES) {
-    if (p.kind === "coverLetter" || p.id === COVER_LETTER_PROFILE_ID) continue;
-    const option = document.createElement("option");
-    option.value = p.id;
-    option.textContent = p.label;
-    presetSelectEl.appendChild(option);
-  }
 }
 
 function syncDeleteButton() {
@@ -806,7 +819,6 @@ async function refreshProfiles(selectedId) {
     (await chrome.storage.local.get("selected_profile_id")).selected_profile_id ||
     DEFAULT_PROFILE_ID;
   populateProfileSelect(preferred);
-  populatePresetSelect();
 }
 
 async function refreshTemplates(selectedId) {
@@ -1006,6 +1018,7 @@ async function loadSettings() {
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
     MANUAL_PANEL_OPEN_KEY,
+    PROFILE_EDITOR_PANEL_OPEN_KEY,
     "generation_status",
     "generation_running",
     QUEUE_KEY,
@@ -1049,6 +1062,13 @@ async function loadSettings() {
   }
   renderAiProvider(data[AI_PROVIDER_KEY]);
   setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
+  if (inlineProfileEditor && Boolean(data[PROFILE_EDITOR_PANEL_OPEN_KEY])) {
+    inlineProfileEditor
+      .open({ profileId: data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID })
+      .catch(() => inlineProfileEditor.setPanelOpen(false, { persist: true }));
+  } else {
+    inlineProfileEditor?.setPanelOpen(false, { persist: false });
+  }
   setStatus(data.generation_status || "");
 
   channelFilter = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
@@ -2110,15 +2130,6 @@ async function onMasterResumeFile(file) {
   }
 }
 
-async function loadPresetIntoEditor() {
-  const id = presetSelectEl.value;
-  if (!id) {
-    setStatus("Pick a built-in preset first.");
-    return;
-  }
-  await openProfileEditorFromPopup({ presetId: id, tab: "prompts" });
-}
-
 async function removeSelectedProfile() {
   const profileId = profileSelectEl.value;
   const selected = profilesCache.find((p) => p.id === profileId);
@@ -2614,6 +2625,11 @@ profileSelectEl.addEventListener("change", () => {
   syncActivePersonChip();
   onProfileChange().catch((e) => setStatus(String(e.message || e)));
   refreshQaBank().catch(() => {});
+  if (inlineProfileEditor?.isOpen?.()) {
+    inlineProfileEditor
+      .open({ profileId: profileSelectEl.value })
+      .catch((e) => setStatus(String(e.message || e)));
+  }
 });
 
 templateSelectEl.addEventListener("change", () => {
@@ -2641,13 +2657,6 @@ toggleManualPanelBtn.addEventListener("click", () => {
   setManualPanelOpen(manualPanelBody.hidden);
 });
 
-editProfileBtn?.addEventListener("click", () => {
-  openProfileEditorFromPopup({ tab: "apply" }).catch((e) => setStatus(String(e.message || e)));
-});
-openQaFromPersonBtn?.addEventListener("click", () => {
-  openQaEditor().catch((e) => setStatus(String(e.message || e)));
-});
-loadPresetBtn.addEventListener("click", () => loadPresetIntoEditor().catch((e) => setStatus(String(e.message || e))));
 deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
 
 activeRoleTrackBtns.forEach((btn) => {
