@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Q&amp;A bank — Brightstar Bid bot</title>
+    <script src="theme-boot.js"></script>
+    <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="qa-editor.css" />
+    <link rel="stylesheet" href="ui-dialog.css" />
+  </head>
+  <body class="ctx-window editor-page">
+    <main class="editor qa-editor">
+      <header class="editor-header">
+        <div class="brand">
+          <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
+          <div class="brand-copy">
+            <h1>Q&amp;A bank</h1>
+            <p class="hype hype-muted">Reusable answers per person — matched before OpenAI</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="theme-picker" role="group" aria-label="Theme">
+            <div class="theme-swatches" id="themeSwatches"></div>
+          </div>
+        </div>
+      </header>
+
+      <p id="status" class="editor-status status-bar" role="status"></p>
+
+      <section class="section section-browse" aria-labelledby="browseTitle">
+        <div class="section-header">
+          <div class="section-copy">
+            <p class="section-title" id="browseTitle">Browse</p>
+            <p class="section-sub">Filter which saved answers appear below</p>
+          </div>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span>Show answers for</span>
+            <select id="filterProfile"></select>
+          </label>
+          <label class="field">
+            <span>Field type</span>
+            <select id="filterType">
+              <option value="">All types</option>
+            </select>
+          </label>
+          <label class="field span-2">
+            <span>Search</span>
+            <div class="search-field-wrap">
+              <svg class="search-field-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M20 20l-4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <input id="searchInput" type="search" placeholder="Filter by question or answer" />
+            </div>
+          </label>
+          <label class="field span-2">
+            <span>Test match — paste a live form question</span>
+            <textarea id="testMatchInput" rows="2" placeholder="e.g. Are you authorized to work in the US without sponsorship?"></textarea>
+          </label>
+        </div>
+        <div class="qa-toolbar browse-tools">
+          <button type="button" id="testMatchBtn" class="ghost compact">Test match</button>
+          <button type="button" id="scanJunkBtn" class="ghost compact">Scan for junk</button>
+          <button type="button" id="deleteJunkBtn" class="ghost danger compact" hidden>Delete junk results</button>
+        </div>
+        <p class="hint" id="testMatchResult" hidden></p>
+        <p class="hint count-hint" id="countHint">0 saved</p>
+      </section>
+
+      <section class="section section-form" id="formSection" aria-labelledby="formTitle">
+        <div class="section-header">
+          <div class="section-copy">
+            <p class="section-title" id="formTitle">Add Q&amp;A</p>
+            <p class="section-sub" id="formHint">
+              Store the question text as it appears on the form. For dropdowns, save the option text
+              to pick. For checkboxes, save Yes or No.
+            </p>
+          </div>
+        </div>
+        <div class="edit-banner" id="editBanner" hidden>
+          <span id="editBannerText">Editing an existing answer</span>
+          <button
+            type="button"
+            id="cancelEditBtn"
+            class="ghost compact icon-button"
+            title="Cancel edit"
+            aria-label="Cancel edit"
+          ></button>
+        </div>
+        <div class="grid-2">
+          <label class="field span-2">
+            <span>Question</span>
+            <textarea
+              id="formQuestion"
+              rows="2"
+              placeholder="e.g. Are you legally authorized to work in the United States?"
+            ></textarea>
+          </label>
+          <label class="field span-2">
+            <span>Answer</span>
+            <textarea
+              id="formAnswer"
+              rows="3"
+              placeholder="For dropdowns, the option text to pick. For checkboxes, Yes or No."
+            ></textarea>
+          </label>
+          <label class="field">
+            <span>Field type</span>
+            <select id="formFieldType"></select>
+          </label>
+          <label class="field">
+            <span>Save to</span>
+            <select id="formScope"></select>
+          </label>
+        </div>
+        <div class="qa-toolbar form-actions">
+          <button
+            type="button"
+            id="saveBtn"
+            class="primary compact icon-button"
+            title="Save Q&amp;A"
+            aria-label="Save Q&amp;A"
+          ></button>
+        </div>
+      </section>
+
+      <section class="section section-saved" aria-labelledby="savedTitle">
+        <div class="section-header qa-list-header">
+          <div class="section-copy">
+            <p class="section-title" id="savedTitle">Saved answers</p>
+            <p class="section-sub" id="savedSub">Import, export, or edit entries for this person</p>
+          </div>
+          <div class="qa-toolbar bank-actions">
+            <button
+              type="button"
+              id="importBundledBtn"
+              class="ghost compact icon-button"
+              title="Load bundled bank"
+              aria-label="Load bundled bank"
+            ></button>
+            <button
+              type="button"
+              id="exportBtn"
+              class="ghost compact icon-button"
+              title="Export JSON"
+              aria-label="Export JSON"
+            ></button>
+            <button
+              type="button"
+              id="importBtn"
+              class="ghost compact icon-button"
+              title="Import JSON"
+              aria-label="Import JSON"
+            ></button>
+            <button
+              type="button"
+              id="clearBtn"
+              class="ghost danger compact icon-button"
+              title="Clear this bank"
+              aria-label="Clear this bank"
+            ></button>
+            <input type="file" id="importInput" accept="application/json,.json" hidden />
+          </div>
+        </div>
+        <label
+          class="checkbox-field import-remap"
+          title="When off, imported rows keep the profileId from the file (e.g. custom-steven-avon)"
+        >
+          <span>Assign imports to the person in Save to</span>
+          <input type="checkbox" id="remapImportToggle" checked />
+        </label>
+        <div class="qa-list qa-editor-list" id="qaList" aria-label="Saved questions and answers"></div>
+        <nav class="qa-pagination" id="pagination" aria-label="Saved answers pages" hidden>
+          <div class="qa-page-nav">
+            <button
+              type="button"
+              id="pageFirst"
+              class="ghost compact icon-button"
+              title="First page"
+              aria-label="First page"
+            ></button>
+            <button
+              type="button"
+              id="pagePrev"
+              class="ghost compact icon-button"
+              title="Previous page"
+              aria-label="Previous page"
+            ></button>
+          </div>
+          <p class="qa-page-meta" id="pageMeta">Page 1 of 1</p>
+          <label class="qa-page-size field compact-field">
+            <span>Per page</span>
+            <select id="pageSize">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <div class="qa-page-nav">
+            <button
+              type="button"
+              id="pageNext"
+              class="ghost compact icon-button"
+              title="Next page"
+              aria-label="Next page"
+            ></button>
+            <button
+              type="button"
+              id="pageLast"
+              class="ghost compact icon-button"
+              title="Last page"
+              aria-label="Last page"
+            ></button>
+          </div>
+        </nav>
+      </section>
+    </main>
+    <script type="module" src="qa-editor.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "brightstar-auto-apply-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check background.js && node --check autofill-runner.js && node --check autofill-junk.js && node --check autofill-summary.js && node --check popup.js && node --check profiles.js && node --check ats-score.js && node --check role-tracks.js && node --check ai-provider.js && node --check ai-answers.js && node --check ats/adapters.js && node --check content/autofill.js && node --check content/autofill-panel.js && node --check content.js && node --check content-claude.js && node --check csv.js && node --check theme.js && node --check theme-boot.js && node --check qa-editor.js && node --check preview.js && node --check person-profile-form.js && node --check open-profile-editor.js && node --check profile-editor.js && node --check resume-wizard.js && node --check ui-dialog.js && node --check ui-toast.js",
+    "test": "node --test tests"
+  }
+}

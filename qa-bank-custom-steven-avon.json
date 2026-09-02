@@ -1,0 +1,146 @@
+[
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Frame data Period of notice *",
+    "answer": "Immediate",
+    "fieldType": "combobox",
+    "source": "user",
+    "site": "jobs.paessler.com",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Period of notice *",
+    "answer": "Two weeks",
+    "fieldType": "text",
+    "source": "ai",
+    "site": "jobs.paessler.com",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Desired Salary",
+    "answer": "$100000",
+    "fieldType": "text",
+    "source": "ai",
+    "site": "jobs.ashbyhq.com",
+    "timesUsed": 2
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "LinkedIn Profile",
+    "answer": "https://www.linkedin.com/in/steven-avon-183739a8",
+    "fieldType": "text",
+    "source": "ai",
+    "site": "jobs.ashbyhq.com",
+    "timesUsed": 1
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "I accept the Privacy Policy and Terms of Use. (required)",
+    "answer": "Yes",
+    "fieldType": "select",
+    "source": "user",
+    "site": "www.governmentjobs.com",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Yes, I have read and consent to the terms and conditions",
+    "answer": "Yes",
+    "fieldType": "select",
+    "source": "user",
+    "site": "icf.wd5.myworkdayjobs.com",
+    "timesUsed": 1
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "What is your full mailing address?",
+    "answer": "36 Burnt Bridge Ave, Brick, NJ",
+    "fieldType": "text",
+    "source": "user",
+    "site": "",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Education History",
+    "answer": "2016",
+    "fieldType": "select",
+    "source": "user",
+    "site": "phg.tbe.taleo.net",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Do you have 5+ years of Salesforce development experience?",
+    "answer": "Yes",
+    "fieldType": "text",
+    "source": "user",
+    "site": "phg.tbe.taleo.net",
+    "timesUsed": 1
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Have you previously been employed by Centric Consulting?",
+    "answer": "No",
+    "fieldType": "text",
+    "source": "user",
+    "site": "phg.tbe.taleo.net",
+    "timesUsed": 3
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "State/Territory",
+    "answer": "New Jersey",
+    "fieldType": "text",
+    "source": "user",
+    "site": "",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Please select your employment authorization status",
+    "answer": "Permanently authorized for any employer",
+    "fieldType": "text",
+    "source": "user",
+    "site": "phg.tbe.taleo.net",
+    "timesUsed": 3
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Do you consider yourself a member of the Lesbian, Gay, Bisexual and/or Transgender (LGBT+) community",
+    "answer": "No",
+    "fieldType": "text",
+    "source": "user",
+    "site": "",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Will you now or in the future require sponsorship for an employment visa (e.g. H-1B visa status)?",
+    "answer": "No",
+    "fieldType": "text",
+    "source": "user",
+    "site": "",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "Are you legally authorized to work in the United States?",
+    "answer": "Yes",
+    "fieldType": "text",
+    "source": "user",
+    "site": "",
+    "timesUsed": 0
+  },
+  {
+    "profileId": "custom-steven-avon",
+    "question": "He/him",
+    "answer": "Yes",
+    "fieldType": "select",
+    "source": "user",
+    "site": "jobs.lever.co",
+    "timesUsed": 1
+  }
+]
