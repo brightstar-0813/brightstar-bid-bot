@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-29.panel01";
+  const SCRIPT_BUILD = "2026-08-29.panel05";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -74,6 +74,66 @@
       Array.from(seed).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7)
     );
     return `${prefix}_${hash.toString(36)}`;
+  }
+
+  function flashHighlightElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    try {
+      el.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    } catch {
+      try {
+        el.scrollIntoView({ block: "center", inline: "nearest" });
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      el.focus({ preventScroll: true });
+    } catch {
+      try {
+        el.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+    const prevOutline = el.style.outline;
+    const prevOffset = el.style.outlineOffset;
+    const prevTransition = el.style.transition;
+    el.style.transition = "outline-color 0.2s ease";
+    el.style.outline = "3px solid #3dd06f";
+    el.style.outlineOffset = "3px";
+    setTimeout(() => {
+      el.style.outline = prevOutline;
+      el.style.outlineOffset = prevOffset;
+      el.style.transition = prevTransition;
+    }, 1800);
+    return true;
+  }
+
+  function highlightAutofillField(fieldId) {
+    const targetId = String(fieldId || "").trim();
+    if (!targetId) return { ok: false, error: "Missing field id." };
+
+    for (const el of collectFillableControls()) {
+      const label = (questionTextForAi(el) || labelTextForControl(el) || "").trim();
+      if (!label || label.length < 2) continue;
+      const fieldType = inferFieldType(el);
+      if (stableQuestionId(label, fieldType, el) === targetId) {
+        return { ok: flashHighlightElement(el), id: targetId };
+      }
+    }
+
+    for (const group of collectChoiceChipGroups()) {
+      if (group.kind === "start") continue;
+      const label = group.question || "";
+      if (!label) continue;
+      const id = stableQuestionId(label, "select", group.buttons?.[0], "rbc");
+      if (id !== targetId) continue;
+      const focusEl = group.buttons?.[0] || group.root || null;
+      return { ok: flashHighlightElement(focusEl), id: targetId };
+    }
+
+    return { ok: false, error: "Field not found on this step." };
   }
 
   function suppressLearn(ms = 2500) {
@@ -7464,6 +7524,14 @@
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;
+    }
+    if (message?.type === "highlight_autofill_field") {
+      try {
+        sendResponse(highlightAutofillField(message.fieldId || message.id || ""));
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+      return false;
     }
     if (message?.type === "autofill_ai_answers") {
       fillAiAnswers(message.answers || [])

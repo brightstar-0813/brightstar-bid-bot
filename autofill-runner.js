@@ -53,7 +53,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-29.panel01";
+const AUTOFILL_SCRIPT_BUILD = "2026-08-29.panel05";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -1042,6 +1042,41 @@ function reportAutofillProgress(tabId, onProgress, event = {}) {
   emitAutofillProgress(tabId, event).catch(() => {});
 }
 
+function reportTerminalAutofillProgress(tabId, onProgress, summary = {}) {
+  const status = String(summary.status || "");
+  const phase = status === "cancelled" ? "cancelled" : "done";
+  const pct =
+    status === "cancelled" || status === "skipped" || status === "unavailable"
+      ? Number(summary.progressPct) || 0
+      : 100;
+  reportAutofillProgress(tabId, onProgress, {
+    phase,
+    status,
+    site: summary.site || "",
+    siteLabel: applySiteLabel(summary.site || ""),
+    autoSubmit: Boolean(summary.autoSubmit),
+    filledCount: summary.filledCount ?? summary.filled ?? 0,
+    bankHits: summary.bankHits || 0,
+    aiHits: summary.aiHits || 0,
+    steps: summary.steps || 0,
+    progressPct: pct,
+    statusText: summary.detail || formatAutofillSummary(summary) || status || "Done."
+  });
+}
+
+export async function highlightFieldOnTab(tabId, fieldId) {
+  if (!tabId || !fieldId) return { ok: false, error: "Missing tab or field." };
+  await ensureAutofillScript(tabId);
+  const frameResults = await sendMessageToAllFrames(tabId, {
+    type: "highlight_autofill_field",
+    fieldId
+  });
+  for (const row of frameResults || []) {
+    if (row?.ok) return row;
+  }
+  return { ok: false, error: "Field not found on this page." };
+}
+
 function mergeScanFrameResults(frameResults = []) {
   let best = { ok: false, fields: [], fillableCount: 0, stepLabel: "", isApplicationForm: false };
   for (const row of frameResults) {
@@ -1126,12 +1161,16 @@ export async function scanFieldsOnTab(tabId) {
   const scrapedFields = collectScanFieldsFromFrames(frameResults);
   bankScrapedQaFromFields(scrapedFields, { profileId: person?.id || "", site }).catch(() => {});
   const stored = await chrome.storage.local.get(["last_job_title", "last_job_company"]);
+  const siteId = tab?.url ? applySiteFromUrl(tab.url) : "";
   return {
     ...scan,
     profileIncomplete: !complete,
     profileMissing: missing,
     jobTitle: stored.last_job_title || "",
-    jobCompany: stored.last_job_company || ""
+    jobCompany: stored.last_job_company || "",
+    site: siteId,
+    siteLabel: applySiteLabel(siteId),
+    siteHost: site
   };
 }
 
@@ -2439,12 +2478,15 @@ export async function startMultiStepApplyOnTab(
   reportAutofillProgress(tab.id, onProgress, {
     phase: "start",
     progressPct: 0,
-    statusText: "Starting autofill…"
+    statusText: "Starting autofill…",
+    site: applySiteFromUrl(tab.url || ""),
+    siteLabel: applySiteLabel(applySiteFromUrl(tab.url || "")),
+    autoSubmit: Boolean(autoSubmit) && !assistMode
   });
 
   const unavailableAtStart = await probeTabJobUnavailable(tab.id);
   if (unavailableAtStart) {
-    return {
+    const early = {
       ok: true,
       steps: 0,
       filled: 0,
@@ -2466,6 +2508,8 @@ export async function startMultiStepApplyOnTab(
       assistMode: Boolean(assistMode),
       site: applySiteFromUrl(tab.url || "")
     };
+    reportTerminalAutofillProgress(tab.id, onProgress, early);
+    return early;
   }
 
   let currentTabId = tab.id;
@@ -2500,6 +2544,18 @@ export async function startMultiStepApplyOnTab(
     site: initialSite
   };
 
+  reportAutofillProgress(tab.id, onProgress, {
+    phase: "start",
+    progressPct: 0,
+    statusText: effectiveAutoSubmit
+      ? `Starting ${siteLabel} autofill (auto-submit on)…`
+      : `Starting ${siteLabel} autofill (stops before Submit)…`,
+    site: initialSite,
+    siteLabel,
+    autoSubmit: effectiveAutoSubmit,
+    stepBudget
+  });
+
   const { person, applicantInfo, extras } = await getApplicantInfoForAutofill();
   const metricsPersonId = person?.id || "";
   const metricsSiteHost = () => hostnameFromUrl(summary.tabUrl || "");
@@ -2507,6 +2563,14 @@ export async function startMultiStepApplyOnTab(
   let noAdvance = 0;
   let workdayStepHint = "";
   let greenhouseSubmitAt = 0;
+  let terminalReported = false;
+
+  function finishProgress() {
+    if (terminalReported) return;
+    if (!summary.status) return;
+    terminalReported = true;
+    reportTerminalAutofillProgress(currentTabId, onProgress, summary);
+  }
 
   function syncLiveSiteFromUrl(url) {
     const detected = applySiteFromUrl(url || "");
@@ -2530,18 +2594,21 @@ export async function startMultiStepApplyOnTab(
         summary.autoSubmit = effectiveAutoSubmit;
       }
       stepBudget = Math.max(stepBudget, stepBudgetForSite(detected, stepBudget));
+      reportAutofillProgress(currentTabId, onProgress, {
+        phase: "advance",
+        site: liveSite,
+        siteLabel,
+        autoSubmit: effectiveAutoSubmit,
+        statusText: `Switched to ${siteLabel}…`
+      });
     }
   }
 
+  try {
   for (let step = 0; step < stepBudget; step += 1) {
     if (typeof shouldAbort === "function" && shouldAbort()) {
       summary.status = "cancelled";
       summary.detail = "Autofill cancelled.";
-      reportAutofillProgress(currentTabId, onProgress, {
-        phase: "cancelled",
-        statusText: "Cancelled.",
-        progressPct: 0
-      });
       return summary;
     }
     const currentTab = await chrome.tabs.get(currentTabId).catch(() => null);
@@ -2777,7 +2844,12 @@ export async function startMultiStepApplyOnTab(
     reportAutofillProgress(currentTabId, onProgress, {
       phase: "step",
       step: step + 1,
+      stepBudget,
       stepLabel: workdayStepHint || fillStepLabel,
+      site: liveSite,
+      siteLabel,
+      autoSubmit: effectiveAutoSubmit,
+      progressPct: Math.min(95, Math.round(((step + 0.35) / Math.max(1, stepBudget)) * 100)),
       statusText: `Step ${step + 1}/${stepBudget} — filling…`
     });
     await setApplyStatus(`Apply: ${fillStepLabel} (${step + 1}/${stepBudget}) — filling form...`);
@@ -2807,9 +2879,14 @@ export async function startMultiStepApplyOnTab(
     reportAutofillProgress(currentTabId, onProgress, {
       phase: "filled",
       step: step + 1,
+      stepBudget,
       filledCount: summary.filled,
       bankHits: summary.bankHits,
       aiHits: summary.aiHits,
+      site: liveSite,
+      siteLabel,
+      autoSubmit: effectiveAutoSubmit,
+      progressPct: Math.min(95, Math.round(((step + 0.85) / Math.max(1, stepBudget)) * 100)),
       statusText: formatAutofillSummary({
         filledCount: fillRes?.filledCount,
         bankHits: fillRes?.bankHits,
@@ -3262,6 +3339,9 @@ export async function startMultiStepApplyOnTab(
   summary.status = "ready_for_review";
   summary.detail = "Reached the step limit; please review the remaining steps.";
   return summary;
+  } finally {
+    finishProgress();
+  }
 }
 
 

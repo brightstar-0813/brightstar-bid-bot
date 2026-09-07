@@ -18,6 +18,12 @@ import {
   parseRequiredExperienceFromPrompt,
   resolveExperienceRulesForPerson
 } from "./experience-rules.js";
+import {
+  buildStrongHumanizeAppendix,
+  getStrongHumanizeMode,
+  normalizeStrongHumanizeMode,
+  shouldApplyStrongHumanize
+} from "./prompts/humanize-resume.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
 export const GENERIC_SENIOR_PROMPT = genericSeniorPrompt;
@@ -492,7 +498,27 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
     })
   );
   const atsAppendix = getTrackAtsAppendix(roleTrack);
-  return `${body}\n\n${atsAppendix}`;
+  let prompt = `${body}\n\n${atsAppendix}`;
+
+  const humanizeMode = normalizeStrongHumanizeMode(
+    extras.strongHumanizeMode != null
+      ? extras.strongHumanizeMode
+      : extras.strongHumanize === true
+        ? "on"
+        : extras.strongHumanize === false
+          ? "off"
+          : await getStrongHumanizeMode()
+  );
+  const applyHumanize =
+    extras.forceStrongHumanize === true ||
+    shouldApplyStrongHumanize(humanizeMode, {
+      jdLink: extras.jdLink || "",
+      site: extras.site || ""
+    });
+  if (applyHumanize) {
+    prompt = `${prompt}\n\n${buildStrongHumanizeAppendix(roleTrack)}`;
+  }
+  return prompt;
 }
 
 export async function buildCoverLetterPrompt({ jdText, jobTitle, companyName, roleTrack, sessionRoleTrack } = {}) {

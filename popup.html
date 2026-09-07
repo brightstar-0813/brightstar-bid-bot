@@ -419,6 +419,21 @@
           <p class="hint">
             Stay logged in on the selected site. After each job’s files are saved, that job’s chat is removed during the cooldown before the next job.
           </p>
+          <p class="field-label" style="margin-top:12px;margin-bottom:6px;font-weight:600;font-size:12px;">Strong humanize (anti-AI detectors)</p>
+          <div class="ai-provider-toggle" role="radiogroup" aria-label="Strong humanize mode">
+            <button type="button" class="ai-provider-btn" id="humanizeOff" data-humanize="off" aria-pressed="false" title="Never append the strong humanize appendix">
+              Off
+            </button>
+            <button type="button" class="ai-provider-btn is-active" id="humanizeAuto" data-humanize="auto" aria-pressed="true" title="Append for Greenhouse / Ashby / Lever jobs">
+              Auto
+            </button>
+            <button type="button" class="ai-provider-btn" id="humanizeOn" data-humanize="on" aria-pressed="false" title="Append strong humanize + US resume voice for every job">
+              Always
+            </button>
+          </div>
+          <p class="hint" id="humanizeHint">
+            Auto appends US resume voice + anti-AI wording rules for Greenhouse / Ashby / Lever jobs only. Still returns JSON only.
+          </p>
         </section>
 
         <!-- Jobs queue (CSV + shared batch) -->

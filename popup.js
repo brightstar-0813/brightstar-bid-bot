@@ -54,6 +54,13 @@ import {
   normalizeAiProvider
 } from "./ai-provider.js";
 import {
+  STRONG_HUMANIZE_MODE_KEY,
+  STRONG_HUMANIZE_MODES,
+  normalizeStrongHumanizeMode,
+  setStrongHumanizeMode,
+  strongHumanizeModeLabel
+} from "./prompts/humanize-resume.js";
+import {
   extractProfileFromResumeText,
   parseEmployersFromResume,
   resumeFilePrefixFromName,
@@ -511,6 +518,11 @@ const aiProviderChatgptBtn = document.getElementById("aiProviderChatgpt");
 const aiProviderClaudeBtn = document.getElementById("aiProviderClaude");
 const aiProviderStateEl = document.getElementById("aiProviderState");
 let aiProviderCache = AI_PROVIDERS.CHATGPT;
+const humanizeOffBtn = document.getElementById("humanizeOff");
+const humanizeAutoBtn = document.getElementById("humanizeAuto");
+const humanizeOnBtn = document.getElementById("humanizeOn");
+const humanizeHintEl = document.getElementById("humanizeHint");
+let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const copySheetRowBtn = document.getElementById("copySheetRow");
@@ -957,6 +969,35 @@ async function setAiProvider(provider) {
   setStatus(`AI engine: ${aiProviderLabel(next)}. Stay logged in on that site.`);
 }
 
+function renderHumanizeMode(mode) {
+  humanizeModeCache = normalizeStrongHumanizeMode(mode);
+  for (const btn of [humanizeOffBtn, humanizeAutoBtn, humanizeOnBtn]) {
+    if (!btn) continue;
+    const active = btn.dataset.humanize === humanizeModeCache;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+  if (humanizeHintEl) {
+    if (humanizeModeCache === STRONG_HUMANIZE_MODES.ON) {
+      humanizeHintEl.textContent =
+        "Always appends US resume voice + anti-AI wording rules to every resume prompt. Still returns JSON only.";
+    } else if (humanizeModeCache === STRONG_HUMANIZE_MODES.OFF) {
+      humanizeHintEl.textContent =
+        "Strong humanize is off. Resume prompts use the track template only.";
+    } else {
+      humanizeHintEl.textContent =
+        "Auto appends US resume voice + anti-AI wording rules for Greenhouse / Ashby / Lever jobs only. Still returns JSON only.";
+    }
+  }
+}
+
+async function setHumanizeMode(mode) {
+  const next = normalizeStrongHumanizeMode(mode);
+  await setStrongHumanizeMode(next);
+  renderHumanizeMode(next);
+  setStatus(`Strong humanize: ${strongHumanizeModeLabel(next)}.`);
+}
+
 function renderIndeedGrabState(state) {
   const current = state && typeof state === "object" ? state : {};
   const status = String(current.status || "idle");
@@ -1019,6 +1060,7 @@ async function loadSettings() {
     "slack_webhook_url",
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
+    STRONG_HUMANIZE_MODE_KEY,
     MANUAL_PANEL_OPEN_KEY,
     PROFILE_EDITOR_PANEL_OPEN_KEY,
     "generation_status",
@@ -1063,6 +1105,7 @@ async function loadSettings() {
     );
   }
   renderAiProvider(data[AI_PROVIDER_KEY]);
+  renderHumanizeMode(data[STRONG_HUMANIZE_MODE_KEY]);
   setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
   if (inlineProfileEditor && Boolean(data[PROFILE_EDITOR_PANEL_OPEN_KEY])) {
     inlineProfileEditor
@@ -2883,6 +2926,15 @@ aiProviderChatgptBtn?.addEventListener("click", () => {
 aiProviderClaudeBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CLAUDE).catch((e) => setStatus(String(e.message || e)));
 });
+humanizeOffBtn?.addEventListener("click", () => {
+  setHumanizeMode(STRONG_HUMANIZE_MODES.OFF).catch((e) => setStatus(String(e.message || e)));
+});
+humanizeAutoBtn?.addEventListener("click", () => {
+  setHumanizeMode(STRONG_HUMANIZE_MODES.AUTO).catch((e) => setStatus(String(e.message || e)));
+});
+humanizeOnBtn?.addEventListener("click", () => {
+  setHumanizeMode(STRONG_HUMANIZE_MODES.ON).catch((e) => setStatus(String(e.message || e)));
+});
 
 for (const el of [
   jobTitleEl,
@@ -2970,6 +3022,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[AI_PROVIDER_KEY] && changes[AI_PROVIDER_KEY].newValue !== undefined) {
     renderAiProvider(changes[AI_PROVIDER_KEY].newValue);
+  }
+  if (changes[STRONG_HUMANIZE_MODE_KEY] && changes[STRONG_HUMANIZE_MODE_KEY].newValue !== undefined) {
+    renderHumanizeMode(changes[STRONG_HUMANIZE_MODE_KEY].newValue);
   }
   if (changes[SESSION_ROLE_TRACK_KEY]) {
     syncActiveTrackUi().catch(() => {});

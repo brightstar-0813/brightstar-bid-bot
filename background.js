@@ -24,6 +24,10 @@ import {
   jdRequiredSkills,
   resolveEffectiveRoleTrack
 } from "./role-tracks.js";
+import {
+  getStrongHumanizeMode,
+  shouldApplyStrongHumanize
+} from "./prompts/humanize-resume.js";
 import { outputDirFromPerson } from "./resume-profile.js";
 import {
   setLastGeneratedDocs,
@@ -48,6 +52,7 @@ import {
   hydrateJobsWithFolders,
   locateJobFolder,
   handleProfileLearnCapture,
+  highlightFieldOnTab,
   handleQaLearnCapture,
   answerQuestionsFromBank
 } from "./autofill-runner.js";
@@ -5460,16 +5465,26 @@ async function runAutoJob(jobMeta) {
   }
 
   const profileId = jobMeta.profileId || person.id;
+  const humanizeMode = await getStrongHumanizeMode();
+  const strongHumanize = shouldApplyStrongHumanize(humanizeMode, {
+    jdLink: jobMeta.jdLink || "",
+    site: jobMeta.board || jobMeta.source || ""
+  });
   const prompt = await buildPrompt(profileId, jobMeta.jdText || "", {
     jobTitle: jobMeta.jobTitle || "",
     companyName: jobMeta.companyName || "",
     masterResume: person.masterResume || "",
     roleTrack,
-    sessionRoleTrack
+    sessionRoleTrack,
+    jdLink: jobMeta.jdLink || "",
+    site: jobMeta.board || "",
+    strongHumanizeMode: humanizeMode
   });
 
   await setStatus(
-    `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: Track ${trackStatus} · opening ONE new ${providerLabel} chat…`
+    `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: Track ${trackStatus}${
+      strongHumanize ? " · strong humanize" : ""
+    } · opening ONE new ${providerLabel} chat…`
   );
 
   if (batchControl.skipCurrent || batchControl.stop) {
@@ -7339,6 +7354,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         const result = await scanFieldsOnTab(tab.id);
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_highlight") {
+    (async () => {
+      try {
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        if (!tab?.id) {
+          safeSendResponse(sendResponse, { ok: false, error: "No application tab found." });
+          return;
+        }
+        const result = await highlightFieldOnTab(tab.id, message.fieldId || message.id || "");
         safeSendResponse(sendResponse, result);
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });

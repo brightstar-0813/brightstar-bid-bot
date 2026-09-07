@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-08-29.panel04";
+  const PANEL_BUILD = "2026-08-29.panel05";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -57,6 +57,8 @@
 
   let hostEl = null;
   let shadow = null;
+  let navWatchInstalled = false;
+  let rescanTimer = null;
   let state = {
     expanded: false,
     running: false,
@@ -67,7 +69,12 @@
     jobTitle: "",
     jobCompany: "",
     profileIncomplete: false,
-    allowSubmit: true
+    allowSubmit: true,
+    liveAutoSubmit: null,
+    site: "",
+    siteLabel: "",
+    resultStatus: "",
+    stats: { filled: 0, bank: 0, ai: 0, steps: 0 }
   };
 
   const fieldStatusMap = new Map();
@@ -94,6 +101,45 @@
     }
   }
 
+  function fieldBuckets() {
+    const needs = [];
+    const matched = [];
+    const filled = [];
+    for (const f of state.fields) {
+      const st = fieldStatusMap.get(f.id) || (f.matchSource === "filled" ? "done" : "pending");
+      if (st === "done" || f.matchSource === "filled") filled.push(f);
+      else if (f.matchSource === "unmatched") needs.push(f);
+      else matched.push(f);
+    }
+    return { needs, matched, filled };
+  }
+
+  function renderFieldRow(f) {
+    const st = fieldStatusMap.get(f.id) || (f.matchSource === "filled" ? "done" : "pending");
+    const badge =
+      st === "done" && fieldStatusMap.get(`${f.id}:source`) === "ai"
+        ? `<span class="field-badge ai">AI</span>`
+        : st === "done" && fieldStatusMap.get(`${f.id}:source`) === "bank"
+          ? `<span class="field-badge bank">bank</span>`
+          : f.matchSource === "profile"
+            ? `<span class="field-badge">profile</span>`
+            : f.matchSource === "extra"
+              ? `<span class="field-badge">extra</span>`
+              : f.matchSource === "unmatched"
+                ? `<span class="field-badge warn">needs AI</span>`
+                : f.required
+                  ? `<span class="field-badge">req</span>`
+                  : "";
+    const statusClass =
+      st === "filling" ? "filling" : st === "done" ? "done" : st === "error" ? "error" : st === "warn" ? "warn" : "pending";
+    const req = f.required ? ` data-required="1"` : "";
+    return `<li class="field-row" data-field-id="${escapeHtml(f.id)}"${req} title="Click to highlight on page">
+      <span class="field-status ${statusClass}"></span>
+      <span class="field-label">${escapeHtml(f.label)}</span>
+      ${badge}
+    </li>`;
+  }
+
   function renderFieldList() {
     const list = qs("#fieldList");
     if (!list) return;
@@ -101,30 +147,35 @@
       list.innerHTML = `<li class="panel-hint">No fields detected yet. Open an application form step.</li>`;
       return;
     }
-    list.innerHTML = state.fields
-      .map((f) => {
-        const st = fieldStatusMap.get(f.id) || (f.matchSource === "filled" ? "done" : "pending");
-        const badge =
-          st === "done" && fieldStatusMap.get(`${f.id}:source`) === "ai"
-            ? `<span class="field-badge ai">AI</span>`
-            : st === "done" && fieldStatusMap.get(`${f.id}:source`) === "bank"
-              ? `<span class="field-badge bank">bank</span>`
-              : f.matchSource === "profile"
-                ? `<span class="field-badge">profile</span>`
-                : f.matchSource === "extra"
-                  ? `<span class="field-badge">extra</span>`
-                  : f.matchSource === "unmatched"
-                    ? `<span class="field-badge">AI?</span>`
-                    : "";
-        const statusClass =
-          st === "filling" ? "filling" : st === "done" ? "done" : st === "error" ? "error" : st === "warn" ? "warn" : "pending";
-        return `<li class="field-row" data-field-id="${escapeHtml(f.id)}">
-          <span class="field-status ${statusClass}"></span>
-          <span class="field-label">${escapeHtml(f.label)}</span>
-          ${badge}
-        </li>`;
-      })
-      .join("");
+    const { needs, matched, filled } = fieldBuckets();
+    const sections = [];
+    if (needs.length) {
+      sections.push(
+        `<li class="field-group-title">Needs attention (${needs.length})</li>`,
+        ...needs.map(renderFieldRow)
+      );
+    }
+    if (matched.length) {
+      sections.push(
+        `<li class="field-group-title">Ready to fill (${matched.length})</li>`,
+        ...matched.map(renderFieldRow)
+      );
+    }
+    if (filled.length) {
+      sections.push(
+        `<li class="field-group-title">Filled (${filled.length})</li>`,
+        ...filled.map(renderFieldRow)
+      );
+    }
+    list.innerHTML = sections.join("");
+  }
+
+  function resultTone(status) {
+    if (status === "submitted") return "ok";
+    if (status === "ready_for_review") return "warn";
+    if (status === "cancelled" || status === "skipped") return "muted";
+    if (status === "needs_review" || status === "unavailable") return "err";
+    return "";
   }
 
   function updateUi() {
@@ -140,9 +191,18 @@
     const jobTitle = qs("#jobTitle");
     const jobCompany = qs("#jobCompany");
     const profileDot = qs("#profileDot");
+    const siteChip = qs("#siteChip");
+    const modeChip = qs("#modeChip");
+    const modeHint = qs("#modeHint");
+    const statsRow = qs("#statsRow");
+    const resultBanner = qs("#resultBanner");
 
     if (shell) shell.hidden = !state.expanded;
-    if (tab) tab.hidden = state.expanded;
+    if (tab) {
+      tab.hidden = state.expanded;
+      tab.classList.toggle("running", state.running);
+      tab.textContent = state.running ? "Filling…" : "Autofill";
+    }
     if (stepEl) stepEl.textContent = state.stepLabel ? `Step: ${state.stepLabel}` : "";
     if (statusEl) statusEl.textContent = state.statusText || "";
     if (progressBlock) progressBlock.hidden = !state.running;
@@ -167,6 +227,61 @@
     }
     const submitToggle = qs("#allowSubmitToggle");
     if (submitToggle) submitToggle.checked = state.allowSubmit;
+    if (siteChip) {
+      const label = state.siteLabel || state.site || "";
+      siteChip.hidden = !label;
+      siteChip.textContent = label || "";
+    }
+    if (modeChip) {
+      const live =
+        state.running && typeof state.liveAutoSubmit === "boolean"
+          ? state.liveAutoSubmit
+          : state.allowSubmit;
+      modeChip.hidden = false;
+      modeChip.textContent = live ? "Auto-submit" : "Review first";
+      modeChip.classList.toggle("submit-on", live);
+      modeChip.classList.toggle("submit-off", !live);
+    }
+    if (modeHint) {
+      const live =
+        state.running && typeof state.liveAutoSubmit === "boolean"
+          ? state.liveAutoSubmit
+          : state.allowSubmit;
+      modeHint.textContent = live
+        ? "Will click Submit on allowed hosted ATS pages."
+        : "Stops before Submit so you can review.";
+    }
+    if (statsRow) {
+      const { needs, matched, filled } = fieldBuckets();
+      const show =
+        state.fields.length > 0 ||
+        state.stats.filled > 0 ||
+        state.stats.bank > 0 ||
+        state.stats.ai > 0;
+      statsRow.hidden = !show;
+      statsRow.innerHTML = [
+        `<span class="stat"><strong>${filled.length || state.stats.filled || 0}</strong> filled</span>`,
+        `<span class="stat"><strong>${matched.length}</strong> ready</span>`,
+        `<span class="stat"><strong>${needs.length}</strong> open</span>`,
+        state.stats.bank
+          ? `<span class="stat"><strong>${state.stats.bank}</strong> bank</span>`
+          : "",
+        state.stats.ai ? `<span class="stat"><strong>${state.stats.ai}</strong> AI</span>` : "",
+        state.stats.steps ? `<span class="stat"><strong>${state.stats.steps}</strong> steps</span>` : ""
+      ]
+        .filter(Boolean)
+        .join("");
+    }
+    if (resultBanner) {
+      const tone = resultTone(state.resultStatus);
+      if (state.resultStatus && !state.running) {
+        resultBanner.hidden = false;
+        resultBanner.className = `result-banner ${tone}`;
+        resultBanner.textContent = state.statusText || state.resultStatus;
+      } else {
+        resultBanner.hidden = true;
+      }
+    }
     renderFieldList();
   }
 
@@ -200,11 +315,16 @@
               <span>Brightstar</span>
             </div>
             <div class="panel-header-actions">
+              <button type="button" class="icon-btn" id="rescanBtn" title="Rescan fields">↻</button>
               <button type="button" class="icon-btn" id="collapseBtn" title="Collapse">›</button>
               <button type="button" class="icon-btn" id="closeBtn" title="Collapse to tab">×</button>
             </div>
           </div>
           <div class="panel-body">
+            <div class="chip-row" id="chipRow">
+              <span class="chip site" id="siteChip" hidden></span>
+              <span class="chip mode" id="modeChip">Review first</span>
+            </div>
             <div class="job-card" id="jobCard" hidden>
               <div class="company" id="jobCompany"></div>
               <div class="title" id="jobTitle"></div>
@@ -219,6 +339,7 @@
               <span>Allow auto submit</span>
               <input type="checkbox" id="allowSubmitToggle" checked />
             </label>
+            <p class="mode-hint" id="modeHint"></p>
             <div class="progress-block" id="progressBlock" hidden>
               <div class="progress-head">
                 <span>Autofilling… <strong id="progressPct">0%</strong></span>
@@ -226,10 +347,12 @@
               </div>
               <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
             </div>
+            <div class="result-banner" id="resultBanner" hidden></div>
+            <div class="stats-row" id="statsRow" hidden></div>
             <p class="panel-status" id="statusText"></p>
-            <p class="field-section-title">Required</p>
+            <p class="field-section-title">Fields</p>
             <ul class="field-list" id="fieldList"></ul>
-            <p class="panel-hint">Uses your profile, Q&amp;A bank, then OpenAI for unknown questions.</p>
+            <p class="panel-hint">Profile → Q&amp;A bank → OpenAI. Click a field to highlight it on the page.</p>
           </div>
         </div>
       </div>
@@ -253,6 +376,9 @@
       state.expanded = false;
       updateUi();
     });
+    qs("#rescanBtn")?.addEventListener("click", () => {
+      if (!state.running) runScan().catch(() => {});
+    });
     qs("#autofillBtn")?.addEventListener("click", () => startAutofill());
     qs("#cancelBtn")?.addEventListener("click", () => cancelAutofill());
     qs("#profileLink")?.addEventListener("click", () => {
@@ -261,6 +387,16 @@
     qs("#allowSubmitToggle")?.addEventListener("change", (e) => {
       state.allowSubmit = Boolean(e.target.checked);
       chrome.storage.local.set({ allowSubmitOnAssist: state.allowSubmit }).catch(() => {});
+      updateUi();
+    });
+    qs("#fieldList")?.addEventListener("click", (e) => {
+      const row = e.target?.closest?.("[data-field-id]");
+      if (!row) return;
+      const fieldId = row.getAttribute("data-field-id");
+      if (!fieldId) return;
+      chrome.runtime
+        .sendMessage({ type: "autofill_panel_highlight", fieldId })
+        .catch(() => {});
     });
 
     chrome.storage.local.get(["allowSubmitOnAssist", "last_job_title", "last_job_company"], (data) => {
@@ -275,7 +411,61 @@
       if (changes.custom_profiles || changes.active_person_id) {
         runScan().catch(() => {});
       }
+      if (changes.last_job_title) state.jobTitle = changes.last_job_title.newValue || "";
+      if (changes.last_job_company) state.jobCompany = changes.last_job_company.newValue || "";
+      if (changes.last_job_title || changes.last_job_company) updateUi();
+      if (changes.allowSubmitOnAssist) {
+        state.allowSubmit = changes.allowSubmitOnAssist.newValue !== false;
+        updateUi();
+      }
     });
+
+    installNavWatch();
+  }
+
+  function scheduleRescan(delayMs = 700) {
+    if (state.running) return;
+    clearTimeout(rescanTimer);
+    rescanTimer = setTimeout(() => {
+      if (!state.expanded && !shouldInitPanel()) return;
+      runScan().catch(() => {});
+    }, delayMs);
+  }
+
+  function installNavWatch() {
+    if (navWatchInstalled) return;
+    navWatchInstalled = true;
+    let lastHref = location.href;
+    const onNav = () => {
+      if (location.href === lastHref) return;
+      lastHref = location.href;
+      scheduleRescan(500);
+    };
+    window.addEventListener("popstate", onNav);
+    window.addEventListener("hashchange", onNav);
+    const wrap = (name) => {
+      const orig = history[name];
+      if (typeof orig !== "function") return;
+      history[name] = function patchedHistory(...args) {
+        const ret = orig.apply(this, args);
+        onNav();
+        return ret;
+      };
+    };
+    try {
+      wrap("pushState");
+      wrap("replaceState");
+    } catch {
+      /* ignore */
+    }
+    const mo = new MutationObserver(() => {
+      if (state.expanded || looksLikeApplyContext()) scheduleRescan(1200);
+    });
+    try {
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+    } catch {
+      /* ignore */
+    }
   }
 
   function showPanelTab({ expand = false } = {}) {
@@ -330,6 +520,8 @@
     }
     state.fields = result.fields || [];
     state.stepLabel = result.stepLabel || "";
+    state.site = result.site || state.site;
+    state.siteLabel = result.siteLabel || state.siteLabel;
     state.statusText = result.fields?.length
       ? `${result.fields.length} field${result.fields.length === 1 ? "" : "s"} detected`
       : "Scan complete";
@@ -346,6 +538,7 @@
 
   async function runScan() {
     state.statusText = "Scanning page…";
+    state.resultStatus = "";
     updateUi();
     try {
       const res = await chrome.runtime.sendMessage({ type: "autofill_panel_scan" });
@@ -353,6 +546,8 @@
       state.profileIncomplete = Boolean(res?.profileIncomplete);
       if (res?.jobTitle) state.jobTitle = res.jobTitle;
       if (res?.jobCompany) state.jobCompany = res.jobCompany;
+      if (res?.site) state.site = res.site;
+      if (res?.siteLabel) state.siteLabel = res.siteLabel;
       updateUi();
     } catch (err) {
       state.statusText = String(err?.message || err);
@@ -364,7 +559,9 @@
     if (state.running) return;
     state.running = true;
     state.progressPct = 0;
+    state.resultStatus = "";
     state.statusText = "Starting autofill…";
+    state.stats = { filled: 0, bank: 0, ai: 0, steps: 0 };
     fieldStatusMap.clear();
     updateUi();
     try {
@@ -374,12 +571,23 @@
       });
       if (!res?.ok) {
         state.statusText = res?.error || "Autofill failed.";
+        state.resultStatus = res?.status || "needs_review";
       } else {
         state.statusText = res.detail || res.statusText || "Autofill complete.";
+        state.resultStatus = res.status || "done";
         state.progressPct = 100;
+        state.stats = {
+          filled: Number(res.filledCount || res.filled || 0),
+          bank: Number(res.bankHits || 0),
+          ai: Number(res.aiHits || 0),
+          steps: Number(res.steps || 0)
+        };
+        if (res.site) state.site = res.site;
+        if (res.siteLabel) state.siteLabel = res.siteLabel;
       }
     } catch (err) {
       state.statusText = String(err?.message || err);
+      state.resultStatus = "needs_review";
     } finally {
       state.running = false;
       updateUi();
@@ -390,6 +598,7 @@
   function cancelAutofill() {
     chrome.runtime.sendMessage({ type: "autofill_panel_cancel" }).catch(() => {});
     state.running = false;
+    state.resultStatus = "cancelled";
     state.statusText = "Cancelled.";
     updateUi();
   }
@@ -403,7 +612,9 @@
       msg.phase === "field" ||
       msg.phase === "filled" ||
       msg.phase === "advance" ||
-      msg.phase === "scan";
+      msg.phase === "scan" ||
+      msg.phase === "done" ||
+      msg.phase === "cancelled";
     showPanelTab({ expand: expandPanel });
     if (msg.phase === "field") {
       if (msg.id) {
@@ -417,18 +628,43 @@
     }
     if (typeof msg.progressPct === "number") state.progressPct = msg.progressPct;
     if (msg.statusText) state.statusText = msg.statusText;
+    if (msg.site) state.site = msg.site;
+    if (msg.siteLabel) state.siteLabel = msg.siteLabel;
+    if (typeof msg.autoSubmit === "boolean") state.liveAutoSubmit = msg.autoSubmit;
     if (msg.phase === "step") {
-      state.stepLabel = msg.stepLabel || state.stepLabel;
+      state.stepLabel =
+        msg.stepLabel ||
+        (msg.step && msg.stepBudget ? `${msg.step}/${msg.stepBudget}` : state.stepLabel);
       fieldStatusMap.clear();
+    }
+    if (msg.phase === "filled") {
+      state.stats = {
+        filled: Number(msg.filledCount || state.stats.filled || 0),
+        bank: Number(msg.bankHits || state.stats.bank || 0),
+        ai: Number(msg.aiHits || state.stats.ai || 0),
+        steps: Number(msg.step || state.stats.steps || 0)
+      };
     }
     if (msg.phase === "start") {
       state.running = true;
+      state.resultStatus = "";
+      state.liveAutoSubmit = typeof msg.autoSubmit === "boolean" ? msg.autoSubmit : null;
       fieldStatusMap.clear();
     }
     if (msg.phase === "done" || msg.phase === "cancelled") {
       state.running = false;
+      state.liveAutoSubmit = null;
+      state.resultStatus = msg.status || msg.phase;
       if (msg.statusText) state.statusText = msg.statusText;
       if (typeof msg.progressPct === "number") state.progressPct = msg.progressPct;
+      if (msg.filledCount != null || msg.bankHits != null || msg.aiHits != null || msg.steps != null) {
+        state.stats = {
+          filled: Number(msg.filledCount ?? state.stats.filled ?? 0),
+          bank: Number(msg.bankHits ?? state.stats.bank ?? 0),
+          ai: Number(msg.aiHits ?? state.stats.ai ?? 0),
+          steps: Number(msg.steps ?? state.stats.steps ?? 0)
+        };
+      }
     }
     updateUi();
   }

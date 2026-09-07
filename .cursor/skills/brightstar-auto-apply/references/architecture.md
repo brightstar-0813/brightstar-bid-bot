@@ -1,6 +1,6 @@
-# Brightstar Auto-Apply — Reference
+# Architecture reference
 
-Read from [SKILL.md](SKILL.md) when you need deeper layout detail. Keep this file aligned with code; prefer code if they disagree.
+Loaded on demand from [SKILL.md](../SKILL.md) (skills.sh / agentskills `references/` layout). Prefer live code if this drifts.
 
 ## Runtime shape
 
