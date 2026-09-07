@@ -53,7 +53,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-08-29.panel05";
+const AUTOFILL_SCRIPT_BUILD = "2026-09-08.cover01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -336,8 +336,18 @@ async function persistJobGeneratedDocs(partial = {}) {
     csvRow: csvRow != null ? csvRow : prev.csvRow,
     jobDir: jobDir || prev.jobDir || "",
     jdLink: String(partial.jdLink || prev.jdLink || "").trim(),
-    resume: docsHaveFile(partial, "resume") ? partial.resume : prev.resume || null,
-    coverLetter: docsHaveFile(partial, "coverLetter") ? partial.coverLetter : prev.coverLetter || null,
+    resume:
+      partial.resume === null
+        ? null
+        : docsHaveFile(partial, "resume")
+          ? partial.resume
+          : prev.resume || null,
+    coverLetter:
+      partial.coverLetter === null
+        ? null
+        : docsHaveFile(partial, "coverLetter")
+          ? partial.coverLetter
+          : prev.coverLetter || null,
     savedAt: Date.now()
   };
   const ranked = Object.entries(map).sort((a, b) => (b[1]?.savedAt || 0) - (a[1]?.savedAt || 0));
@@ -636,7 +646,24 @@ export async function resolveUploadDocs({ csvRow, jobDir, jdLink } = {}) {
       docs = { ...(docs || {}), resume: last.resume, folderName: located.jobDir, csvRow: located.csvRow };
     }
     if (!docsHaveFile(docs, "coverLetter") && docsHaveFile(last, "coverLetter")) {
-      docs = { ...(docs || {}), coverLetter: last.coverLetter, folderName: located.jobDir, csvRow: located.csvRow };
+      const coverName = String(last.coverLetter?.fileName || "");
+      const coverLooksLikeResume = /resume/i.test(coverName) && !/cover/i.test(coverName);
+      if (!coverLooksLikeResume) {
+        docs = {
+          ...(docs || {}),
+          coverLetter: last.coverLetter,
+          folderName: located.jobDir,
+          csvRow: located.csvRow
+        };
+      }
+    }
+  }
+
+  // Never treat a resume PDF as the cover letter for upload.
+  if (docsHaveFile(docs, "coverLetter")) {
+    const coverName = String(docs.coverLetter?.fileName || "");
+    if (/resume/i.test(coverName) && !/cover/i.test(coverName)) {
+      docs = { ...docs, coverLetter: null };
     }
   }
 

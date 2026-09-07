@@ -64,8 +64,18 @@ export async function putJobDocs(partial = {}) {
     jobDir: jobDir || prev.jobDir || "",
     folderName: jobDir || prev.folderName || prev.jobDir || "",
     jdLink: String(partial.jdLink || prev.jdLink || "").trim(),
-    resume: docsHaveFile(partial, "resume") ? partial.resume : prev.resume || null,
-    coverLetter: docsHaveFile(partial, "coverLetter") ? partial.coverLetter : prev.coverLetter || null,
+    resume:
+      partial.resume === null
+        ? null
+        : docsHaveFile(partial, "resume")
+          ? partial.resume
+          : prev.resume || null,
+    coverLetter:
+      partial.coverLetter === null
+        ? null
+        : docsHaveFile(partial, "coverLetter")
+          ? partial.coverLetter
+          : prev.coverLetter || null,
     savedAt: Date.now()
   };
 

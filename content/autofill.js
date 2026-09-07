@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-08-29.panel05";
+  const SCRIPT_BUILD = "2026-09-08.cover01";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -3149,7 +3149,16 @@
     }
 
     for (const { kind, el } of findUploadCards()) {
-      const file = kind === "coverLetter" ? coverFile : resumeFile;
+      if (kind === "coverLetter" && !coverFile) {
+        skipped.push({
+          reason: "no-cover-letter-doc",
+          label: cleanLabelText(el.innerText || "").slice(0, 80)
+        });
+        continue;
+      }
+      // Never attach the resume PDF into a cover-letter card.
+      const file =
+        kind === "coverLetter" ? coverFile : kind === "resume" ? resumeFile : null;
       if (!file) continue;
       if (uploaded.some((row) => row.kind === kind && row.verified !== false)) continue;
       // Always try occupied Dice/profile cards — even if a prior unverified attempt exists.
@@ -3178,7 +3187,15 @@
         let kind = classifyFileInput(zone) || uploadKindFromText(zone.innerText || "");
         if (!kind) continue;
         if (uploaded.some((row) => row.kind === kind && row.verified !== false)) continue;
-        const file = kind === "coverLetter" && coverFile ? coverFile : kind === "resume" ? resumeFile : null;
+        if (kind === "coverLetter" && !coverFile) {
+          skipped.push({
+            reason: "no-cover-letter-doc",
+            label: cleanLabelText(zone.innerText || "").slice(0, 80)
+          });
+          continue;
+        }
+        const file =
+          kind === "coverLetter" ? coverFile : kind === "resume" ? resumeFile : null;
         if (!file) continue;
         const ok = await attachToZone(kind, file, zone);
         if (ok) {

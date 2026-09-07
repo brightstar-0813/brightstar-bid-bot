@@ -22,6 +22,7 @@ import {
   formatRoleTrackStatus,
   getSessionRoleTrack,
   jdRequiredSkills,
+  normalizeRoleTrackId,
   resolveEffectiveRoleTrack
 } from "./role-tracks.js";
 import {
@@ -1325,6 +1326,37 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
       `Row ${jobMeta.csvRow}: files ready, but no JD link — skipping apply and continuing…`
     );
     return { status: "needs_review", detail: "Missing job URL", tabId: null };
+  }
+
+  // Hosted apply (esp. Dice) must not run without a real cover PDF — otherwise the
+  // cover slot often keeps a profile resume / wrong file.
+  const uploadDocs = await resolveUploadDocs({
+    csvRow: jobMeta.csvRow,
+    jobDir: jobMeta.jobDir || "",
+    jdLink
+  }).catch(() => null);
+  const coverName = String(uploadDocs?.coverLetter?.fileName || "");
+  const coverLooksLikeResume =
+    /resume/i.test(coverName) && !/cover/i.test(coverName);
+  const hasCoverLetter =
+    Boolean(uploadDocs?.coverLetter?.base64) && !coverLooksLikeResume;
+  if (!hasCoverLetter) {
+    const detail = coverLooksLikeResume
+      ? "Cover slot resolved to a resume file — regenerate cover letter"
+      : "Cover letter missing — regenerate cover before auto-apply";
+    await updateQueueJob(jobMeta.csvRow, {
+      applied: false,
+      applyAttempted: true,
+      applyAttempts: prevAttempts + 1,
+      error: detail
+    }).catch(() => {});
+    await setStatus(`Row ${jobMeta.csvRow}: ${detail}. Skipping ${boardLabel} apply…`);
+    return {
+      status: "needs_review",
+      detail,
+      tabId: null,
+      needsPause: false
+    };
   }
 
   if (batchControl.skipCurrent || batchControl.stop) {
@@ -5216,6 +5248,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
     status += ` — ${saved.pdfError}`;
   }
 
+  let coverLetterSaved = false;
   if (runCoverLetter && typeof tabId === "number") {
     try {
       // Brief pause so the AI finishes any post-JSON UI before the CL prompt.
@@ -5225,6 +5258,12 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         await waitOutChatGptRateLimit(tabId).catch(() => {});
       }
       await setStatus(`Same chat: sending cover letter prompt (${aiProviderLabel(provider)})…`);
+      const person = await getActivePerson().catch(() => null);
+      const sessionRoleTrack =
+        jobMeta.sessionRoleTrack || (await getSessionRoleTrack().catch(() => "")) || "";
+      const roleTrack = normalizeRoleTrackId(
+        jobMeta.roleTrack || resolveEffectiveRoleTrack(person, sessionRoleTrack)
+      );
       const coverPrompt = await buildCoverLetterPrompt({
         jdText: jobMeta.jdText || "",
         jobTitle: jobMeta.jobTitle || "",
@@ -5299,9 +5338,20 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         token,
         jobMeta
       );
-      if (cl.pdf) status = `${status} + ${cl.coverPdfName || coverPdfName}`;
+      if (cl.pdf) {
+        coverLetterSaved = true;
+        status = `${status} + ${cl.coverPdfName || coverPdfName}`;
+      }
     } catch (coverErr) {
       status = `${status}; cover letter failed: ${String(coverErr?.message || coverErr)}`;
+      // Do not leave a prior job's cover letter attached to this row.
+      await setLastGeneratedDocs({
+        coverLetter: null,
+        folderName: savedDir,
+        jobDir: savedDir,
+        csvRow: jobMeta.csvRow,
+        jdLink: jobMeta.jdLink || ""
+      }).catch(() => {});
     }
   } else if (runCoverLetter) {
     status = `${status}. Cover letter skipped: open a ChatGPT or Claude tab.`;
@@ -5349,7 +5399,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
     }
   }
 
-  return { savedDir, status };
+  return { savedDir, status, coverLetterSaved };
 }
 
 async function runGenerationPipeline({ jobMeta, jsonText }) {
@@ -5803,7 +5853,9 @@ async function runAutoJob(jobMeta) {
   const enrichedMeta = {
     ...jobMeta,
     templateId: await pickTemplateId(jobMeta, person),
-    resumeFilePrefix: jobMeta.resumeFilePrefix || person.resumeFilePrefix || "Resume"
+    resumeFilePrefix: jobMeta.resumeFilePrefix || person.resumeFilePrefix || "Resume",
+    roleTrack,
+    sessionRoleTrack
   };
 
   const result = await saveResumeAndCoverLetter(
@@ -6098,7 +6150,9 @@ async function runBatchLoop(outputDir) {
           atsScore: result.atsEvaluation?.score ?? null,
           atsGrade: result.atsEvaluation?.grade || "",
           atsEvaluation: result.atsEvaluation || null,
-          error: ""
+          error: result.coverLetterSaved
+            ? ""
+            : "Cover letter not created — auto-apply deferred until cover PDF exists"
         });
         await rememberApplyHistory(next.csvRow, {
           jobDir: result.savedDir,
@@ -6128,7 +6182,7 @@ async function runBatchLoop(outputDir) {
                         ? "Dice"
                         : ""
           : "";
-        if (hostedApplyBoard && !batchControl.stop) {
+        if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
           // Apply after build: Ready row on the sheet is expected — only Applied blocks apply.
           const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,
