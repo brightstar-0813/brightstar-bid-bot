@@ -548,6 +548,10 @@ button.primary:hover,
   margin-top: 2px;
 }
 
+.ai-provider-toggle.humanize-toggle {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .role-track-toggle {
   grid-template-columns: repeat(4, 1fr);
 }
