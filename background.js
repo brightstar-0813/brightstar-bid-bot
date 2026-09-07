@@ -1151,20 +1151,34 @@ function jobBelongsToPerson(job, person) {
 }
 
 /**
- * True when this JD link was already built/applied/inactive for the SAME person.
+ * True when this JD link was already handled for the SAME person.
+ * @param {string} jdLink
+ * @param {{ excludeCsvRow?: number|string, purpose?: "generate"|"apply" }} [opts]
+ *   generate — any sheet row (Ready or Applied) blocks resume build
+ *   apply — only Applied (or queue.applied) blocks auto-apply; Ready is expected after build
  */
-async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow } = {}) {
+async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "generate" } = {}) {
   const linkKey = normalizeJobLink(jdLink || "");
   if (!linkKey) return { covered: false };
 
   const person = await getActivePerson().catch(() => null);
+  const forApply = purpose === "apply";
 
   const queue = await getQueue();
   for (const j of queue) {
     if (excludeCsvRow != null && Number(j.csvRow) === Number(excludeCsvRow)) continue;
     if (person && !jobBelongsToPerson(j, person)) continue;
     if (normalizeJobLink(j.jdLink || "") !== linkKey) continue;
-    if (j.applied || j.inactive || j.status === "done") {
+    if (j.applied || j.inactive) {
+      return {
+        covered: true,
+        reason: j.applied
+          ? `same job link already Applied (row ${j.csvRow})`
+          : `same job link marked inactive (row ${j.csvRow})`
+      };
+    }
+    // For generate: a prior DONE build for this person also blocks a rebuild.
+    if (!forApply && j.status === "done") {
       return {
         covered: true,
         reason: `same job link already handled (row ${j.csvRow})`
@@ -1175,15 +1189,24 @@ async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow } = {}) {
   const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
   if (!spreadsheetUrl || !webAppUrl) return { covered: false };
   try {
-    const { links } = await fetchExistingSheetDedupKeys({
+    const keys = await fetchExistingSheetDedupKeys({
       spreadsheetUrl,
       webAppUrl
     });
-    if (buildKnownLinkSet(links).has(linkKey)) {
+    const known = buildKnownLinkSet(keys.links || []);
+    const applied = buildKnownLinkSet(keys.appliedLinks || []);
+    if (forApply) {
+      if (applied.has(linkKey)) {
+        return { covered: true, reason: "same job link already Applied on Google Sheet" };
+      }
+      // Ready (or unknown status) must not block apply — we just appended Ready after build.
+      return { covered: false };
+    }
+    if (known.has(linkKey)) {
       return { covered: true, reason: "same job link already on Google Sheet" };
     }
   } catch {
-    /* sheet check optional at apply time */
+    /* sheet check optional when unreachable */
   }
   return { covered: false };
 }
@@ -1194,7 +1217,8 @@ async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow } = {}) {
  */
 async function getPreGenerateSkipReason(jobMeta = {}) {
   const linkDup = await isJobLinkAlreadyCovered(jobMeta.jdLink || "", {
-    excludeCsvRow: jobMeta.csvRow
+    excludeCsvRow: jobMeta.csvRow,
+    purpose: "generate"
   });
   if (linkDup.covered) {
     return linkDup.reason || "duplicate job link";
@@ -1251,24 +1275,29 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
 
   if (!skipDuplicateCheck) {
     const linkDup = await isJobLinkAlreadyCovered(jdLink, {
-      excludeCsvRow: jobMeta.csvRow
+      excludeCsvRow: jobMeta.csvRow,
+      purpose: "apply"
     });
     if (linkDup.covered) {
-    const queueSnap = await getQueue().catch(() => []);
-    const prior = (queueSnap || []).find((j) => Number(j.csvRow) === Number(jobMeta.csvRow));
-    const recheckAfterReadySkip = isRetriableReadyRowCompanySkip(prior);
-    await updateQueueJob(jobMeta.csvRow, {
-      applied: false,
-      applyAttempted: true,
-      applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
-      companySheetSkipLocked: recheckAfterReadySkip || Boolean(prior?.companySheetSkipLocked),
-      error: `Skipped — ${linkDup.reason}`
-    }).catch(() => {});
-    await setStatus(
-      `Row ${jobMeta.csvRow}: skipped duplicate job link. Continuing…`
-    );
+      const queueSnap = await getQueue().catch(() => []);
+      const prior = (queueSnap || []).find((j) => Number(j.csvRow) === Number(jobMeta.csvRow));
+      const alreadyApplied = /already Applied/i.test(String(linkDup.reason || ""));
+      await updateQueueJob(jobMeta.csvRow, {
+        applied: alreadyApplied ? true : false,
+        applyAttempted: true,
+        applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+        companySheetSkipLocked: Boolean(prior?.companySheetSkipLocked) || alreadyApplied,
+        error: alreadyApplied
+          ? ""
+          : `Skipped — ${linkDup.reason}`
+      }).catch(() => {});
+      await setStatus(
+        alreadyApplied
+          ? `Row ${jobMeta.csvRow}: already Applied on sheet — skipping apply.`
+          : `Row ${jobMeta.csvRow}: skipped duplicate job link. Continuing…`
+      );
       return {
-        status: "skipped",
+        status: alreadyApplied ? "submitted" : "skipped",
         detail: linkDup.reason || "Duplicate job link",
         tabId: null,
         needsPause: false
@@ -5982,6 +6011,9 @@ async function runBatchLoop(outputDir) {
       }
 
       // Validate duplicates BEFORE ChatGPT — do not build a resume we will skip.
+      await setStatus(
+        `Row ${next.csvRow}: checking Google Sheet / queue for duplicate job link…`
+      );
       const preSkipReason = await getPreGenerateSkipReason({
         csvRow: next.csvRow,
         companyName: next.company,
@@ -6097,6 +6129,7 @@ async function runBatchLoop(outputDir) {
                         : ""
           : "";
         if (hostedApplyBoard && !batchControl.stop) {
+          // Apply after build: Ready row on the sheet is expected — only Applied blocks apply.
           const applyRes = await runHostedInterleavedApply({
             csvRow: next.csvRow,
             jobTitle: next.title,

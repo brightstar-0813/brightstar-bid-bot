@@ -238,6 +238,13 @@ export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl })
   const links = Array.isArray(parsed?.links) ? parsed.links : [];
   const companies = Array.isArray(parsed?.companies) ? parsed.companies : [];
   const companyRows = Array.isArray(parsed?.companyRows) ? parsed.companyRows : [];
+  const linkStatuses = Array.isArray(parsed?.linkStatuses) ? parsed.linkStatuses : [];
+  const appliedLinks = Array.isArray(parsed?.appliedLinks)
+    ? parsed.appliedLinks
+    : linkStatuses
+        .filter((row) => /^\s*applied\b/i.test(String(row?.status || "")))
+        .map((row) => row?.link)
+        .filter(Boolean);
   return {
     links: links.map((l) => String(l || "").trim()).filter(Boolean),
     companies: companies.map((c) => String(c || "").trim()).filter(Boolean),
@@ -246,7 +253,14 @@ export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl })
         company: String(row?.company || "").trim(),
         link: String(row?.link || "").trim()
       }))
-      .filter((row) => row.company)
+      .filter((row) => row.company),
+    linkStatuses: linkStatuses
+      .map((row) => ({
+        link: String(row?.link || "").trim(),
+        status: String(row?.status || "").trim()
+      }))
+      .filter((row) => row.link),
+    appliedLinks: appliedLinks.map((l) => String(l || "").trim()).filter(Boolean)
   };
 }
 

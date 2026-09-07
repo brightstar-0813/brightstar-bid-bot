@@ -33,13 +33,24 @@ function doPost(e) {
       const links = collectJobLinks_(sheet);
       const companies = collectCompanies_(sheet);
       const companyRows = collectCompanyLinkPairs_(sheet);
+      const linkStatuses = collectLinkStatusPairs_(sheet);
+      const appliedLinks = linkStatuses
+        .filter(function (row) {
+          return statusLooksApplied_(row.status);
+        })
+        .map(function (row) {
+          return row.link;
+        });
       return json_({
         ok: true,
         links: links,
         companies: companies,
         companyRows: companyRows,
+        linkStatuses: linkStatuses,
+        appliedLinks: appliedLinks,
         count: links.length,
-        companyCount: companies.length
+        companyCount: companies.length,
+        appliedCount: appliedLinks.length
       });
     }
 
@@ -245,6 +256,40 @@ function collectCompanies_(sheet) {
     if (!n || seen[n]) continue;
     seen[n] = true;
     out.push(raw);
+  }
+  return out;
+}
+
+function statusLooksApplied_(status) {
+  return /^\s*applied\b/i.test(String(status || "").trim());
+}
+
+/** Link + Status pairs for generate vs apply duplicate gates. */
+function collectLinkStatusPairs_(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return [];
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var linkCol = hasHeader ? linkColumnIndex_(values[0]) : 4;
+  var statusCol = hasHeader ? statusColumnIndex_(values[0]) : 6;
+  var out = [];
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    var link = String(row[linkCol] || "").trim();
+    if (!link) {
+      for (var c = 0; c < row.length; c++) {
+        var cell = String(row[c] || "").trim();
+        if (cellLooksLikeUrl_(cell)) {
+          link = cell;
+          break;
+        }
+      }
+    }
+    if (!link) continue;
+    out.push({
+      link: link,
+      status: String(row[statusCol] || "").trim()
+    });
   }
   return out;
 }
