@@ -29,6 +29,7 @@ Progressive disclosure (per [Agent Skills](https://www.skills.sh/) / agentskills
 3. Autofill forms; **auto-submit only on allowed hosted paths**
 
 Master resume = text/PDF/DOCX (never ChatGPT JSON). Resume prompts must ask for **JSON only**.
+Prefer short control labels and live status text over long instructional hints in popup/panel UI.
 
 ## Ownership map
 

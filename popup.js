@@ -490,7 +490,6 @@ const filterAshbyBtn = document.getElementById("filterAshby");
 const filterLeverBtn = document.getElementById("filterLever");
 const filterEtcBtn = document.getElementById("filterEtc");
 const filterAllBtn = document.getElementById("filterAll");
-const diceInterleaveHintEl = document.getElementById("diceInterleaveHint");
 const indeedGrabApplyBtn = document.getElementById("indeedGrabApply");
 const indeedGrabOnlyBtn = document.getElementById("indeedGrabOnly");
 const indeedGrabStateEl = document.getElementById("indeedGrabState");
@@ -965,7 +964,7 @@ async function setAiProvider(provider) {
   const next = normalizeAiProvider(provider);
   renderAiProvider(next);
   await chrome.storage.local.set({ [AI_PROVIDER_KEY]: next });
-  setStatus(`AI engine: ${aiProviderLabel(next)}. Stay logged in on that site.`);
+  setStatus(`AI engine: ${aiProviderLabel(next)}.`);
 }
 
 function renderHumanizeMode(mode) {
@@ -1248,13 +1247,6 @@ function syncChannelFilterButtons() {
     if (!btn) continue;
     btn.classList.toggle("active", key === channelFilter);
   }
-  if (diceInterleaveHintEl) {
-    diceInterleaveHintEl.hidden = false;
-    diceInterleaveHintEl.textContent =
-      channelFilter === "all"
-        ? "All: build resume + cover letter only — no auto-apply. Pick Dice, Workday, Greenhouse, Ashby, or Lever to auto-apply after each build."
-        : "Dice / Workday / Greenhouse / Ashby / Lever / Jobgether→ATS: build → autofill → Submit → next. Other external ATS links are never auto-submitted.";
-  }
 }
 
 function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
@@ -1522,7 +1514,7 @@ function renderQueue() {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
     empty.innerHTML =
-      "<p>Queue is empty</p><span>Upload a CSV, then review before Start</span>";
+      "<p>Queue is empty</p>";
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     queueListScrollTop = 0;

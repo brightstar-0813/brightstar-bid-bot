@@ -199,8 +199,7 @@ function resetForm() {
   editingId = null;
   els.formTitle.textContent = "Add Q&A";
   setIconButton(els.saveBtn, "save", "Save Q&A");
-  els.formHint.textContent =
-    "Store the question text as it appears on the form. For dropdowns, save the option text to pick. For checkboxes, save Yes or No.";
+  if (els.formHint) els.formHint.textContent = "";
   els.editBanner.hidden = true;
   els.formSection.classList.remove("is-editing");
   els.formQuestion.value = "";
@@ -214,7 +213,7 @@ function startEdit(row) {
   editingId = row.id;
   els.formTitle.textContent = "Edit Q&A";
   setIconButton(els.saveBtn, "save", "Update Q&A");
-  els.formHint.textContent = "Update the fields below, then click Update Q&A. Cancel to discard.";
+  if (els.formHint) els.formHint.textContent = "";
   els.editBanner.hidden = false;
   els.editBannerText.textContent = `Editing: ${(row.question || "").slice(0, 80)}${
     (row.question || "").length > 80 ? "…" : ""

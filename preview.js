@@ -85,10 +85,10 @@ async function renderPreview() {
   syncSourceButtons();
   const html = resumeJsonToHtml(data, templateId);
   pageEl.srcdoc = html;
-  if (kind === "last") {
-    ledeEl.textContent = `Last generated resume · ${template.label}`;
-  } else {
-    ledeEl.textContent = `Sample layout · ${template.label} — next generate uses the active person’s content.`;
+  if (ledeEl) {
+    ledeEl.hidden = false;
+    ledeEl.textContent =
+      kind === "last" ? `Last generated · ${template.label}` : `Sample · ${template.label}`;
   }
 }
 

@@ -49,7 +49,6 @@
             <span class="step" aria-hidden="true">1</span>
             <div class="section-copy">
               <p class="section-title">Person</p>
-              <p class="section-sub">Upload a resume to fill contact, prompt, and employers — then bid.</p>
             </div>
           </header>
           <div class="row-split">
@@ -96,7 +95,7 @@
               </button>
             </div>
           </div>
-          <label class="field file-field" title="One upload fills contact, prompt, and employers. Use Edit or add profile to review.">
+          <label class="field file-field">
             <span>Add or update from resume file</span>
             <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
           </label>
@@ -365,15 +364,14 @@
             <span class="step" aria-hidden="true">2</span>
             <div class="section-copy">
               <p class="section-title">Resume style</p>
-              <p class="section-sub">Ten US senior-engineer layouts — ATS, Big Tech, consulting, finance, and executive.</p>
             </div>
           </header>
           <div class="row-split">
-            <label class="field grow" title="Style only — content comes from the active person">
+            <label class="field grow">
               <span>Resume template</span>
               <select id="templateSelect"></select>
             </label>
-            <button type="button" id="previewTemplate" class="primary compact" title="Preview this style (sample or last generated resume)">
+            <button type="button" id="previewTemplate" class="primary compact" title="Open a full-page preview of this style">
               Preview
             </button>
           </div>
@@ -385,7 +383,6 @@
             <span class="step" aria-hidden="true">3</span>
             <div class="section-copy">
               <p class="section-title">AI engine</p>
-              <p class="section-sub">ChatGPT or Claude — switch anytime before Start / Grab</p>
             </div>
             <span
               id="aiProviderState"
@@ -406,7 +403,7 @@
               <span class="engine-chip-label">ChatGPT</span>
             </span>
           </header>
-          <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine" title="Stay logged in on the selected site. Job chats are removed during cooldown.">
+          <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine">
             <button type="button" class="ai-provider-btn is-active" id="aiProviderChatgpt" data-provider="chatgpt" aria-pressed="true">
               ChatGPT
             </button>
@@ -414,15 +411,15 @@
               Claude
             </button>
           </div>
-          <p class="field-label" style="margin-top:12px;margin-bottom:6px;font-weight:600;font-size:12px;">Strong humanize (anti-AI detectors)</p>
+          <p class="field-label" style="margin-top:12px;margin-bottom:6px;font-weight:600;font-size:12px;">Strong humanize</p>
           <div class="ai-provider-toggle" role="radiogroup" aria-label="Strong humanize mode">
-            <button type="button" class="ai-provider-btn" id="humanizeOff" data-humanize="off" aria-pressed="false" title="Never append strong humanize">
+            <button type="button" class="ai-provider-btn" id="humanizeOff" data-humanize="off" aria-pressed="false" title="Off">
               Off
             </button>
-            <button type="button" class="ai-provider-btn is-active" id="humanizeAuto" data-humanize="auto" aria-pressed="true" title="Greenhouse / Ashby / Lever only">
+            <button type="button" class="ai-provider-btn is-active" id="humanizeAuto" data-humanize="auto" aria-pressed="true" title="Auto for Greenhouse / Ashby / Lever">
               Auto
             </button>
-            <button type="button" class="ai-provider-btn" id="humanizeOn" data-humanize="on" aria-pressed="false" title="Every job">
+            <button type="button" class="ai-provider-btn" id="humanizeOn" data-humanize="on" aria-pressed="false" title="Always">
               Always
             </button>
           </div>
@@ -434,7 +431,6 @@
             <span class="step" aria-hidden="true">4</span>
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
-              <p class="section-sub">CSV load → review/remove → Start</p>
             </div>
             <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
           </header>
@@ -442,7 +438,6 @@
             <span>Upload jobs CSV (optional)</span>
             <input id="csvFile" type="file" accept=".csv,text/csv" />
           </label>
-          <p class="hint">CSV load never auto-starts. Review with Open / trash icons, then Start.</p>
           <div class="row row-2">
             <button type="button" id="csvRefresh" class="ghost" title="Re-read pinned file, URL, or native watcher">
               Refresh CSV
@@ -455,10 +450,6 @@
             Auto-source settings
           </button>
           <div class="panel-body" id="csvSourcePanelBody" hidden>
-            <p class="hint">
-              Cron updates every ~12h: pin the file, set a CSV URL, and/or install the native watcher. Refresh merges
-              <strong>new</strong> jobs for review. Generation starts only when you click Start.
-            </p>
             <div class="grid-2">
               <label class="field">
                 <span>Poll every (minutes)</span>
@@ -536,9 +527,6 @@
               </button>
             </div>
           </div>
-          <p class="hint" id="diceInterleaveHint">
-            Dice / Workday / Greenhouse / Jobgether→ATS: build → autofill → Submit → next. Other external ATS links are never auto-submitted.
-          </p>
           <div id="csvSummary" class="csv-summary is-idle">
             <span class="summary-idle">No jobs loaded</span>
           </div>
@@ -573,7 +561,6 @@
           <div id="queueList" class="queue-list">
             <div class="queue-empty">
               <p>Queue is empty</p>
-              <span>Upload a CSV, then review before Start</span>
             </div>
           </div>
         </section>
@@ -584,7 +571,6 @@
             <span class="step" aria-hidden="true">5</span>
             <div class="section-copy">
               <p class="section-title">Manual one-off</p>
-              <p class="section-sub">Single JD without a CSV row</p>
             </div>
           </header>
           <button type="button" class="panel-toggle" id="toggleManualPanel" aria-expanded="false">
@@ -618,7 +604,6 @@
               <button type="button" id="pasteJd" class="ghost">Paste JD</button>
               <button type="button" id="runOneOff" class="primary">Generate (auto)</button>
             </div>
-            <p class="hint">Sends prompt to the selected AI engine, waits for JSON automatically, then saves resume + cover letter.</p>
           </div>
         </section>
 
@@ -631,7 +616,6 @@
             <span class="step" aria-hidden="true">*</span>
             <div class="section-copy">
               <p class="section-title">Indeed</p>
-              <p class="section-sub">Select a job on Indeed, then grab it here</p>
             </div>
             <span id="indeedGrabState" class="state-pill" data-state="idle">idle</span>
           </header>
@@ -640,16 +624,11 @@
             <li>Grab job</li>
             <li>Resume + apply</li>
           </ol>
-          <p class="hint">
-            On Indeed, filter yourself and open/select one job (right-hand details). Then click
-            <strong>Grab &amp; auto-apply</strong>. The bot reads title, company, JD, link, salary,
-            builds the resume, logs the Google Sheet, and fully submits only Apply-on-Indeed flows.
-          </p>
           <div class="row row-2">
             <button type="button" id="indeedGrabApply" class="primary">Grab &amp; auto-apply</button>
             <button type="button" id="indeedGrabOnly" class="ghost">Grab to queue only</button>
           </div>
-          <p id="indeedGrabStatus" class="hint">Select a job on Indeed, then grab it.</p>
+          <p id="indeedGrabStatus" class="hint">Idle</p>
         </section>
 
         <!-- Apply -->
@@ -658,7 +637,6 @@
             <span class="step" aria-hidden="true">6</span>
             <div class="section-copy">
               <p class="section-title">Apply assist</p>
-              <p class="section-sub">Fill the open application tab</p>
             </div>
           </header>
           <label class="checkbox-field toggle-field">
@@ -678,14 +656,12 @@
               Auto Apply
               <kbd>Ctrl+Shift+U</kbd>
             </button>
-          </div>
-          <p class="hint"><strong>Autofill</strong> opens the panel on the application tab and fills this step. <strong>Auto Apply</strong> advances through multi-step forms (stops before Submit unless allowed above).</p>
+            </div>
           <div class="qa-bank-block">
             <div class="qa-bank-head">
               <p class="subsection-title">Q&amp;A bank</p>
               <span class="qa-bank-note" id="qaBankNote">0 saved</span>
             </div>
-            <p class="hint">Reusable answers for the active person (used before OpenAI).</p>
             <label class="checkbox-field">
               <span>Learn mode — save answers you type on forms</span>
               <input type="checkbox" id="qaLearnToggle" checked />
@@ -699,7 +675,6 @@
               </div>
               <input type="file" id="qaImportInput" accept="application/json,.json" hidden />
             </div>
-            <p class="hint qa-toolbar-legend">Editor · Bundled · Import · Export</p>
           </div>
         </section>
 
@@ -709,7 +684,6 @@
             <span class="step step-muted" aria-hidden="true">7</span>
             <div class="section-copy">
               <p class="section-title">Integrations</p>
-              <p class="section-sub">Google Sheet · AI pacing · Slack</p>
             </div>
           </header>
           <button type="button" class="panel-toggle" id="toggleIntegrationsPanel" aria-expanded="false">
@@ -718,9 +692,6 @@
           <div class="panel-body" id="integrationsPanelBody" hidden>
             <div class="subblock" id="spreadsheetSection">
               <p class="subsection-title">Google Sheet</p>
-              <p class="hint">
-                Per active person. Batch build logs Ready; Apply sets Applied with local date/time.
-              </p>
               <label class="field">
                 <span>Spreadsheet link</span>
                 <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />
@@ -735,7 +706,6 @@
             </div>
             <div class="subblock" id="chatgptPacingSection">
               <p class="subsection-title">AI pacing</p>
-              <p class="hint">Longer gaps reduce rate limits (especially ChatGPT). Hard-pause after too many hits in one batch.</p>
               <div class="row-split">
                 <label class="field grow">
                   <span>Seconds between jobs</span>
@@ -749,7 +719,6 @@
             </div>
             <div class="subblock" id="slackSection">
               <p class="subsection-title">Slack alert</p>
-              <p class="hint">Error pings + batch-complete summary via Incoming Webhook.</p>
               <div class="row-split">
                 <label class="field grow">
                   <span>Incoming Webhook URL</span>

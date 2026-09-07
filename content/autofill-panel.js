@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-08-29.panel05";
+  const PANEL_BUILD = "2026-08-29.panel06";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -144,7 +144,7 @@
     const list = qs("#fieldList");
     if (!list) return;
     if (!state.fields.length) {
-      list.innerHTML = `<li class="panel-hint">No fields detected yet. Open an application form step.</li>`;
+      list.innerHTML = `<li class="panel-hint">No fields detected yet.</li>`;
       return;
     }
     const { needs, matched, filled } = fieldBuckets();
@@ -193,7 +193,6 @@
     const profileDot = qs("#profileDot");
     const siteChip = qs("#siteChip");
     const modeChip = qs("#modeChip");
-    const modeHint = qs("#modeHint");
     const statsRow = qs("#statsRow");
     const resultBanner = qs("#resultBanner");
 
@@ -241,15 +240,6 @@
       modeChip.textContent = live ? "Auto-submit" : "Review first";
       modeChip.classList.toggle("submit-on", live);
       modeChip.classList.toggle("submit-off", !live);
-    }
-    if (modeHint) {
-      const live =
-        state.running && typeof state.liveAutoSubmit === "boolean"
-          ? state.liveAutoSubmit
-          : state.allowSubmit;
-      modeHint.textContent = live
-        ? "Will click Submit on allowed hosted ATS pages."
-        : "Stops before Submit so you can review.";
     }
     if (statsRow) {
       const { needs, matched, filled } = fieldBuckets();
@@ -339,7 +329,6 @@
               <span>Allow auto submit</span>
               <input type="checkbox" id="allowSubmitToggle" checked />
             </label>
-            <p class="mode-hint" id="modeHint"></p>
             <div class="progress-block" id="progressBlock" hidden>
               <div class="progress-head">
                 <span>Autofilling… <strong id="progressPct">0%</strong></span>
@@ -352,7 +341,6 @@
             <p class="panel-status" id="statusText"></p>
             <p class="field-section-title">Fields</p>
             <ul class="field-list" id="fieldList"></ul>
-            <p class="panel-hint">Profile → Q&amp;A bank → OpenAI. Click a field to highlight it on the page.</p>
           </div>
         </div>
       </div>
