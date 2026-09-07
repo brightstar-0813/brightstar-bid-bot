@@ -521,7 +521,6 @@ let aiProviderCache = AI_PROVIDERS.CHATGPT;
 const humanizeOffBtn = document.getElementById("humanizeOff");
 const humanizeAutoBtn = document.getElementById("humanizeAuto");
 const humanizeOnBtn = document.getElementById("humanizeOn");
-const humanizeHintEl = document.getElementById("humanizeHint");
 let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
@@ -976,18 +975,6 @@ function renderHumanizeMode(mode) {
     const active = btn.dataset.humanize === humanizeModeCache;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
-  }
-  if (humanizeHintEl) {
-    if (humanizeModeCache === STRONG_HUMANIZE_MODES.ON) {
-      humanizeHintEl.textContent =
-        "Always appends US resume voice + anti-AI wording rules to every resume prompt. Still returns JSON only.";
-    } else if (humanizeModeCache === STRONG_HUMANIZE_MODES.OFF) {
-      humanizeHintEl.textContent =
-        "Strong humanize is off. Resume prompts use the track template only.";
-    } else {
-      humanizeHintEl.textContent =
-        "Auto appends US resume voice + anti-AI wording rules for Greenhouse / Ashby / Lever jobs only. Still returns JSON only.";
-    }
   }
 }
 

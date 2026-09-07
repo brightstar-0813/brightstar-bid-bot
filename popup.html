@@ -96,11 +96,10 @@
               </button>
             </div>
           </div>
-          <label class="field file-field">
+          <label class="field file-field" title="One upload fills contact, prompt, and employers. Use Edit or add profile to review.">
             <span>Add or update from resume file</span>
             <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
           </label>
-          <p class="hint">One upload fills contact, prompt, and employers from the file. Use <strong>Edit or add profile</strong> to review fields, save custom copies, or start from a built-in preset.</p>
           <div id="personImportNotice" class="person-import-notice" hidden></div>
           <button type="button" class="panel-toggle" id="toggleProfileEditorPanel" aria-expanded="false">
             Edit or add profile
@@ -370,15 +369,14 @@
             </div>
           </header>
           <div class="row-split">
-            <label class="field grow">
+            <label class="field grow" title="Style only — content comes from the active person">
               <span>Resume template</span>
               <select id="templateSelect"></select>
             </label>
-            <button type="button" id="previewTemplate" class="primary compact" title="Open a full-page preview of this style">
+            <button type="button" id="previewTemplate" class="primary compact" title="Preview this style (sample or last generated resume)">
               Preview
             </button>
           </div>
-          <p class="hint">Style only — the active person’s resume content stays the same. Preview uses a sample layout, or your last generated resume.</p>
         </section>
 
         <!-- AI engine -->
@@ -408,7 +406,7 @@
               <span class="engine-chip-label">ChatGPT</span>
             </span>
           </header>
-          <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine">
+          <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine" title="Stay logged in on the selected site. Job chats are removed during cooldown.">
             <button type="button" class="ai-provider-btn is-active" id="aiProviderChatgpt" data-provider="chatgpt" aria-pressed="true">
               ChatGPT
             </button>
@@ -416,24 +414,18 @@
               Claude
             </button>
           </div>
-          <p class="hint">
-            Stay logged in on the selected site. After each job’s files are saved, that job’s chat is removed during the cooldown before the next job.
-          </p>
           <p class="field-label" style="margin-top:12px;margin-bottom:6px;font-weight:600;font-size:12px;">Strong humanize (anti-AI detectors)</p>
           <div class="ai-provider-toggle" role="radiogroup" aria-label="Strong humanize mode">
-            <button type="button" class="ai-provider-btn" id="humanizeOff" data-humanize="off" aria-pressed="false" title="Never append the strong humanize appendix">
+            <button type="button" class="ai-provider-btn" id="humanizeOff" data-humanize="off" aria-pressed="false" title="Never append strong humanize">
               Off
             </button>
-            <button type="button" class="ai-provider-btn is-active" id="humanizeAuto" data-humanize="auto" aria-pressed="true" title="Append for Greenhouse / Ashby / Lever jobs">
+            <button type="button" class="ai-provider-btn is-active" id="humanizeAuto" data-humanize="auto" aria-pressed="true" title="Greenhouse / Ashby / Lever only">
               Auto
             </button>
-            <button type="button" class="ai-provider-btn" id="humanizeOn" data-humanize="on" aria-pressed="false" title="Append strong humanize + US resume voice for every job">
+            <button type="button" class="ai-provider-btn" id="humanizeOn" data-humanize="on" aria-pressed="false" title="Every job">
               Always
             </button>
           </div>
-          <p class="hint" id="humanizeHint">
-            Auto appends US resume voice + anti-AI wording rules for Greenhouse / Ashby / Lever jobs only. Still returns JSON only.
-          </p>
         </section>
 
         <!-- Jobs queue (CSV + shared batch) -->
