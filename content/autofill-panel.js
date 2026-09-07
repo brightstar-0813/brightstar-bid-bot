@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-08-29.panel03";
+  const PANEL_BUILD = "2026-08-29.panel04";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -19,7 +19,11 @@
     if (/\/apply\//i.test(pathQuery)) return true;
     if (/[?&]apply(?:=|&|$)/i.test(location.search)) return true;
     if (/myworkdayjobs\.com$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
-    if (/greenhouse\.io$/i.test(host) && /\/(embed\/)?job_app\b|\/jobs\/[^/]+\/apply/i.test(pathQuery)) {
+    if (
+      /greenhouse\.io$/i.test(host) &&
+      (/\/(embed\/)?job_app\b|\/jobs\/[^/]+\/apply|\/jobs\/\d+/i.test(pathQuery) ||
+        /[?&]gh_jid=/i.test(pathQuery))
+    ) {
       return true;
     }
     if (/lever\.co$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
@@ -310,6 +314,10 @@
     if (probeAttempts < MAX_PROBE_ATTEMPTS) {
       probeAttempts += 1;
       setTimeout(initPanelVisibility, 1500);
+      return;
+    }
+    if (isAtsHost()) {
+      showPanelTab({ expand: false });
     }
   }
 
@@ -387,6 +395,16 @@
   }
 
   function handleProgress(msg) {
+    const expandPanel =
+      state.expanded ||
+      state.running ||
+      msg.phase === "start" ||
+      msg.phase === "step" ||
+      msg.phase === "field" ||
+      msg.phase === "filled" ||
+      msg.phase === "advance" ||
+      msg.phase === "scan";
+    showPanelTab({ expand: expandPanel });
     if (msg.phase === "field") {
       if (msg.id) {
         fieldStatusMap.set(msg.id, msg.status || "done");
