@@ -1688,27 +1688,66 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
 }
 
 function startDownload(url, filename) {
+  const safeName = assertDownloadsRelativeFilename(filename);
   return new Promise((resolve, reject) => {
     chrome.downloads.download(
       {
         url,
-        filename,
+        filename: safeName,
         saveAs: false,
         conflictAction: "uniquify"
       },
       (downloadId) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+          reject(
+            new Error(
+              `${chrome.runtime.lastError.message} (filename: ${safeName})`
+            )
+          );
           return;
         }
         if (typeof downloadId !== "number") {
-          reject(new Error("Chrome refused the download (no id returned)."));
+          reject(new Error(`Chrome refused the download (no id returned; filename: ${safeName}).`));
           return;
         }
         resolve(downloadId);
       }
     );
   });
+}
+
+/**
+ * chrome.downloads only accepts paths relative to Downloads.
+ * Absolute / empty / ".." paths make Chromium save data: URLs as bare "download"
+ * (sometimes "download.js" when MIME is mis-guessed).
+ */
+function assertDownloadsRelativeFilename(filename) {
+  let s = String(filename || "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (!s) {
+    throw new Error("Download filename is empty — refusing to save as generic download.");
+  }
+  if (/^[a-zA-Z]:\//.test(s) || s.startsWith("/") || s.startsWith("//")) {
+    throw new Error(
+      `Download path must be relative to Downloads (got absolute: ${s}). Use Applications-{Name}/…`
+    );
+  }
+  if (s.split("/").some((part) => part === ".." || part === "")) {
+    throw new Error(`Download path has invalid segments: ${s}`);
+  }
+  // Strip a leading "Downloads/" if the user pasted a full path fragment.
+  s = s.replace(/^Downloads\//i, "");
+  if (!s || /^download(\.\w+)?$/i.test(s.split("/").pop() || "")) {
+    throw new Error(`Refusing unsafe download filename: ${filename}`);
+  }
+  return s;
+}
+
+async function downloadDataUrl(url, filename) {
+  const downloadId = await startDownload(url, filename);
+  await waitForDownloadComplete(downloadId);
+  return downloadId;
 }
 
 /**
@@ -1765,12 +1804,6 @@ function waitForDownloadComplete(downloadId, timeoutMs = 60000) {
   });
 }
 
-async function downloadDataUrl(url, filename) {
-  const downloadId = await startDownload(url, filename);
-  await waitForDownloadComplete(downloadId);
-  return downloadId;
-}
-
 /** data: URLs have size limits — keep JD downloads under a safe ceiling. */
 function downloadTextFile(text, mimeType, filename) {
   let body = String(text || "");
@@ -1800,8 +1833,8 @@ function sanitizePathSegment(value, fallback = "untitled") {
 
 /**
  * Prefer the active person's Applications-{Name} folder.
- * Honor an explicit non-generic batch override; never keep absolute paths
- * (Chrome then saves data: URLs as a generic "download" file).
+ * Explicit override wins only when it already matches that person folder
+ * (never keep a stale Applications-Other or absolute path).
  */
 async function resolveOutputDir(explicit = "") {
   let personDir = "";
@@ -1813,11 +1846,16 @@ async function resolveOutputDir(explicit = "") {
   }
 
   const fromArg = normalizeDownloadsRelativeDir(explicit, "");
-  if (fromArg && !isGenericApplicationsDir(fromArg)) {
-    return fromArg;
+  if (fromArg && personDir) {
+    const argTop = fromArg.split("/")[0].toLowerCase();
+    const personTop = personDir.split("/")[0].toLowerCase();
+    if (argTop === personTop || fromArg.toLowerCase().startsWith(`${personTop}/`)) {
+      return fromArg;
+    }
   }
-
   if (personDir) return personDir;
+
+  if (fromArg && !isGenericApplicationsDir(fromArg)) return fromArg;
 
   try {
     const data = await chrome.storage.local.get(["output_dir", "batch_output_dir"]);
@@ -1825,8 +1863,13 @@ async function resolveOutputDir(explicit = "") {
       data.output_dir || data.batch_output_dir || "",
       ""
     );
-    if (stored && !isGenericApplicationsDir(stored)) return stored;
-    if (stored) return stored;
+    if (stored && personDir) {
+      const storedTop = stored.split("/")[0].toLowerCase();
+      const personTop = personDir.split("/")[0].toLowerCase();
+      if (storedTop === personTop) return stored;
+    }
+    if (stored && !isGenericApplicationsDir(stored) && !personDir) return stored;
+    if (stored && !personDir) return stored;
   } catch {
     // ignore
   }
@@ -2875,7 +2918,9 @@ async function readChatReadiness(tabId, provider) {
  * Hard-guarantee a blank chat before each job. Clicking "New chat"
  * control silently no-ops on some builds, and the poller then harvests the
  * PREVIOUS job's resume JSON — wrong resume, saved under the new company.
- * Navigating the tab is deterministic; the in-page click stays as a fallback.
+ * Navigating the tab is deterministic; the in-page click stays as a fallback
+ * only when navigation never left a prior /c/... conversation.
+ * @returns {{ ok: boolean, navigated: boolean }}
  */
 async function ensureFreshChat(tabId, provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
@@ -2886,25 +2931,53 @@ async function ensureFreshChat(tabId, provider) {
     await chrome.tabs.update(tabId, { url: base });
     await withTimeout(waitForTabComplete(tabId, 30000), 32000, `Timed out loading a new ${label} chat.`);
   } catch {
-    return false;
+    return { ok: false, navigated: false };
   }
 
   // The composer mounts after load; assistant blocks must be gone.
   for (let i = 0; i < 40; i += 1) {
     const state = await readChatReadiness(tabId, p);
-    if (state.hasInput && state.assistantBlocks === 0) return true;
+    if (state.hasInput && state.assistantBlocks === 0) return { ok: true, navigated: true };
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  return false;
+  // Navigated to blank URL but composer not ready — do NOT click New chat again
+  // (that opens a second empty chat). Caller should wait/retry send instead.
+  return { ok: false, navigated: true };
+}
+
+/** True when the AI tab is still on a prior conversation URL. */
+async function aiTabStillOnPriorConversation(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const url = String(tab?.url || "");
+    if (p === AI_PROVIDERS.CLAUDE) return /\/chat\/[a-f0-9-]+/i.test(url);
+    return /\/c\/[a-zA-Z0-9_-]+/.test(url);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * After opening a fresh chat for a job, decide whether an in-page "New chat"
+ * click is still needed. Never double-open when navigation already left /c/...
+ */
+async function shouldUseInPageNewChat(tabId, provider, freshResult) {
+  if (freshResult?.ok) return false;
+  if (freshResult?.navigated) {
+    // Already on / or /new — only click if somehow still on a prior conversation.
+    return aiTabStillOnPriorConversation(tabId, provider);
+  }
+  // Navigate failed — fall back to in-page New chat.
+  return true;
 }
 
 async function chatgptSendPrompt(tabId, prompt, startNewChat) {
-  // Navigate to a blank chat first; only fall back to the in-page "New chat"
-  // click when navigation did not produce an empty conversation.
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
-    needsInPageNewChat = !(await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT));
+    const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT);
+    needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CHATGPT, fresh);
   }
 
   let lastError = null;
@@ -3418,7 +3491,8 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
     await setStatus("Opening a fresh Claude chat…");
-    needsInPageNewChat = !(await ensureFreshChat(tabId, AI_PROVIDERS.CLAUDE));
+    const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CLAUDE);
+    needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CLAUDE, fresh);
   }
 
   let lastError = null;
@@ -3868,6 +3942,35 @@ async function readAiConversationId(tabId, provider) {
   } catch {
     return "";
   }
+}
+
+/**
+ * Persist conversation id as soon as the first resume message creates /c/<id>
+ * so failed jobs can still delete the chat before a batch retry.
+ */
+async function rememberAiChatFromTab(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  let chatId = await readAiConversationId(tabId, p);
+  if (!chatId) {
+    for (let i = 0; i < 16 && !chatId; i += 1) {
+      await sleep(250);
+      chatId = await readAiConversationId(tabId, p);
+    }
+  }
+  if (chatId) {
+    await chrome.storage.local
+      .set({ last_ai_chat_id: chatId, last_ai_provider: p })
+      .catch(() => {});
+  }
+  return chatId || "";
+}
+
+function attachAiContextToError(err, { aiTabId = null, aiChatId = "", aiProvider = "" } = {}) {
+  const error = err instanceof Error ? err : new Error(String(err?.message || err));
+  if (typeof aiTabId === "number") error.aiTabId = aiTabId;
+  if (aiChatId) error.aiChatId = String(aiChatId);
+  if (aiProvider) error.aiProvider = aiProvider;
+  return error;
 }
 
 /**
@@ -5461,7 +5564,21 @@ async function runGenerationPipeline({ jobMeta, jsonText }) {
   const rawText = JSON.stringify(data, null, 2);
   const tab = await getOpenChatGptTab();
   await chrome.storage.local.set({ last_response: rawText });
-  return saveResumeAndCoverLetter(tab?.id, rawText, data, jobMeta || {}, {
+  const person = await getActivePerson().catch(() => null);
+  const resumeFilePrefix = normalizeResumeFilePrefix(
+    jobMeta?.resumeFilePrefix || person?.resumeFilePrefix,
+    person?.name || person?.label || data?.name || ""
+  );
+  const enrichedMeta = {
+    ...(jobMeta || {}),
+    resumeFilePrefix,
+    personName: person?.name || person?.label || data?.name || "",
+    templateId: await pickTemplateId(jobMeta || {}, person || {}),
+    outputDir: person
+      ? outputDirFromPerson({ ...person, resumeFilePrefix })
+      : await resolveOutputDir(jobMeta?.outputDir || "")
+  };
+  return saveResumeAndCoverLetter(tab?.id, rawText, data, enrichedMeta, {
     runCoverLetter: true
   });
 }
@@ -5572,7 +5689,9 @@ async function runAutoJob(jobMeta) {
   if (!tab || typeof tab.id !== "number") {
     throw new Error(`Open ${providerLabel} in a browser tab first.`);
   }
+  let jobAiChatId = "";
 
+  try {
   const person = await getActivePerson();
   const sessionRoleTrack = await getSessionRoleTrack();
   const personRoleTrack = resolveRoleTrackForPerson(person);
@@ -5666,6 +5785,12 @@ async function runAutoJob(jobMeta) {
         ? `Chat 1/1 · resume JSON (${jobMeta.companyName || "job"})…`
         : `Same chat · retry resume JSON (${jobMeta.companyName || "job"})…`
     });
+
+    // Persist chat id as soon as the first resume message creates the conversation
+    // so a later failure can delete it before batch retry (avoids twin "Rewrite…" chats).
+    if (isFirst) {
+      jobAiChatId = await rememberAiChatFromTab(tab.id, provider);
+    }
 
     if (batchControl.skipCurrent || batchControl.stop) {
       throw new Error("__SKIP__");
@@ -5940,20 +6065,22 @@ async function runAutoJob(jobMeta) {
   }
 
   // Capture conversation id now; chat is deleted later during inter-job cooldown.
-  let aiChatId = await readAiConversationId(tab.id, provider);
-  if (!aiChatId) {
-    for (let i = 0; i < 10 && !aiChatId; i += 1) {
-      await sleep(400);
-      aiChatId = await readAiConversationId(tab.id, provider);
-    }
+  if (!jobAiChatId) {
+    jobAiChatId = await rememberAiChatFromTab(tab.id, provider);
   }
-  if (aiChatId) {
-    await chrome.storage.local
-      .set({ last_ai_chat_id: aiChatId, last_ai_provider: provider })
-      .catch(() => {});
-  }
+  const aiChatId = jobAiChatId;
 
   return { ...result, atsEvaluation, aiTabId: tab.id, aiChatId, aiProvider: provider };
+  } catch (err) {
+    if (!jobAiChatId) {
+      jobAiChatId = await rememberAiChatFromTab(tab.id, provider).catch(() => "");
+    }
+    throw attachAiContextToError(err, {
+      aiTabId: tab.id,
+      aiChatId: jobAiChatId,
+      aiProvider: provider
+    });
+  }
 }
 
 async function runBatchLoop(outputDir) {
@@ -6310,8 +6437,8 @@ async function runBatchLoop(outputDir) {
         }
         if (batchControl.stop) {
           await cooldownBeforeNextJob({
-            aiTabId: null,
-            aiChatId: "",
+            aiTabId: err?.aiTabId ?? null,
+            aiChatId: err?.aiChatId || "",
             reason: "stop"
           });
           break;
@@ -6378,9 +6505,10 @@ async function runBatchLoop(outputDir) {
           maxAttempts: MAX_JOB_ATTEMPTS,
           progress: await queueSlackProgress()
         });
+        // Delete the failed attempt's chat before retry so Recents don't show twins.
         await cooldownBeforeNextJob({
-          aiTabId: null,
-          aiChatId: "",
+          aiTabId: err?.aiTabId ?? null,
+          aiChatId: err?.aiChatId || "",
           reason: "next job after error"
         });
         continue;
@@ -8103,6 +8231,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         );
 
         // Always save directly — do not wait for a stuck poller.
+        const resumeFilePrefix = normalizeResumeFilePrefix(
+          person.resumeFilePrefix,
+          person.name || person.label || data?.name || ""
+        );
         const result = await saveResumeAndCoverLetter(
           tab.id,
           JSON.stringify(data, null, 2),
@@ -8114,12 +8246,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             jdLink: job.jdLink || "",
             jdText: job.jdText || "",
             salary: job.salary || "",
-            outputDir: outputDirFromPerson(person),
+            outputDir: outputDirFromPerson({ ...person, resumeFilePrefix }),
             templateId: await pickTemplateId({}, person),
-            resumeFilePrefix: normalizeResumeFilePrefix(
-              person.resumeFilePrefix,
-              person.name || person.label || ""
-            ),
+            resumeFilePrefix,
             personName: person.name || person.label || ""
           },
           { runCoverLetter: true }

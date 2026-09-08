@@ -8,7 +8,7 @@
 
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson, personToAtsCredentials, DEFAULT_ATS_PASSWORD } from "./profiles.js";
 import { applyCompleteness } from "./person-profile-form.js";
-import { outputDirFromPerson } from "./resume-profile.js";
+import { outputDirFromPerson, normalizeDownloadsRelativeDir, isGenericApplicationsDir } from "./resume-profile.js";
 import {
   buildWorkHistory,
   buildEducationHistory,
@@ -164,19 +164,33 @@ function folderFitsJob(jobDir, job = {}) {
 }
 
 async function resolveAppsOutputDir() {
+  let personDir = "";
+  try {
+    const person = await getActivePerson();
+    personDir = outputDirFromPerson(person);
+  } catch {
+    personDir = "";
+  }
   try {
     const data = await chrome.storage.local.get(["output_dir", "batch_output_dir"]);
-    const stored = String(data.output_dir || data.batch_output_dir || "").trim();
+    const stored = normalizeDownloadsRelativeDir(
+      data.output_dir || data.batch_output_dir || "",
+      ""
+    );
+    if (stored && personDir) {
+      const storedTop = stored.split("/")[0].toLowerCase();
+      const personTop = personDir.split("/")[0].toLowerCase();
+      if (storedTop === personTop || stored.toLowerCase().startsWith(`${personTop}/`)) {
+        return stored;
+      }
+    }
+    if (personDir) return personDir;
+    if (stored && !isGenericApplicationsDir(stored)) return stored;
     if (stored) return stored;
   } catch {
     // ignore
   }
-  try {
-    const person = await getActivePerson();
-    return outputDirFromPerson(person);
-  } catch {
-    return "Applications";
-  }
+  return personDir || "Applications";
 }
 
 async function listJobFoldersFromDownloads() {

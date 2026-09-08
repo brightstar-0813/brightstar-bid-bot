@@ -945,12 +945,21 @@ async function loadActivePersonIntoForm() {
 }
 
 async function persistJobFields() {
+  const person = await getActivePerson().catch(() => null);
+  const personDir = person ? outputDirFromPerson(person) : "";
+  let outputDir = normalizeDownloadsRelativeDir(
+    (outputDirEl?.value || "").trim(),
+    personDir || DEFAULT_OUTPUT_DIR
+  );
+  if (isGenericApplicationsDir(outputDir) && personDir) outputDir = personDir;
+  if (outputDirEl) outputDirEl.value = outputDir;
   await chrome.storage.local.set({
     last_job_title: jobTitleEl.value,
     last_company_name: companyNameEl.value,
     last_jd_link: jdLinkEl.value,
     last_jd_text: jdTextEl.value,
-    output_dir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR,
+    output_dir: outputDir,
+    batch_output_dir: outputDir,
     slack_webhook_url: slackWebhookUrlEl.value.trim()
   });
   await persistActivePersonSheetFromUi();
