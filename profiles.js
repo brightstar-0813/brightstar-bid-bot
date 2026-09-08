@@ -25,6 +25,7 @@ import {
   normalizeStrongHumanizeMode,
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
+import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
 import {
   normalizeResumeFilePrefix,
   outputDirFromPerson
@@ -207,7 +208,8 @@ export function applyPlaceholders(
     linkedin = "",
     location = "",
     address = "",
-    headline = ""
+    headline = "",
+    sfProjectBank = SF_ENTERPRISE_PROJECT_BANK
   } = {}
 ) {
   return String(template || "")
@@ -215,6 +217,7 @@ export function applyPlaceholders(
     .replaceAll("{JOB_TITLE}", jobTitle)
     .replaceAll("{COMPANY}", companyName)
     .replaceAll("{MASTER_RESUME}", masterResume)
+    .replaceAll("{SF_PROJECT_BANK}", sfProjectBank)
     .replaceAll("{NAME}", name)
     .replaceAll("{EMAIL}", email)
     .replaceAll("{PHONE}", phone)
@@ -222,6 +225,24 @@ export function applyPlaceholders(
     .replaceAll("{LOCATION}", location)
     .replaceAll("{ADDRESS}", address)
     .replaceAll("{HEADLINE}", headline);
+}
+
+const SF_PROJECT_BANK_APPENDIX =
+  "\n\n==================================================\n" +
+  "ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY\n" +
+  "==================================================\n" +
+  "Treat as PROJECT PATTERN AND ARCHITECTURE REFERENCE only — never as the candidate's claimed employers or official project titles.\n\n" +
+  "{SF_PROJECT_BANK}";
+
+/** Append built-in SF project bank when the template lacks {SF_PROJECT_BANK}. */
+export function ensureSfProjectBankInTemplate(template, roleTrack) {
+  const track = normalizeRoleTrackId(roleTrack);
+  const text = String(template || "");
+  if (track !== "sf") return text;
+  if (text.includes("{SF_PROJECT_BANK}") || text.includes("Patient 360 + EHR Integration Platform")) {
+    return text;
+  }
+  return `${text.trimEnd()}${SF_PROJECT_BANK_APPENDIX}`;
 }
 
 const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman"]);
@@ -546,7 +567,10 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
     extras.roleTrack ||
       resolveEffectiveRoleTrack(person, extras.sessionRoleTrack || "")
   );
-  const promptTemplate = resolvePromptTemplateForTrack(person, roleTrack);
+  const promptTemplate = ensureSfProjectBankInTemplate(
+    resolvePromptTemplateForTrack(person, roleTrack),
+    roleTrack
+  );
   if (!promptTemplate) {
     throw new Error("Selected profile has no prompt content.");
   }

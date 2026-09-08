@@ -43,6 +43,7 @@ Prefer short control labels and live status text over long instructional hints i
 | AI content scripts | `content.js`, `content-claude.js` |
 | AI provider preference | `ai-provider.js` |
 | Tracks + default prompts | `role-tracks.js`, `prompts/*` |
+| SF enterprise project bank | `prompts/sf-enterprise-projects.txt` (+ `.js` export); injected via `{SF_PROJECT_BANK}` in `profiles.js` `buildPrompt` |
 | Strong humanize (anti-AI resume voice) | `prompts/humanize-resume.js` (+ AI engine toggle) |
 | ATS score | `ats-score.js` |
 | Indeed hosted vs external | `indeed.js` |
