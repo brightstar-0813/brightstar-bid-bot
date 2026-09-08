@@ -5249,14 +5249,45 @@
     return "";
   }
 
+  // Already applied (Dice / ATS) — distinct from inactive; do not mark as gone.
+  const ALREADY_APPLIED_RE = new RegExp(
+    [
+      "you(?:'|’)?(?:ve| have) already applied",
+      "already applied to (this|the) (job|position|role|posting|listing)",
+      "you previously applied (to|for) (this|the) (job|position|role)",
+      "we have your application on file",
+      "application (is )?already on file",
+      "you(?:'|’)?(?:ve| have) already submitted (an |your )?application"
+    ].join("|"),
+    "i"
+  );
+
+  /** @returns {string} short reason when the page says already applied, else "" */
+  function detectAlreadyApplied() {
+    // Prefer headings / alerts before the long body scan.
+    const headings = queryAllDeep("h1, h2, [role='heading'], [role='alert']")
+      .map((el) => cleanLabelText(el.textContent))
+      .filter(Boolean);
+    for (const t of headings) {
+      const m = t.match(ALREADY_APPLIED_RE);
+      if (m) return (m[0] || "You've already applied").slice(0, 160);
+    }
+    const match = unavailableTextSnippet().match(ALREADY_APPLIED_RE);
+    if (match) return (match[0] || "You've already applied").slice(0, 160);
+    return "";
+  }
+
   // Dice confirmation after successful Easy Apply submit.
   const DICE_APPLY_SUCCESS_RE =
     /hooray!\s*your application is on its way|your application is on its way|find the job listing for this role in your\s+applied jobs/i;
 
   /**
-   * @returns {{ ok: boolean, text?: string }} when Dice shows the post-submit success screen
+   * @returns {{ ok: boolean, text?: string, alreadyApplied?: boolean }}
    */
   function detectDiceApplySuccess() {
+    const already = detectAlreadyApplied();
+    if (already) return { ok: true, text: already, alreadyApplied: true };
+
     const bodyText = cleanLabelText(document.body?.innerText || document.body?.textContent || "");
     if (!bodyText) return { ok: false };
     const match = bodyText.match(DICE_APPLY_SUCCESS_RE);
@@ -5581,12 +5612,33 @@
   }
 
   function detectApplySuccess() {
-    if (isIndeedPage()) return detectIndeedApplySuccess();
-    if (isDicePage()) return detectDiceApplySuccess();
-    if (isWorkdayPage()) return detectWorkdayApplySuccess();
-    if (isGreenhousePage()) return detectGreenhouseApplySuccess();
-    if (isAshbyPage()) return detectAshbyApplySuccess();
-    if (isLeverPage()) return detectLeverApplySuccess();
+    if (isIndeedPage()) {
+      const indeed = detectIndeedApplySuccess();
+      if (indeed.ok) return indeed;
+    }
+    if (isDicePage()) {
+      const dice = detectDiceApplySuccess();
+      if (dice.ok) return dice;
+    }
+    if (isWorkdayPage()) {
+      const wd = detectWorkdayApplySuccess();
+      if (wd.ok) return wd;
+    }
+    if (isGreenhousePage()) {
+      const gh = detectGreenhouseApplySuccess();
+      if (gh.ok) return gh;
+    }
+    if (isAshbyPage()) {
+      const ashby = detectAshbyApplySuccess();
+      if (ashby.ok) return ashby;
+    }
+    if (isLeverPage()) {
+      const lever = detectLeverApplySuccess();
+      if (lever.ok) return lever;
+    }
+    // Generic ATS / Dice-like banners when site heuristics miss.
+    const already = detectAlreadyApplied();
+    if (already) return { ok: true, text: already, alreadyApplied: true };
     return { ok: false };
   }
 
@@ -6191,6 +6243,8 @@
   function getApplyActionSnapshot() {
     const probe = probeApplicationForm();
     const success = detectApplySuccess();
+    const alreadyText = detectAlreadyApplied();
+    const alreadyApplied = Boolean(success.alreadyApplied) || Boolean(alreadyText);
     const emailVerification = detectGreenhouseEmailVerification();
     const workdayWizard = isWorkdayPage() ? detectWorkdayWizardState() : null;
     let action = findActionButton();
@@ -6213,8 +6267,9 @@
       blockedReason: probe.blockedReason || "",
       validationReason: probe.validationReason || "",
       jobUnavailable: probe.jobUnavailable || "",
-      applySuccess: Boolean(success.ok),
-      applySuccessText: success.text || "",
+      applySuccess: Boolean(success.ok) || alreadyApplied,
+      applySuccessText: success.text || alreadyText || "",
+      alreadyApplied,
       emailVerification: Boolean(emailVerification.ok),
       emailVerificationText: emailVerification.text || "",
       action: describeAction(action),

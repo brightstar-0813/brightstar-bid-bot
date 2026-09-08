@@ -1549,9 +1549,13 @@ function pickBestApplyAction(frameResults = []) {
     validationReason: frameResults.find((f) => f?.validationReason)?.validationReason || "",
     jobUnavailable: frameResults.find((f) => f?.jobUnavailable)?.jobUnavailable || "",
     site: best?.action?.site || frameResults.find((f) => f?.site)?.site || "",
-    applySuccess: frameResults.some((f) => f?.applySuccess),
+    applySuccess: frameResults.some((f) => f?.applySuccess || f?.alreadyApplied),
     applySuccessText:
-      frameResults.find((f) => f?.applySuccess && f?.applySuccessText)?.applySuccessText || "",
+      frameResults.find((f) => (f?.applySuccess || f?.alreadyApplied) && f?.applySuccessText)
+        ?.applySuccessText ||
+      frameResults.find((f) => f?.alreadyApplied)?.alreadyAppliedText ||
+      "",
+    alreadyApplied: frameResults.some((f) => f?.alreadyApplied),
     emailVerification: frameResults.some((f) => f?.emailVerification),
     emailVerificationText:
       frameResults.find((f) => f?.emailVerification && f?.emailVerificationText)
@@ -1591,12 +1595,15 @@ async function probeTabJobUnavailable(tabId) {
 }
 
 /**
- * Open a job URL in a background tab and check whether the posting is gone.
+ * Open a job URL in a background tab and check whether the posting is gone
+ * or already applied — so we skip ChatGPT / apply work early.
  * Caller should close tabId when done.
  */
 export async function probeJobLinkInactive(url) {
   const href = String(url || "").trim();
-  if (!href) return { unavailable: false, detail: "", tabId: null, created: false };
+  if (!href) {
+    return { unavailable: false, alreadyApplied: false, detail: "", tabId: null, created: false };
+  }
   const tab = await chrome.tabs.create({ url: href, active: false });
   try {
     await waitForTabComplete(tab.id, 35000);
@@ -1604,16 +1611,37 @@ export async function probeJobLinkInactive(url) {
     /* probe anyway */
   }
   await sleep(APPLY_SETTLE_MS);
-  const unavailable = await probeTabJobUnavailable(tab.id);
-  if (unavailable) {
+  const probe = await getApplyActionFromTab(tab.id).catch(() => null);
+  if (probe?.jobUnavailable) {
     return {
       unavailable: true,
-      detail: unavailable.detail || "inactive job",
+      alreadyApplied: false,
+      detail: probe.jobUnavailable || "inactive job",
       tabId: tab.id,
       created: true
     };
   }
-  return { unavailable: false, detail: "", tabId: tab.id, created: true };
+  const alreadyText = String(probe?.applySuccessText || "").trim();
+  const already =
+    Boolean(probe?.alreadyApplied) ||
+    (/already applied|application on file|previously applied/i.test(alreadyText) &&
+      Boolean(probe?.applySuccess));
+  if (already) {
+    return {
+      unavailable: false,
+      alreadyApplied: true,
+      detail: alreadyText || "already applied",
+      tabId: tab.id,
+      created: true
+    };
+  }
+  return {
+    unavailable: false,
+    alreadyApplied: false,
+    detail: "",
+    tabId: tab.id,
+    created: true
+  };
 }
 
 async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
@@ -2740,16 +2768,19 @@ export async function startMultiStepApplyOnTab(
       return summary;
     }
 
-    if (probe.blockedReason) {
-      summary.status = "needs_review";
-      summary.detail = probe.blockedReason;
+    if (probe.alreadyApplied || probe.applySuccess) {
+      summary.status = "submitted";
+      summary.detail =
+        probe.applySuccessText ||
+        (probe.alreadyApplied ? "You've already applied" : "Your application is on its way");
       summary.tabId = currentTabId;
+      summary.alreadyApplied = Boolean(probe.alreadyApplied);
       return summary;
     }
 
-    if (probe.applySuccess) {
-      summary.status = "submitted";
-      summary.detail = probe.applySuccessText || "Your application is on its way";
+    if (probe.blockedReason) {
+      summary.status = "needs_review";
+      summary.detail = probe.blockedReason;
       summary.tabId = currentTabId;
       return summary;
     }

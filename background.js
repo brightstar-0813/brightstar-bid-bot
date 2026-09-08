@@ -1143,6 +1143,31 @@ async function markJobSkippedAsInactive(csvRow, reason = "inactive job", jobMeta
   return sheet;
 }
 
+/** Mark a queue row Applied when the job page says already applied — skip generate/apply. */
+async function markJobSkippedAsAlreadyApplied(csvRow, reason = "already applied", jobMeta = {}) {
+  const detail = String(reason || "already applied").trim() || "already applied";
+  const sheet = await markQueueJobAppliedOnSheet({
+    csvRow,
+    jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+    companyName: jobMeta.companyName || jobMeta.company || "",
+    jdLink: jobMeta.jdLink || "",
+    salary: jobMeta.salary || "",
+    jobDir: jobMeta.jobDir || ""
+  }).catch((err) => ({ error: String(err?.message || err) }));
+  const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
+  await updateQueueJob(csvRow, {
+    status: "skipped",
+    applied: !sheet?.error,
+    inactive: false,
+    applyAttempted: true,
+    applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+    appliedDate: sheet?.error ? "" : appliedDate,
+    companySheetSkipLocked: !sheet?.error,
+    error: sheet?.error ? `Already applied; sheet mark failed: ${sheet.error}` : detail
+  }).catch(() => {});
+  return sheet;
+}
+
 /** Mark a built row inactive after apply detected the posting is gone. */
 async function markQueueJobInactive(jobMeta = {}, detail = "inactive job") {
   const sheetStatus = "inactive job";
@@ -5694,12 +5719,17 @@ async function runAutoJob(jobMeta) {
   if (jdLink) {
     if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
     await setStatus(
-      `Row ${jobMeta.csvRow != null ? `${jobMeta.csvRow}: ` : ""}checking if job posting is still active…`
+      `Row ${jobMeta.csvRow != null ? `${jobMeta.csvRow}: ` : ""}checking if job is active / already applied…`
     );
     const inactiveProbe = await probeJobLinkInactive(jdLink);
     await closeApplyTab(inactiveProbe.tabId).catch(() => false);
     if (inactiveProbe.unavailable) {
       throw new Error(`__INACTIVE_SKIP__:${inactiveProbe.detail || "inactive job"}`);
+    }
+    if (inactiveProbe.alreadyApplied) {
+      throw new Error(
+        `__ALREADY_APPLIED_SKIP__:${inactiveProbe.detail || "You've already applied to this job"}`
+      );
     }
   }
 
@@ -6454,6 +6484,19 @@ async function runBatchLoop(outputDir) {
           await setStatus(`Row ${next.csvRow}: inactive job — skipped before generate. Continuing…`);
           continue;
         }
+        if (msg.startsWith("__ALREADY_APPLIED_SKIP__:")) {
+          const reason = msg.slice("__ALREADY_APPLIED_SKIP__:".length) || "already applied";
+          await markJobSkippedAsAlreadyApplied(next.csvRow, reason, {
+            csvRow: next.csvRow,
+            jobTitle: next.title,
+            companyName: next.company,
+            jdLink: next.jdLink || ""
+          });
+          await setStatus(
+            `Row ${next.csvRow}: already applied on job page — marked Applied, skipped generate. Continuing…`
+          );
+          continue;
+        }
         if (msg === "__RATE_LIMIT_PAUSE__") {
           await cooldownBeforeNextJob({
             aiTabId: err?.aiTabId ?? null,
@@ -6831,6 +6874,18 @@ async function runIndeedGrabAndApply({ autoApply = true } = {}) {
           await setStatus(`Indeed: inactive job — skipped before generate.`);
           await setGrab("idle", `Inactive — ${job.company} / ${job.title}`);
           return { ok: true, job, skipped: true, reason, inactive: true };
+        }
+        if (genMsg.startsWith("__ALREADY_APPLIED_SKIP__:")) {
+          const reason = genMsg.slice("__ALREADY_APPLIED_SKIP__:".length) || "already applied";
+          await markJobSkippedAsAlreadyApplied(job.csvRow, reason, {
+            csvRow: job.csvRow,
+            jobTitle: job.title,
+            companyName: job.company,
+            jdLink: job.jdLink || ""
+          });
+          await setStatus(`Indeed: already applied — marked Applied, skipped generate.`);
+          await setGrab("idle", `Already applied — ${job.company} / ${job.title}`);
+          return { ok: true, job, skipped: true, reason, alreadyApplied: true };
         }
         throw genErr;
       }
@@ -8615,6 +8670,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           await setStatus(
             `Skipped inactive job — ${meta.companyName || ""} / ${meta.jobTitle || ""}`
+          );
+          return;
+        }
+        if (msg.startsWith("__ALREADY_APPLIED_SKIP__:")) {
+          const reason = msg.slice("__ALREADY_APPLIED_SKIP__:".length) || "already applied";
+          const meta = message.jobMeta || {};
+          if (meta.csvRow != null && meta.csvRow !== "") {
+            await markJobSkippedAsAlreadyApplied(meta.csvRow, reason, meta);
+          }
+          await setStatus(
+            `Already applied — marked Applied: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
           );
           return;
         }
