@@ -29,7 +29,7 @@
             type="button"
             id="openAsWindow"
             class="ghost compact icon-button topbar-icon"
-            title="Open as window app (Ctrl+Shift+A)"
+            title="Open as window app"
             aria-label="Open as window app"
           ></button>
           <button
@@ -558,6 +558,13 @@
               </div>
             </div>
           </div>
+          <div
+            id="queueNowWorking"
+            class="queue-now-working"
+            hidden
+            role="status"
+            aria-live="polite"
+          ></div>
           <div id="queueList" class="queue-list">
             <div class="queue-empty">
               <p>Queue is empty</p>
@@ -647,7 +654,11 @@
             <span>Allow auto submit</span>
             <input type="checkbox" id="allowSubmitToggle" />
           </label>
-          <div class="apply-actions">
+          <label class="checkbox-field toggle-field">
+            <span>OpenAI Custom Q&amp;A</span>
+            <input type="checkbox" id="openaiQaToggle" checked />
+          </label>
+          <div class="apply-actions apply-actions-3">
             <button type="button" id="autofillPage" class="primary" title="Open the in-page panel and fill the current step — never clicks Next or Submit">
               Autofill
               <kbd>Ctrl+Shift+Y</kbd>
@@ -655,6 +666,10 @@
             <button type="button" id="autoApplyPage" class="ghost" title="Walk Next/Continue through the form; submits when Allow auto submit is on">
               Auto Apply
               <kbd>Ctrl+Shift+U</kbd>
+            </button>
+            <button type="button" id="customQaPage" class="ghost" title="Answer leftover special questions with Q&A bank + OpenAI (requires OPENAI_API_KEY in .env)">
+              Custom Q&amp;A
+              <kbd>Ctrl+Shift+Q</kbd>
             </button>
             </div>
           <div class="qa-bank-block">

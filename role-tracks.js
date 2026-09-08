@@ -162,6 +162,7 @@ export const ROLE_TRACKS = {
       "Senior Salesforce Developer",
       "Salesforce Consultant"
     ],
+    signatureTitleFallback: "Salesforce Professional",
     atsAppendix: SF_ATS_APPENDIX,
     bulletInternalsHint:
       "Data Cloud means data streams, DMOs, identity resolution; Agentforce means agent topics, actions, Prompt Builder; Service Cloud means Cases, Queues, Omni-Channel routing; Apex/LWC/Flow mean concrete development artifacts."
@@ -192,6 +193,7 @@ export const ROLE_TRACKS = {
       "AI Data Engineer",
       "Cloud Data Engineer"
     ],
+    signatureTitleFallback: "Senior Data Engineer",
     atsAppendix: DE_ATS_APPENDIX,
     bulletInternalsHint:
       "Snowflake means warehouses, stages, tasks, streams; dbt means incremental models, snapshots, tests; Airflow means DAGs, sensors, backfills; Kafka means topics, partitions, consumer groups; Spark means jobs, stages, partitioning."
@@ -221,6 +223,7 @@ export const ROLE_TRACKS = {
       "Frontend Engineer",
       "Platform Engineer"
     ],
+    signatureTitleFallback: "Senior Software Engineer",
     atsAppendix: FS_ATS_APPENDIX,
     bulletInternalsHint:
       "React means components, hooks, state management; Node.js means Express/Fastify APIs, middleware; Kubernetes means deployments, services, ingress; CI/CD means pipelines, automated tests, deployment gates."
@@ -249,6 +252,7 @@ export const ROLE_TRACKS = {
       "Applied AI Engineer",
       "ML Engineer"
     ],
+    signatureTitleFallback: "Senior AI Engineer",
     atsAppendix: AI_ATS_APPENDIX,
     bulletInternalsHint:
       "LLM evaluation means rubrics, golden datasets, human/model judges; RAG means retrieval quality, chunking, grounding checks; regression testing means eval harnesses, baseline comparisons, failure taxonomies."
@@ -266,6 +270,11 @@ export function normalizeRoleTrackId(value) {
 
 export function getRoleTrack(id) {
   return ROLE_TRACKS[normalizeRoleTrackId(id)];
+}
+
+/** Cover-letter / autofill signature title when the person left it blank. */
+export function signatureTitleFallbackForTrack(roleTrack) {
+  return getRoleTrack(roleTrack).signatureTitleFallback || "Professional";
 }
 
 export function jdRequiredSkills(jdText, roleTrack = "sf") {

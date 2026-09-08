@@ -23,7 +23,7 @@ export const BUILTIN_TEMPLATES = [
   executiveNavyTemplate
 ];
 
-export const DEFAULT_TEMPLATE_ID = timesClassicTemplate.id;
+export const DEFAULT_TEMPLATE_ID = atsModernTemplate.id;
 
 /** Old ids kept so saved people still resolve after renames. */
 const TEMPLATE_ID_ALIASES = {

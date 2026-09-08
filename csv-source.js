@@ -111,7 +111,8 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       atsScore: j.atsScore ?? prev?.atsScore ?? null,
       atsGrade: j.atsGrade || prev?.atsGrade || "",
       atsEvaluation: j.atsEvaluation || prev?.atsEvaluation || null,
-      hasFiles: Boolean(j.hasFiles || prev?.hasFiles || j.jobDir || prev?.jobDir)
+      hasFiles: Boolean(j.hasFiles || prev?.hasFiles || j.jobDir || prev?.jobDir),
+      profileId: String(j.profileId || prev?.profileId || "").trim()
     });
   }
 
@@ -131,7 +132,8 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
         status: "pending",
         attempts: 0,
         error: "",
-        jobDir: dirByRow.get(Number(j.csvRow)) || ""
+        jobDir: dirByRow.get(Number(j.csvRow)) || "",
+        profileId: String(j.profileId || "").trim()
       };
     }
     const status = prev.status || "pending";
@@ -153,7 +155,8 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       atsScore: prev.atsScore ?? null,
       atsGrade: prev.atsGrade || "",
       atsEvaluation: prev.atsEvaluation || null,
-      hasFiles: Boolean(prev.hasFiles || prev.jobDir)
+      hasFiles: Boolean(prev.hasFiles || prev.jobDir),
+      profileId: String(prev.profileId || j.profileId || "").trim()
     };
   });
 

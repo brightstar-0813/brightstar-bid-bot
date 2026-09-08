@@ -16,7 +16,10 @@ import {
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
   resolveExperienceRulesForPerson,
-  setPersonSheetConfig
+  setPersonSheetConfig,
+  syncActivePersonOutputContext,
+  applyUsApplicantDefaults,
+  promptHasFixedCompanyHistory
 } from "./profiles.js";
 import {
   getSessionRoleTrack,
@@ -65,7 +68,9 @@ import {
   parseEmployersFromResume,
   resumeFilePrefixFromName,
   outputDirFromPerson,
-  namesLikelyDifferent
+  namesLikelyDifferent,
+  normalizeDownloadsRelativeDir,
+  isGenericApplicationsDir
 } from "./resume-profile.js";
 import {
   mergeExtractedProfileIntoPerson,
@@ -91,6 +96,7 @@ import {
   loadBundledQaBank
 } from "./qa-store.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
+import { OPENAI_QA_ASSIST_KEY } from "./openai.js";
 import { mountThemeSwatches } from "./theme.js";
 import { confirmDialog } from "./ui-dialog.js";
 
@@ -457,6 +463,7 @@ if (inlineProfileEditorEl && profileEditorPanelBody) {
 
 const csvFileEl = document.getElementById("csvFile");
 const csvSummaryEl = document.getElementById("csvSummary");
+const queueNowWorkingEl = document.getElementById("queueNowWorking");
 const csvRefreshBtn = document.getElementById("csvRefresh");
 const csvPinFileBtn = document.getElementById("csvPinFile");
 const toggleCsvSourcePanelBtn = document.getElementById("toggleCsvSourcePanel");
@@ -531,10 +538,12 @@ const pasteJdBtn = document.getElementById("pasteJd");
 const runOneOffBtn = document.getElementById("runOneOff");
 const autofillPageBtn = document.getElementById("autofillPage");
 const autoApplyPageBtn = document.getElementById("autoApplyPage");
+const customQaPageBtn = document.getElementById("customQaPage");
 const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const allowSubmitToggleEl = document.getElementById("allowSubmitToggle");
+const openaiQaToggleEl = document.getElementById("openaiQaToggle");
 const autofillEnabledToggleEl = document.getElementById("autofillEnabledToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
@@ -569,6 +578,7 @@ function setStatus(message) {
   statusEl.classList.remove("is-idle", "is-ok", "is-warn", "is-err");
   if (!text) {
     statusEl.classList.add("is-idle");
+    renderCurrentWorkIndicator();
     return;
   }
   const lower = text.toLowerCase();
@@ -579,6 +589,7 @@ function setStatus(message) {
   } else if (/\b(saved|done|complete|loaded|started|sent|ok|ready|pinned|refreshed|imported|filled|applied)\b/.test(lower)) {
     statusEl.classList.add("is-ok");
   }
+  renderCurrentWorkIndicator();
 }
 
 function syncActivePersonChip() {
@@ -647,6 +658,8 @@ function syncAutofillUi(enabled = autofillEnabledCache) {
   if (autofillEnabledToggleEl) autofillEnabledToggleEl.checked = autofillEnabledCache;
   if (autofillPageBtn) autofillPageBtn.disabled = !autofillEnabledCache;
   if (autoApplyPageBtn) autoApplyPageBtn.disabled = !autofillEnabledCache;
+  const openaiOn = openaiQaToggleEl ? Boolean(openaiQaToggleEl.checked) : true;
+  if (customQaPageBtn) customQaPageBtn.disabled = !autofillEnabledCache || !openaiOn;
 }
 
 function setPersonImportNotice(message, { ok = true } = {}) {
@@ -667,32 +680,52 @@ function setPersonImportNotice(message, { ok = true } = {}) {
   }
 }
 
-function ensurePromptsOnPerson(person, { resetEeo = false } = {}) {
-  const next = { ...person };
+function ensurePromptsOnPerson(person, { resetEeo = false, resetPrompts = false } = {}) {
+  let next = { ...person };
   const track = next.roleTrack || readActiveRoleTrack();
-  if (
-    resetEeo ||
-    !String(next.promptTemplate || "").trim() ||
-    !next.promptTemplate.includes("{JD}") ||
-    isTrackDefaultPrompt(next.promptTemplate)
-  ) {
-    next.promptTemplate = getTrackPromptTemplate(track, next);
+  const prompt = String(next.promptTemplate || "").trim();
+  const hasRichPrompt =
+    Boolean(prompt) &&
+    prompt.includes("{JD}") &&
+    (promptHasFixedCompanyHistory(prompt) || !isTrackDefaultPrompt(prompt));
+
+  // Save-as-mine uses resetEeo only — keep FIXED COMPANY HISTORY / custom rich prompts.
+  if (resetPrompts || !hasRichPrompt) {
+    if (resetPrompts || !prompt || !prompt.includes("{JD}") || isTrackDefaultPrompt(prompt)) {
+      next.promptTemplate = getTrackPromptTemplate(track, next);
+    }
   }
+
   const cover = String(next.coverLetterPrompt || "");
-  if (
-    resetEeo ||
-    !cover.trim() ||
-    !cover.includes("{JD}") ||
-    isTrackDefaultCoverLetter(cover)
-  ) {
-    next.coverLetterPrompt = resolveCoverLetterTemplateForTrack(next, track);
+  const hasRichCover =
+    Boolean(cover.trim()) && cover.includes("{JD}") && !isTrackDefaultCoverLetter(cover);
+  if (resetPrompts || !hasRichCover) {
+    if (resetPrompts || !cover.trim() || !cover.includes("{JD}") || isTrackDefaultCoverLetter(cover)) {
+      next.coverLetterPrompt = resolveCoverLetterTemplateForTrack(next, track);
+    }
   }
   if (!next.templateId) next.templateId = templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
+  if (resetEeo) {
+    next = {
+      ...next,
+      gender: "",
+      ethnicity: "",
+      disability: "",
+      veteran: "",
+      citizenship: "",
+      workAuthorized: "",
+      sponsorship: "",
+      hispanicLatino: "",
+      autofillExtras: {}
+    };
+    next = applyUsApplicantDefaults(next);
+  }
   return next;
 }
 
 async function persistImportedPerson(merged, { asNew = false } = {}) {
-  const person = ensurePromptsOnPerson(merged, { resetEeo: asNew });
+  // asNew from builtin/name-mismatch: reset EEO only — keep rich prompts when present.
+  const person = ensurePromptsOnPerson(merged, { resetEeo: asNew, resetPrompts: false });
   if (asNew) {
     const saved = await addCustomProfile({
       label: person.label || person.name,
@@ -843,10 +876,24 @@ async function refreshTemplates(selectedId) {
 }
 
 async function syncOutputDirFromPerson(person) {
-  const next = outputDirFromPerson(person);
-  if (outputDirEl) outputDirEl.value = next;
-  await chrome.storage.local.set({ output_dir: next, batch_output_dir: next });
-  return next;
+  const { outputDir } = await syncActivePersonOutputContext(person);
+  if (outputDirEl) outputDirEl.value = outputDir;
+  return outputDir;
+}
+
+/** Resolve Output folder for batch/one-off: person Applications-* wins over bare "Applications". */
+async function resolveUiOutputDir() {
+  const person = await getActivePerson().catch(() => null);
+  const personDir = person ? outputDirFromPerson(person) : "";
+  let outputDir = normalizeDownloadsRelativeDir(
+    (outputDirEl?.value || "").trim(),
+    personDir || DEFAULT_OUTPUT_DIR
+  );
+  if (isGenericApplicationsDir(outputDir) && personDir) {
+    outputDir = personDir;
+  }
+  if (outputDirEl) outputDirEl.value = outputDir;
+  return { outputDir, person };
 }
 
 /** Load this person's Google Sheet URLs into the UI + global keys used by the batch worker. */
@@ -879,11 +926,12 @@ async function persistActivePersonSheetFromUi() {
 
 async function syncPersonContext(person) {
   syncActivePersonChip();
-  await syncOutputDirFromPerson(person);
+  const { outputDir, resumeFilePrefix } = await syncActivePersonOutputContext(person);
+  if (outputDirEl) outputDirEl.value = outputDir;
   await syncSheetConfigFromPerson(person);
   const rules = resolveExperienceRulesForPerson(person);
   await chrome.storage.local.set({
-    resume_file_prefix: person.resumeFilePrefix || "Resume",
+    resume_file_prefix: resumeFilePrefix,
     experience_validation_rules: rules,
     experience_validation_person: person.name || person.label || ""
   });
@@ -1056,7 +1104,10 @@ async function loadSettings() {
     JOB_CHANNEL_FILTER_KEY,
     BATCH_STATE_KEY,
     INDEED_GRAB_STATUS_KEY,
-    "qa_learn_enabled"
+    "qa_learn_enabled",
+    "allowSubmitOnAssist",
+    AUTOFILL_ENABLED_KEY,
+    OPENAI_QA_ASSIST_KEY
   ]);
 
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
@@ -1135,6 +1186,7 @@ async function loadSettings() {
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   if (allowSubmitToggleEl) allowSubmitToggleEl.checked = Boolean(data.allowSubmitOnAssist);
+  if (openaiQaToggleEl) openaiQaToggleEl.checked = data[OPENAI_QA_ASSIST_KEY] !== false;
   syncAutofillUi(data[AUTOFILL_ENABLED_KEY] !== false);
   await refreshQaBank().catch(() => {});
   await hydrateJobDirsInUi().catch(() => {});
@@ -1435,6 +1487,82 @@ function resolveCurrentWorkCsvRow() {
   return m ? Number(m[1]) : null;
 }
 
+function resolveCurrentWorkJob() {
+  const row = resolveCurrentWorkCsvRow();
+  if (row == null || !Number.isFinite(row)) return null;
+  return queueCache.find((j) => Number(j.csvRow) === row) || { csvRow: row };
+}
+
+/** Sticky strip above the list — always shows the active row while batch runs (no auto-scroll). */
+function renderCurrentWorkIndicator() {
+  if (!queueNowWorkingEl) return;
+  const busy =
+    batchState === "running" ||
+    batchState === "paused" ||
+    document.body.classList.contains("is-busy") ||
+    queueCache.some((j) => j.status === "running");
+  const job = resolveCurrentWorkJob();
+  if (!busy || !job || job.csvRow == null || job.csvRow === "") {
+    queueNowWorkingEl.hidden = true;
+    queueNowWorkingEl.replaceChildren();
+    queueNowWorkingEl.removeAttribute("data-csv-row");
+    queueNowWorkingEl.removeAttribute("tabindex");
+    queueNowWorkingEl.removeAttribute("title");
+    return;
+  }
+
+  const row = Number(job.csvRow);
+  const title = String(job.title || "").trim() || "Working…";
+  const company = String(job.company || "").trim();
+  const phase =
+    job.status === "running"
+      ? "Generating"
+      : /\bauto-apply\b/i.test(lastStatusText)
+        ? "Applying"
+        : batchState === "paused"
+          ? "Paused on"
+          : "Working";
+
+  queueNowWorkingEl.hidden = false;
+  queueNowWorkingEl.dataset.csvRow = String(row);
+  queueNowWorkingEl.tabIndex = 0;
+  queueNowWorkingEl.title = "Click to jump to this row in the list";
+  queueNowWorkingEl.replaceChildren();
+
+  const kicker = document.createElement("span");
+  kicker.className = "now-kicker";
+  kicker.textContent = "Now";
+
+  const body = document.createElement("div");
+  body.className = "now-body";
+  const titleEl = document.createElement("div");
+  titleEl.className = "now-title";
+  titleEl.append(`${phase} `);
+  const rowEl = document.createElement("span");
+  rowEl.className = "now-row";
+  rowEl.textContent = `row ${row}`;
+  titleEl.appendChild(rowEl);
+  titleEl.append(` · ${title}`);
+  const subEl = document.createElement("div");
+  subEl.className = "now-sub";
+  subEl.textContent = company || lastStatusText || "Batch in progress";
+  body.appendChild(titleEl);
+  body.appendChild(subEl);
+
+  queueNowWorkingEl.appendChild(kicker);
+  queueNowWorkingEl.appendChild(body);
+}
+
+function jumpQueueToCurrentWork() {
+  if (!queueListEl || !queueNowWorkingEl) return;
+  const row = Number(queueNowWorkingEl.dataset.csvRow || "");
+  if (!Number.isFinite(row)) return;
+  const el = queueListEl.querySelector(`.queue-item[data-csv-row="${row}"]`);
+  if (!el) return;
+  scrollQueueItemIntoView(queueListEl, el, { smooth: true });
+  el.classList.add("is-current");
+}
+
 /** Batch is actively generating/applying — queue list scroll stays user-controlled. */
 function isBatchQueueScrollingLocked() {
   return (
@@ -1518,6 +1646,7 @@ function renderQueue() {
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     queueListScrollTop = 0;
+    renderCurrentWorkIndicator();
     return;
   }
 
@@ -1546,6 +1675,13 @@ function renderQueue() {
     sub.textContent = `${job.company || ""}${job.location ? " · " + job.location : ""}`;
     const badges = document.createElement("div");
     badges.className = "queue-badges";
+    if (currentRow != null && Number(job.csvRow) === currentRow) {
+      const nowBadge = document.createElement("span");
+      nowBadge.className = "badge badge-now";
+      nowBadge.textContent = "Now";
+      nowBadge.title = "Currently processing this job";
+      badges.appendChild(nowBadge);
+    }
     const badge = document.createElement("span");
     badge.className = badgeClass(job.status);
     badge.textContent = job.status || "pending";
@@ -1738,6 +1874,8 @@ function renderQueue() {
     item.appendChild(controls);
     queueListEl.appendChild(item);
   }
+
+  renderCurrentWorkIndicator();
 
   if (isBatchQueueScrollingLocked()) {
     restoreQueueListScroll();
@@ -2123,8 +2261,8 @@ async function applyAssist(job) {
 }
 
 async function sendBatch(type) {
-  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
-  await chrome.storage.local.set({ output_dir: outputDir });
+  const { outputDir } = await resolveUiOutputDir();
+  await chrome.storage.local.set({ output_dir: outputDir, batch_output_dir: outputDir });
   const res = await chrome.runtime.sendMessage({ type, outputDir });
   if (!res?.ok) {
     setStatus(res?.error || `Batch ${type} failed.`);
@@ -2141,7 +2279,7 @@ async function sendBatch(type) {
 
 async function retryOneJob(job) {
   if (!job || job.csvRow == null) return;
-  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  const { outputDir } = await resolveUiOutputDir();
   setStatus(`Retrying row ${job.csvRow}…`);
   try {
     const res = await chrome.runtime.sendMessage({
@@ -2174,7 +2312,7 @@ async function retryErrorJobs() {
     setStatus("No error jobs to retry.");
     return;
   }
-  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  const { outputDir } = await resolveUiOutputDir();
   setStatus(`Retrying ${errors.length} error job(s)…`);
   try {
     const res = await chrome.runtime.sendMessage({
@@ -2247,8 +2385,9 @@ async function onProfileChange() {
   await loadActivePersonIntoForm();
   const person = await getActivePerson();
   const rules = resolveExperienceRulesForPerson(person);
+  const { resumeFilePrefix } = await syncActivePersonOutputContext(person);
   await chrome.storage.local.set({
-    resume_file_prefix: person.resumeFilePrefix || "Resume",
+    resume_file_prefix: resumeFilePrefix,
     experience_validation_rules: rules,
     experience_validation_person: person.name || person.label || ""
   });
@@ -2446,7 +2585,7 @@ async function runOneOff() {
   const companyName = (companyNameEl.value || "").trim();
   const jd = (jdTextEl.value || "").trim();
   const jdLink = (jdLinkEl.value || "").trim();
-  const outputDir = (outputDirEl.value || "").trim() || DEFAULT_OUTPUT_DIR;
+  const { outputDir, person } = await resolveUiOutputDir();
 
   if (!jobTitle) {
     setStatus("Enter a job title first.");
@@ -2461,8 +2600,7 @@ async function runOneOff() {
     return;
   }
 
-  const person = await getActivePerson();
-  if (!person.promptTemplate?.includes("{JD}")) {
+  if (!person?.promptTemplate?.includes("{JD}")) {
     setStatus("Active person needs a tailor prompt with {JD} (auto-filled from each CSV job). Open the person editor.");
     return;
   }
@@ -2486,7 +2624,7 @@ async function runOneOff() {
       spreadsheetUrl: spreadsheetUrlEl.value.trim(),
       sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
       templateId: templateSelectEl.value || person.templateId || DEFAULT_TEMPLATE_ID,
-      resumeFilePrefix: person.resumeFilePrefix || "Resume",
+      resumeFilePrefix: person.resumeFilePrefix || resumeFilePrefixFromName(person.name || person.label),
       profileId: person.id,
       bidSource: "one-off"
     }
@@ -2593,6 +2731,7 @@ async function autofillThisPage() {
   }
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
+  if (customQaPageBtn) customQaPageBtn.disabled = true;
   try {
     setStatus("Opening panel and autofilling the application tab…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
@@ -2602,8 +2741,7 @@ async function autofillThisPage() {
     }
     setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete — check the panel on the application page.");
   } finally {
-    autofillPageBtn.disabled = false;
-    autoApplyPageBtn.disabled = false;
+    syncAutofillUi();
   }
 }
 
@@ -2615,6 +2753,7 @@ async function autoApplyThisPage() {
   const allowSubmit = Boolean(allowSubmitToggleEl?.checked);
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
+  if (customQaPageBtn) customQaPageBtn.disabled = true;
   try {
     setStatus(
       allowSubmit
@@ -2631,8 +2770,32 @@ async function autoApplyThisPage() {
     }
     setStatus(res.status || res.detail || res.statusText || formatAutofillSummary(res) || "Auto Apply finished.");
   } finally {
-    autofillPageBtn.disabled = false;
-    autoApplyPageBtn.disabled = false;
+    syncAutofillUi();
+  }
+}
+
+async function customQaThisPage() {
+  if (!autofillEnabledCache) {
+    setStatus("Autofill is off. Turn it on in Apply assist.");
+    return;
+  }
+  if (openaiQaToggleEl && !openaiQaToggleEl.checked) {
+    setStatus("OpenAI Custom Q&A is off. Enable the toggle in Apply assist.");
+    return;
+  }
+  autofillPageBtn.disabled = true;
+  autoApplyPageBtn.disabled = true;
+  if (customQaPageBtn) customQaPageBtn.disabled = true;
+  try {
+    setStatus("Custom Q&A: answering special questions with OpenAI…");
+    const res = await chrome.runtime.sendMessage({ type: "autofill_openai_qa" });
+    if (!res?.ok) {
+      setStatus(res?.error || "Custom Q&A failed. Focus the application tab, then try again.");
+      return;
+    }
+    setStatus(res.statusText || formatAutofillSummary(res) || "Custom Q&A complete.");
+  } finally {
+    syncAutofillUi();
   }
 }
 
@@ -2704,6 +2867,14 @@ async function resetWorkflow() {
 }
 
 // Events
+queueNowWorkingEl?.addEventListener("click", () => jumpQueueToCurrentWork());
+queueNowWorkingEl?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    jumpQueueToCurrentWork();
+  }
+});
+
 queueListEl?.addEventListener(
   "scroll",
   () => {
@@ -2868,6 +3039,7 @@ testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
 autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
+customQaPageBtn?.addEventListener("click", customQaThisPage);
 resetBtn.addEventListener("click", resetWorkflow);
 qaOpenEditorBtn?.addEventListener("click", () => {
   openQaEditor().catch((e) => setStatus(String(e.message || e)));
@@ -2892,6 +3064,17 @@ qaLearnToggleEl?.addEventListener("change", () => {
 });
 allowSubmitToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ allowSubmitOnAssist: Boolean(allowSubmitToggleEl.checked) }).catch(() => {});
+});
+openaiQaToggleEl?.addEventListener("change", () => {
+  chrome.storage.local
+    .set({ [OPENAI_QA_ASSIST_KEY]: Boolean(openaiQaToggleEl.checked) })
+    .catch(() => {});
+  syncAutofillUi();
+  setStatus(
+    openaiQaToggleEl.checked
+      ? "OpenAI Custom Q&A on — Autofill leftovers and Custom Q&A use the API key."
+      : "OpenAI Custom Q&A off — Autofill uses profile + Q&A bank only."
+  );
 });
 autofillEnabledToggleEl?.addEventListener("change", () => {
   const enabled = Boolean(autofillEnabledToggleEl.checked);
@@ -2985,6 +3168,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.allowSubmitOnAssist && allowSubmitToggleEl && changes.allowSubmitOnAssist.newValue !== undefined) {
     allowSubmitToggleEl.checked = Boolean(changes.allowSubmitOnAssist.newValue);
+  }
+  if (changes[OPENAI_QA_ASSIST_KEY] && openaiQaToggleEl && changes[OPENAI_QA_ASSIST_KEY].newValue !== undefined) {
+    openaiQaToggleEl.checked = changes[OPENAI_QA_ASSIST_KEY].newValue !== false;
+    syncAutofillUi();
   }
   if (changes.qa_bank_version) refreshQaBank().catch(() => {});
   if (changes.qa_learn_enabled && qaLearnToggleEl && changes.qa_learn_enabled.newValue !== undefined) {

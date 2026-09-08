@@ -347,15 +347,45 @@ export function hasFormHistory(workHistory = [], educationHistory = []) {
     (Array.isArray(educationHistory) && educationHistory.length > 0);
 }
 
-export async function getStoredResumeJson() {
-  const data = await chrome.storage.local.get("last_resume_json");
-  const resume = data.last_resume_json;
-  return resume && typeof resume === "object" ? resume : null;
+export async function getStoredResumeJson(profileId = "") {
+  const id = String(profileId || "").trim();
+  const data = await chrome.storage.local.get([
+    "last_resume_json",
+    "last_resume_json_profile_id",
+    "last_resume_json_by_profile"
+  ]);
+  const map =
+    data.last_resume_json_by_profile && typeof data.last_resume_json_by_profile === "object"
+      ? data.last_resume_json_by_profile
+      : {};
+  if (id && map[id] && typeof map[id] === "object") return map[id];
+  const legacy = data.last_resume_json;
+  if (!legacy || typeof legacy !== "object") return null;
+  const owner = String(data.last_resume_json_profile_id || "").trim();
+  if (id && owner && owner !== id) return null;
+  return legacy;
 }
 
-export async function persistRoleSummaries(workHistory = []) {
-  const data = await chrome.storage.local.get("last_resume_json");
-  const resume = data.last_resume_json;
+/** Persist resume JSON for autofill history, scoped to the active person when known. */
+export async function setStoredResumeJson(resumeData, profileId = "") {
+  if (!resumeData || typeof resumeData !== "object") return;
+  const id = String(profileId || "").trim();
+  const data = await chrome.storage.local.get(["last_resume_json_by_profile"]);
+  const map = {
+    ...(data.last_resume_json_by_profile && typeof data.last_resume_json_by_profile === "object"
+      ? data.last_resume_json_by_profile
+      : {})
+  };
+  if (id) map[id] = resumeData;
+  await chrome.storage.local.set({
+    last_resume_json: resumeData,
+    last_resume_json_profile_id: id,
+    last_resume_json_by_profile: map
+  });
+}
+
+export async function persistRoleSummaries(workHistory = [], profileId = "") {
+  const resume = await getStoredResumeJson(profileId);
   if (!resume || !Array.isArray(resume.experience)) return;
   let changed = false;
   for (const row of workHistory) {
@@ -365,5 +395,5 @@ export async function persistRoleSummaries(workHistory = []) {
     job.formSummary = row.summary;
     changed = true;
   }
-  if (changed) await chrome.storage.local.set({ last_resume_json: resume });
+  if (changed) await setStoredResumeJson(resume, profileId);
 }

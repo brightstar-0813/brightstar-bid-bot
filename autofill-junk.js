@@ -11,6 +11,13 @@ const JUNK_QUESTION_RE =
 const JUNK_QUESTION_CONTAINS_RE =
   /upload your resume|autofill from resume|drop your resume|choose file|drag and drop|upload file|select type or paste your resume|add resume|paste your resume here|format paragraph|heading dropdown|find any email|paste any linkedin profile url|embed content from social networks|parsing your resume|autofill completed|remove file|resume here to autofill/i;
 
+/** Meta / analytics / fingerprint param names that leak into field inventories. */
+const TRACKING_NOISE_LABEL_RE =
+  /^(id|ev|dl|rl|if|ts|iw|sw|sh|ec|fbp|ler|cdl|aems|uid|uuid|sid|cid|gid|pid|tid|rid)$/i;
+
+const TRACKING_NOISE_CONTAINS_RE =
+  /\b(udff|audff|ncudff|cudff|buttonfeatures|formfeatures|pagefeatures|buttontext|pixel|fbclid|gclid|fbp|fbc)\b/i;
+
 const YES_NO_QUESTION_RE =
   /\b(yes or no|yes\/no|do you|are you|have you|will you|can you|did you|is this|agree|consent|authorized|eligible|willing)\b/i;
 
@@ -19,6 +26,38 @@ const PHONE_ANSWER_RE = /^[\d\s().+-]{7,20}$/;
 /** Identity / PII / secrets — never store in the exportable Q&A bank. */
 const SENSITIVE_PROFILE_QUESTION_RE =
   /\b(password|otp|captcha|ssn|social security|credit card|card number|cvv|routing|account number|search|first name|last name|full name|middle name|legal name|email|e-mail|phone|mobile|telephone|address|street|city|state|province|zip|postal|country|linkedin|github|portfolio|website|date of birth|dob|birthday|salary|compensation|desired pay|expected pay|disability|veteran|military|\brace\b|ethnic|gender|\bsex\b|hispanic|latino|felony|conviction|criminal)\b/i;
+
+/** Strip char counters / required markers that ATS UIs glue onto labels. */
+export function cleanAutofillLabelText(text) {
+  return String(text || "")
+    .replace(/\b\d+\s*\/\s*\d{2,5}\b/g, " ")
+    .replace(/\bcharacters?\s*(remaining|left)?\b/gi, " ")
+    .replace(/^\s*[\u2022*·•]+\s*/, "")
+    .replace(/\s*\*\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Radio/checkbox option chrome mistaken for the question. */
+export function isBareChoiceOptionLabel(label) {
+  return /^(yes|no|y|n|true|false|agree|disagree|i agree|i do not agree)$/i.test(
+    cleanAutofillLabelText(label)
+  );
+}
+
+/** Tracking / pixel / fingerprint field names (not real application questions). */
+export function isTrackingNoiseLabel(label) {
+  const raw = cleanAutofillLabelText(label);
+  if (!raw) return true;
+  if (TRACKING_NOISE_LABEL_RE.test(raw)) return true;
+  if (TRACKING_NOISE_CONTAINS_RE.test(raw)) return true;
+  if (/^cd\s+\w+/i.test(raw) && raw.length < 48) return true;
+  // Cryptic short tokens like "ev", "dl", "audff zp"
+  if (/^[a-z]{1,5}(\s+[a-z]{1,4}){0,2}$/i.test(raw) && !/[?]/.test(raw) && raw.length <= 12) {
+    if (!/^(dob|ssn|url|zip|city|name|email|phone|race|sex)$/i.test(raw)) return true;
+  }
+  return false;
+}
 
 /** @param {string} label */
 export function isSensitiveProfileQuestion(label) {
@@ -40,8 +79,10 @@ export function isJunkAutofillAnswer(text, { questionLabel = "" } = {}) {
 
 /** @param {string} label */
 export function isJunkQuestionLabel(label) {
-  const raw = String(label || "").trim();
+  const raw = cleanAutofillLabelText(label);
   if (!raw || raw.length < 3) return true;
+  if (isBareChoiceOptionLabel(raw)) return true;
+  if (isTrackingNoiseLabel(raw)) return true;
   const compact = raw.replace(/\s+/g, " ");
   if (JUNK_QUESTION_RE.test(compact)) return true;
   if (JUNK_QUESTION_CONTAINS_RE.test(compact)) return true;

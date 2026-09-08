@@ -9,7 +9,7 @@
 (() => {
   const DOUBLE_TAP_MS = 500;
   const DEFAULT_OUTPUT_DIR = "Applications";
-  const DEFAULT_TEMPLATE_ID = "times-classic";
+  const DEFAULT_TEMPLATE_ID = "ats-modern";
 
   let lastCtrlTap = 0;
   let ctrlUsedAsModifier = false;
@@ -82,7 +82,7 @@
       spreadsheetUrl: (s.spreadsheet_url || "").trim(),
       sheetsWebAppUrl: (s.sheets_web_app_url || "").trim(),
       templateId: s.selected_template_id || DEFAULT_TEMPLATE_ID,
-      resumeFilePrefix: (s.resume_file_prefix || "").trim() || "Resume",
+      resumeFilePrefix: (s.resume_file_prefix || "").trim() || "Applicant_Resume",
       bidSource: "one-off"
     };
   }

@@ -23,13 +23,21 @@ import {
   getSessionRoleTrack,
   jdRequiredSkills,
   normalizeRoleTrackId,
-  resolveEffectiveRoleTrack
+  resolveEffectiveRoleTrack,
+  signatureTitleFallbackForTrack
 } from "./role-tracks.js";
+import { getStoredResumeJson, setStoredResumeJson } from "./history.js";
 import {
   getStrongHumanizeMode,
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
-import { outputDirFromPerson } from "./resume-profile.js";
+import {
+  isGenericApplicationsDir,
+  normalizeDownloadsRelativeDir,
+  normalizeResumeFilePrefix,
+  outputDirFromPerson,
+  personOutputNameToken
+} from "./resume-profile.js";
 import {
   setLastGeneratedDocs,
   startAutofillOnTab,
@@ -55,9 +63,11 @@ import {
   handleProfileLearnCapture,
   highlightFieldOnTab,
   handleQaLearnCapture,
-  answerQuestionsFromBank
+  answerQuestionsFromBank,
+  runCustomOpenAiQaOnTab
 } from "./autofill-runner.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
+import { isOpenAiQaAssistEnabled } from "./openai.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -372,8 +382,7 @@ async function tryRecognizeResumeOnPage(tabId) {
     const stored = await chrome.storage.local.get([
       "chatgpt_json_ready",
       "chatgpt_json_ready_at",
-      "chatgpt_harvested_resume",
-      "last_resume_json"
+      "chatgpt_harvested_resume"
     ]);
     if (stored.chatgpt_json_ready && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
       lastUsableResumeData = stored.chatgpt_harvested_resume;
@@ -383,9 +392,11 @@ async function tryRecognizeResumeOnPage(tabId) {
       lastUsableResumeData = stored.chatgpt_harvested_resume;
       return stored.chatgpt_harvested_resume;
     }
-    if (isUsableResumeJson(stored.last_resume_json)) {
-      lastUsableResumeData = stored.last_resume_json;
-      return stored.last_resume_json;
+    const person = await getActivePerson().catch(() => null);
+    const scoped = await getStoredResumeJson(person?.id || "");
+    if (isUsableResumeJson(scoped)) {
+      lastUsableResumeData = scoped;
+      return scoped;
     }
   } catch {
     // ignore
@@ -396,15 +407,12 @@ async function tryRecognizeResumeOnPage(tabId) {
   const deep = await deepHarvestResumeFromTab(tabId);
   if (isUsableResumeJson(deep) || isMinimallySaveableResume(deep)) {
     lastUsableResumeData = deep;
-    await chrome.storage.local
-      .set({
-        chatgpt_harvested_resume: deep,
-        chatgpt_harvested_at: Date.now(),
-        chatgpt_json_ready: true,
-        chatgpt_json_ready_at: Date.now(),
-        last_resume_json: deep
-      })
-      .catch(() => {});
+    await persistActiveResumeJson(deep, {
+      chatgpt_harvested_resume: deep,
+      chatgpt_harvested_at: Date.now(),
+      chatgpt_json_ready: true,
+      chatgpt_json_ready_at: Date.now()
+    }).catch(() => {});
     return deep;
   }
 
@@ -416,29 +424,23 @@ async function tryRecognizeResumeOnPage(tabId) {
     );
     if (isUsableResumeJson(state.resumeData)) {
       lastUsableResumeData = state.resumeData;
-      await chrome.storage.local
-        .set({
-          chatgpt_harvested_resume: state.resumeData,
-          chatgpt_harvested_at: Date.now(),
-          chatgpt_json_ready: true,
-          chatgpt_json_ready_at: Date.now(),
-          last_resume_json: state.resumeData
-        })
-        .catch(() => {});
+      await persistActiveResumeJson(state.resumeData, {
+        chatgpt_harvested_resume: state.resumeData,
+        chatgpt_harvested_at: Date.now(),
+        chatgpt_json_ready: true,
+        chatgpt_json_ready_at: Date.now()
+      }).catch(() => {});
       return state.resumeData;
     }
     const fromText = extractResumeJson(state.latest);
     if (isUsableResumeJson(fromText)) {
       lastUsableResumeData = fromText;
-      await chrome.storage.local
-        .set({
-          chatgpt_harvested_resume: fromText,
-          chatgpt_harvested_at: Date.now(),
-          chatgpt_json_ready: true,
-          chatgpt_json_ready_at: Date.now(),
-          last_resume_json: fromText
-        })
-        .catch(() => {});
+      await persistActiveResumeJson(fromText, {
+        chatgpt_harvested_resume: fromText,
+        chatgpt_harvested_at: Date.now(),
+        chatgpt_json_ready: true,
+        chatgpt_json_ready_at: Date.now()
+      }).catch(() => {});
       return fromText;
     }
   } catch {
@@ -988,13 +990,51 @@ async function getSheetConfig() {
     spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
     webAppUrl: String(person?.sheetsWebAppUrl || "").trim()
   };
-  if (fromPerson.spreadsheetUrl && fromPerson.webAppUrl) return fromPerson;
+  // Any person-scoped sheet field wins in full — never fill gaps from another person's globals.
+  if (fromPerson.spreadsheetUrl || fromPerson.webAppUrl) return fromPerson;
 
   const data = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
   return {
-    spreadsheetUrl: fromPerson.spreadsheetUrl || String(data.spreadsheet_url || "").trim(),
-    webAppUrl: fromPerson.webAppUrl || String(data.sheets_web_app_url || "").trim()
+    spreadsheetUrl: String(data.spreadsheet_url || "").trim(),
+    webAppUrl: String(data.sheets_web_app_url || "").trim()
   };
+}
+
+/** Persist harvested resume JSON scoped to the active person (avoids cross-profile autofill history). */
+async function persistActiveResumeJson(resumeData, extra = {}) {
+  if (!resumeData || typeof resumeData !== "object") return;
+  const person = await getActivePerson().catch(() => null);
+  await setStoredResumeJson(resumeData, person?.id || "");
+  const keys = Object.keys(extra || {});
+  if (keys.length) await chrome.storage.local.set(extra);
+}
+
+/** Tag untagged queue rows for the active person (Applications-* folder or claimable pending). */
+async function backfillQueueProfileIds(person) {
+  if (!person?.id) return 0;
+  const queue = await getQueue();
+  let n = 0;
+  const apps = String(outputDirFromPerson(person) || "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+  const next = queue.map((job) => {
+    if (String(job?.profileId || "").trim()) return job;
+    const dir = String(job?.jobDir || "")
+      .replace(/\\/g, "/")
+      .toLowerCase();
+    const inPersonDir =
+      Boolean(apps) &&
+      Boolean(dir) &&
+      (dir === apps || dir.startsWith(`${apps}/`) || dir.includes(`/${apps}/`));
+    const claimPending =
+      !dir &&
+      (job.status === "pending" || job.status === "error" || job.status === "failed");
+    if (!inPersonDir && !claimPending) return job;
+    n += 1;
+    return { ...job, profileId: person.id };
+  });
+  if (n) await setQueue(next);
+  return n;
 }
 
 /** Remember the current job so leftover-question OpenAI calls have JD context. */
@@ -1758,23 +1798,39 @@ function sanitizePathSegment(value, fallback = "untitled") {
   return cleaned || fallback;
 }
 
-/** Prefer explicit dir, then stored settings, then Applications-{person}. */
+/**
+ * Prefer the active person's Applications-{Name} folder.
+ * Honor an explicit non-generic batch override; never keep absolute paths
+ * (Chrome then saves data: URLs as a generic "download" file).
+ */
 async function resolveOutputDir(explicit = "") {
-  const fromArg = String(explicit || "").trim();
-  if (fromArg) return sanitizePathSegment(fromArg, fromArg);
+  let personDir = "";
+  try {
+    const person = await getActivePerson();
+    personDir = outputDirFromPerson(person);
+  } catch {
+    personDir = "";
+  }
+
+  const fromArg = normalizeDownloadsRelativeDir(explicit, "");
+  if (fromArg && !isGenericApplicationsDir(fromArg)) {
+    return fromArg;
+  }
+
+  if (personDir) return personDir;
+
   try {
     const data = await chrome.storage.local.get(["output_dir", "batch_output_dir"]);
-    const stored = String(data.output_dir || data.batch_output_dir || "").trim();
-    if (stored) return sanitizePathSegment(stored, stored);
+    const stored = normalizeDownloadsRelativeDir(
+      data.output_dir || data.batch_output_dir || "",
+      ""
+    );
+    if (stored && !isGenericApplicationsDir(stored)) return stored;
+    if (stored) return stored;
   } catch {
     // ignore
   }
-  try {
-    const person = await getActivePerson();
-    return sanitizePathSegment(outputDirFromPerson(person), "Applications");
-  } catch {
-    return "Applications";
-  }
+  return personDir || "Applications";
 }
 
 function joinDownloadPath(...parts) {
@@ -2133,19 +2189,17 @@ function buildJobFolderName(jobMeta = {}) {
 
 /** First-name token for files like Name_Resume.pdf / Name_Cover Letter.pdf */
 function outputNameToken(jobMeta = {}, resumeData = {}) {
-  const prefix = String(jobMeta.resumeFilePrefix || "").trim();
-  if (prefix) {
-    const cleaned = prefix.replace(/_?(Resume|resume)$/i, "").replace(/_+$/, "");
-    if (cleaned) return sanitizePathSegment(cleaned, "Applicant");
-  }
-  const full = String(resumeData?.name || jobMeta.personName || "Applicant").trim();
-  const first = full.split(/\s+/)[0] || "Applicant";
-  return sanitizePathSegment(first, "Applicant");
+  const token = personOutputNameToken({
+    resumeFilePrefix: jobMeta.resumeFilePrefix,
+    name: resumeData?.name || jobMeta.personName || ""
+  });
+  return sanitizePathSegment(token, "Applicant");
 }
 
 async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
   // Style comes from the selected Brightstar template; content comes from resume JSON.
-  const templateId = jobMeta.templateId || "times-classic";
+  const templateId = jobMeta.templateId || DEFAULT_TEMPLATE_ID;
+  // Always re-resolve so a stale "Applications" Start value cannot orphan custom profiles.
   const outputDir = await resolveOutputDir(jobMeta.outputDir);
   const jobFolder = buildJobFolderName(jobMeta);
   const jobDir = joinDownloadPath(outputDir, jobFolder);
@@ -2171,9 +2225,8 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
 
   // Persist JSON snapshot immediately so progress is visible even if PDF hangs.
   try {
-    await chrome.storage.local.set({
+    await persistActiveResumeJson(resumeData, {
       last_response: String(rawText || "").slice(0, 200000),
-      last_resume_json: resumeData,
       last_output_dir: jobDir
     });
   } catch {
@@ -4683,13 +4736,12 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
               edu >= 1 ||
               (jobs >= 3 && bullets >= 8 && profile.length >= 60) ||
               (jobs >= 2 && bullets >= 10));
-          chrome.storage.local.set({
+          persistActiveResumeJson(resumeData, {
             chatgpt_harvested_resume: resumeData,
             chatgpt_harvested_at: Date.now(),
             chatgpt_harvested_jobs: jobs,
             chatgpt_json_ready: Boolean(looksComplete),
-            chatgpt_json_ready_at: looksComplete ? Date.now() : 0,
-            last_resume_json: resumeData
+            chatgpt_json_ready_at: looksComplete ? Date.now() : 0
           });
         } catch {
           // storage may be temporarily unavailable
@@ -4937,15 +4989,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         isUsableResumeJson(state.resumeData) ||
         isMinimallySaveableResume(state.resumeData)
       ) {
-        await chrome.storage.local
-          .set({
-            last_resume_json: state.resumeData,
-            chatgpt_harvested_resume: state.resumeData,
-            chatgpt_harvested_at: Date.now(),
-            chatgpt_json_ready: true,
-            chatgpt_json_ready_at: Date.now()
-          })
-          .catch(() => {});
+        await persistActiveResumeJson(state.resumeData, {
+          chatgpt_harvested_resume: state.resumeData,
+          chatgpt_harvested_at: Date.now(),
+          chatgpt_json_ready: true,
+          chatgpt_json_ready_at: Date.now()
+        }).catch(() => {});
         await setStatus(
           `Resume JSON recognized (${state.resumeData.name || "ok"}, ${
             state.resumeData.experience?.length || 0
@@ -4967,14 +5016,15 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       try {
         const stored = await chrome.storage.local.get([
           "chatgpt_harvested_resume",
-          "chatgpt_harvested_at",
-          "last_resume_json"
+          "chatgpt_harvested_at"
         ]);
         const stamp = Number(stored.chatgpt_harvested_at || 0);
         if (stamp >= start && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
           fromStorage = stored.chatgpt_harvested_resume;
-        } else if (stamp >= start && isUsableResumeJson(stored.last_resume_json)) {
-          fromStorage = stored.last_resume_json;
+        } else if (stamp >= start) {
+          const person = await getActivePerson().catch(() => null);
+          const scoped = await getStoredResumeJson(person?.id || "");
+          if (isUsableResumeJson(scoped)) fromStorage = scoped;
         }
       } catch {
         // ignore
@@ -5009,15 +5059,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     const looksComplete = usable && resumeJsonLooksComplete(parsed);
     if (usable || softOk) {
       lastUsableResumeData = parsed;
-      await chrome.storage.local
-        .set({
-          last_resume_json: parsed,
-          chatgpt_harvested_resume: parsed,
-          chatgpt_harvested_at: Date.now(),
-          chatgpt_json_ready: true,
-          chatgpt_json_ready_at: Date.now()
-        })
-        .catch(() => {});
+      await persistActiveResumeJson(parsed, {
+        chatgpt_harvested_resume: parsed,
+        chatgpt_harvested_at: Date.now(),
+        chatgpt_json_ready: true,
+        chatgpt_json_ready_at: Date.now()
+      }).catch(() => {});
     }
 
     if (elapsedSec > 0 && elapsedSec % 2 === 0) {
@@ -5321,6 +5368,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       const coverPdfName = `${token}_Cover Letter.pdf`;
       await setStatus(`Saving ${coverPdfName}…`);
       const contact = await getAutofillContact();
+      const titleFallback = signatureTitleFallbackForTrack(roleTrack);
       // Always use person-profile contact for the signature — never ChatGPT-mangled JSON fields.
       const cl = await autoDownloadCoverLetterPdf(
         coverOutput,
@@ -5328,7 +5376,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         {
           name: contact.name || resumeData?.name || "Applicant",
           signatureTitle:
-            contact.signatureTitle || resumeData?.headline || "Salesforce Professional",
+            contact.signatureTitle || resumeData?.headline || titleFallback,
           headline: resumeData?.headline || contact.signatureTitle || "",
           location: contact.location || resumeData?.location || "",
           email: contact.email || resumeData?.email || "",
@@ -5489,8 +5537,9 @@ async function hydrateQueueFromDisk() {
 
 async function pickTemplateId(jobMeta = {}, person = {}) {
   if (jobMeta.templateId) return jobMeta.templateId;
+  if (person?.templateId) return person.templateId;
   const stored = await chrome.storage.local.get("selected_template_id");
-  return stored.selected_template_id || person.templateId || DEFAULT_TEMPLATE_ID;
+  return stored.selected_template_id || DEFAULT_TEMPLATE_ID;
 }
 
 /**
@@ -5690,14 +5739,15 @@ async function runAutoJob(jobMeta) {
   }
   if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     try {
-      const stored = await chrome.storage.local.get([
-        "chatgpt_harvested_resume",
-        "last_resume_json"
-      ]);
+      const stored = await chrome.storage.local.get(["chatgpt_harvested_resume"]);
       if (isUsableResumeJson(stored.chatgpt_harvested_resume) || isMinimallySaveableResume(stored.chatgpt_harvested_resume)) {
         resumeData = stored.chatgpt_harvested_resume;
-      } else if (isUsableResumeJson(stored.last_resume_json) || isMinimallySaveableResume(stored.last_resume_json)) {
-        resumeData = stored.last_resume_json;
+      } else {
+        const person = await getActivePerson().catch(() => null);
+        const scoped = await getStoredResumeJson(person?.id || "");
+        if (isUsableResumeJson(scoped) || isMinimallySaveableResume(scoped)) {
+          resumeData = scoped;
+        }
       }
     } catch {
       // ignore
@@ -5850,10 +5900,17 @@ async function runAutoJob(jobMeta) {
   );
 
   // Save JD + resume immediately (before cover letter), same chat continues after.
+  const resumeFilePrefix = normalizeResumeFilePrefix(
+    jobMeta.resumeFilePrefix || person.resumeFilePrefix,
+    person.name || person.label || resumeData?.name || ""
+  );
   const enrichedMeta = {
     ...jobMeta,
     templateId: await pickTemplateId(jobMeta, person),
-    resumeFilePrefix: jobMeta.resumeFilePrefix || person.resumeFilePrefix || "Resume",
+    resumeFilePrefix,
+    personName: person.name || person.label || "",
+    // Person folder is source of truth — do not keep a stale generic Start override.
+    outputDir: outputDirFromPerson({ ...person, resumeFilePrefix }),
     roleTrack,
     sessionRoleTrack
   };
@@ -5909,6 +5966,8 @@ async function runBatchLoop(outputDir) {
     batch_output_dir: outputDir || (await resolveOutputDir()),
     generation_heartbeat: Date.now()
   });
+  const startPerson = await getActivePerson().catch(() => null);
+  await backfillQueueProfileIds(startPerson).catch(() => 0);
   startKeepAlive();
 
   try {
@@ -6570,7 +6629,11 @@ async function runIndeedGrabAndApply({ autoApply = true } = {}) {
           salary: job.salary || "",
           outputDir: await resolveOutputDir(),
           templateId: await pickTemplateId({}, person),
-          resumeFilePrefix: person.resumeFilePrefix || "Resume",
+          resumeFilePrefix: normalizeResumeFilePrefix(
+            person.resumeFilePrefix,
+            person.name || person.label || ""
+          ),
+          personName: person.name || person.label || "",
           profileId: person.id,
           bidSource: "indeed-grab"
         });
@@ -6862,10 +6925,16 @@ async function ingestCsvText({
   );
   const merged = mergeParsedJobs(previousAll, previousQueue, reviewableJobs);
   const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
-  const filtered = filterJobsByChannel(merged.allUsJobs, channel);
+  const person = await getActivePerson().catch(() => null);
+  const tagProfile = (job) => {
+    if (!person?.id) return job;
+    return { ...job, profileId: job.profileId || person.id };
+  };
+  const filtered = filterJobsByChannel(merged.allUsJobs, channel).map(tagProfile);
+  const taggedAll = merged.allUsJobs.map(tagProfile);
 
   await chrome.storage.local.set({
-    [ALL_US_JOBS_KEY]: merged.allUsJobs,
+    [ALL_US_JOBS_KEY]: taggedAll,
     [QUEUE_KEY]: filtered,
     [JOB_CHANNEL_FILTER_KEY]: channel,
     csv_file_name: fileName,
@@ -7365,6 +7434,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         safeSendResponse(sendResponse, { ok: true, ...result, statusText });
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_openai_qa") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
+        if (!(await isOpenAiQaAssistEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "OpenAI Custom Q&A is off. Enable it in Apply assist."
+          });
+          return;
+        }
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        await setStatus("Custom Q&A: answering special questions with OpenAI…");
+        const result = await runCustomOpenAiQaOnTab(tab?.id || null);
+        const statusText = result.statusText || formatAutofillSummary(result);
+        await setStatus(statusText);
+        safeSendResponse(sendResponse, { ok: true, ...result, statusText });
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Custom Q&A failed: ${msg}`);
+        safeSendResponse(sendResponse, { ok: false, error: msg });
       }
     })();
     return true;
@@ -7959,14 +8060,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let data = message.resumeData && typeof message.resumeData === "object" ? message.resumeData : null;
 
         if (!isUsableResumeJson(data)) {
-          const stored = await chrome.storage.local.get([
-            "chatgpt_harvested_resume",
-            "last_resume_json"
-          ]);
+          const stored = await chrome.storage.local.get(["chatgpt_harvested_resume"]);
           if (isUsableResumeJson(stored.chatgpt_harvested_resume)) {
             data = stored.chatgpt_harvested_resume;
-          } else if (isUsableResumeJson(stored.last_resume_json)) {
-            data = stored.last_resume_json;
+          } else {
+            const scoped = await getStoredResumeJson(person?.id || "");
+            if (isUsableResumeJson(scoped)) data = scoped;
           }
         }
 
@@ -7987,7 +8086,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         lastUsableResumeData = data;
-        await chrome.storage.local.set({ last_resume_json: data, chatgpt_harvested_resume: data });
+        await persistActiveResumeJson(data, { chatgpt_harvested_resume: data });
 
         // Abort any stuck poller waiting on this job.
         batchControl.forceProceed = true;
@@ -8017,7 +8116,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             salary: job.salary || "",
             outputDir: outputDirFromPerson(person),
             templateId: await pickTemplateId({}, person),
-            resumeFilePrefix: person.resumeFilePrefix
+            resumeFilePrefix: normalizeResumeFilePrefix(
+              person.resumeFilePrefix,
+              person.name || person.label || ""
+            ),
+            personName: person.name || person.label || ""
           },
           { runCoverLetter: true }
         );
@@ -8353,6 +8456,25 @@ chrome.commands.onCommand.addListener((command) => {
         );
       } catch (err) {
         await setStatus(`Apply assist failed: ${String(err?.message || err)}`);
+      }
+    })();
+  }
+  if (command === "autofill-openai-qa") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          await setStatus("Autofill is disabled. Turn it on in Apply assist.");
+          return;
+        }
+        if (!(await isOpenAiQaAssistEnabled())) {
+          await setStatus("OpenAI Custom Q&A is off. Enable it in Apply assist.");
+          return;
+        }
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const r = await runCustomOpenAiQaOnTab(tab?.id || null);
+        await setStatus(r.statusText || formatAutofillSummary(r) || "Custom Q&A complete.");
+      } catch (err) {
+        await setStatus(`Custom Q&A failed: ${String(err?.message || err)}`);
       }
     })();
   }

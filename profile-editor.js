@@ -10,7 +10,8 @@ import {
   getPersonSheetConfig,
   DEFAULT_PROFILE_ID,
   resolveCoverLetterTemplateForTrack,
-  resolvePromptTemplateForTrack
+  resolvePromptTemplateForTrack,
+  applyUsApplicantDefaults
 } from "./profiles.js";
 import {
   fillPersonForm,
@@ -401,7 +402,7 @@ async function loadPersonIntoForm(person) {
 
 function blankNewPerson() {
   const track = "sf";
-  return {
+  return applyUsApplicantDefaults({
     id: null,
     label: "",
     name: "",
@@ -414,17 +415,15 @@ function blankNewPerson() {
     zip: "",
     masterResume: "",
     requiredExperience: [],
-    workHistory: [],
-    educationHistory: [],
     roleTrack: track,
     promptTemplate: getTrackPromptTemplate(track),
     coverLetterPrompt: resolveCoverLetterTemplateForTrack({ roleTrack: track }, track),
     templateId: DEFAULT_TEMPLATE_ID,
-    resumeFilePrefix: "Resume",
+    resumeFilePrefix: "",
     signatureTitle: "",
     autofillExtras: {},
     builtin: false
-  };
+  });
 }
 
 async function startNewProfile() {

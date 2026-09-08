@@ -1,5 +1,17 @@
 export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
+/** Storage: when false, Autofill skips OpenAI leftovers (Custom Q&A button still forces AI). */
+export const OPENAI_QA_ASSIST_KEY = "openai_qa_assist_enabled";
+
+export async function isOpenAiQaAssistEnabled() {
+  try {
+    const data = await chrome.storage.local.get(OPENAI_QA_ASSIST_KEY);
+    return data[OPENAI_QA_ASSIST_KEY] !== false;
+  } catch {
+    return true;
+  }
+}
+
 export function estimateTokensFromText(text) {
   return Math.max(1, Math.ceil(String(text || "").length / 4));
 }

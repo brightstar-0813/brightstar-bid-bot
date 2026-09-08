@@ -16,6 +16,7 @@ import {
 import {
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
+  promptHasFixedCompanyHistory,
   resolveExperienceRulesForPerson
 } from "./experience-rules.js";
 import {
@@ -24,6 +25,12 @@ import {
   normalizeStrongHumanizeMode,
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
+import {
+  normalizeResumeFilePrefix,
+  outputDirFromPerson
+} from "./resume-profile.js";
+import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import { clearQa, cloneQaBank } from "./qa-store.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
 export const GENERIC_SENIOR_PROMPT = genericSeniorPrompt;
@@ -130,7 +137,12 @@ export const BUILTIN_PROFILES = [
   }
 ];
 
-export { resolveExperienceRulesForPerson, normalizeRequiredExperienceInput, parseRequiredExperienceFromPrompt };
+export {
+  resolveExperienceRulesForPerson,
+  normalizeRequiredExperienceInput,
+  parseRequiredExperienceFromPrompt,
+  promptHasFixedCompanyHistory
+};
 
 export const DEFAULT_PROFILE_ID = "dmario-lewis";
 
@@ -281,6 +293,49 @@ export async function setActivePersonId(profileId) {
     [ACTIVE_PERSON_ID_KEY]: profileId,
     selected_profile_id: profileId
   });
+  // Keep Downloads folder + PDF prefix in lockstep with the active person (custom + built-in).
+  try {
+    const person = await getActivePerson();
+    await syncActivePersonOutputContext(person);
+  } catch {
+    /* ignore — profile may be mid-create */
+  }
+}
+
+/** Default US apply / EEO answers for new custom people (matches built-in parity). */
+export const US_APPLICANT_DEFAULTS = {
+  disability: "No, I do not have a disability",
+  veteran: "I am not a protected veteran",
+  citizenship: "US Citizen",
+  workAuthorized: "Yes",
+  sponsorship: "No"
+};
+
+export function applyUsApplicantDefaults(person = {}, { onlyEmpty = true } = {}) {
+  const next = { ...(person || {}) };
+  for (const [key, value] of Object.entries(US_APPLICANT_DEFAULTS)) {
+    if (onlyEmpty && String(next[key] || "").trim()) continue;
+    next[key] = value;
+  }
+  return next;
+}
+
+/**
+ * Persist Applications-{Person} + resume_file_prefix + PDF template from the person record.
+ * Call after save / activate so batch Start never freezes on bare "Applications".
+ */
+export async function syncActivePersonOutputContext(person) {
+  const p = normalizePerson(person);
+  const resumeFilePrefix = normalizeResumeFilePrefix(p.resumeFilePrefix, p.name || p.label);
+  const outputDir = outputDirFromPerson({ ...p, resumeFilePrefix });
+  const templateId = String(p.templateId || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
+  await chrome.storage.local.set({
+    output_dir: outputDir,
+    batch_output_dir: outputDir,
+    resume_file_prefix: resumeFilePrefix,
+    selected_template_id: templateId
+  });
+  return { outputDir, resumeFilePrefix, templateId };
 }
 
 /** Active person used for prompts, contact autofill, and cover letter. */
@@ -319,8 +374,8 @@ function normalizePerson(p) {
     masterResume: "",
     promptTemplate: "",
     coverLetterPrompt: "",
-    resumeFilePrefix: "Resume",
-    templateId: "times-classic",
+    resumeFilePrefix: "Applicant_Resume",
+    templateId: DEFAULT_TEMPLATE_ID,
     signatureTitle: "",
     roleTrack: "sf",
     autofillExtras: {},
@@ -368,8 +423,8 @@ function normalizePerson(p) {
     masterResume: p.masterResume || "",
     promptTemplate: p.promptTemplate || "",
     coverLetterPrompt: p.coverLetterPrompt || "",
-    resumeFilePrefix: p.resumeFilePrefix || "Resume",
-    templateId: p.templateId || "times-classic",
+    resumeFilePrefix: normalizeResumeFilePrefix(p.resumeFilePrefix, p.name || p.label || ""),
+    templateId: p.templateId || DEFAULT_TEMPLATE_ID,
     signatureTitle: p.signatureTitle || p.headline || "",
     roleTrack: normalizeRoleTrackId(p.roleTrack),
     autofillExtras: extras,
@@ -429,17 +484,27 @@ function isBuiltinSfProfile(person) {
 /** Resume prompt for the active engineering track (session or saved default). */
 export function resolvePromptTemplateForTrack(person, roleTrack) {
   const track = normalizeRoleTrackId(roleTrack);
-  if (track === "sf" && isBuiltinSfProfile(person)) {
-    return person?.promptTemplate || getTrackPromptTemplate(track);
+  const rawPrompt = String(person?.promptTemplate || "");
+  const prompt = rawPrompt.trim();
+  const hasRichPrompt =
+    Boolean(prompt) &&
+    (promptHasFixedCompanyHistory(prompt) || !isTrackDefaultPrompt(prompt));
+
+  // Built-ins and Save-as-mine copies with FIXED COMPANY HISTORY / custom rich prompts
+  // keep their template when the session track matches SF / their saved track.
+  if (track === "sf" && (isBuiltinSfProfile(person) || promptHasFixedCompanyHistory(prompt))) {
+    return prompt ? rawPrompt : getTrackPromptTemplate(track);
   }
+
   const personTrack = resolveRoleTrackForPerson(person);
   if (track !== personTrack) {
+    // Session override: only keep a rich non-default prompt when it already targets this track.
+    if (hasRichPrompt && !isTrackDefaultPrompt(prompt) && personTrack === track) {
+      return rawPrompt;
+    }
     return getTrackPromptTemplate(track);
   }
-  const prompt = String(person?.promptTemplate || "").trim();
-  if (prompt && !isTrackDefaultPrompt(prompt)) {
-    return prompt;
-  }
+  if (hasRichPrompt) return rawPrompt;
   return getTrackPromptTemplate(track);
 }
 
@@ -607,10 +672,20 @@ export async function addCustomProfile({
     employers = parseRequiredExperienceFromPrompt(prompt);
   }
   if (profileKind === "resume" && employers.length < 1 && !String(masterResume || "").trim()) {
-    throw new Error(
-      "Add Required experience employers (one company per line), or upload a master resume so employers can be detected."
-    );
+    if (!promptHasFixedCompanyHistory(prompt)) {
+      throw new Error(
+        "Add Required experience employers (one company per line), or upload a master resume so employers can be detected."
+      );
+    }
   }
+
+  const seeded = applyUsApplicantDefaults({
+    disability: String(disability || "").trim(),
+    veteran: String(veteran || "").trim(),
+    citizenship: String(citizenship || "").trim(),
+    workAuthorized: String(workAuthorized || "").trim(),
+    sponsorship: String(sponsorship || "").trim()
+  });
 
   const profile = {
     id,
@@ -628,16 +703,19 @@ export async function addCustomProfile({
     zip: String(zip || "").trim(),
     gender: String(gender || "").trim(),
     ethnicity: String(ethnicity || "").trim(),
-    disability: String(disability || "").trim(),
-    veteran: String(veteran || "").trim(),
-    citizenship: String(citizenship || "").trim(),
-    workAuthorized: String(workAuthorized || "").trim(),
-    sponsorship: String(sponsorship || "").trim(),
+    disability: seeded.disability,
+    veteran: seeded.veteran,
+    citizenship: seeded.citizenship,
+    workAuthorized: seeded.workAuthorized,
+    sponsorship: seeded.sponsorship,
     hispanicLatino: String(hispanicLatino || "").trim(),
     masterResume: String(masterResume || ""),
     coverLetterPrompt: String(coverLetterPrompt || "").trim(),
-    resumeFilePrefix: String(resumeFilePrefix || slugify(displayName).replace(/-/g, "_") || "Resume"),
-    templateId: String(templateId || "times-classic").trim(),
+    resumeFilePrefix: normalizeResumeFilePrefix(
+      resumeFilePrefix,
+      String(name || displayName).trim()
+    ),
+    templateId: String(templateId || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID,
     signatureTitle: String(signatureTitle || "").trim(),
     roleTrack: normalizeRoleTrackId(roleTrack),
     autofillExtras: extras,
@@ -698,8 +776,8 @@ export async function savePersonProfile(person) {
     masterResume: String(person?.masterResume || ""),
     promptTemplate: prompt,
     coverLetterPrompt: cl,
-    resumeFilePrefix: String(person?.resumeFilePrefix || "Resume").trim() || "Resume",
-    templateId: String(person?.templateId || "times-classic").trim(),
+    resumeFilePrefix: normalizeResumeFilePrefix(person?.resumeFilePrefix, displayName),
+    templateId: String(person?.templateId || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID,
     signatureTitle: String(person?.signatureTitle || "").trim(),
     roleTrack: normalizeRoleTrackId(person?.roleTrack),
     autofillExtras:
@@ -709,15 +787,20 @@ export async function savePersonProfile(person) {
     requiredExperience: (() => {
       let employers = normalizeRequiredExperienceInput(person?.requiredExperience);
       if (!employers.length) employers = parseRequiredExperienceFromPrompt(prompt);
-      if (employers.length < 1 && !String(person?.masterResume || "").trim()) {
+      if (
+        employers.length < 1 &&
+        !String(person?.masterResume || "").trim() &&
+        !promptHasFixedCompanyHistory(prompt)
+      ) {
         throw new Error(
           "Add Required experience employers (one company per line), or upload a master resume so employers can be detected."
         );
       }
       return employers;
     })(),
-    workHistory: Array.isArray(person?.workHistory) ? person.workHistory : [],
-    educationHistory: Array.isArray(person?.educationHistory) ? person.educationHistory : [],
+    // undefined = preserve existing history on update (inline editor has no wizard)
+    workHistory: Array.isArray(person?.workHistory) ? person.workHistory : undefined,
+    educationHistory: Array.isArray(person?.educationHistory) ? person.educationHistory : undefined,
     spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(person?.sheetsWebAppUrl || "").trim(),
     kind: "resume"
@@ -729,20 +812,49 @@ export async function savePersonProfile(person) {
 
   // Updating an existing custom profile
   if (existingId && custom.some((p) => p.id === existingId)) {
-    const next = custom.map((p) => (p.id === existingId ? { ...p, ...payload, id: existingId, builtin: false } : p));
+    const prev = custom.find((p) => p.id === existingId) || {};
+    const mergedPayload = {
+      ...payload,
+      workHistory:
+        payload.workHistory !== undefined
+          ? payload.workHistory
+          : Array.isArray(prev.workHistory)
+            ? prev.workHistory
+            : [],
+      educationHistory:
+        payload.educationHistory !== undefined
+          ? payload.educationHistory
+          : Array.isArray(prev.educationHistory)
+            ? prev.educationHistory
+            : []
+    };
+    const next = custom.map((p) =>
+      p.id === existingId ? { ...p, ...mergedPayload, id: existingId, builtin: false } : p
+    );
     await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: next });
     await setActivePersonId(existingId);
     await setPersonSheetConfig(existingId, {
-      spreadsheetUrl: payload.spreadsheetUrl,
-      sheetsWebAppUrl: payload.sheetsWebAppUrl
+      spreadsheetUrl: mergedPayload.spreadsheetUrl,
+      sheetsWebAppUrl: mergedPayload.sheetsWebAppUrl
     });
     const profile = next.find((p) => p.id === existingId);
+    await syncActivePersonOutputContext(profile);
     return { profile, created: false, fromBuiltin: false };
   }
 
   // Built-in selected → save as new custom person (copy)
-  const created = await addCustomProfile(payload);
+  const forkPayload = applyUsApplicantDefaults({
+    ...payload,
+    workHistory: Array.isArray(payload.workHistory) ? payload.workHistory : person?.workHistory || [],
+    educationHistory: Array.isArray(payload.educationHistory)
+      ? payload.educationHistory
+      : person?.educationHistory || []
+  });
+  const created = await addCustomProfile(forkPayload);
   await setActivePersonId(created.id);
+  if (person?.id && created?.id && person.id !== created.id) {
+    await cloneQaBank(person.id, created.id).catch(() => 0);
+  }
   return { profile: created, created: true, fromBuiltin: isBuiltin };
 }
 
@@ -769,6 +881,10 @@ export async function updateCustomProfile(profileId, updates) {
     id: profileId,
     promptTemplate: prompt,
     coverLetterPrompt: cl,
+    resumeFilePrefix: normalizeResumeFilePrefix(
+      updates.resumeFilePrefix != null ? updates.resumeFilePrefix : custom[idx].resumeFilePrefix,
+      updates.name || updates.label || custom[idx].name || custom[idx].label || ""
+    ),
     builtin: false,
     kind: custom[idx].kind || "resume"
   };
@@ -783,6 +899,46 @@ export async function deleteCustomProfile(profileId) {
     throw new Error("Only profiles you added can be deleted.");
   }
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: next });
+
+  // Drop per-person sheet URLs and Q&A bank for this custom person.
+  try {
+    const data = await chrome.storage.local.get(PERSON_SHEET_KEY);
+    const map =
+      data[PERSON_SHEET_KEY] && typeof data[PERSON_SHEET_KEY] === "object" && !Array.isArray(data[PERSON_SHEET_KEY])
+        ? { ...data[PERSON_SHEET_KEY] }
+        : {};
+    if (map[profileId]) {
+      delete map[profileId];
+      await chrome.storage.local.set({ [PERSON_SHEET_KEY]: map });
+    }
+  } catch {
+    /* ignore */
+  }
+  await clearQa(profileId).catch(() => {});
+
+  try {
+    const resumeMapData = await chrome.storage.local.get([
+      "last_resume_json_by_profile",
+      "last_resume_json_profile_id"
+    ]);
+    const resumeMap = {
+      ...(resumeMapData.last_resume_json_by_profile &&
+      typeof resumeMapData.last_resume_json_by_profile === "object"
+        ? resumeMapData.last_resume_json_by_profile
+        : {})
+    };
+    if (resumeMap[profileId]) {
+      delete resumeMap[profileId];
+      const patch = { last_resume_json_by_profile: resumeMap };
+      if (String(resumeMapData.last_resume_json_profile_id || "") === profileId) {
+        patch.last_resume_json_profile_id = "";
+      }
+      await chrome.storage.local.set(patch);
+    }
+  } catch {
+    /* ignore */
+  }
+
   const activeId = await getActivePersonId();
   if (activeId === profileId) {
     await setActivePersonId(DEFAULT_PROFILE_ID);

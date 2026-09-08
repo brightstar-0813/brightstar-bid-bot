@@ -313,6 +313,16 @@ export async function exportQa(profileId = null) {
   }));
 }
 
+/** Copy Q&A rows from one profile onto another (Save-as-mine / fork). */
+export async function cloneQaBank(fromProfileId, toProfileId) {
+  const fromId = String(fromProfileId || "").trim();
+  const toId = String(toProfileId || "").trim();
+  if (!fromId || !toId || fromId === toId) return 0;
+  const rows = await exportQa(fromId);
+  if (!rows.length) return 0;
+  return importQa(rows, { remapProfileId: toId });
+}
+
 export const BUNDLED_QA_BANK_PATH = "qa-bank-custom-steven-avon.json";
 
 /** Accept a raw array or `{ records: [...] }`. */

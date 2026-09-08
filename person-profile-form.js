@@ -7,14 +7,18 @@ import {
   savePersonProfile,
   addCustomProfile,
   BUILTIN_PROFILES,
-  DEFAULT_ATS_PASSWORD
+  DEFAULT_ATS_PASSWORD,
+  applyUsApplicantDefaults
 } from "./profiles.js";
 import {
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
+  promptHasFixedCompanyHistory,
   requiredExperienceToText
 } from "./experience-rules.js";
 import { normalizeRoleTrackId } from "./role-tracks.js";
+import { normalizeResumeFilePrefix, resumeFilePrefixFromName } from "./resume-profile.js";
+import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 
 export { requiredExperienceToText };
 
@@ -215,18 +219,23 @@ export function readPersonFromForm(root, opts = {}) {
     sponsorship: val("sponsorship"),
     hispanicLatino: val("hispanicLatino"),
     autofillExtras: textToExtras(val("autofillExtras")),
-    resumeFilePrefix: val("resumeFilePrefix") || "Resume",
+    resumeFilePrefix: normalizeResumeFilePrefix(
+      val("resumeFilePrefix"),
+      val("name") || val("label")
+    ),
     signatureTitle: val("signatureTitle"),
     masterResume: fieldEl(root, "masterResume")?.value ?? "",
     requiredExperience: normalizeRequiredExperienceInput(val("requiredExperience")),
     roleTrack,
     promptTemplate: val("promptTemplate"),
     coverLetterPrompt: val("coverLetterPrompt"),
-    templateId: opts.templateId || templateEl?.value || "times-classic",
+    templateId: opts.templateId || templateEl?.value || DEFAULT_TEMPLATE_ID,
     spreadsheetUrl: val("spreadsheetUrl"),
     sheetsWebAppUrl: val("sheetsWebAppUrl"),
-    workHistory: opts.workHistory || [],
-    educationHistory: opts.educationHistory || []
+    // Omit history unless the caller (full editor wizard) provided arrays —
+    // otherwise savePersonProfile preserves existing custom history.
+    ...(Array.isArray(opts.workHistory) ? { workHistory: opts.workHistory } : {}),
+    ...(Array.isArray(opts.educationHistory) ? { educationHistory: opts.educationHistory } : {})
   };
 }
 
@@ -249,15 +258,22 @@ export function validatePerson(person) {
     focusKey = focusKey || "promptTemplate";
   }
   if (!person.masterResume?.trim() && person.promptTemplate?.includes("{MASTER_RESUME}")) {
-    errors.push("Your prompt uses {MASTER_RESUME}. Upload or paste master resume text first.");
-    focusKey = focusKey || "masterResume";
+    // FIXED COMPANY HISTORY prompts (built-in style) do not need master resume text.
+    if (!promptHasFixedCompanyHistory(person.promptTemplate)) {
+      errors.push("Your prompt uses {MASTER_RESUME}. Upload or paste master resume text first.");
+      focusKey = focusKey || "masterResume";
+    }
   }
 
   let requiredExperience = person.requiredExperience || [];
   if (!requiredExperience.length && person.promptTemplate) {
     requiredExperience = parseRequiredExperienceFromPrompt(person.promptTemplate);
   }
-  if (requiredExperience.length < 1 && !person.masterResume?.trim()) {
+  if (
+    requiredExperience.length < 1 &&
+    !person.masterResume?.trim() &&
+    !promptHasFixedCompanyHistory(person.promptTemplate)
+  ) {
     errors.push(
       "List required experience employers (one per line), or upload a master resume so they can be detected."
     );
@@ -284,6 +300,25 @@ export function applyCompleteness(person = {}) {
   if (!String(person.phone || "").trim()) missing.push("Phone");
   if (!String(person.address || "").trim()) missing.push("Street address");
   if (!String(person.zip || "").trim()) missing.push("ZIP / postal code");
+  if (!String(person.workAuthorized || "").trim()) missing.push("Work authorization");
+  if (!String(person.sponsorship || "").trim()) missing.push("Sponsorship");
+  if (!String(person.signatureTitle || "").trim()) missing.push("Signature title");
+  const prompt = String(person.promptTemplate || "");
+  if (
+    prompt.includes("{MASTER_RESUME}") &&
+    !promptHasFixedCompanyHistory(prompt) &&
+    !String(person.masterResume || "").trim()
+  ) {
+    missing.push("Master resume");
+  }
+  const employers = person.requiredExperience || [];
+  if (
+    !employers.length &&
+    !promptHasFixedCompanyHistory(prompt) &&
+    !String(person.masterResume || "").trim()
+  ) {
+    missing.push("Required employers");
+  }
   return { complete: missing.length === 0, missing };
 }
 
@@ -296,7 +331,7 @@ export function mergeExtractedProfileIntoPerson(person, parsed, resumeText, { re
   if (parsed.name) {
     next.name = parsed.name;
     next.label = parsed.name;
-    next.resumeFilePrefix = parsed.name.replace(/[^\w]+/g, "_").replace(/_+/g, "_") || "Resume";
+    next.resumeFilePrefix = resumeFilePrefixFromName(parsed.name);
   }
   if (parsed.email) next.email = parsed.email;
   if (parsed.phone) next.phone = parsed.phone;
@@ -330,6 +365,8 @@ export async function savePersonFromForm(root, opts = {}) {
   if (opts.sheetsWebAppUrl != null) person.sheetsWebAppUrl = String(opts.sheetsWebAppUrl).trim();
   if (Array.isArray(opts.workHistory)) person.workHistory = opts.workHistory;
   if (Array.isArray(opts.educationHistory)) person.educationHistory = opts.educationHistory;
+  // Seed US apply defaults for new customs / incomplete people (only fills empty fields).
+  person = applyUsApplicantDefaults(person);
   const validation = validatePerson(person);
   if (!validation.ok) {
     const err = new Error(validation.errors[0]);

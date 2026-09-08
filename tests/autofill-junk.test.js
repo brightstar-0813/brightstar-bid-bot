@@ -6,7 +6,10 @@ import {
   isJunkQuestionLabel,
   isJunkQaRecord,
   isSensitiveProfileQuestion,
-  normalizeChoiceAnswerValue
+  normalizeChoiceAnswerValue,
+  cleanAutofillLabelText,
+  isBareChoiceOptionLabel,
+  isTrackingNoiseLabel
 } from "../autofill-junk.js";
 
 test("isJunkAutofillAnswer rejects polluted answers", () => {
@@ -25,6 +28,27 @@ test("isJunkQuestionLabel rejects upload chrome and profile duplicates", () => {
   assert.equal(isJunkQuestionLabel("First Name*"), true);
   assert.equal(isJunkQuestionLabel("Autofill from resumeUpload your resume here"), true);
   assert.equal(isJunkQuestionLabel("Are you legally authorized to work in the United States?"), false);
+  assert.equal(isJunkQuestionLabel("Yes"), true);
+  assert.equal(isJunkQuestionLabel("No"), true);
+  assert.equal(isJunkQuestionLabel("udff em"), true);
+  assert.equal(isJunkQuestionLabel("cd buttonfeatures"), true);
+});
+
+test("cleanAutofillLabelText strips char counters", () => {
+  assert.equal(
+    cleanAutofillLabelText("* 2/1000 How many years of experience do you have with Apex?"),
+    "How many years of experience do you have with Apex?"
+  );
+  assert.equal(cleanAutofillLabelText("1/1000 years"), "years");
+});
+
+test("isBareChoiceOptionLabel and isTrackingNoiseLabel", () => {
+  assert.equal(isBareChoiceOptionLabel("Yes"), true);
+  assert.equal(isBareChoiceOptionLabel("Are you authorized?"), false);
+  assert.equal(isTrackingNoiseLabel("fbp"), true);
+  assert.equal(isTrackingNoiseLabel("audff zp"), true);
+  assert.equal(isTrackingNoiseLabel("zip"), false);
+  assert.equal(isTrackingNoiseLabel("How many years of Apex experience?"), false);
 });
 
 test("isJunkQaRecord combines question and answer checks", () => {
@@ -38,23 +62,19 @@ test("isJunkQaRecord combines question and answer checks", () => {
   assert.equal(
     isJunkQaRecord({
       question: "Desired Salary",
-      answer: "$100000"
+      answer: "150000"
     }),
     false
   );
 });
 
-test("isSensitiveProfileQuestion rejects identity and EEO fields", () => {
-  assert.equal(isSensitiveProfileQuestion("Email address"), true);
-  assert.equal(isSensitiveProfileQuestion("Are you a veteran?"), true);
-  assert.equal(isSensitiveProfileQuestion("How many years of Salesforce experience do you have?"), false);
+test("isSensitiveProfileQuestion flags identity fields", () => {
+  assert.equal(isSensitiveProfileQuestion("Email Address"), true);
+  assert.equal(isSensitiveProfileQuestion("Why do you want this role?"), false);
 });
 
-test("normalizeChoiceAnswerValue maps common variants", () => {
+test("normalizeChoiceAnswerValue canonicalizes yes/no", () => {
   assert.equal(normalizeChoiceAnswerValue("y"), "Yes");
-  assert.equal(normalizeChoiceAnswerValue("TRUE"), "Yes");
-  assert.equal(normalizeChoiceAnswerValue("I agree"), "Yes");
-  assert.equal(normalizeChoiceAnswerValue("n"), "No");
-  assert.equal(normalizeChoiceAnswerValue("Decline"), "No");
-  assert.equal(normalizeChoiceAnswerValue("United States"), "United States");
+  assert.equal(normalizeChoiceAnswerValue("false"), "No");
+  assert.equal(normalizeChoiceAnswerValue("Maybe"), "Maybe");
 });

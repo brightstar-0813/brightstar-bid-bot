@@ -9,17 +9,25 @@
 import { getApplicantInfoForAutofill, applyLearnedApplicantField, mergeAutofillExtras, getActivePerson, personToAtsCredentials, DEFAULT_ATS_PASSWORD } from "./profiles.js";
 import { applyCompleteness } from "./person-profile-form.js";
 import { outputDirFromPerson } from "./resume-profile.js";
-import { buildWorkHistory, buildEducationHistory, hasFormHistory, workHistoryForAutofill, educationHistoryForAutofill } from "./history.js";
+import {
+  buildWorkHistory,
+  buildEducationHistory,
+  hasFormHistory,
+  workHistoryForAutofill,
+  educationHistoryForAutofill,
+  getStoredResumeJson as readScopedResumeJson
+} from "./history.js";
 import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
 import {
   isJunkAutofillAnswer,
   isJunkQuestionLabel,
   isSensitiveProfileQuestion,
-  normalizeChoiceAnswerValue
+  normalizeChoiceAnswerValue,
+  isTrackingNoiseLabel
 } from "./autofill-junk.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { getEnv } from "./env.js";
-import { DEFAULT_OPENAI_MODEL } from "./openai.js";
+import { DEFAULT_OPENAI_MODEL, isOpenAiQaAssistEnabled } from "./openai.js";
 import { normalizeJobLink } from "./sheets.js";
 import { NATIVE_HOST_NAME } from "./csv-source.js";
 import {
@@ -53,7 +61,7 @@ import {
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-09-08.cover01";
+const AUTOFILL_SCRIPT_BUILD = "2026-09-08.detect02";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
 
@@ -678,10 +686,15 @@ export async function setActiveApplyJob({ csvRow, jobDir, jdLink } = {}) {
   });
 }
 
-export async function getStoredResumeJson() {
-  const data = await chrome.storage.local.get("last_resume_json");
-  const resume = data.last_resume_json;
-  return resume && typeof resume === "object" ? resume : null;
+export async function getStoredResumeJson(profileId = "") {
+  const id = String(profileId || "").trim();
+  if (id) return readScopedResumeJson(id);
+  try {
+    const person = await getActivePerson();
+    return readScopedResumeJson(person?.id || "");
+  } catch {
+    return readScopedResumeJson("");
+  }
 }
 
 export function waitForTabComplete(tabId, timeoutMs = 30000) {
@@ -1107,10 +1120,13 @@ export async function highlightFieldOnTab(tabId, fieldId) {
 function mergeScanFrameResults(frameResults = []) {
   let best = { ok: false, fields: [], fillableCount: 0, stepLabel: "", isApplicationForm: false };
   for (const row of frameResults) {
-    const count = Array.isArray(row.fields) ? row.fields.length : 0;
+    const fields = (row.fields || []).filter(
+      (f) => !isJunkQuestionLabel(f?.label) && !isTrackingNoiseLabel(f?.label)
+    );
+    const count = fields.length;
     const bestCount = Array.isArray(best.fields) ? best.fields.length : 0;
-    if (row.ok && count >= bestCount) best = row;
-    else if (!best.ok && row.isApplicationForm) best = { ...row, fields: row.fields || [] };
+    if (row.ok && count >= bestCount) best = { ...row, fields };
+    else if (!best.ok && row.isApplicationForm) best = { ...row, fields };
   }
   return best;
 }
@@ -1449,10 +1465,13 @@ async function loadFormHistory(applicantInfo = {}, person = {}) {
       workHistory: storedWork,
       educationHistory: storedEdu.length
         ? storedEdu
-        : buildEducationHistory((await getStoredResumeJson()) || {}, applicantInfo)
+        : buildEducationHistory(
+            (await getStoredResumeJson(person?.id)) || {},
+            applicantInfo
+          )
     };
   }
-  const resume = (await getStoredResumeJson()) || {};
+  const resume = (await getStoredResumeJson(person?.id)) || {};
   return {
     workHistory: buildWorkHistory(resume),
     educationHistory: buildEducationHistory(resume, applicantInfo)
@@ -2004,13 +2023,17 @@ async function enrichAnswersWithAi(questions, answers, {
   profileId = "",
   site = "",
   applicantInfo = {},
-  jobMeta = null
+  jobMeta = null,
+  forceAi = false
 } = {}) {
   const answered = new Set(answers.map((a) => a.id));
   const stillNeed = questions.filter((q) => {
     if (!q?.id || answered.has(q.id)) return false;
     return choice ? Array.isArray(q.options) && q.options.length : true;
   });
+  if (!forceAi && !(await isOpenAiQaAssistEnabled())) {
+    return { aiHits: 0 };
+  }
   const { apiKey, model } = await getOpenAiSettings();
   if (!apiKey || !stillNeed.length) return { aiHits: 0 };
 
@@ -2074,7 +2097,15 @@ async function enrichAnswersWithAi(questions, answers, {
 /**
  * Apply bank + AI answers for unmatched text/choice questions already collected on the page.
  */
-async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, applicantInfo = {}) {
+async function fillUnmatchedAnswers(
+  tabId,
+  result,
+  extras,
+  profileId,
+  site,
+  applicantInfo = {},
+  { forceAi = false } = {}
+) {
   let extraFilled = 0;
   let bankHits = 0;
   let aiHits = 0;
@@ -2101,7 +2132,8 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
         choice: true,
         profileId,
         site,
-        applicantInfo: info
+        applicantInfo: info,
+        forceAi
       });
       aiHits += Number(ai.aiHits || 0);
       if (!answers.length) continue;
@@ -2131,7 +2163,8 @@ async function fillUnmatchedAnswers(tabId, result, extras, profileId, site, appl
         choice: false,
         profileId,
         site,
-        applicantInfo: info
+        applicantInfo: info,
+        forceAi
       });
       aiHits += Number(ai.aiHits || 0);
       if (!answers.length) continue;
@@ -2170,7 +2203,15 @@ async function collectRemainingUnmatchedFromTab(tabId, applicantInfo = {}) {
 /**
  * One inventory AI pass for mixed leftovers (choices + free text) still unanswered.
  */
-async function fillInventoryPlannerPass(tabId, inventory, extras, profileId, site, applicantInfo = {}) {
+async function fillInventoryPlannerPass(
+  tabId,
+  inventory,
+  extras,
+  profileId,
+  site,
+  applicantInfo = {},
+  { forceAi = false } = {}
+) {
   const fields = [
     ...(Array.isArray(inventory?.unmatchedChoiceQuestions)
       ? inventory.unmatchedChoiceQuestions.map((q) => ({
@@ -2189,7 +2230,9 @@ async function fillInventoryPlannerPass(tabId, inventory, extras, profileId, sit
   if (!fields.length) return { extraFilled: 0, bankHits: 0, aiHits: 0 };
 
   // Prefer bank/extras first via the normal path.
-  const first = await fillUnmatchedAnswers(tabId, inventory, extras, profileId, site, applicantInfo);
+  const first = await fillUnmatchedAnswers(tabId, inventory, extras, profileId, site, applicantInfo, {
+    forceAi
+  });
 
   const still = await collectRemainingUnmatchedFromTab(tabId, applicantInfo);
   const leftoverFields = [
@@ -2204,6 +2247,8 @@ async function fillInventoryPlannerPass(tabId, inventory, extras, profileId, sit
     }))
   ];
   if (!leftoverFields.length) return first;
+
+  if (!forceAi && !(await isOpenAiQaAssistEnabled())) return first;
 
   const { apiKey, model } = await getOpenAiSettings();
   if (!apiKey) return first;
@@ -3558,7 +3603,101 @@ export async function answerQuestionsFromBank(
     profileId: person?.id || "",
     site,
     applicantInfo: info,
-    jobMeta
+    jobMeta,
+    forceAi: true
   });
   return answers;
+}
+
+/**
+ * Dedicated Apply Assist action: scan empty special questions on the current
+ * application tab and answer them via Q&A bank + OpenAI (forced).
+ * Use after Autofill when profile aliases cannot map screening / essay fields.
+ */
+export async function runCustomOpenAiQaOnTab(tabId = null) {
+  const { apiKey } = await getOpenAiSettings();
+  if (!apiKey) {
+    throw new Error(
+      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env file, then reload the extension."
+    );
+  }
+
+  const { person, applicantInfo, extras } = await getApplicantInfoForAutofill();
+  const tab = tabId
+    ? await chrome.tabs.get(tabId).catch(() => null)
+    : (await getCurrentApplicationTab()) || (await resolveAssistTab());
+
+  if (!tab?.id) {
+    throw new Error("No active application tab. Focus the job form tab first.");
+  }
+  if (!/^https?:\/\//i.test(tab.url || "")) {
+    throw new Error("Cannot run Custom Q&A on Chrome system pages. Focus the job application tab.");
+  }
+
+  await rememberApplyTab(tab.id);
+  if (tab.status === "loading") {
+    try {
+      await waitForTabComplete(tab.id, 25000);
+    } catch {
+      /* continue */
+    }
+    await sleep(APPLY_SETTLE_MS);
+  }
+
+  await ensureAutofillScript(tab.id);
+  await showAutofillPanelOnTab(tab.id, { expand: true }).catch(() => false);
+  await setApplyStatus("Custom Q&A: scanning special questions…");
+
+  const site = hostnameFromUrl(tab.url || "");
+  const inventory = await collectRemainingUnmatchedFromTab(tab.id, applicantInfo);
+  const pending =
+    (inventory.unmatchedQuestions?.length || 0) + (inventory.unmatchedChoiceQuestions?.length || 0);
+
+  if (!pending) {
+    const statusText = "Custom Q&A: no empty special questions found on this step.";
+    await setApplyStatus(statusText);
+    return {
+      ok: true,
+      filledCount: 0,
+      extraFilled: 0,
+      bankHits: 0,
+      aiHits: 0,
+      unmatched: 0,
+      unmatchedAfterSecondPass: 0,
+      customQa: true,
+      statusText
+    };
+  }
+
+  await setApplyStatus(`Custom Q&A: answering ${pending} question(s) with bank + OpenAI…`);
+  const pass = await fillInventoryPlannerPass(
+    tab.id,
+    inventory,
+    extras,
+    person?.id || "",
+    site,
+    applicantInfo,
+    { forceAi: true }
+  );
+
+  const still = await collectRemainingUnmatchedFromTab(tab.id, applicantInfo);
+  const left =
+    (still.unmatchedQuestions?.length || 0) + (still.unmatchedChoiceQuestions?.length || 0);
+
+  const result = {
+    ok: true,
+    filledCount: Number(pass.extraFilled || 0),
+    extraFilled: Number(pass.extraFilled || 0),
+    bankHits: Number(pass.bankHits || 0),
+    aiHits: Number(pass.aiHits || 0),
+    unmatched: left,
+    unmatchedAfterSecondPass: left,
+    customQa: true
+  };
+  result.statusText = formatAutofillSummary(result).replace(/^Autofill complete/, "Custom Q&A complete");
+  if (result.statusText === "Custom Q&A complete" && pending) {
+    result.statusText = `Custom Q&A: processed ${pending} question(s)`;
+  }
+  await setApplyStatus(result.statusText);
+  return result;
 }

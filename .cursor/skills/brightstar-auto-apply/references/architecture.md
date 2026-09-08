@@ -43,6 +43,12 @@ Indeed hosted vs external: `indeed.js` (`hostedApply` / `externalApply` / apply 
 - Use keep-alive / alarms patterns already in `background.js` for long batches.
 - Autofill: prefer multi-frame broadcast + merge results; application UIs often iframe.
 
+## PDF / Downloads naming
+
+- Helpers: `resume-profile.js` (`normalizeResumeFilePrefix`, `outputDirFromPerson`, `normalizeDownloadsRelativeDir`)
+- Persist on activate/save: `profiles.js` → `syncActivePersonOutputContext`
+- Save path: `background.js` `resolveOutputDir` + `autoDownloadResumeFiles` (person `Applications-{Token}` wins over bare `Applications`; absolute paths rejected)
+
 ## Storage
 
 - Person profiles, queue, settings: `chrome.storage.local`
@@ -57,6 +63,7 @@ Indeed hosted vs external: `indeed.js` (`hostedApply` / `externalApply` / apply 
 | Indeed hosted detection | `tests/indeed.test.js` |
 | Greenhouse helpers | `tests/greenhouse.test.js` |
 | Role tracks | `tests/role-tracks.test.js` |
+| Resume PDF prefix / output dir | `tests/resume-profile-output.test.js` |
 | ATS score | `tests/ats-score.test.js` |
 | Autofill junk | `tests/autofill-junk.test.js` |
 | Q&A store | `tests/qa-store.test.js` |
@@ -71,4 +78,5 @@ Indeed hosted vs external: `indeed.js` (`hostedApply` / `externalApply` / apply 
 - Treating LinkedIn / Etc like Dice for auto-submit.
 - Assuming sheet write success is required for a successful job row.
 - Blocking the batch on one unusable JSON when deep harvest already found valid JSON.
+- Leaving custom people on bare PDF prefix `Resume` / output `Applications` (Chrome may save as `download`).
 - Committing `.env` or personal Q&A dumps with secrets.

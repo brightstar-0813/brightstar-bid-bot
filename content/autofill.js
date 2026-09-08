@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-08.cover01";
+  const SCRIPT_BUILD = "2026-09-08.detect02";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -115,8 +115,9 @@
     if (!targetId) return { ok: false, error: "Missing field id." };
 
     for (const el of collectFillableControls()) {
-      const label = (questionTextForAi(el) || labelTextForControl(el) || "").trim();
+      const label = (displayQuestionLabel(el) || questionTextForAi(el) || labelTextForControl(el) || "").trim();
       if (!label || label.length < 2) continue;
+      if (isTrackingNoiseLabel(label) || isBareChoiceOptionLabel(label)) continue;
       const fieldType = inferFieldType(el);
       if (stableQuestionId(label, fieldType, el) === targetId) {
         return { ok: flashHighlightElement(el), id: targetId };
@@ -1047,8 +1048,61 @@
 
   function cleanLabelText(text) {
     return String(text || "")
+      .replace(/\b\d+\s*\/\s*\d{2,5}\b/g, " ")
+      .replace(/\bcharacters?\s*(remaining|left)?\b/gi, " ")
+      .replace(/^\s*[\u2022*·•]+\s*/, "")
+      .replace(/\s*\*\s*$/, "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function isBareChoiceOptionLabel(text) {
+    return /^(yes|no|y|n|true|false|agree|disagree|i agree|i do not agree)$/i.test(
+      cleanLabelText(text)
+    );
+  }
+
+  function isTrackingNoiseLabel(text) {
+    const raw = cleanLabelText(text);
+    if (!raw) return true;
+    if (
+      /^(id|ev|dl|rl|if|ts|iw|sw|sh|ec|fbp|ler|cdl|aems|uid|uuid|sid|cid|gid|pid|tid|rid)$/i.test(raw)
+    ) {
+      return true;
+    }
+    if (
+      /\b(udff|audff|ncudff|cudff|buttonfeatures|formfeatures|pagefeatures|buttontext|pixel|fbclid|gclid|fbp|fbc)\b/i.test(
+        raw
+      )
+    ) {
+      return true;
+    }
+    if (/^cd\s+\w+/i.test(raw) && raw.length < 48) return true;
+    if (/^[a-z]{1,5}(\s+[a-z]{1,4}){0,2}$/i.test(raw) && !/[?]/.test(raw) && raw.length <= 12) {
+      if (!/^(dob|ssn|url|zip|city|name|email|phone|race|sex)$/i.test(raw)) return true;
+    }
+    return false;
+  }
+
+  function isTrackingNoiseControl(el, label = "") {
+    const nameId = `${el?.name || ""} ${el?.id || ""} ${el?.getAttribute?.("autocomplete") || ""}`;
+    if (isTrackingNoiseLabel(label) || isTrackingNoiseLabel(nameId.replace(/[\[\]_.-]+/g, " "))) {
+      return true;
+    }
+    if (el?.getAttribute?.("aria-hidden") === "true") return true;
+    if (el?.closest?.('[aria-hidden="true"], [hidden], noscript, template')) return true;
+    try {
+      const style = window.getComputedStyle(el);
+      if (Number(style.opacity) === 0) return true;
+      if (style.position === "absolute" || style.position === "fixed") {
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 1 && rect.height <= 1) return true;
+        if (rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight + 200) return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
   }
 
   function labelTextForControl(el) {
@@ -1317,12 +1371,58 @@
     for (const c of candidates) {
       if (!c) continue;
       if (looksLikeEditorChromeValue(c)) continue;
+      if (isBareChoiceOptionLabel(c)) continue;
+      if (isTrackingNoiseLabel(c)) continue;
       if (/^(type here|enter text|write here|your answer)\.?$/i.test(c)) continue;
-      if (c.length > best.length) best = c;
+      // Prefer longer, question-like labels over short option chrome.
+      const score = c.length + (looksLikeQuestionLabel(c) ? 400 : 0) + (/[?]/.test(c) ? 200 : 0);
+      const bestScore =
+        best.length + (looksLikeQuestionLabel(best) ? 400 : 0) + (/[?]/.test(best) ? 200 : 0);
+      if (score > bestScore) best = c;
     }
     if (best) return best.slice(0, 1000);
 
     return cleanLabelText(labelTextForControl(el)).slice(0, 1000);
+  }
+
+  /**
+   * Panel / AI display label: for radios use the group question, never Yes/No alone.
+   */
+  function displayQuestionLabel(el) {
+    if (!el) return "";
+    const type = (el.type || "").toLowerCase();
+    if (type === "radio" || type === "checkbox") {
+      const options = type === "radio" ? collectControlOptions(el) : ["Yes", "No"];
+      const root =
+        el.closest?.('[role="radiogroup"], [role="group"], fieldset') ||
+        el.closest?.("fieldset") ||
+        el.parentElement;
+      const near = questionTextNearNode(root || el, options);
+      if (near && !isBareChoiceOptionLabel(near) && !isTrackingNoiseLabel(near)) {
+        return near.slice(0, 1000);
+      }
+      const fromQuestion = questionLabelForControl(el);
+      if (
+        fromQuestion &&
+        !isBareChoiceOptionLabel(fromQuestion) &&
+        !isTrackingNoiseLabel(fromQuestion)
+      ) {
+        return fromQuestion.slice(0, 1000);
+      }
+      const fromAi = questionTextForAi(el);
+      if (fromAi && !isBareChoiceOptionLabel(fromAi) && !isTrackingNoiseLabel(fromAi)) {
+        return fromAi.slice(0, 1000);
+      }
+      return near || fromQuestion || fromAi || "";
+    }
+
+    let label = questionTextForAi(el) || questionLabelForControl(el) || "";
+    label = cleanLabelText(label);
+    if (isBareChoiceOptionLabel(label) || isTrackingNoiseLabel(label)) {
+      const near = questionTextNearNode(el, []);
+      if (near) return near.slice(0, 1000);
+    }
+    return label.slice(0, 1000);
   }
 
   function isYesNoValue(value) {
@@ -3367,8 +3467,10 @@
 
       if (isHistoryFilled(el)) continue;
       const labelNorm = labelTextForControl(el);
-      const questionLabel = questionTextForAi(el);
+      const questionLabel = displayQuestionLabel(el) || questionTextForAi(el);
       if (!labelNorm && !questionLabel) continue;
+      if (isTrackingNoiseLabel(questionLabel) || isTrackingNoiseControl(el, questionLabel)) continue;
+      if (isBareChoiceOptionLabel(questionLabel)) continue;
       if (shouldSkipAiField(el, labelNorm || questionLabel)) continue;
 
       const multiline = isMultilineControl(el);
@@ -3663,6 +3765,7 @@
       const style = window.getComputedStyle(el);
       const hiddenChoice = type === "radio" || type === "checkbox";
       if (!hiddenChoice && (style.display === "none" || style.visibility === "hidden")) return false;
+      if (!hiddenChoice && isTrackingNoiseControl(el)) return false;
       return true;
     });
   }
@@ -4875,7 +4978,7 @@
     if (type === "checkbox") return el.checked ? "Yes" : "";
     if (type === "radio") {
       if (!el.checked) return "";
-      return cleanLabelText(questionTextForAi(el) || radioOptionLabel(el) || el.value);
+      return cleanLabelText(radioOptionLabel(el) || el.value);
     }
     return String(el.value ?? "").trim();
   }
@@ -4896,6 +4999,7 @@
 
     const fields = [];
     const seen = new Set();
+    const seenRadioGroups = new Set();
 
     const pushField = (row) => {
       const key = `${row.label}|${row.type}|${row.id}`;
@@ -4906,13 +5010,33 @@
 
     for (const el of collectFillableControls()) {
       if (isHistoryFilled(el)) continue;
-      const label = (questionTextForAi(el) || labelTextForControl(el) || "").trim();
+      const type = (el.type || "").toLowerCase();
+      if (type === "radio") {
+        const groupKey = String(el.name || el.id || "").trim();
+        if (groupKey) {
+          if (seenRadioGroups.has(groupKey)) continue;
+          seenRadioGroups.add(groupKey);
+        }
+      }
+
+      const label = cleanLabelText(displayQuestionLabel(el) || labelTextForControl(el) || "");
       if (!label || label.length < 2) continue;
+      if (isTrackingNoiseLabel(label) || isTrackingNoiseControl(el, label)) continue;
+      if (isBareChoiceOptionLabel(label) && (type === "radio" || type === "checkbox")) continue;
 
       const profileKey = matchApplicantKeyFromControl(el);
       const fieldType = inferFieldType(el);
       const currentValue = readFilledAnswer(el);
-      const hasValue = Boolean(currentValue);
+      const hasValue =
+        type === "radio"
+          ? Boolean(
+              el.name
+                ? document.querySelector(
+                    `input[type="radio"][name="${CSS.escape(el.name)}"]:checked`
+                  )
+                : el.checked
+            )
+          : Boolean(currentValue);
       const options =
         fieldType === "select" || fieldType === "radio" ? collectControlOptions(el).slice(0, 24) : [];
 
@@ -4940,8 +5064,9 @@
 
     for (const group of collectChoiceChipGroups()) {
       if (group.kind === "start") continue;
-      const label = group.question || "";
+      const label = cleanLabelText(group.question || "");
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
+      if (isTrackingNoiseLabel(label) || isBareChoiceOptionLabel(label)) continue;
       const options = (group.labels || []).slice(0, 24);
       const profileKey = matchApplicantKey(label);
 
@@ -6518,7 +6643,7 @@
     if (type === "checkbox") return el.checked ? "Yes" : "No";
     if (type === "radio") {
       if (!el.checked) return "";
-      return cleanLabelText(questionTextForAi(el) || el.value);
+      return cleanLabelText(radioOptionLabel(el) || el.value);
     }
     return cleanLabelText(el.value || "");
   }

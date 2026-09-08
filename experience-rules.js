@@ -160,6 +160,13 @@ export function compileExperienceRules(input) {
 /**
  * Best-effort extract of FIXED COMPANY HISTORY employers from a tailor prompt.
  */
+export function promptHasFixedCompanyHistory(promptText) {
+  return /FIXED\s+COMPANY\s+HISTORY/i.test(String(promptText || ""));
+}
+
+/**
+ * Best-effort extract of FIXED COMPANY HISTORY employers from a tailor prompt.
+ */
 export function parseRequiredExperienceFromPrompt(promptText) {
   const text = String(promptText || "");
   if (!text.trim()) return [];

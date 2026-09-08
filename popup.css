@@ -765,6 +765,81 @@ input[type="file"]::file-selector-button {
   background: var(--accent-soft-08);
 }
 
+.queue-now-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--gold-bright) 42%, var(--line-strong));
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--gold) 18%, transparent),
+    var(--accent-soft-08) 55%,
+    transparent
+  );
+  box-shadow: inset 3px 0 0 var(--gold-bright);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.queue-now-working[hidden] {
+  display: none !important;
+}
+
+.queue-now-working:hover {
+  background: color-mix(in srgb, var(--gold) 14%, var(--control-bg));
+}
+
+.queue-now-working:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 1px;
+}
+
+.queue-now-working .now-kicker {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft-16);
+}
+
+.queue-now-working .now-body {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.queue-now-working .now-title {
+  font-size: 11.5px;
+  font-weight: 750;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-now-working .now-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-now-working .now-row {
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+  font-weight: 800;
+}
+
 .queue-list {
   max-height: 220px;
   overflow: auto;
@@ -831,8 +906,30 @@ input[type="file"]::file-selector-button {
 }
 
 .queue-item.is-current {
-  background: var(--accent-soft-10);
+  background: color-mix(in srgb, var(--gold) 12%, var(--control-bg));
   box-shadow: inset 3px 0 0 var(--gold-bright);
+  outline: 1px solid color-mix(in srgb, var(--gold-bright) 35%, transparent);
+  outline-offset: -1px;
+}
+
+.queue-item.is-current .csv-row {
+  color: var(--gold-bright);
+}
+
+.badge-now {
+  background: var(--gold-bright);
+  color: #1a1510;
+  animation: queue-now-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes queue-now-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
 }
 
 .queue-item .csv-row {
@@ -1602,6 +1699,16 @@ input[type="file"]::file-selector-button {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.apply-actions-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+@media (max-width: 360px) {
+  .apply-actions-3 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .apply-actions button {

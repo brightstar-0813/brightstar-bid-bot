@@ -14,7 +14,8 @@ import {
   getPersonSheetConfig,
   DEFAULT_PROFILE_ID,
   resolveCoverLetterTemplateForTrack,
-  resolvePromptTemplateForTrack
+  resolvePromptTemplateForTrack,
+  applyUsApplicantDefaults
 } from "./profiles.js";
 import {
   fillPersonForm,
@@ -175,7 +176,7 @@ export function createInlineProfileEditor(opts) {
 
   function blankPerson() {
     const track = "sf";
-    return {
+    return applyUsApplicantDefaults({
       id: null,
       label: "",
       name: "",
@@ -188,17 +189,15 @@ export function createInlineProfileEditor(opts) {
       zip: "",
       masterResume: "",
       requiredExperience: [],
-      workHistory: [],
-      educationHistory: [],
       roleTrack: track,
       promptTemplate: getTrackPromptTemplate(track),
       coverLetterPrompt: resolveCoverLetterTemplateForTrack({ roleTrack: track }, track),
       templateId: DEFAULT_TEMPLATE_ID,
-      resumeFilePrefix: "Resume",
+      resumeFilePrefix: "",
       signatureTitle: "",
       autofillExtras: {},
       builtin: false
-    };
+    });
   }
 
   function applyTrackPrompts(nextTrack, previousTrack) {

@@ -344,17 +344,47 @@ export function extractProfileFromResumeText(text) {
 }
 
 export function resumeFilePrefixFromName(name) {
-  const first = String(name || "")
+  const parts = String(name || "")
     .trim()
-    .split(/\s+/)[0]
-    .replace(/[^A-Za-z0-9]/g, "");
-  return first ? `${first}_Resume` : "Resume";
+    .split(/\s+/)
+    .filter(Boolean);
+  // Prefer last name so Applications-Lewis matches built-in convention.
+  const tokenSource = parts.length > 1 ? parts[parts.length - 1] : parts[0] || "";
+  const token = tokenSource.replace(/[^A-Za-z0-9]/g, "");
+  return token ? `${token}_Resume` : "Applicant_Resume";
 }
 
-/** Downloads subfolder for a person, e.g. Lewis_Resume / "D'mario Lewis" → Applications-Lewis */
-export function outputDirFromPerson(person = {}) {
-  const prefix = String(person?.resumeFilePrefix || "").trim();
-  let token = prefix
+/**
+ * Bare "Resume" / empty is not a configured prefix — built-ins use Lewis_Resume etc.
+ * After stripping a trailing _Resume, there must still be a name token.
+ */
+export function isGenericResumeFilePrefix(prefix) {
+  const raw = String(prefix || "").trim();
+  if (!raw) return true;
+  const token = raw
+    .replace(/_?(Resume|resume)$/i, "")
+    .replace(/_+$/, "")
+    .replace(/[^A-Za-z0-9]+/g, "");
+  return !token;
+}
+
+/**
+ * Prefer an explicit configured prefix; otherwise derive FirstName_Resume from the person name.
+ * Never leave custom profiles on bare "Resume" (that collapses to ChatGPT JSON / Chrome "download").
+ */
+export function normalizeResumeFilePrefix(rawPrefix, personName = "") {
+  const raw = String(rawPrefix || "").trim();
+  if (!isGenericResumeFilePrefix(raw)) return raw;
+  return resumeFilePrefixFromName(personName);
+}
+
+/** Name token used in Applications-{token} and {token}_Resume.pdf */
+export function personOutputNameToken(person = {}) {
+  const prefix = normalizeResumeFilePrefix(
+    person?.resumeFilePrefix,
+    person?.name || person?.label || ""
+  );
+  let token = String(prefix)
     .replace(/_?(Resume|resume)$/i, "")
     .replace(/_+$/, "")
     .replace(/[^A-Za-z0-9]+/g, "");
@@ -366,7 +396,60 @@ export function outputDirFromPerson(person = {}) {
     const last = parts.length ? parts[parts.length - 1] : "";
     token = last.replace(/[^A-Za-z0-9]+/g, "");
   }
-  return `Applications-${token || "Applicant"}`;
+  if (!token) {
+    const first = String(person?.name || person?.label || "")
+      .trim()
+      .split(/\s+/)[0];
+    token = String(first || "").replace(/[^A-Za-z0-9]+/g, "");
+  }
+  return token || "Applicant";
+}
+
+/** Downloads subfolder for a person, e.g. Lewis_Resume / "D'mario Lewis" → Applications-Lewis */
+export function outputDirFromPerson(person = {}) {
+  return `Applications-${personOutputNameToken(person)}`;
+}
+
+/** True when folder is missing or the non-person-specific "Applications" default. */
+export function isGenericApplicationsDir(dir) {
+  const top = String(dir || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)[0];
+  if (!top) return true;
+  return /^Applications$/i.test(top);
+}
+
+/**
+ * chrome.downloads only accepts paths relative to the Downloads folder.
+ * Absolute Windows/Unix paths are rejected (Chrome then saves as "download").
+ */
+export function normalizeDownloadsRelativeDir(raw, fallback = "Applications") {
+  let s = String(raw || "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (!s) return fallback;
+
+  const looksAbsolute = /^[a-zA-Z]:\//.test(s) || s.startsWith("/") || s.startsWith("//");
+  if (looksAbsolute) {
+    const hit = s.match(/\/(Applications-[^/]+|Applications)(?:\/|$)/i);
+    if (hit?.[1]) s = hit[1];
+    else {
+      const leaf = s.split("/").filter(Boolean).pop() || "";
+      if (/^Applications-/i.test(leaf)) s = leaf;
+      else return fallback;
+    }
+  }
+
+  const top = s.split("/").filter(Boolean)[0] || fallback;
+  const cleaned = top
+    .replace(/[<>:"|?*\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim()
+    .slice(0, 80);
+  return cleaned || fallback;
 }
 
 export function namesLikelyDifferent(a, b) {
