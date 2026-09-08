@@ -1733,6 +1733,91 @@ input[type="file"]::file-selector-button {
   opacity: 0.78;
 }
 
+.custom-qa-ask {
+  margin: 0 0 10px;
+  padding: 10px 10px 8px;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.1));
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.custom-qa-ask-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, rgba(255, 255, 255, 0.72));
+}
+
+.custom-qa-ask .field-label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, rgba(255, 255, 255, 0.65));
+}
+
+.custom-qa-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 56px;
+}
+
+.custom-qa-textarea:focus {
+  outline: 1px solid var(--accent, #f5c542);
+  border-color: transparent;
+}
+
+.custom-qa-engines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 0 0 6px;
+}
+
+.custom-qa-engines .radio-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.custom-qa-engines .radio-inline input {
+  accent-color: var(--accent, #f5c542);
+}
+
+.custom-qa-strong {
+  margin: 0 0 8px !important;
+}
+
+.custom-qa-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.custom-qa-actions-secondary {
+  margin-bottom: 0;
+}
+
+.custom-qa-meta {
+  margin: -2px 0 8px;
+  font-size: 11px;
+  color: var(--accent, #f5c542);
+}
+
 .qa-bank-block {
   margin-top: 10px;
   padding-top: 10px;

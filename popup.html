@@ -656,7 +656,7 @@
           </label>
           <label class="checkbox-field toggle-field">
             <span>OpenAI Custom Q&amp;A</span>
-            <input type="checkbox" id="openaiQaToggle" checked />
+            <input type="checkbox" id="openaiQaToggle" checked title="When on: Autofill leftovers and Scan page may call OpenAI. Ask panel can still use AI tab when this is off." />
           </label>
           <div class="apply-actions apply-actions-3">
             <button type="button" id="autofillPage" class="primary" title="Open the in-page panel and fill the current step — never clicks Next or Submit">
@@ -667,11 +667,41 @@
               Auto Apply
               <kbd>Ctrl+Shift+U</kbd>
             </button>
-            <button type="button" id="customQaPage" class="ghost" title="Answer leftover special questions with Q&A bank + OpenAI (requires OPENAI_API_KEY in .env)">
+            <button type="button" id="customQaPage" class="ghost" title="Ask one question using the active profile (OpenAI API or ChatGPT/Claude tab), or scan leftover fields on the page">
               Custom Q&amp;A
               <kbd>Ctrl+Shift+Q</kbd>
             </button>
             </div>
+          <div id="customQaAskPanel" class="custom-qa-ask" hidden>
+            <p class="custom-qa-ask-title">Ask from active profile</p>
+            <label class="field-label" for="customQaQuestion">Question</label>
+            <textarea id="customQaQuestion" class="custom-qa-textarea" rows="3" placeholder="Paste or type the application question…"></textarea>
+            <div class="custom-qa-engines" role="radiogroup" aria-label="Answer engine">
+              <label class="radio-inline">
+                <input type="radio" name="customQaEngine" value="openai" checked />
+                <span>OpenAI API</span>
+              </label>
+              <label class="radio-inline">
+                <input type="radio" name="customQaEngine" value="chatgpt" />
+                <span>AI tab (ChatGPT/Claude)</span>
+              </label>
+            </div>
+            <label class="checkbox-field custom-qa-strong" id="customQaStrongWrap">
+              <span>Stronger OpenAI model (costs more)</span>
+              <input type="checkbox" id="customQaStrongModel" />
+            </label>
+            <div class="custom-qa-actions">
+              <button type="button" id="customQaGenerate" class="primary">Generate</button>
+              <button type="button" id="customQaScanPage" class="ghost" title="Scan empty special questions on the focused application tab">Scan page</button>
+            </div>
+            <label class="field-label" for="customQaAnswer">Answer</label>
+            <textarea id="customQaAnswer" class="custom-qa-textarea" rows="4" placeholder="Generated answer appears here…"></textarea>
+            <p class="custom-qa-meta" id="customQaMeta" hidden></p>
+            <div class="custom-qa-actions custom-qa-actions-secondary">
+              <button type="button" id="customQaCopy" class="ghost" disabled>Copy</button>
+              <button type="button" id="customQaSave" class="ghost" disabled>Save to bank</button>
+            </div>
+          </div>
           <div class="qa-bank-block">
             <div class="qa-bank-head">
               <p class="subsection-title">Q&amp;A bank</p>

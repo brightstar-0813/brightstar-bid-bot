@@ -64,10 +64,14 @@ import {
   highlightFieldOnTab,
   handleQaLearnCapture,
   answerQuestionsFromBank,
-  runCustomOpenAiQaOnTab
+  runCustomOpenAiQaOnTab,
+  answerCustomQaAsk,
+  prepareCustomQaAsk,
+  saveCustomQaAnswer
 } from "./autofill-runner.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { isOpenAiQaAssistEnabled } from "./openai.js";
+import { cleanCustomQaAnswer } from "./ai-answers.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -2945,17 +2949,27 @@ async function ensureFreshChat(tabId, provider) {
   return { ok: false, navigated: true };
 }
 
-/** True when the AI tab is still on a prior conversation URL. */
+/** True when the AI tab still has a prior conversation with messages. */
 async function aiTabStillOnPriorConversation(tabId, provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
   try {
-    const tab = await chrome.tabs.get(tabId);
-    const url = String(tab?.url || "");
-    if (p === AI_PROVIDERS.CLAUDE) return /\/chat\/[a-f0-9-]+/i.test(url);
-    return /\/c\/[a-zA-Z0-9_-]+/.test(url);
+    const state = await readChatReadiness(tabId, p);
+    // Empty /c/<id> after navigate is a fresh chat — not "prior".
+    // Only treat as prior when user/assistant turns already exist.
+    if (Number(state.userBlocks) > 0 || Number(state.assistantBlocks) > 0) return true;
+    return false;
   } catch {
     return false;
   }
+}
+
+/** True when composer is ready and the chat has no messages yet. */
+async function isBlankFreshAiChat(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  const state = await readChatReadiness(tabId, p);
+  if (!state.hasInput) return false;
+  if (Number(state.userBlocks) > 0 || Number(state.assistantBlocks) > 0) return false;
+  return true;
 }
 
 /**
@@ -4920,6 +4934,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
   const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat);
 
+  // Capture /c/<id> immediately after the first send so mid-poll failures
+  // (rate limit, timeout) can still delete this chat before a batch retry.
+  if (startNewChat) {
+    await rememberAiChatFromTab(tabId, provider).catch(() => "");
+  }
+
   // Active polling budget (rate-limit cooldowns do NOT count against this).
   const timeoutMs = expectResumeJson ? 12 * 60 * 1000 : 4 * 60 * 1000;
   // Consecutive no-growth polls (≈1s each) after streaming stops before we give
@@ -5778,12 +5798,23 @@ async function runAutoJob(jobMeta) {
     }
 
     const retryPrompt = isFirst ? prompt : buildJsonRetryPrompt(resumeData);
+    // Cooldown often already left a blank chat — reusing it avoids a second
+    // "Rewrite … Resume" sidebar entry for the same job.
+    let openNewChat = isFirst;
+    if (isFirst && (await isBlankFreshAiChat(tab.id, provider))) {
+      openNewChat = false;
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: blank ${providerLabel} chat ready — sending resume (no second New chat)…`
+      );
+    }
     rawOutput = await automateChatGpt(tab.id, retryPrompt, {
-      newChat: isFirst,
+      newChat: openNewChat,
       expectResumeJson: true,
-      statusLabel: isFirst
+      statusLabel: openNewChat
         ? `Chat 1/1 · resume JSON (${jobMeta.companyName || "job"})…`
-        : `Same chat · retry resume JSON (${jobMeta.companyName || "job"})…`
+        : isFirst
+          ? `Same blank chat · resume JSON (${jobMeta.companyName || "job"})…`
+          : `Same chat · retry resume JSON (${jobMeta.companyName || "job"})…`
     });
 
     // Persist chat id as soon as the first resume message creates the conversation
@@ -6424,6 +6455,11 @@ async function runBatchLoop(outputDir) {
           continue;
         }
         if (msg === "__RATE_LIMIT_PAUSE__") {
+          await cooldownBeforeNextJob({
+            aiTabId: err?.aiTabId ?? null,
+            aiChatId: err?.aiChatId || "",
+            reason: "rate limit pause"
+          }).catch(() => {});
           await updateQueueJob(next.csvRow, {
             status: "pending",
             error: "ChatGPT rate limit — batch paused for cool-down"
@@ -6464,7 +6500,8 @@ async function runBatchLoop(outputDir) {
           return;
         }
 
-        // Rate limit: keep pending (do not burn attempts) and cool down.
+        // Rate limit: keep pending (do not burn attempts), delete the orphaned
+        // chat, then cool down — otherwise retry opens a twin "Rewrite…" chat.
         if (/rate limit|too many requests|requests too quickly|temporarily limited/i.test(msg)) {
           lastRateLimitHitAt = Date.now();
           rateLimitHitsThisBatch += 1;
@@ -6473,12 +6510,21 @@ async function runBatchLoop(outputDir) {
             error: "ChatGPT rate limit — will retry after cooldown"
           });
           if (await maybeHardPauseForRateLimit(msg.slice(0, 120))) {
+            await cooldownBeforeNextJob({
+              aiTabId: err?.aiTabId ?? null,
+              aiChatId: err?.aiChatId || "",
+              reason: "rate limit hard pause"
+            }).catch(() => {});
             return;
           }
           await setStatus(
-            `Row ${next.csvRow}: ChatGPT rate limit. Waiting ~${formatWaitLeft(RATE_LIMIT_BASE_WAIT_MS)}, then continuing…`
+            `Row ${next.csvRow}: ChatGPT rate limit. Removing chat, then waiting before retry…`
           );
-          await sleep(RATE_LIMIT_BASE_WAIT_MS);
+          await cooldownBeforeNextJob({
+            aiTabId: err?.aiTabId ?? null,
+            aiChatId: err?.aiChatId || "",
+            reason: "rate limit retry"
+          });
           continue;
         }
 
@@ -7594,6 +7640,87 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const msg = String(err?.message || err);
         await setStatus(`Custom Q&A failed: ${msg}`);
         safeSendResponse(sendResponse, { ok: false, error: msg });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "custom_qa_ask") {
+    (async () => {
+      try {
+        const question = String(message.question || "").trim();
+        if (!question) {
+          safeSendResponse(sendResponse, { ok: false, error: "Enter or paste a question first." });
+          return;
+        }
+        const engine = String(message.engine || "openai").toLowerCase();
+        const strongModel = Boolean(message.strongModel);
+        const skipBank = Boolean(message.skipBank);
+
+        if (engine === "chatgpt" || engine === "agent" || engine === "claude") {
+          const prep = await prepareCustomQaAsk({ question, skipBank });
+          if (prep.bankHit) {
+            await setStatus(`Custom Q&A: reused bank answer (${prep.bankHit.personLabel || "profile"}).`);
+            safeSendResponse(sendResponse, prep.bankHit);
+            return;
+          }
+          const provider = await getStoredAiProvider();
+          const providerLabel = aiProviderLabel(provider);
+          await setStatus(`Custom Q&A: asking ${providerLabel} tab…`);
+          const tab = await ensureAiTab(provider);
+          const raw = await automateChatGpt(tab.id, prep.prompt, {
+            newChat: true,
+            expectResumeJson: false,
+            statusLabel: `Custom Q&A via ${providerLabel}…`
+          });
+          const answer = cleanCustomQaAnswer(raw);
+          if (!answer) {
+            throw new Error(`${providerLabel} returned an empty answer. Try again.`);
+          }
+          await setStatus(`Custom Q&A: answer ready (${providerLabel}).`);
+          safeSendResponse(sendResponse, {
+            ok: true,
+            answer,
+            source: provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt",
+            profileId: prep.profileId,
+            personLabel: prep.personLabel
+          });
+          return;
+        }
+
+        await setStatus(
+          strongModel
+            ? "Custom Q&A: generating with stronger OpenAI model…"
+            : "Custom Q&A: generating with OpenAI…"
+        );
+        const result = await answerCustomQaAsk({ question, strongModel, skipBank });
+        const via =
+          result.source === "bank"
+            ? `bank (${result.personLabel || "profile"})`
+            : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
+        await setStatus(`Custom Q&A: answer ready (${via}).`);
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Custom Q&A failed: ${msg}`);
+        safeSendResponse(sendResponse, { ok: false, error: msg });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "custom_qa_save") {
+    (async () => {
+      try {
+        const result = await saveCustomQaAnswer({
+          question: message.question,
+          answer: message.answer,
+          source: message.source || "custom_ask"
+        });
+        await setStatus("Custom Q&A: saved to bank for this person.");
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }
     })();
     return true;

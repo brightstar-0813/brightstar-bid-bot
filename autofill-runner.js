@@ -27,13 +27,20 @@ import {
 } from "./autofill-junk.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { getEnv } from "./env.js";
-import { DEFAULT_OPENAI_MODEL, isOpenAiQaAssistEnabled } from "./openai.js";
+import {
+  DEFAULT_OPENAI_MODEL,
+  QUALITY_OPENAI_MODEL,
+  isOpenAiQaAssistEnabled
+} from "./openai.js";
 import { normalizeJobLink } from "./sheets.js";
 import { NATIVE_HOST_NAME } from "./csv-source.js";
 import {
   generateHumanizedApplicationAnswers,
   generateConstrainedChoiceAnswers,
   generateFormInventoryAnswers,
+  generateSingleProfileAnswer,
+  buildCustomQaAgentPrompt,
+  cleanCustomQaAnswer,
   shouldBankAnswer,
   isCertificationQuestion,
   answerCertificationQuestion,
@@ -3621,6 +3628,158 @@ export async function answerQuestionsFromBank(
     forceAi: true
   });
   return answers;
+}
+
+/**
+ * Ask dialog: bank match first, then OpenAI grounded on the active person profile.
+ * ChatGPT/Claude tab engine is handled in background.js (needs automateChatGpt).
+ */
+export async function answerCustomQaAsk({
+  question,
+  strongModel = false,
+  skipBank = false
+} = {}) {
+  const q = String(question || "").trim();
+  if (!q) throw new Error("Enter or paste a question first.");
+
+  const { person, applicantInfo } = await getApplicantInfoForAutofill();
+  const profileId = person?.id || "";
+  const personLabel = person?.label || person?.name || person?.firstName || "";
+
+  if (!skipBank) {
+    let match = null;
+    try {
+      match = await findQaMatch(profileId, q, { fieldType: "text" });
+    } catch {
+      match = null;
+    }
+    const bankAnswer = String(match?.record?.answer || "").trim();
+    if (
+      bankAnswer &&
+      !isJunkAutofillAnswer(bankAnswer, { questionLabel: q }) &&
+      bankAnswerFitsQuestion(q, bankAnswer)
+    ) {
+      recordQaUsage(match.record.id).catch(() => {});
+      return {
+        ok: true,
+        answer: bankAnswer,
+        source: "bank",
+        profileId,
+        personLabel,
+        score: match.score
+      };
+    }
+  }
+
+  const { apiKey, model: envModel } = await getOpenAiSettings();
+  if (!apiKey) {
+    throw new Error(
+      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env, or use ChatGPT tab instead."
+    );
+  }
+  const model = strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
+  const ctx = await getAutofillAiContext();
+  const info = {
+    ...applicantInfo,
+    certifications: parseCertificationList(applicantInfo.certifications).length
+      ? applicantInfo.certifications
+      : ctx.certifications
+  };
+  const result = await generateSingleProfileAnswer({
+    apiKey,
+    model,
+    question: q,
+    applicantInfo: info,
+    jobMeta: ctx.jobMeta,
+    resumeText: ctx.resumeText
+  });
+  const answer = cleanCustomQaAnswer(result.answer);
+  if (!answer) throw new Error("OpenAI returned an empty answer. Try again or use ChatGPT tab.");
+  return {
+    ok: true,
+    answer,
+    source: "openai",
+    model,
+    usage: result.usage || null,
+    profileId,
+    personLabel
+  };
+}
+
+/** Shared prep for ChatGPT/Claude Custom Q&A (bank hit or agent prompt). */
+export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
+  const q = String(question || "").trim();
+  if (!q) throw new Error("Enter or paste a question first.");
+
+  const { person, applicantInfo } = await getApplicantInfoForAutofill();
+  const profileId = person?.id || "";
+  const personLabel = person?.label || person?.name || person?.firstName || "";
+
+  if (!skipBank) {
+    let match = null;
+    try {
+      match = await findQaMatch(profileId, q, { fieldType: "text" });
+    } catch {
+      match = null;
+    }
+    const bankAnswer = String(match?.record?.answer || "").trim();
+    if (
+      bankAnswer &&
+      !isJunkAutofillAnswer(bankAnswer, { questionLabel: q }) &&
+      bankAnswerFitsQuestion(q, bankAnswer)
+    ) {
+      recordQaUsage(match.record.id).catch(() => {});
+      return {
+        bankHit: {
+          ok: true,
+          answer: bankAnswer,
+          source: "bank",
+          profileId,
+          personLabel,
+          score: match.score
+        }
+      };
+    }
+  }
+
+  const ctx = await getAutofillAiContext();
+  const info = {
+    ...applicantInfo,
+    certifications: parseCertificationList(applicantInfo.certifications).length
+      ? applicantInfo.certifications
+      : ctx.certifications
+  };
+  const prompt = buildCustomQaAgentPrompt({
+    question: q,
+    applicantInfo: info,
+    jobMeta: ctx.jobMeta,
+    resumeText: ctx.resumeText
+  });
+  return { bankHit: null, prompt, profileId, personLabel, question: q };
+}
+
+export async function saveCustomQaAnswer({
+  question,
+  answer,
+  source = "custom_ask"
+} = {}) {
+  const q = String(question || "").trim();
+  const a = String(answer || "").trim();
+  if (!q || !a) throw new Error("Question and answer are required to save.");
+  const { person } = await getApplicantInfoForAutofill();
+  const saved = await saveQa({
+    profileId: person?.id || "",
+    question: q,
+    answer: a,
+    fieldType: "text",
+    source: String(source || "custom_ask").slice(0, 40)
+  });
+  return {
+    ok: true,
+    id: saved?.id || "",
+    profileId: person?.id || "",
+    personLabel: person?.label || person?.name || ""
+  };
 }
 
 /**

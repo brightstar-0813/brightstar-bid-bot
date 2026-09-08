@@ -610,3 +610,105 @@ export async function generateRoleSummaries({
 
   return { summaries, usage: result.usage };
 }
+
+export const CUSTOM_QA_SYSTEM_PROMPT =
+  "You answer one US job-application question for a real candidate. " +
+  "Reply with ONLY the answer text — no preamble, no markdown, no quotes around the whole answer. " +
+  "Keep it short: 1–3 sentences unless the question clearly needs a longer essay. " +
+  "For yes/no use Title Case exactly: Yes or No. " +
+  "Ground the answer in candidateProfile and the resume excerpt. Prefer real roles, employers, tools, and skills. " +
+  "Do not invent employers, degrees, visas, certifications, or tools that contradict the profile/resume. " +
+  "Certification questions must name only credentials listed in candidateProfile.certifications (or the resume). " +
+  "If a fact is missing (especially work authorization, sponsorship, salary, or compliance), give a cautious brief answer or say you would confirm with the candidate — do not fabricate.";
+
+/**
+ * Strip common LLM wrappers from a single-answer reply.
+ */
+export function cleanCustomQaAnswer(raw) {
+  let t = String(raw || "").trim();
+  if (!t) return "";
+  t = t.replace(/^```(?:text|markdown|md)?\s*/i, "").replace(/```$/i, "").trim();
+  t = t.replace(/^(here(?:'s| is)|answer|response)\s*[:\-–]\s*/i, "").trim();
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  ) {
+    t = t.slice(1, -1).trim();
+  }
+  return t.slice(0, 4000);
+}
+
+export function buildCustomQaPayload({
+  question,
+  applicantInfo = {},
+  jobMeta = {},
+  resumeText = "",
+  applicationBrief = null
+} = {}) {
+  const profile = compactApplicantContext(applicantInfo);
+  const certs = parseCertificationList(applicantInfo?.certifications);
+  return {
+    ...buildAutofillContext({
+      jobMeta,
+      resumeText,
+      applicationBrief,
+      certifications: certs
+    }),
+    candidateProfile: profile,
+    question: String(question || "").trim()
+  };
+}
+
+/** Plain-text prompt for ChatGPT / Claude tab (subscription, no API cost). */
+export function buildCustomQaAgentPrompt(opts = {}) {
+  const payload = buildCustomQaPayload(opts);
+  return (
+    `${CUSTOM_QA_SYSTEM_PROMPT}\n\n` +
+    `CONTEXT (JSON):\n${JSON.stringify(payload, null, 2)}\n\n` +
+    `QUESTION:\n${payload.question}\n\n` +
+    `Reply with ONLY the answer text.`
+  );
+}
+
+/**
+ * One-shot profile-grounded answer via OpenAI Chat Completions.
+ * @returns {Promise<{ answer: string, usage: object|null }>}
+ */
+export async function generateSingleProfileAnswer({
+  apiKey,
+  model = DEFAULT_OPENAI_MODEL,
+  question,
+  applicantInfo,
+  jobMeta = {},
+  resumeText = "",
+  applicationBrief = null
+}) {
+  const q = String(question || "").trim();
+  if (!q) return { answer: "", usage: null };
+
+  const payload = buildCustomQaPayload({
+    question: q,
+    applicantInfo,
+    jobMeta,
+    resumeText,
+    applicationBrief
+  });
+  const certQ = isCertificationQuestion(q);
+  const result = await chatCompletion({
+    apiKey,
+    model,
+    jsonMode: false,
+    temperature: certQ ? 0.2 : 0.45,
+    maxTokens: 700,
+    messages: [
+      { role: "system", content: CUSTOM_QA_SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify(payload, null, 2) }
+    ]
+  });
+
+  let answer = cleanCustomQaAnswer(result.content);
+  if (answer && !bankAnswerFitsQuestion(q, answer)) {
+    // Soft fail: still return; caller may choose to keep or discard.
+  }
+  return { answer, usage: result.usage || null };
+}

@@ -49,7 +49,7 @@ Prefer short control labels and live status text over long instructional hints i
 | Popup / queue UI | `popup.js` |
 | Profiles | `profiles.js`, `person-profile-form.js`, `profile-editor.js` |
 | Q&A bank | `qa-store.js`, `qa-editor.js` |
-| OpenAI leftover / Custom Q&A | `ai-answers.js`, `openai.js`, `autofill-runner.js` (`runCustomOpenAiQaOnTab`) |
+| OpenAI leftover / Custom Q&A | `ai-answers.js`, `openai.js`, `autofill-runner.js` (`answerCustomQaAsk`, `runCustomOpenAiQaOnTab`), popup Ask panel |
 | Host matches / permissions | `manifest.json` |
 
 **Thin adapters, thick DOM:** SW-facing host quirks → `ats/adapters.js`; fill logic → `content/autofill.js`.

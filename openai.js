@@ -1,6 +1,8 @@
 export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+/** Optional stronger model for one-off Custom Q&A Ask (costs more). */
+export const QUALITY_OPENAI_MODEL = "gpt-4o";
 
-/** Storage: when false, Autofill skips OpenAI leftovers (Custom Q&A button still forces AI). */
+/** Storage: when false, Autofill skips OpenAI leftovers (Custom Q&A Ask OpenAI engine still available). */
 export const OPENAI_QA_ASSIST_KEY = "openai_qa_assist_enabled";
 
 export async function isOpenAiQaAssistEnabled() {

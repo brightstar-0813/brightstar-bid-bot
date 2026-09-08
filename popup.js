@@ -539,6 +539,16 @@ const runOneOffBtn = document.getElementById("runOneOff");
 const autofillPageBtn = document.getElementById("autofillPage");
 const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const customQaPageBtn = document.getElementById("customQaPage");
+const customQaAskPanelEl = document.getElementById("customQaAskPanel");
+const customQaQuestionEl = document.getElementById("customQaQuestion");
+const customQaAnswerEl = document.getElementById("customQaAnswer");
+const customQaMetaEl = document.getElementById("customQaMeta");
+const customQaGenerateBtn = document.getElementById("customQaGenerate");
+const customQaScanPageBtn = document.getElementById("customQaScanPage");
+const customQaCopyBtn = document.getElementById("customQaCopy");
+const customQaSaveBtn = document.getElementById("customQaSave");
+const customQaStrongModelEl = document.getElementById("customQaStrongModel");
+const customQaStrongWrapEl = document.getElementById("customQaStrongWrap");
 const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
@@ -658,8 +668,8 @@ function syncAutofillUi(enabled = autofillEnabledCache) {
   if (autofillEnabledToggleEl) autofillEnabledToggleEl.checked = autofillEnabledCache;
   if (autofillPageBtn) autofillPageBtn.disabled = !autofillEnabledCache;
   if (autoApplyPageBtn) autoApplyPageBtn.disabled = !autofillEnabledCache;
-  const openaiOn = openaiQaToggleEl ? Boolean(openaiQaToggleEl.checked) : true;
-  if (customQaPageBtn) customQaPageBtn.disabled = !autofillEnabledCache || !openaiOn;
+  if (customQaPageBtn) customQaPageBtn.disabled = !autofillEnabledCache;
+  syncCustomQaAskControls();
 }
 
 function setPersonImportNotice(message, { ok = true } = {}) {
@@ -2789,12 +2799,13 @@ async function customQaThisPage() {
     return;
   }
   if (openaiQaToggleEl && !openaiQaToggleEl.checked) {
-    setStatus("OpenAI Custom Q&A is off. Enable the toggle in Apply assist.");
+    setStatus("OpenAI Custom Q&A is off. Enable the toggle to scan leftovers on the page.");
     return;
   }
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
   if (customQaPageBtn) customQaPageBtn.disabled = true;
+  if (customQaScanPageBtn) customQaScanPageBtn.disabled = true;
   try {
     setStatus("Custom Q&A: answering special questions with OpenAI…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_openai_qa" });
@@ -2805,6 +2816,155 @@ async function customQaThisPage() {
     setStatus(res.statusText || formatAutofillSummary(res) || "Custom Q&A complete.");
   } finally {
     syncAutofillUi();
+  }
+}
+
+function selectedCustomQaEngine() {
+  const el = document.querySelector('input[name="customQaEngine"]:checked');
+  return el?.value === "chatgpt" ? "chatgpt" : "openai";
+}
+
+function syncCustomQaAskControls() {
+  const engine = selectedCustomQaEngine();
+  if (customQaStrongWrapEl) {
+    customQaStrongWrapEl.style.opacity = engine === "openai" ? "1" : "0.45";
+  }
+  if (customQaStrongModelEl) {
+    customQaStrongModelEl.disabled = engine !== "openai";
+  }
+  const busy = Boolean(customQaGenerateBtn?.dataset.busy === "1");
+  const hasAnswer = Boolean(String(customQaAnswerEl?.value || "").trim());
+  if (customQaCopyBtn) customQaCopyBtn.disabled = !hasAnswer;
+  if (customQaSaveBtn) customQaSaveBtn.disabled = !hasAnswer || busy;
+  if (customQaGenerateBtn) {
+    customQaGenerateBtn.disabled = busy || !autofillEnabledCache;
+  }
+  if (customQaScanPageBtn) {
+    const openaiOn = openaiQaToggleEl ? Boolean(openaiQaToggleEl.checked) : true;
+    customQaScanPageBtn.disabled = busy || !autofillEnabledCache || !openaiOn;
+  }
+}
+
+function setCustomQaMeta(text) {
+  if (!customQaMetaEl) return;
+  if (!text) {
+    customQaMetaEl.hidden = true;
+    customQaMetaEl.textContent = "";
+    return;
+  }
+  customQaMetaEl.hidden = false;
+  customQaMetaEl.textContent = text;
+}
+
+function toggleCustomQaAskPanel({ focus = true } = {}) {
+  if (!customQaAskPanelEl) return;
+  const open = customQaAskPanelEl.hidden;
+  customQaAskPanelEl.hidden = !open;
+  if (open) {
+    syncCustomQaAskControls();
+    if (focus) {
+      try {
+        customQaQuestionEl?.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+    setStatus("Custom Q&A: paste a question, pick OpenAI or AI tab, then Generate.");
+  }
+}
+
+async function generateCustomQaAsk() {
+  if (!autofillEnabledCache) {
+    setStatus("Autofill is off. Turn it on in Apply assist.");
+    return;
+  }
+  const question = String(customQaQuestionEl?.value || "").trim();
+  if (!question) {
+    setStatus("Paste or type a question first.");
+    try {
+      customQaQuestionEl?.focus();
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  const engine = selectedCustomQaEngine();
+  const strongModel = Boolean(customQaStrongModelEl?.checked) && engine === "openai";
+  if (customQaGenerateBtn) customQaGenerateBtn.dataset.busy = "1";
+  syncCustomQaAskControls();
+  if (customQaAnswerEl) customQaAnswerEl.value = "";
+  setCustomQaMeta("");
+  try {
+    setStatus(
+      engine === "chatgpt"
+        ? "Custom Q&A: asking ChatGPT/Claude tab (uses subscription)…"
+        : strongModel
+          ? "Custom Q&A: generating with stronger OpenAI model…"
+          : "Custom Q&A: generating with OpenAI…"
+    );
+    const res = await chrome.runtime.sendMessage({
+      type: "custom_qa_ask",
+      question,
+      engine,
+      strongModel
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || "Custom Q&A generate failed.");
+      return;
+    }
+    if (customQaAnswerEl) customQaAnswerEl.value = String(res.answer || "").trim();
+    const who = res.personLabel ? ` · ${res.personLabel}` : "";
+    const src =
+      res.source === "bank"
+        ? `Q&A bank${who}`
+        : res.source === "openai"
+          ? `OpenAI${res.model ? ` · ${res.model}` : ""}${who}`
+          : res.source === "claude"
+            ? `Claude tab${who}`
+            : `ChatGPT tab${who}`;
+    setCustomQaMeta(src);
+    setStatus(`Custom Q&A ready (${src}). Copy or Save to bank.`);
+  } finally {
+    if (customQaGenerateBtn) customQaGenerateBtn.dataset.busy = "0";
+    syncCustomQaAskControls();
+  }
+}
+
+async function copyCustomQaAnswer() {
+  const text = String(customQaAnswerEl?.value || "").trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("Answer copied.");
+  } catch {
+    setStatus("Could not copy — select the answer and copy manually.");
+  }
+}
+
+async function saveCustomQaAskToBank() {
+  const question = String(customQaQuestionEl?.value || "").trim();
+  const answer = String(customQaAnswerEl?.value || "").trim();
+  if (!question || !answer) {
+    setStatus("Need both question and answer to save.");
+    return;
+  }
+  if (customQaSaveBtn) customQaSaveBtn.disabled = true;
+  try {
+    const engine = selectedCustomQaEngine();
+    const res = await chrome.runtime.sendMessage({
+      type: "custom_qa_save",
+      question,
+      answer,
+      source: engine === "chatgpt" ? "custom_ask_agent" : "custom_ask"
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || "Save to bank failed.");
+      return;
+    }
+    setStatus("Saved to Q&A bank for this person.");
+    await refreshQaBank().catch(() => {});
+  } finally {
+    syncCustomQaAskControls();
   }
 }
 
@@ -3048,7 +3208,23 @@ testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", runOneOff);
 autofillPageBtn.addEventListener("click", autofillThisPage);
 autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
-customQaPageBtn?.addEventListener("click", customQaThisPage);
+customQaPageBtn?.addEventListener("click", () => toggleCustomQaAskPanel({ focus: true }));
+customQaGenerateBtn?.addEventListener("click", () => {
+  generateCustomQaAsk().catch((e) => setStatus(String(e.message || e)));
+});
+customQaScanPageBtn?.addEventListener("click", () => {
+  customQaThisPage().catch((e) => setStatus(String(e.message || e)));
+});
+customQaCopyBtn?.addEventListener("click", () => {
+  copyCustomQaAnswer().catch((e) => setStatus(String(e.message || e)));
+});
+customQaSaveBtn?.addEventListener("click", () => {
+  saveCustomQaAskToBank().catch((e) => setStatus(String(e.message || e)));
+});
+document.querySelectorAll('input[name="customQaEngine"]').forEach((el) => {
+  el.addEventListener("change", syncCustomQaAskControls);
+});
+customQaAnswerEl?.addEventListener("input", syncCustomQaAskControls);
 resetBtn.addEventListener("click", resetWorkflow);
 qaOpenEditorBtn?.addEventListener("click", () => {
   openQaEditor().catch((e) => setStatus(String(e.message || e)));
@@ -3081,8 +3257,8 @@ openaiQaToggleEl?.addEventListener("change", () => {
   syncAutofillUi();
   setStatus(
     openaiQaToggleEl.checked
-      ? "OpenAI Custom Q&A on — Autofill leftovers and Custom Q&A use the API key."
-      : "OpenAI Custom Q&A off — Autofill uses profile + Q&A bank only."
+      ? "OpenAI Custom Q&A on — Autofill leftovers and Scan page use the API key."
+      : "OpenAI Custom Q&A off — Autofill uses profile + bank; Ask can still use AI tab."
   );
 });
 autofillEnabledToggleEl?.addEventListener("change", () => {
