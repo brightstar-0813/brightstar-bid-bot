@@ -61,7 +61,7 @@ Do not change without an explicit product decision:
 
 1. Manual Apply / Auto Apply assist **stops before Submit** unless caller + adapter allow it.
 2. **External Indeed / external company ATS** = capture-only (files OK, never auto-submit).
-3. Hosted Dice / Apply-on-Indeed (and interleaved `autoSubmitAllowed` boards) may submit after confirmed fill.
+3. Hosted Dice / Apply-on-Indeed / Workday / Ashby / Lever / Jobgether (and interleaved `autoSubmitAllowed` boards) may submit after confirmed fill. **Greenhouse batch is generate-only** — use the in-page Autofill panel manually.
 4. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.
 5. Sheet dedupe = **job link only** (normalized), never company name. **Generate** skips if the link is already on the sheet (Ready or Applied). **Apply** only skips when the sheet status is Applied — a Ready row from the just-finished build must not block submit.
 6. CSV upload/refresh **never auto-starts** generation — user clicks **Start** after review.

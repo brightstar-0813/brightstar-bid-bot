@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-08.panel07";
+  const PANEL_BUILD = "2026-09-09.panel08";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -20,11 +20,27 @@
     if (/[?&]apply(?:=|&|$)/i.test(location.search)) return true;
     if (/myworkdayjobs\.com$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
     if (
-      /greenhouse\.io$/i.test(host) &&
-      (/\/(embed\/)?job_app\b|\/jobs\/[^/]+\/apply|\/jobs\/\d+/i.test(pathQuery) ||
-        /[?&]gh_jid=/i.test(pathQuery))
+      /greenhouse\.io$/i.test(host)
     ) {
-      return true;
+      // Job boards, embeds, and SPA apply forms (token / gh_jid query params).
+      if (
+        /\/(embed\/)?job_app\b|\/jobs\/|\/embed\//i.test(pathQuery) ||
+        /[?&](gh_jid|token|for)=/i.test(pathQuery)
+      ) {
+        return true;
+      }
+      // Fallback: classic Greenhouse application inputs already on the page.
+      try {
+        if (
+          document.querySelector(
+            '#first_name, #last_name, input[name="job_application[first_name]"], input[autocomplete="email"], input[type="email"]'
+          )
+        ) {
+          return true;
+        }
+      } catch {
+        /* ignore */
+      }
     }
     if (/lever\.co$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
     if (/indeed\.com$/i.test(host) && /(indeedapply|viewjob.*apply|from=smartapply)/i.test(pathQuery)) {
@@ -494,8 +510,12 @@
       setTimeout(initPanelVisibility, 1500);
       return;
     }
-    if (isAtsHost()) {
-      showPanelTab({ expand: false });
+    // Always surface a panel tab on ATS hosts so Greenhouse apply pages are not blank
+    // when the form probe is slow or React has not marked fields yet.
+    if (isAtsHost() || looksLikeApplyContext()) {
+      const expand =
+        looksLikeApplyContext() || /greenhouse\.io$/i.test(location.hostname.toLowerCase());
+      showPanelTab({ expand });
     }
   }
 

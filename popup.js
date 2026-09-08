@@ -1378,7 +1378,7 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
         : channelFilter === "workday"
           ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "greenhouse"
-          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds files only (no auto-apply; use Autofill panel manually).`
         : channelFilter === "ashby"
           ? `Showing Ashby jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
         : channelFilter === "lever"

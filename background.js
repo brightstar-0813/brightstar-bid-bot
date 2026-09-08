@@ -1613,12 +1613,13 @@ function isSkippedSheetDuplicateJob(j) {
 function isHostedApplyBacklogJob(j, person = null) {
   const hostedIndeed = isIndeedHostedApplyJob(j);
   const workday = isWorkdayJob(j || {});
-  const greenhouse = isGreenhouseJob(j || {});
+  // Greenhouse: generate-only in batch — autofill is unreliable and can pause the run.
+  // Manual Autofill / Auto Apply from the in-page panel still works.
   const ashby = isAshbyJob(j || {});
   const lever = isLeverJob(j || {});
   const jobgether = isJobgetherJob(j || {});
   if (
-    !(isDiceJob(j) || hostedIndeed || workday || greenhouse || ashby || lever || jobgether) ||
+    !(isDiceJob(j) || hostedIndeed || workday || ashby || lever || jobgether) ||
     j.status !== "done" ||
     j.applied ||
     isJobMarkedInactive(j) ||
@@ -6224,26 +6225,15 @@ async function runBatchLoop(outputDir) {
       const activePerson = await getActivePerson().catch(() => null);
       const batchAutoApply = await isBatchAutoApplyEnabled();
 
-      // Hosted Dice/Indeed/Workday/Greenhouse/Jobgether jobs: apply already-built rows that are not Applied yet (no ChatGPT).
+      // Hosted Dice/Indeed/Workday/Ashby/Lever/Jobgether: apply already-built rows (no ChatGPT).
+      // Greenhouse is generate-only in batch — use the in-page Autofill panel manually.
       // Gated by job type, not the visible source filter — except All channel (build only).
       // Only the active person's rows (profileId / Applications-* folder).
       const backlog = batchAutoApply
         ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson))
         : null;
       if (backlog) {
-        const backlogBoard = isIndeedHostedApplyJob(backlog)
-          ? "Indeed"
-          : isWorkdayJob(backlog)
-            ? "Workday"
-            : isGreenhouseJob(backlog)
-              ? "Greenhouse"
-              : isAshbyJob(backlog)
-                ? "Ashby"
-                : isLeverJob(backlog)
-                  ? "Lever"
-                  : isJobgetherJob(backlog)
-                    ? "Jobgether"
-                    : "Dice";
+        const backlogBoard = resolveHostedApplyBoard(backlog) || "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
@@ -6448,24 +6438,23 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Hosted Dice, Indeed, Workday, Greenhouse, and Jobgether jobs: generate → auto-apply+submit → close tab → next.
+        // Hosted Dice, Indeed, Workday, Ashby, Lever, Jobgether: generate → auto-apply.
+        // Greenhouse: generate files only (manual Autofill via panel — batch auto-apply paused the run).
         // All channel: generate files only — no auto-apply.
         const hostedApplyBoard = batchAutoApply
           ? isIndeedHostedApplyJob(next)
             ? "Indeed"
             : isWorkdayJob(next)
               ? "Workday"
-              : isGreenhouseJob(next)
-                ? "Greenhouse"
-                : isAshbyJob(next)
-                  ? "Ashby"
-                  : isLeverJob(next)
-                    ? "Lever"
-                    : isJobgetherJob(next)
-                      ? "Jobgether"
-                      : isDiceJob(next)
-                        ? "Dice"
-                        : ""
+              : isAshbyJob(next)
+                ? "Ashby"
+                : isLeverJob(next)
+                  ? "Lever"
+                  : isJobgetherJob(next)
+                    ? "Jobgether"
+                    : isDiceJob(next)
+                      ? "Dice"
+                      : ""
           : "";
         if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
           // Apply after build: Ready row on the sheet is expected — only Applied blocks apply.

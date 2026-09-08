@@ -1004,12 +1004,13 @@ export function looksLikeApplyUrl(url = "") {
     if (/[?&]apply(?:=|&|$)/i.test(u.search)) return true;
 
     if (/myworkdayjobs\.com$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
-    if (
-      /greenhouse\.io$/i.test(host) &&
-      (/\/(embed\/)?job_app\b|\/jobs\/[^/]+\/apply|\/jobs\/\d+/i.test(pathQuery) ||
-        /[?&]gh_jid=/i.test(pathQuery))
-    ) {
-      return true;
+    if (/greenhouse\.io$/i.test(host)) {
+      if (
+        /\/(embed\/)?job_app\b|\/jobs\/|\/embed\//i.test(pathQuery) ||
+        /[?&](gh_jid|token|for)=/i.test(pathQuery)
+      ) {
+        return true;
+      }
     }
     if (/lever\.co$/i.test(host) && /\/apply\b/i.test(pathQuery)) return true;
     if (/indeed\.com$/i.test(host) && /(indeedapply|viewjob.*apply|from=smartapply)/i.test(pathQuery)) {
