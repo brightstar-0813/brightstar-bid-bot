@@ -1067,7 +1067,8 @@ export async function resolveAssistTab(tabId = null) {
 /** Show the Jobright-style in-page autofill sidebar on a tab. */
 export async function showAutofillPanelOnTab(tabId, { expand = true } = {}) {
   if (!tabId) return false;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  await ensureAutofillScript(tabId).catch(() => {});
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     await ensureAutofillPanelScript(tabId);
     try {
       const pong = await chrome.tabs.sendMessage(tabId, { type: "autofill_panel_ping" });
@@ -1078,9 +1079,20 @@ export async function showAutofillPanelOnTab(tabId, { expand = true } = {}) {
     } catch {
       /* retry after inject settles */
     }
-    await sleep(180);
+    await sleep(220 + attempt * 80);
   }
-  return false;
+  // Last resort: force-inject and show even if ping failed once.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content/autofill-panel.js"]
+    });
+    await sleep(350);
+    await chrome.tabs.sendMessage(tabId, { type: "autofill_panel_show", expand });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function emitAutofillProgress(tabId, event = {}) {
@@ -3570,6 +3582,10 @@ export async function openJobAndApply(
     }
   }
   await sleep(APPLY_SETTLE_MS);
+  // Always surface the in-page panel when opening apply from the queue button
+  // (Greenhouse SPAs often load before the form probe is ready).
+  await showAutofillPanelOnTab(tab.id, { expand: true }).catch(() => false);
+
   let unavailable = await probeTabJobUnavailable(tab.id);
   if (unavailable) return unavailable;
 
@@ -3580,15 +3596,17 @@ export async function openJobAndApply(
       await chrome.tabs.update(tab.id, { url: href });
       await waitForTabComplete(tab.id, 35000).catch(() => {});
       await sleep(APPLY_SETTLE_MS);
+      await showAutofillPanelOnTab(tab.id, { expand: true }).catch(() => false);
       unavailable = await probeTabJobUnavailable(tab.id);
       if (unavailable) return unavailable;
     }
   }
   if (openOnly) {
+    await showAutofillPanelOnTab(tab.id, { expand: true }).catch(() => false);
     return {
       status: "opened",
       tabId: tab.id,
-      detail: "Job link opened.",
+      detail: "Job link opened — Autofill panel ready.",
       openedOnly: true
     };
   }

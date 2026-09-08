@@ -745,9 +745,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   (async () => {
     try {
       if (!(await isAutofillEnabled())) return;
-      const probe = await probeApplicationFormOnTab(tabId).catch(() => ({}));
-      if (!shouldOfferAutofillPanel(probe, url)) return;
-      await ensureAutofillPanelOnTab(tabId);
+      // Always show on ATS / apply URLs — do not wait for form probe (Greenhouse SPA lag).
       await showAutofillPanelOnTab(tabId, { expand: true });
     } catch {
       /* ignore */
