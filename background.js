@@ -2956,6 +2956,21 @@ async function ensureFreshChat(tabId, provider) {
   const label = aiProviderLabel(p);
   const base = aiProviderNewChatUrl(p);
 
+  const waitForBlankComposer = async (attempts = 40) => {
+    for (let i = 0; i < attempts; i += 1) {
+      const state = await readChatReadiness(tabId, p);
+      if (
+        state.hasInput &&
+        Number(state.assistantBlocks) === 0 &&
+        Number(state.userBlocks) === 0
+      ) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return false;
+  };
+
   try {
     await chrome.tabs.update(tabId, { url: base });
     await withTimeout(waitForTabComplete(tabId, 30000), 32000, `Timed out loading a new ${label} chat.`);
@@ -2963,14 +2978,19 @@ async function ensureFreshChat(tabId, provider) {
     return { ok: false, navigated: false };
   }
 
-  // The composer mounts after load; assistant blocks must be gone.
-  for (let i = 0; i < 40; i += 1) {
-    const state = await readChatReadiness(tabId, p);
-    if (state.hasInput && state.assistantBlocks === 0) return { ok: true, navigated: true };
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  if (await waitForBlankComposer(40)) return { ok: true, navigated: true };
+
+  // SPA sometimes keeps the prior thread visible after / load — hard reload once.
+  // Do NOT click in-page New chat after navigate (that creates a twin empty chat).
+  try {
+    await chrome.tabs.update(tabId, { url: `${base}${base.includes("?") ? "&" : "?"}fresh=${Date.now()}` });
+    await withTimeout(waitForTabComplete(tabId, 30000), 32000, `Timed out reloading a blank ${label} chat.`);
+  } catch {
+    return { ok: false, navigated: true };
   }
-  // Navigated to blank URL but composer not ready — do NOT click New chat again
-  // (that opens a second empty chat). Caller should wait/retry send instead.
+
+  if (await waitForBlankComposer(24)) return { ok: true, navigated: true };
+  // Navigated to blank URL but composer not ready — never click New chat again.
   return { ok: false, navigated: true };
 }
 
@@ -2999,16 +3019,15 @@ async function isBlankFreshAiChat(tabId, provider) {
 
 /**
  * After opening a fresh chat for a job, decide whether an in-page "New chat"
- * click is still needed. Never double-open when navigation already left /c/...
+ * click is still needed. Never double-open when navigation already left a blank shell.
  */
 async function shouldUseInPageNewChat(tabId, provider, freshResult) {
+  // chatgpt.com/ / claude.ai/new already seeds one Recents "New chat".
+  // Clicking New chat (or a[href='/']) again creates a twin empty entry — common on one-off.
+  if (freshResult?.navigated) return false;
   if (freshResult?.ok) return false;
-  if (freshResult?.navigated) {
-    // Already on / or /new — only click if somehow still on a prior conversation.
-    return aiTabStillOnPriorConversation(tabId, provider);
-  }
-  // Navigate failed — fall back to in-page New chat.
-  return true;
+  // Navigate failed entirely — fall back to in-page New chat only if still on a prior thread.
+  return aiTabStillOnPriorConversation(tabId, provider);
 }
 
 async function chatgptSendPrompt(tabId, prompt, startNewChat) {
@@ -3402,12 +3421,21 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       };
 
       if (shouldStartNewChat) {
-        clickIfExists([
-          "button[data-testid='new-chat-button']",
-          "a[href='/']",
-          "text:new chat"
-        ]);
-        await sleep(1200);
+        const usersNow = countUserBlocks();
+        const assistantsNow = getAssistantBlocks().length;
+        // Already on a blank composer (e.g. after navigate to /) — do not click
+        // New chat or a[href='/']; that creates a twin empty Recents entry.
+        if (usersNow === 0 && assistantsNow === 0) {
+          // stay on this blank chat
+        } else {
+          clickIfExists([
+            "button[data-testid='create-new-chat-button']",
+            "button[data-testid='new-chat-button']",
+            "a[data-testid='create-new-chat-button']",
+            "text:new chat"
+          ]);
+          await sleep(1200);
+        }
       }
 
       const blocks = getAssistantBlocks();
@@ -3790,12 +3818,22 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
           };
 
           if (shouldStartNewChat) {
-            const newBtn = Array.from(document.querySelectorAll("a, button")).find((el) =>
-              /new chat/i.test(`${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`)
-            );
-            if (newBtn instanceof HTMLElement) {
-              firePointerClick(newBtn);
-              await sleep(1200);
+            const userCount = document.querySelectorAll(
+              '[data-testid="user-message"], [data-testid="user"]'
+            ).length;
+            const asstCount = document.querySelectorAll(
+              '[data-testid="assistant-message"], [data-testid="assistant"], [data-is-streaming="true"]'
+            ).length;
+            if (userCount === 0 && asstCount === 0) {
+              // Already blank after navigate — do not open a twin New chat.
+            } else {
+              const newBtn = Array.from(document.querySelectorAll("a, button")).find((el) =>
+                /new chat/i.test(`${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`)
+              );
+              if (newBtn instanceof HTMLElement) {
+                firePointerClick(newBtn);
+                await sleep(1200);
+              }
             }
           }
 
