@@ -86,8 +86,45 @@ function certListHas(certs, pattern) {
  */
 export function answerCertificationQuestion(label, certifications = []) {
   const certs = parseCertificationList(certifications);
-  if (!certs.length) return "";
   const q = String(label || "");
+  if (!q) return "";
+
+  const yesNoHold =
+    /\b(do you|have you|are you)\b/i.test(q) ||
+    /\b(any|currently hold|current .{0,40}certif|hold any)\b/i.test(q);
+
+  // Yes/No: "Do you hold any Salesforce Platform Developer certifications?"
+  if (yesNoHold && isCertificationQuestion(q)) {
+    const focusMatchers = [
+      [/platform developer\s*i\b|pd1\b/i, /platform developer\s*i\b|pd1\b/i],
+      [/platform developer\s*ii\b|pd2\b/i, /platform developer\s*ii\b|pd2\b/i],
+      [/platform developer/i, /platform developer/i],
+      [/app(?:lication)?\s*builder/i, /app(?:lication)?\s*builder/i],
+      [/application architect/i, /application architect/i],
+      [/system architect/i, /system architect/i],
+      [/\badministrator\b/i, /certified administrator\b|\badministrator\b/i],
+      [/javascript developer/i, /javascript developer/i],
+      [/agentforce/i, /agentforce/i],
+      [/data cloud/i, /data cloud/i],
+      [/sales cloud/i, /sales cloud consultant|sales cloud/i],
+      [/service cloud/i, /service cloud consultant|service cloud/i]
+    ];
+    for (const [askRe, certRe] of focusMatchers) {
+      if (!askRe.test(q)) continue;
+      const hit = certs.find((row) => certRe.test(String(row || "")));
+      // Authoritative when we know the ask focus: Yes only if listed; else No (never invent).
+      return hit ? "Yes" : "No";
+    }
+    if (/salesforce/i.test(q) && /\b(any|hold|have)\b/i.test(q)) {
+      const sf = certs.filter((row) => /salesforce/i.test(String(row || "")));
+      return sf.length ? "Yes" : "No";
+    }
+    // Generic "do you hold certifications?" with an inventory → Yes if any, else No.
+    if (/\bcertif/i.test(q)) return certs.length ? "Yes" : "No";
+  }
+
+  if (!certs.length) return "";
+
   const asksAppArch = /application architect/i.test(q);
   const asksAdmin = /\badministrator\b/i.test(q);
   const hasAppArch = certListHas(certs, /application architect/i);
@@ -99,12 +136,12 @@ export function answerCertificationQuestion(label, certifications = []) {
     }
     if (hasAppArch) return "I currently hold Salesforce Certified Application Architect.";
     if (hasAdmin) return "I currently hold Salesforce Certified Administrator.";
-    return "";
+    return "No";
   }
 
   const relevant = /salesforce/i.test(q) ? certs.filter((row) => /salesforce/i.test(row)) : certs;
   const list = (relevant.length ? relevant : certs).slice(0, 12);
-  if (!list.length) return "";
+  if (!list.length) return "No";
   if (list.length === 1) return `I currently hold ${list[0]}.`;
   return `I currently hold: ${list.join("; ")}.`;
 }
@@ -115,6 +152,13 @@ export function bankAnswerFitsQuestion(questionLabel, answer) {
   const a = String(answer || "").trim();
   if (!a) return false;
   if (!isCertificationQuestion(q)) return true;
+  // Yes/No hold-cert questions may legitimately be answered with Yes or No alone.
+  if (
+    /^(yes|no)$/i.test(a) &&
+    (/\b(do you|have you|hold|any current|currently hold)\b/i.test(q) || /\bany\b.{0,40}\bcertif/i.test(q))
+  ) {
+    return true;
+  }
   if (!/\b(certif|credential|administrator|architect|platform developer|app builder|consultant)\b/i.test(a)) {
     return false;
   }
@@ -143,18 +187,25 @@ export function compactApplicantContext(applicantInfo = {}) {
     "cityCountryOfResidence",
     "yearsExperience",
     "relevantExperience",
+    "currentEmployer",
+    "currentJobTitle",
     "englishLevel",
     "highestDegree",
     "schoolName",
     "fieldOfStudy",
+    "graduationDate",
     "workAuthorized",
     "citizenship",
     "needsSponsorship",
     "postEmploymentRestrictions",
+    "willingToRelocate",
     "salaryExpectation",
+    "hourlyRate",
     "earliestStartDate",
     "whyInterested",
     "linkedinUrl",
+    "githubUrl",
+    "portfolioUrl",
     "gender",
     "hispanicLatino",
     "raceEthnicity",
@@ -168,6 +219,83 @@ export function compactApplicantContext(applicantInfo = {}) {
   }
   const certs = parseCertificationList(applicantInfo.certifications);
   if (certs.length) out.certifications = certs;
+  const skills = normalizeSkillList(applicantInfo.skills);
+  if (skills.length) out.skills = skills;
+  const roles = normalizeRecentRoles(applicantInfo.recentRoles || applicantInfo.workHistory);
+  if (roles.length) out.recentRoles = roles;
+  return out;
+}
+
+/** Flatten resume.skills (string[] or {category,items}[]) into a short list. */
+export function normalizeSkillList(value) {
+  if (!value) return [];
+  if (typeof value === "string") {
+    return value
+      .split(/[,;\n]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 2)
+      .slice(0, 48);
+  }
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const row of value) {
+    if (typeof row === "string") {
+      const t = row.trim();
+      if (t) out.push(t);
+      continue;
+    }
+    if (row && typeof row === "object") {
+      const items = row.items ?? row.skills ?? row.values;
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const t = String(item || "").trim();
+          if (t) out.push(t);
+        }
+      } else {
+        const t = String(row.name || row.title || row.skill || "").trim();
+        if (t) out.push(t);
+      }
+    }
+  }
+  const seen = new Set();
+  const uniq = [];
+  for (const s of out) {
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(s);
+    if (uniq.length >= 48) break;
+  }
+  return uniq;
+}
+
+/** Short recent-role cards for AI grounding (no long bullet essays). */
+export function normalizeRecentRoles(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const company = String(row.company || row.employer || row.organization || "").trim();
+    const title = String(row.title || row.role || row.jobTitle || "").trim();
+    if (!company && !title) continue;
+    const dates = String(
+      row.dates ||
+        [row.startDate || row.start || row.startYear, row.endDate || row.end || row.endYear || (row.current ? "Present" : "")]
+          .filter(Boolean)
+          .join(" – ")
+    ).trim();
+    const bullets = Array.isArray(row.bullets)
+      ? row.bullets.map((b) => String(b || "").trim()).filter(Boolean).slice(0, 3)
+      : [];
+    out.push({
+      company,
+      title,
+      dates,
+      current: Boolean(row.current),
+      ...(bullets.length ? { sampleBullets: bullets } : {})
+    });
+    if (out.length >= 5) break;
+  }
   return out;
 }
 
@@ -198,14 +326,20 @@ function buildAutofillContext({
   jobMeta = {},
   resumeText = "",
   applicationBrief = null,
-  certifications = []
+  certifications = [],
+  skills = [],
+  recentRoles = []
 } = {}) {
   const certs = parseCertificationList(certifications);
+  const skillList = normalizeSkillList(skills);
+  const roles = normalizeRecentRoles(recentRoles);
   if (applicationBrief && typeof applicationBrief === "object") {
     return {
       jobTitle: jobMeta.jobTitle || applicationBrief.jobTitle || "",
       companyName: jobMeta.companyName || applicationBrief.companyName || "",
       certifications: certs,
+      skills: skillList,
+      recentRoles: roles,
       applicationBrief: {
         roleSummary: applicationBrief.roleSummary || "",
         topSkills: applicationBrief.topSkills || [],
@@ -219,8 +353,10 @@ function buildAutofillContext({
     jobTitle: jobMeta.jobTitle || "",
     companyName: jobMeta.companyName || "",
     certifications: certs,
+    skills: skillList,
+    recentRoles: roles,
     jobDescriptionExcerpt: String(jobMeta.jdText || "").trim().slice(0, 3500),
-    resumeExcerpt: String(resumeText || "").trim().slice(0, 4000)
+    resumeExcerpt: String(resumeText || "").trim().slice(0, 5500)
   };
 }
 
@@ -257,7 +393,21 @@ export async function generateHumanizedApplicationAnswers({
 
   const profile = compactApplicantContext(applicantInfo);
   const certs = parseCertificationList(applicantInfo?.certifications);
-  const hasCertQuestion = list.some((q) => isCertificationQuestion(q.label));
+  const preAnswers = [];
+  const stillNeed = [];
+  for (const q of list) {
+    if (isCertificationQuestion(q.label)) {
+      const factual = answerCertificationQuestion(q.label, certs);
+      if (factual) {
+        preAnswers.push({ id: q.id, answer: factual });
+        continue;
+      }
+    }
+    stillNeed.push(q);
+  }
+  if (!stillNeed.length) return { answers: preAnswers, usage: null };
+
+  const hasCertQuestion = stillNeed.some((q) => isCertificationQuestion(q.label));
   const result = await chatCompletion({
     apiKey,
     model,
@@ -273,9 +423,10 @@ export async function generateHumanizedApplicationAnswers({
           "Keep each answer to 1-2 sentences max (a short phrase for tiny fields). " +
           "For yes/no style answers use Title Case exactly: \"Yes\" or \"No\" (never lowercase). " +
           "If the question requires a specific opening phrase, begin the answer with that phrase exactly. " +
-          "Ground answers in the candidate resume/profile/brief; prefer real roles, employers, tools, and skills. " +
+          "Ground answers in candidateProfile, knownFacts, resume excerpt, and skills/recentRoles; prefer real roles, employers, tools, and skills. " +
           "Do not invent employers, degrees, visas, certifications, or tools that contradict the resume/profile. " +
-          "Certification/credential questions must name only credentials listed in candidateProfile.certifications (or the resume excerpt). " +
+          "Certification/credential questions must name only credentials listed in candidateProfile.certifications (or knownFacts.certifications). " +
+          "If the asked certification is not in that list, answer \"No\" — never invent one. " +
           "If the prompt offers options such as \"Application Architect, Administrator, or both\", answer with those options from the listed credentials — never a generic architecture, stakeholder, or collaboration paragraph. " +
           "If the resume lacks a specific story the question asks for, give a cautious brief answer based on transferable experience — do not fabricate a detailed false project. " +
           "If the profile and resume do not support a confident answer (especially work authorization, sponsorship, or other compliance facts), OMIT that id from answers rather than guessing."
@@ -288,10 +439,19 @@ export async function generateHumanizedApplicationAnswers({
               jobMeta,
               resumeText,
               applicationBrief,
-              certifications: certs
+              certifications: certs,
+              skills: profile.skills || applicantInfo.skills,
+              recentRoles: profile.recentRoles || applicantInfo.recentRoles
             }),
+            knownFacts: {
+              certifications: certs,
+              workAuthorized: profile.workAuthorized || "",
+              needsSponsorship: profile.needsSponsorship || "",
+              currentRole: [profile.currentJobTitle, profile.currentEmployer].filter(Boolean).join(" at "),
+              yearsExperience: profile.yearsExperience || ""
+            },
             candidateProfile: profile,
-            questions: list.map((q) => ({
+            questions: stillNeed.map((q) => ({
               id: q.id,
               question: q.label,
               preferLonger: Boolean(q.multiline)
@@ -304,13 +464,13 @@ export async function generateHumanizedApplicationAnswers({
     ]
   });
 
-  const drafted = answersFromJson(result.content, list).filter((row) => {
-    const q = list.find((item) => item.id === row.id);
+  const drafted = answersFromJson(result.content, stillNeed).filter((row) => {
+    const q = stillNeed.find((item) => item.id === row.id);
     return bankAnswerFitsQuestion(q?.label || "", row.answer);
   });
 
   return {
-    answers: drafted,
+    answers: [...preAnswers, ...drafted],
     usage: result.usage
   };
 }
@@ -617,10 +777,11 @@ export const CUSTOM_QA_SYSTEM_PROMPT =
   "Reply with ONLY the answer text — no preamble, no markdown, no quotes around the whole answer. " +
   "Keep it short: 1–3 sentences unless the question clearly needs a longer essay. " +
   "For yes/no use Title Case exactly: Yes or No. " +
-  "Ground the answer in candidateProfile and the resume excerpt. Prefer real roles, employers, tools, and skills. " +
-  "Do not invent employers, degrees, visas, certifications, or tools that contradict the profile/resume. " +
-  "Certification questions must name only credentials listed in candidateProfile.certifications (or the resume). " +
-  "If a fact is missing (especially work authorization, sponsorship, salary, or compliance), give a cautious brief answer or say you would confirm with the candidate — do not fabricate.";
+  "Treat knownFacts and candidateProfile as ground truth. Prefer real roles, employers, tools, skills, and certifications from those fields and the resume excerpt. " +
+  "Do not invent employers, degrees, visas, certifications, tools, metrics, or clearances that are not supported by knownFacts / candidateProfile / resume. " +
+  "Certification questions: knownFacts.certifications (and candidateProfile.certifications) are authoritative. " +
+  "If the asked credential is absent from that list, answer No (or omit naming it). Never invent a Salesforce or other certification. " +
+  "If a fact is missing (especially work authorization, sponsorship, salary, or compliance), give a cautious brief answer based only on listed profile facts — do not fabricate.";
 
 /**
  * Strip common LLM wrappers from a single-answer reply.
@@ -644,17 +805,52 @@ export function buildCustomQaPayload({
   applicantInfo = {},
   jobMeta = {},
   resumeText = "",
-  applicationBrief = null
+  applicationBrief = null,
+  skills = [],
+  recentRoles = []
 } = {}) {
   const profile = compactApplicantContext(applicantInfo);
-  const certs = parseCertificationList(applicantInfo?.certifications);
+  const certs = parseCertificationList(
+    applicantInfo?.certifications?.length ? applicantInfo.certifications : profile.certifications
+  );
+  const skillList =
+    normalizeSkillList(skills).length > 0
+      ? normalizeSkillList(skills)
+      : normalizeSkillList(applicantInfo.skills || profile.skills);
+  const roles =
+    normalizeRecentRoles(recentRoles).length > 0
+      ? normalizeRecentRoles(recentRoles)
+      : normalizeRecentRoles(applicantInfo.recentRoles || applicantInfo.workHistory || profile.recentRoles);
+
+  if (certs.length) profile.certifications = certs;
+  if (skillList.length) profile.skills = skillList;
+  if (roles.length) profile.recentRoles = roles;
+
+  const knownFacts = {
+    certifications: certs,
+    skills: skillList.slice(0, 24),
+    recentRoles: roles,
+    workAuthorized: profile.workAuthorized || "",
+    needsSponsorship: profile.needsSponsorship || "",
+    citizenship: profile.citizenship || "",
+    yearsExperience: profile.yearsExperience || profile.relevantExperience || "",
+    currentRole: [profile.currentJobTitle, profile.currentEmployer].filter(Boolean).join(" at "),
+    location: [profile.city, profile.state, profile.country || profile.cityCountryOfResidence]
+      .filter(Boolean)
+      .join(", "),
+    education: [profile.highestDegree, profile.fieldOfStudy, profile.schoolName].filter(Boolean).join(" · ")
+  };
+
   return {
     ...buildAutofillContext({
       jobMeta,
       resumeText,
       applicationBrief,
-      certifications: certs
+      certifications: certs,
+      skills: skillList,
+      recentRoles: roles
     }),
+    knownFacts,
     candidateProfile: profile,
     question: String(question || "").trim()
   };
@@ -682,24 +878,34 @@ export async function generateSingleProfileAnswer({
   applicantInfo,
   jobMeta = {},
   resumeText = "",
-  applicationBrief = null
+  applicationBrief = null,
+  skills = [],
+  recentRoles = []
 }) {
   const q = String(question || "").trim();
   if (!q) return { answer: "", usage: null };
+
+  // Prefer deterministic profile facts for certification yes/no / list questions.
+  if (isCertificationQuestion(q)) {
+    const factual = answerCertificationQuestion(q, applicantInfo?.certifications);
+    if (factual) return { answer: factual, usage: null, source: "profile" };
+  }
 
   const payload = buildCustomQaPayload({
     question: q,
     applicantInfo,
     jobMeta,
     resumeText,
-    applicationBrief
+    applicationBrief,
+    skills,
+    recentRoles
   });
   const certQ = isCertificationQuestion(q);
   const result = await chatCompletion({
     apiKey,
     model,
     jsonMode: false,
-    temperature: certQ ? 0.2 : 0.45,
+    temperature: certQ ? 0.15 : 0.4,
     maxTokens: 700,
     messages: [
       { role: "system", content: CUSTOM_QA_SYSTEM_PROMPT },
@@ -711,5 +917,5 @@ export async function generateSingleProfileAnswer({
   if (answer && !bankAnswerFitsQuestion(q, answer)) {
     // Soft fail: still return; caller may choose to keep or discard.
   }
-  return { answer, usage: result.usage || null };
+  return { answer, usage: result.usage || null, source: "openai" };
 }

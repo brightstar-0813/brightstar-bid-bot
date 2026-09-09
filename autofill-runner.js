@@ -49,7 +49,9 @@ import {
   answerCertificationQuestion,
   parseCertificationList,
   certificationsFromText,
-  bankAnswerFitsQuestion
+  bankAnswerFitsQuestion,
+  normalizeSkillList,
+  normalizeRecentRoles
 } from "./ai-answers.js";
 import {
   applySiteFromUrl,
@@ -2205,6 +2207,10 @@ async function getAutofillAiContext() {
   const certifications = await loadAutofillCertifications({
     certifications: resume.certifications
   });
+  const skills = normalizeSkillList(resume.skills);
+  const recentRoles = normalizeRecentRoles(
+    resume.experience || resume.workHistory || person?.workHistory || []
+  );
   return {
     jobMeta: {
       jobTitle: data.last_job_title || "",
@@ -2213,7 +2219,9 @@ async function getAutofillAiContext() {
       jdLink: data.last_jd_link || ""
     },
     resumeText: String(person?.masterResume || "").trim(),
-    certifications
+    certifications,
+    skills,
+    recentRoles
   };
 }
 
@@ -2245,7 +2253,13 @@ async function enrichAnswersWithAi(questions, answers, {
     ...applicantInfo,
     certifications: parseCertificationList(applicantInfo.certifications).length
       ? applicantInfo.certifications
-      : ctx.certifications
+      : ctx.certifications,
+    skills: normalizeSkillList(applicantInfo.skills).length
+      ? applicantInfo.skills
+      : ctx.skills,
+    recentRoles: normalizeRecentRoles(applicantInfo.recentRoles).length
+      ? applicantInfo.recentRoles
+      : ctx.recentRoles
   };
   let aiHits = 0;
   try {
@@ -3866,19 +3880,44 @@ export async function answerCustomQaAsk({
   }
   const model = strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
   const ctx = await getAutofillAiContext();
-  const info = {
+  const info = await withResumeCertifications({
     ...applicantInfo,
-    certifications: parseCertificationList(applicantInfo.certifications).length
-      ? applicantInfo.certifications
-      : ctx.certifications
-  };
+    skills: ctx.skills,
+    recentRoles: ctx.recentRoles.length
+      ? ctx.recentRoles
+      : normalizeRecentRoles(person?.workHistory || [])
+  });
+
+  // Answer cert yes/no from profile facts before spending an API call.
+  if (isCertificationQuestion(q)) {
+    const factual = answerCertificationQuestion(q, info.certifications);
+    if (factual) {
+      saveQa({
+        profileId,
+        question: q,
+        answer: factual,
+        fieldType: "text",
+        source: "profile"
+      }).catch(() => {});
+      return {
+        ok: true,
+        answer: factual,
+        source: "profile",
+        profileId,
+        personLabel
+      };
+    }
+  }
+
   const result = await generateSingleProfileAnswer({
     apiKey,
     model,
     question: q,
     applicantInfo: info,
     jobMeta: ctx.jobMeta,
-    resumeText: ctx.resumeText
+    resumeText: ctx.resumeText,
+    skills: ctx.skills,
+    recentRoles: info.recentRoles || ctx.recentRoles
   });
   const answer = cleanCustomQaAnswer(result.answer);
   if (!answer) throw new Error("OpenAI returned an empty answer. Try again or use ChatGPT tab.");
@@ -3888,13 +3927,13 @@ export async function answerCustomQaAsk({
     question: q,
     answer,
     fieldType: "text",
-    source: "openai"
+    source: result.source === "profile" ? "profile" : "openai"
   }).catch(() => {});
   return {
     ok: true,
     answer,
-    source: "openai",
-    model,
+    source: result.source === "profile" ? "profile" : "openai",
+    model: result.source === "profile" ? undefined : model,
     usage: result.usage || null,
     profileId,
     personLabel
@@ -3938,17 +3977,43 @@ export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
   }
 
   const ctx = await getAutofillAiContext();
-  const info = {
+  const info = await withResumeCertifications({
     ...applicantInfo,
-    certifications: parseCertificationList(applicantInfo.certifications).length
-      ? applicantInfo.certifications
-      : ctx.certifications
-  };
+    skills: ctx.skills,
+    recentRoles: ctx.recentRoles.length
+      ? ctx.recentRoles
+      : normalizeRecentRoles(person?.workHistory || [])
+  });
+
+  if (isCertificationQuestion(q)) {
+    const factual = answerCertificationQuestion(q, info.certifications);
+    if (factual) {
+      saveQa({
+        profileId,
+        question: q,
+        answer: factual,
+        fieldType: "text",
+        source: "profile"
+      }).catch(() => {});
+      return {
+        bankHit: {
+          ok: true,
+          answer: factual,
+          source: "profile",
+          profileId,
+          personLabel
+        }
+      };
+    }
+  }
+
   const prompt = buildCustomQaAgentPrompt({
     question: q,
     applicantInfo: info,
     jobMeta: ctx.jobMeta,
-    resumeText: ctx.resumeText
+    resumeText: ctx.resumeText,
+    skills: ctx.skills,
+    recentRoles: info.recentRoles || ctx.recentRoles
   });
   return { bankHit: null, prompt, profileId, personLabel, question: q };
 }

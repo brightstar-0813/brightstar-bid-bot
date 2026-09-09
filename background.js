@@ -7719,7 +7719,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (engine === "chatgpt" || engine === "agent" || engine === "claude") {
           const prep = await prepareCustomQaAsk({ question, skipBank });
           if (prep.bankHit) {
-            await setStatus(`Custom Q&A: reused bank answer (${prep.bankHit.personLabel || "profile"}).`);
+            const via =
+              prep.bankHit.source === "profile"
+                ? `profile facts (${prep.bankHit.personLabel || "profile"})`
+                : `bank (${prep.bankHit.personLabel || "profile"})`;
+            await setStatus(`Custom Q&A: reused ${via}.`);
             safeSendResponse(sendResponse, prep.bankHit);
             return;
           }
@@ -7761,7 +7765,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const via =
           result.source === "bank"
             ? `bank (${result.personLabel || "profile"})`
-            : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
+            : result.source === "profile"
+              ? `profile facts (${result.personLabel || "profile"})`
+              : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
         await setStatus(`Custom Q&A: answer ready (${via}).`);
         safeSendResponse(sendResponse, result);
       } catch (err) {

@@ -2917,11 +2917,13 @@ async function generateCustomQaAsk() {
     const src =
       res.source === "bank"
         ? `Q&A bank${who}`
-        : res.source === "openai"
-          ? `OpenAI${res.model ? ` · ${res.model}` : ""}${who}`
-          : res.source === "claude"
-            ? `Claude tab${who}`
-            : `ChatGPT tab${who}`;
+        : res.source === "profile"
+          ? `profile facts${who}`
+          : res.source === "openai"
+            ? `OpenAI${res.model ? ` · ${res.model}` : ""}${who}`
+            : res.source === "claude"
+              ? `Claude tab${who}`
+              : `ChatGPT tab${who}`;
     setCustomQaMeta(src);
     setStatus(`Custom Q&A ready (${src}). Copy or Save to bank.`);
   } finally {
