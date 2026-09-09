@@ -11,6 +11,10 @@ const JUNK_QUESTION_RE =
 const JUNK_QUESTION_CONTAINS_RE =
   /upload your resume|autofill from resume|drop your resume|choose file|drag and drop|upload file|select type or paste your resume|add resume|paste your resume here|format paragraph|heading dropdown|find any email|paste any linkedin profile url|embed content from social networks|parsing your resume|autofill completed|remove file|resume here to autofill/i;
 
+/** Section blurbs / EEO disclaimers mistaken for fillable questions. */
+const INSTRUCTIONAL_FIELD_LABEL_RE =
+  /\b(we invite (you|applicants)|invite applicants to share|demographic background|voluntary (self[- ]?identification|survey)|equal employment opportunity|eeo statement|responses may be used|used to identify areas of improvement|choose not to (self[- ]?)?identify|prefer not to (self[- ]?)?identify|this information will not|will not affect (your|the) (application|candidacy))\b/i;
+
 /** Meta / analytics / fingerprint param names that leak into field inventories. */
 const TRACKING_NOISE_LABEL_RE =
   /^(id|ev|dl|rl|if|ts|iw|sw|sh|ec|fbp|ler|cdl|aems|uid|uuid|sid|cid|gid|pid|tid|rid)$/i;
@@ -77,12 +81,33 @@ export function isJunkAutofillAnswer(text, { questionLabel = "" } = {}) {
   return false;
 }
 
+/** Placeholder / search-chrome mistaken for the real field label. */
+export function isPlaceholderFieldLabel(label) {
+  return /^(search|type here|enter text|write here|your answer|select\.\.\.?|please select|choose|filter)$/i.test(
+    cleanAutofillLabelText(label)
+  );
+}
+
+/** Survey intros and policy blurbs — not answerable fields. */
+export function isInstructionalFieldLabel(label) {
+  const raw = cleanAutofillLabelText(label);
+  if (!raw) return true;
+  if (INSTRUCTIONAL_FIELD_LABEL_RE.test(raw)) return true;
+  // Long paragraph without a question mark and without a short field-name shape.
+  if (raw.length > 140 && !/[?]/.test(raw) && !/^(gender|race|ethnicity|veteran|disability)\b/i.test(raw)) {
+    if (/\b(applicant|hiring|survey|demographic|voluntary|opportunity)\b/i.test(raw)) return true;
+  }
+  return false;
+}
+
 /** @param {string} label */
 export function isJunkQuestionLabel(label) {
   const raw = cleanAutofillLabelText(label);
   if (!raw || raw.length < 3) return true;
   if (isBareChoiceOptionLabel(raw)) return true;
   if (isTrackingNoiseLabel(raw)) return true;
+  if (isPlaceholderFieldLabel(raw)) return true;
+  if (isInstructionalFieldLabel(raw)) return true;
   const compact = raw.replace(/\s+/g, " ");
   if (JUNK_QUESTION_RE.test(compact)) return true;
   if (JUNK_QUESTION_CONTAINS_RE.test(compact)) return true;

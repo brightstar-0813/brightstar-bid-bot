@@ -21,6 +21,7 @@ import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilari
 import {
   isJunkAutofillAnswer,
   isJunkQuestionLabel,
+  isInstructionalFieldLabel,
   isSensitiveProfileQuestion,
   normalizeChoiceAnswerValue,
   isTrackingNoiseLabel
@@ -1237,6 +1238,14 @@ async function annotateScanFieldsWithBank(fields = [], profileId = "") {
   const out = [];
   for (const field of fields || []) {
     if (!field) continue;
+    if (isJunkQuestionLabel(field.label) || isInstructionalFieldLabel(field.label)) {
+      continue;
+    }
+    // Prefer live DOM answer over stale "needs AI" / "ready" classification.
+    if (String(field.currentValue || "").trim() && field.matchSource !== "filled") {
+      out.push({ ...field, matchSource: "filled" });
+      continue;
+    }
     if (field.matchSource && field.matchSource !== "unmatched") {
       out.push(field);
       continue;

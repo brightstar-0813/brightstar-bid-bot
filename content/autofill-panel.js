@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-09.panel12";
+  const PANEL_BUILD = "2026-09-09.panel13";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -74,7 +74,9 @@
   let hostEl = null;
   let shadow = null;
   let navWatchInstalled = false;
+  let formWatchInstalled = false;
   let rescanTimer = null;
+  let rescanRetries = 0;
   let state = {
     expanded: false,
     running: false,
@@ -438,31 +440,81 @@
     });
 
     installNavWatch();
+    installFormWatch();
   }
 
-  function scheduleRescan(delayMs = 700) {
+  function isFormControlFocused() {
+    try {
+      const a = document.activeElement;
+      if (!a || a === document.body) return false;
+      // Typing in the Brightstar panel itself should not block page rescans.
+      if (hostEl?.contains?.(a) || shadow?.contains?.(a)) return false;
+      return Boolean(
+        a.matches?.(
+          "input, textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox']"
+        )
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function scheduleRescan(delayMs = 700, { force = false } = {}) {
     if (state.running) return;
     clearTimeout(rescanTimer);
     rescanTimer = setTimeout(() => {
       if (state.running) return;
-      // Never rescan while the user is typing in the application form.
-      try {
-        const a = document.activeElement;
-        if (
-          a &&
-          a !== document.body &&
-          a.matches?.(
-            "input, textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox']"
-          )
-        ) {
-          return;
+      // While the user is mid-keystroke, retry instead of dropping — otherwise the
+      // panel stays stale forever as they tab through fields.
+      if (!force && isFormControlFocused()) {
+        if (rescanRetries < 10) {
+          rescanRetries += 1;
+          scheduleRescan(600, { force: false });
         }
-      } catch {
-        /* ignore */
+        return;
       }
+      rescanRetries = 0;
       if (!state.expanded && !shouldInitPanel()) return;
       runScan().catch(() => {});
     }, delayMs);
+  }
+
+  function installFormWatch() {
+    if (formWatchInstalled) return;
+    formWatchInstalled = true;
+    const onFormChange = (event) => {
+      const t = event?.target;
+      if (!t || typeof t.matches !== "function") return;
+      if (hostEl?.contains?.(t)) return;
+      if (
+        !t.matches?.(
+          "input, textarea, select, [role='combobox'], [contenteditable='true']"
+        )
+      ) {
+        return;
+      }
+      // Selects/radios finish on change; text fields finish on focusout.
+      const type = String(t.type || "").toLowerCase();
+      if (event.type === "change" || type === "radio" || type === "checkbox" || t.tagName === "SELECT") {
+        scheduleRescan(450, { force: true });
+        return;
+      }
+      if (event.type === "focusout") {
+        scheduleRescan(500, { force: false });
+      }
+    };
+    document.addEventListener("change", onFormChange, true);
+    document.addEventListener("focusout", onFormChange, true);
+    document.addEventListener(
+      "click",
+      (event) => {
+        const opt = event.target?.closest?.(
+          '[role="option"], .select__option, [class*="select__option"]'
+        );
+        if (opt) scheduleRescan(350, { force: true });
+      },
+      true
+    );
   }
 
   function installNavWatch() {
@@ -472,7 +524,7 @@
     const onNav = () => {
       if (location.href === lastHref) return;
       lastHref = location.href;
-      scheduleRescan(500);
+      scheduleRescan(500, { force: true });
     };
     window.addEventListener("popstate", onNav);
     window.addEventListener("hashchange", onNav);
@@ -488,16 +540,6 @@
     try {
       wrap("pushState");
       wrap("replaceState");
-    } catch {
-      /* ignore */
-    }
-    const mo = new MutationObserver(() => {
-      // Never auto-rescan on every DOM mutation — that opens menus and steals page scroll.
-      // Only refresh when the apply URL path changes (handled by popstate/pushState above).
-    });
-    try {
-      // Observe nothing heavy; keep install for future hooks without subtree churn.
-      mo.disconnect();
     } catch {
       /* ignore */
     }

@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-09.scan04";
+  const SCRIPT_BUILD = "2026-09-09.scan05";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -59,10 +59,37 @@
     }, ms);
   }
 
+  function isInstructionalFieldLabel(label) {
+    const raw = cleanLabelText(label);
+    if (!raw) return true;
+    if (
+      /\b(we invite (you|applicants)|invite applicants to share|demographic background|voluntary (self[- ]?identification|survey)|equal employment opportunity|eeo statement|responses may be used|used to identify areas of improvement|this information will not|will not affect (your|the) (application|candidacy))\b/i.test(
+        raw
+      )
+    ) {
+      return true;
+    }
+    if (
+      raw.length > 140 &&
+      !/[?]/.test(raw) &&
+      /\b(applicant|hiring|survey|demographic|voluntary|opportunity)\b/i.test(raw)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function isPlaceholderFieldLabel(label) {
+    return /^(search|type here|enter text|write here|your answer|select\.\.\.?|please select|choose|filter)$/i.test(
+      cleanLabelText(label)
+    );
+  }
+
   function isJunkLearnLabel(label) {
     const raw = String(label || "").trim();
     if (!raw) return true;
     if (/^(first name|last name|email|phone|name)\*?$/i.test(raw.replace(/\s+/g, " "))) return true;
+    if (isPlaceholderFieldLabel(raw) || isInstructionalFieldLabel(raw)) return true;
     return /upload your resume|autofill from resume|drop your resume|choose file|drag and drop|upload file|add resume|paste your resume|format paragraph|heading dropdown|find any email|parsing your resume|autofill completed|remove file/i.test(
       raw
     );
@@ -1208,16 +1235,40 @@
     const root =
       getReactSelectRoot(el) ||
       el.closest?.(".select__control")?.parentElement ||
-      el.closest?.("[class*='select__control']")?.parentElement;
+      el.closest?.("[class*='select__control']")?.parentElement ||
+      el.closest?.("[class*='select-container'], [class*='Select-control'], .select__value-container")?.parentElement;
     const selected = cleanLabelText(
       root?.querySelector?.(
-        ".select__single-value, .select__multi-value__label, [class*='select__single-value']"
+        ".select__single-value, .select__multi-value__label, [class*='select__single-value'], [class*='Select-value-label'], [class*='singleValue']"
       )?.textContent || ""
     );
     if (!selected || /^select\.\.\.?$/i.test(selected) || /^please select$/i.test(selected)) {
       return "";
     }
     return selected;
+  }
+
+  /** Current answer for text / select / combobox (includes React-Select chips). */
+  function readControlCurrentValue(el) {
+    if (!el) return "";
+    let currentValue = readFilledAnswer(el);
+    if (!currentValue && (isReactSelectInput(el) || looksLikeCombobox(el) || inferFieldType(el) === "select")) {
+      currentValue = readReactSelectValue(el);
+    }
+    // Greenhouse / custom selects sometimes mirror the chosen text in a sibling.
+    if (!currentValue) {
+      const wrap =
+        el.closest?.(".select, .select-shell, [data-provides='select'], [class*='select']") || el.parentElement;
+      const mirror = cleanLabelText(
+        wrap?.querySelector?.(
+          ".select__single-value, [class*='select__single-value'], [aria-selected='true'], .selected-value"
+        )?.textContent || ""
+      );
+      if (mirror && !/^select\.\.\.?$/i.test(mirror) && !isPlaceholderFieldLabel(mirror)) {
+        currentValue = mirror;
+      }
+    }
+    return currentValue;
   }
 
   /** Strip open-menu chrome ("Select... Yes No") from scanned question labels. */
@@ -1640,11 +1691,22 @@
       if (looksLikeEditorChromeValue(c)) continue;
       if (isBareChoiceOptionLabel(c)) continue;
       if (isTrackingNoiseLabel(c)) continue;
+      if (isPlaceholderFieldLabel(c)) continue;
+      if (isInstructionalFieldLabel(c)) continue;
       if (/^(type here|enter text|write here|your answer)\.?$/i.test(c)) continue;
-      // Prefer longer, question-like labels over short option chrome.
-      const score = c.length + (looksLikeQuestionLabel(c) ? 400 : 0) + (/[?]/.test(c) ? 200 : 0);
+      // Prefer real field labels over long section blurbs (EEO intros, etc.).
+      const score =
+        Math.min(c.length, 160) +
+        (looksLikeQuestionLabel(c) ? 400 : 0) +
+        (/[?]/.test(c) ? 200 : 0) +
+        (c.length <= 80 ? 80 : 0) -
+        (c.length > 140 && !/[?]/.test(c) ? 300 : 0);
       const bestScore =
-        best.length + (looksLikeQuestionLabel(best) ? 400 : 0) + (/[?]/.test(best) ? 200 : 0);
+        Math.min(best.length, 160) +
+        (looksLikeQuestionLabel(best) ? 400 : 0) +
+        (/[?]/.test(best) ? 200 : 0) +
+        (best.length <= 80 ? 80 : 0) -
+        (best.length > 140 && !/[?]/.test(best) ? 300 : 0);
       if (score > bestScore) best = c;
     }
     if (best) return best.slice(0, 1000);
@@ -2169,14 +2231,28 @@
         .map((id) => document.getElementById(id)?.textContent || "")
         .join(" ");
       const t = stripEmoji(cleanLabelText(fromIds));
-      if (t.length >= 8 && !looksLikeEditorChromeValue(t)) return t.slice(0, 1000);
+      if (
+        t.length >= 8 &&
+        !looksLikeEditorChromeValue(t) &&
+        !isInstructionalFieldLabel(t) &&
+        !isPlaceholderFieldLabel(t)
+      ) {
+        return t.slice(0, 1000);
+      }
     }
     const legend = el?.matches?.("fieldset, [role='radiogroup'], [role='group']")
       ? el.querySelector(":scope > legend")
       : el?.closest?.("fieldset")?.querySelector("legend");
     if (legend) {
       const t = stripEmoji(cleanLabelText(legend.textContent));
-      if (t.length >= 8 && !looksLikeEditorChromeValue(t)) return t.slice(0, 1000);
+      if (
+        t.length >= 8 &&
+        !looksLikeEditorChromeValue(t) &&
+        !isInstructionalFieldLabel(t) &&
+        !isPlaceholderFieldLabel(t)
+      ) {
+        return t.slice(0, 1000);
+      }
     }
 
     let walk = el;
@@ -2187,6 +2263,7 @@
         if (
           t.length >= 24 &&
           !looksLikeEditorChromeValue(t) &&
+          !isInstructionalFieldLabel(t) &&
           (/[?]/.test(t) ||
             /\b(please (describe|share|answer|explain)|share an example|describe your|tell us about)\b/i.test(
               t
@@ -2211,16 +2288,21 @@
         .replace(/\bthe client has input a budget of\b[^.?\n]*/gi, " ")
         .replace(/\s+/g, " ")
         .trim();
+      if (isInstructionalFieldLabel(stripped) || isPlaceholderFieldLabel(stripped)) {
+        node = node.parentElement;
+        continue;
+      }
       if (
         stripped.length >= 12 &&
-        /[?]|\b(authorized|sponsorship|eligible|require|confirm|available|hourly rate|start|describe|share an example)\b/i.test(
+        stripped.length <= 220 &&
+        /[?]|\b(authorized|sponsorship|eligible|require|confirm|available|hourly rate|start|describe|share an example|gender|race|ethnicity|orientation|veteran|disability)\b/i.test(
           stripped
         )
       ) {
         const qs = stripped.match(/[^?]*\?/g);
         if (qs?.length) {
           const last = qs[qs.length - 1].trim();
-          if (last.length >= 12) return last.slice(0, 1000);
+          if (last.length >= 12 && !isInstructionalFieldLabel(last)) return last.slice(0, 1000);
         }
         return stripped.slice(0, 1000);
       }
@@ -2229,7 +2311,15 @@
     const prev = el.previousElementSibling || el.parentElement?.previousElementSibling;
     if (prev) {
       const t = stripEmoji(cleanLabelText(prev.textContent));
-      if (t.length >= 12) return t.slice(0, 1000);
+      if (
+        t.length >= 12 &&
+        t.length <= 160 &&
+        !isInstructionalFieldLabel(t) &&
+        !isPlaceholderFieldLabel(t) &&
+        !looksLikeEditorChromeValue(t)
+      ) {
+        return t.slice(0, 1000);
+      }
     }
     return "";
   }
@@ -3881,6 +3971,7 @@
       const label = sanitizeFieldLabel(captureQuestionText(el));
       if (!label) continue;
       if (LEARN_SENSITIVE_RE.test(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6) continue;
 
@@ -3922,6 +4013,7 @@
       if (group.kind === "start") continue;
       const label = sanitizeFieldLabel(group.question);
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6) continue;
       const chipFieldType = group.kind === "yesno" ? "radio" : "select";
@@ -3954,9 +4046,12 @@
       if (isHistoryFilled(el)) continue;
       if (matchApplicantKeyFromControl(el)) continue;
       if (String(el.value || "").trim() && !isPlaceholderChoiceValue(el.value)) continue;
+      // Already answered in the React-Select UI — do not list as needing AI.
+      if (readReactSelectValue(el) || readControlCurrentValue(el)) continue;
 
       const label = sanitizeFieldLabel(captureQuestionText(el));
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6 || seenLabels.has(labelNorm)) continue;
 
@@ -5327,6 +5422,7 @@
       if (!row) return;
       const label = sanitizeFieldLabel(row.label || "");
       if (!label || label.length < 2) return;
+      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) return;
       const next = { ...row, label: label.slice(0, 200) };
       const labelNorm = normalize(label);
       const key = `${labelNorm}|${next.type}|${next.id}`;
@@ -5352,6 +5448,7 @@
       const label = sanitizeFieldLabel(displayQuestionLabel(el) || labelTextForControl(el) || "");
       if (!label || label.length < 2) continue;
       if (isTrackingNoiseLabel(label) || isTrackingNoiseControl(el, label)) continue;
+      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
       if (isBareChoiceOptionLabel(label) && (type === "radio" || type === "checkbox")) continue;
 
       // Multi-checkbox lists (agency DOC/DOD/…) share one parent question — emit once.
@@ -5363,10 +5460,7 @@
 
       const profileKey = matchApplicantKeyFromControl(el);
       const fieldType = inferFieldType(el);
-      let currentValue = readFilledAnswer(el);
-      if (!currentValue && (isReactSelectInput(el) || looksLikeCombobox(el) || fieldType === "select")) {
-        currentValue = readReactSelectValue(el);
-      }
+      let currentValue = readControlCurrentValue(el);
       const hasValue =
         type === "radio"
           ? Boolean(
@@ -5430,6 +5524,7 @@
       const label = sanitizeFieldLabel(group.question || "");
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       if (isTrackingNoiseLabel(label) || isBareChoiceOptionLabel(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
       const options = (group.labels || []).slice(0, 24);
       const profileKey = matchApplicantKey(normalize(label), normalize(label));
 
@@ -7115,10 +7210,7 @@
     if (["hidden", "file", "submit", "button", "image", "reset", "password"].includes(type)) return;
     // Combobox: learn the selected chip value, not the transient search text.
     if (isReactSelectInput(el) || looksLikeCombobox(el)) {
-      const root = getReactSelectRoot(el) || el.closest?.(".select__control")?.parentElement;
-      const selected = cleanLabelText(
-        root?.querySelector?.(".select__single-value, [class*='select__single-value']")?.textContent || ""
-      );
+      const selected = readReactSelectValue(el) || readControlCurrentValue(el);
       if (!selected || /^select\.\.\.?$/i.test(selected)) return;
       const profileKey = matchApplicantKeyFromControl(el);
       if (profileKey) {
@@ -7154,7 +7246,10 @@
       return;
     }
 
-    const answer = readControlAnswer(el);
+    const answer =
+      el.tagName === "SELECT" || type === "radio" || type === "checkbox"
+        ? readControlAnswer(el) || readControlCurrentValue(el)
+        : readControlAnswer(el);
     if (!answer || answer.length > 2000) return;
     if (looksLikeEditorChromeValue(answer)) return;
 
@@ -7173,6 +7268,37 @@
         chrome.runtime.sendMessage({ type: "profile_learn_capture", key: profileKey, value });
       } catch {
         /* extension context invalidated — ignore */
+      }
+      // Also bank reusable screening answers (sponsorship, work auth, etc.).
+      if (
+        [
+          "needsSponsorship",
+          "workAuthorized",
+          "citizenship",
+          "willingToRelocate",
+          "over18",
+          "yearsExperience",
+          "relevantExperience"
+        ].includes(profileKey)
+      ) {
+        const label = sanitizeFieldLabel(captureQuestionText(el));
+        if (label && !LEARN_SENSITIVE_RE.test(label) && !isJunkLearnLabel(label)) {
+          const labelNorm = normalize(label);
+          if (labelNorm && learnSentByQuestion.get(`qa:${labelNorm}`) !== value) {
+            learnSentByQuestion.set(`qa:${labelNorm}`, value);
+            try {
+              chrome.runtime.sendMessage({
+                type: "qa_learn_capture",
+                question: label.slice(0, 1000),
+                answer: String(value).slice(0, 2000),
+                fieldType: el.tagName === "SELECT" ? "select" : type === "radio" ? "radio" : "text",
+                site: location.hostname
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+        }
       }
       return;
     }
@@ -7228,6 +7354,29 @@
     }
   }
 
+  function onLearnOptionClick(event) {
+    try {
+      const opt = event.target?.closest?.(
+        '[role="option"], .select__option, [class*="select__option"], [id*="-option-"]'
+      );
+      if (!opt) return;
+      // After React-Select commits the chip, capture from the open combobox input.
+      setTimeout(() => {
+        const active = document.activeElement;
+        if (active && (isReactSelectInput(active) || looksLikeCombobox(active))) {
+          maybeCaptureLearn(active);
+          return;
+        }
+        const combo = document.querySelector(
+          'input.select__input, [role="combobox"][aria-expanded="true"], .select__input'
+        );
+        if (combo) maybeCaptureLearn(combo);
+      }, 120);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function initLearnMode() {
     chrome.storage.local
       .get("qa_learn_enabled")
@@ -7244,6 +7393,7 @@
 
     document.addEventListener("change", onLearnEvent, true);
     document.addEventListener("focusout", onLearnEvent, true);
+    document.addEventListener("click", onLearnOptionClick, true);
   }
 
   initLearnMode();

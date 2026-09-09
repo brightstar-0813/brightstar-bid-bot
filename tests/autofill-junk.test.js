@@ -9,7 +9,9 @@ import {
   normalizeChoiceAnswerValue,
   cleanAutofillLabelText,
   isBareChoiceOptionLabel,
-  isTrackingNoiseLabel
+  isTrackingNoiseLabel,
+  isInstructionalFieldLabel,
+  isPlaceholderFieldLabel
 } from "../autofill-junk.js";
 
 test("isJunkAutofillAnswer rejects polluted answers", () => {
@@ -32,6 +34,25 @@ test("isJunkQuestionLabel rejects upload chrome and profile duplicates", () => {
   assert.equal(isJunkQuestionLabel("No"), true);
   assert.equal(isJunkQuestionLabel("udff em"), true);
   assert.equal(isJunkQuestionLabel("cd buttonfeatures"), true);
+  assert.equal(isJunkQuestionLabel("Search"), true);
+  assert.equal(
+    isJunkQuestionLabel(
+      "We invite applicants to share their demographic background. If you choose to complete this survey, your responses may be used to identify areas of improvement in our hiring process."
+    ),
+    true
+  );
+});
+
+test("isInstructionalFieldLabel and isPlaceholderFieldLabel", () => {
+  assert.equal(
+    isInstructionalFieldLabel(
+      "We invite applicants to share their demographic background. If you choose to complete this survey, your responses may be used to identify areas of improvement in our hiring process."
+    ),
+    true
+  );
+  assert.equal(isInstructionalFieldLabel("Gender Identity"), false);
+  assert.equal(isPlaceholderFieldLabel("Search"), true);
+  assert.equal(isPlaceholderFieldLabel("Preferred First Name"), false);
 });
 
 test("cleanAutofillLabelText strips char counters", () => {
