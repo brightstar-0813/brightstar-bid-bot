@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-09.scan02";
+  const SCRIPT_BUILD = "2026-09-09.scan03";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -491,8 +491,38 @@
     felonyConviction: ["felony", "criminal conviction", "convicted of a crime", "criminal record"],
     felonyExplanation: ["please explain", "conviction explanation", "explain your"],
 
-    yearsExperience: ["years of experience", "total experience", "years experience", "how many years"],
-    relevantExperience: ["relevant experience", "describe your experience"],
+    yearsExperience: [
+      "years of experience",
+      "total years of relevant experience",
+      "years of relevant experience",
+      "total years of experience",
+      "total years experience",
+      "total experience",
+      "years experience",
+      "how many years",
+      "years of professional experience",
+      "years of work experience"
+    ],
+    relevantExperience: [
+      "describe your experience",
+      "describe your relevant experience",
+      "summary of your experience",
+      "tell us about your experience"
+    ],
+    currentEmployer: [
+      "current employer",
+      "current company",
+      "present employer",
+      "who is your current employer",
+      "name of current employer"
+    ],
+    currentJobTitle: [
+      "current job title",
+      "current title",
+      "current position",
+      "present job title",
+      "current role"
+    ],
     englishLevel: [
       "english level",
       "english proficiency",
@@ -642,6 +672,8 @@
     "felonyConviction",
     "felonyExplanation",
     "yearsExperience",
+    "currentEmployer",
+    "currentJobTitle",
     "relevantExperience",
     "englishLevel",
     "linkedinUrl",
@@ -1174,6 +1206,53 @@
     }
   }
 
+  /** Strip open-menu chrome ("Select... Yes No") from scanned question labels. */
+  function sanitizeFieldLabel(label) {
+    let t = cleanLabelText(label);
+    if (!t) return "";
+    t = t.replace(/\*?\s*Select\.\.\.?/gi, " ");
+    t = t.replace(/\bYes\s*No\b/gi, " ");
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return cleanLabelText(t);
+  }
+
+  /** Match-source priority when collapsing duplicate scan rows. */
+  function matchSourceRank(src) {
+    const order = {
+      filled: 60,
+      profile: 50,
+      bank: 40,
+      extra: 35,
+      optional: 20,
+      unmatched: 10
+    };
+    return order[src] || 0;
+  }
+
+  function dedupeScanFields(fields = []) {
+    const bestByLabel = new Map();
+    for (const row of fields) {
+      if (!row) continue;
+      const label = sanitizeFieldLabel(row.label || "");
+      if (!label || label.length < 2) continue;
+      const norm = normalize(label);
+      if (!norm) continue;
+      const next = { ...row, label: label.slice(0, 200) };
+      const prev = bestByLabel.get(norm);
+      if (!prev) {
+        bestByLabel.set(norm, next);
+        continue;
+      }
+      const prevRank = matchSourceRank(prev.matchSource);
+      const nextRank = matchSourceRank(next.matchSource);
+      if (nextRank > prevRank) bestByLabel.set(norm, next);
+      else if (nextRank === prevRank && (next.options?.length || 0) > (prev.options?.length || 0)) {
+        bestByLabel.set(norm, next);
+      }
+    }
+    return [...bestByLabel.values()];
+  }
+
   /** Option labels for a multi-checkbox question that shares one parent label. */
   function collectCheckboxGroupOptionLabels(questionNorm) {
     if (!questionNorm) return [];
@@ -1421,6 +1500,11 @@
         if (key === "needsSponsorship" && /\beligible to work\b/.test(primary) && !/\bsponsorship\b/.test(primary)) {
           continue;
         }
+        if (key === "relevantExperience" && /\byears?\b/.test(primary)) continue;
+        if (key === "yearsExperience" && /\b(describe|summary|tell us|detail)\b/.test(primary)) {
+          continue;
+        }
+        if (key === "portfolioUrl" && /\blinkedin\b/.test(primary)) continue;
         if (key === "workedForCompanyBefore" && !/\b(worked|employed|subsidiary|past|before)\b/.test(primary)) {
           continue;
         }
@@ -1453,6 +1537,19 @@
     }
 
     // High-confidence Workday / ATS compliance questions (company name varies).
+    if (
+      /\byears?\b/.test(primary) &&
+      /\b(experience|exp)\b/.test(primary) &&
+      !/\b(describe|summary|tell us|detail|list)\b/.test(primary)
+    ) {
+      return "yearsExperience";
+    }
+    if (/\bcurrent employer\b/.test(primary) || /\bpresent employer\b/.test(primary)) {
+      return "currentEmployer";
+    }
+    if (/\bcurrent (job )?title\b/.test(primary) || /\bcurrent position\b/.test(primary)) {
+      return "currentJobTitle";
+    }
     if (/\bcitizen/.test(primary) || /\bcitizenship\b/.test(primary) || /\bimmigration status\b/.test(primary)) {
       return "citizenship";
     }
@@ -3579,6 +3676,9 @@
     "raceEthnicity",
     "veteranStatus",
     "disabilityStatus",
+    "yearsExperience",
+    "currentEmployer",
+    "currentJobTitle",
     "englishLevel",
     "over18",
     "willingToRelocate",
@@ -3736,7 +3836,7 @@
    * NOT mapped to a known profile field. These get answered from the Q&A bank
    * (stable, reusable selections) — never free-text AI into combobox search boxes.
    */
-  async function collectUnmatchedChoiceQuestions() {
+  async function collectUnmatchedChoiceQuestions({ openMenus = true } = {}) {
     const out = [];
     const groupIds = new Map(); // labelNorm -> id (radio/checkbox groups share one)
     const nodes = [
@@ -3755,7 +3855,7 @@
       if (matchApplicantKeyFromControl(el)) continue;
       if (!isChoiceControlEmpty(el)) continue;
 
-      const label = captureQuestionText(el);
+      const label = sanitizeFieldLabel(captureQuestionText(el));
       if (!label) continue;
       if (LEARN_SENSITIVE_RE.test(label)) continue;
       const labelNorm = normalize(label);
@@ -3797,7 +3897,7 @@
       if (group.buttons.some(isEditorChrome)) continue;
       if ((group.labels || []).some((l) => EDITOR_STYLE_OPTION_RE.test(l))) continue;
       if (group.kind === "start") continue;
-      const label = group.question;
+      const label = sanitizeFieldLabel(group.question);
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6) continue;
@@ -3832,7 +3932,7 @@
       if (matchApplicantKeyFromControl(el)) continue;
       if (String(el.value || "").trim() && !isPlaceholderChoiceValue(el.value)) continue;
 
-      const label = captureQuestionText(el);
+      const label = sanitizeFieldLabel(captureQuestionText(el));
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6 || seenLabels.has(labelNorm)) continue;
@@ -3844,7 +3944,7 @@
           .map((node) => cleanLabelText(node.textContent))
           .filter(Boolean)
           .slice(0, 40);
-      } else {
+      } else if (openMenus) {
         // Open briefly so choice AI / bank get real options — never free-text into the search box.
         try {
           openReactSelect(el);
@@ -3859,6 +3959,20 @@
           dismissOpenMenus();
           await sleep(40);
         }
+      }
+      // Panel inventory: still list the field without opening menus (avoids scroll fights).
+      if (!options.length && !openMenus) {
+        const id = stableQuestionId(label, "combobox", el, "rbc");
+        el.setAttribute("data-resume-bot-choice-qid", id);
+        seenLabels.add(labelNorm);
+        out.push({
+          id,
+          label: label.slice(0, 1000),
+          options: [],
+          fieldType: "combobox",
+          required: isControlRequired(el)
+        });
+        continue;
       }
       if (!options.length) continue;
 
@@ -5164,8 +5278,12 @@
 
   /**
    * Dry-run inventory of fillable fields for the autofill panel (no values written).
+   * @param {object} applicantInfo
+   * @param {object} extras
+   * @param {{ inventoryOnly?: boolean }} [opts] inventoryOnly skips opening combobox menus (panel scan).
    */
-  async function scanApplicationFields(applicantInfo = {}, extras = {}) {
+  async function scanApplicationFields(applicantInfo = {}, extras = {}, opts = {}) {
+    const inventoryOnly = opts.inventoryOnly !== false;
     const probe = probeApplicationForm();
     if (!probe.isApplicationForm && !probe.hasFormFields) {
       return {
@@ -5178,14 +5296,23 @@
 
     const fields = [];
     const seen = new Set();
+    const seenLabelNorms = new Set();
     const seenRadioGroups = new Set();
     const seenCheckboxQuestions = new Set();
 
     const pushField = (row) => {
-      const key = `${row.label}|${row.type}|${row.id}`;
+      if (!row) return;
+      const label = sanitizeFieldLabel(row.label || "");
+      if (!label || label.length < 2) return;
+      const next = { ...row, label: label.slice(0, 200) };
+      const labelNorm = normalize(label);
+      const key = `${labelNorm}|${next.type}|${next.id}`;
       if (seen.has(key)) return;
+      // One row per question label — later sources must not re-list the same field.
+      if (labelNorm && seenLabelNorms.has(labelNorm)) return;
       seen.add(key);
-      fields.push(row);
+      if (labelNorm) seenLabelNorms.add(labelNorm);
+      fields.push(next);
     };
 
     for (const el of collectFillableControls()) {
@@ -5199,7 +5326,7 @@
         }
       }
 
-      const label = cleanLabelText(displayQuestionLabel(el) || labelTextForControl(el) || "");
+      const label = sanitizeFieldLabel(displayQuestionLabel(el) || labelTextForControl(el) || "");
       if (!label || label.length < 2) continue;
       if (isTrackingNoiseLabel(label) || isTrackingNoiseControl(el, label)) continue;
       if (isBareChoiceOptionLabel(label) && (type === "radio" || type === "checkbox")) continue;
@@ -5213,7 +5340,14 @@
 
       const profileKey = matchApplicantKeyFromControl(el);
       const fieldType = inferFieldType(el);
-      const currentValue = readFilledAnswer(el);
+      let currentValue = readFilledAnswer(el);
+      if (!currentValue && (isReactSelectInput(el) || looksLikeCombobox(el))) {
+        const root = getReactSelectRoot(el) || el.closest?.(".select__control")?.parentElement;
+        currentValue = cleanLabelText(
+          root?.querySelector?.(".select__single-value, [class*='select__single-value']")?.textContent || ""
+        );
+        if (/^select\.\.\.?$/i.test(currentValue)) currentValue = "";
+      }
       const hasValue =
         type === "radio"
           ? Boolean(
@@ -5227,7 +5361,9 @@
             ? Boolean(
                 [...document.querySelectorAll('input[type="checkbox"]')].some((cb) => {
                   if (!cb.checked) return false;
-                  const q = normalize(displayQuestionLabel(cb) || labelTextForControl(cb) || "");
+                  const q = normalize(
+                    sanitizeFieldLabel(displayQuestionLabel(cb) || labelTextForControl(cb) || "")
+                  );
                   return q === normalize(label);
                 })
               )
@@ -5260,7 +5396,7 @@
 
       pushField({
         id: stableQuestionId(label, fieldType, idSeed),
-        label: label.slice(0, 200),
+        label,
         type: fieldType,
         required: isControlRequired(el) && !isConditionalFollowUpLabel(label),
         matchSource,
@@ -5272,11 +5408,11 @@
 
     for (const group of collectChoiceChipGroups()) {
       if (group.kind === "start") continue;
-      const label = cleanLabelText(group.question || "");
+      const label = sanitizeFieldLabel(group.question || "");
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       if (isTrackingNoiseLabel(label) || isBareChoiceOptionLabel(label)) continue;
       const options = (group.labels || []).slice(0, 24);
-      const profileKey = matchApplicantKey(label);
+      const profileKey = matchApplicantKey(normalize(label), normalize(label));
 
       if (group.selected) {
         if (profileKey) continue;
@@ -5291,7 +5427,7 @@
         if (!selectedValue) continue;
         pushField({
           id: stableQuestionId(label, "select", group.buttons?.[0], "rbc"),
-          label: label.slice(0, 200),
+          label,
           type: "select",
           required: true,
           matchSource: "filled",
@@ -5307,7 +5443,7 @@
       else if (matchExtraForScan(label, extras, options)) matchSource = "extra";
       pushField({
         id: stableQuestionId(label, "select", group.buttons?.[0], "rbc"),
-        label: label.slice(0, 200),
+        label,
         type: "select",
         required: true,
         matchSource,
@@ -5318,10 +5454,10 @@
     }
 
     for (const el of collectFileInputs()) {
-      const label = labelTextForControl(el) || "Resume upload";
+      const label = sanitizeFieldLabel(labelTextForControl(el) || "Resume upload");
       pushField({
         id: stableQuestionId(label, "file", el),
-        label: label.slice(0, 200),
+        label,
         type: "file",
         required: isControlRequired(el),
         matchSource: "profile",
@@ -5331,32 +5467,50 @@
       });
     }
 
-    const unmatchedText = collectUnmatchedQuestions(applicantInfo);
-    for (const q of unmatchedText) {
-      pushField({
-        id: q.id,
-        label: q.label,
-        type: q.fieldType || "text",
-        required: true,
-        matchSource: "unmatched",
-        profileKey: null,
-        currentValue: "",
-        options: []
-      });
-    }
+    // Panel inventory: do not re-list via unmatched collectors (causes duplicates + menu opens).
+    if (!inventoryOnly) {
+      const unmatchedText = collectUnmatchedQuestions(applicantInfo);
+      for (const q of unmatchedText) {
+        pushField({
+          id: q.id,
+          label: q.label,
+          type: q.fieldType || "text",
+          required: true,
+          matchSource: "unmatched",
+          profileKey: null,
+          currentValue: "",
+          options: []
+        });
+      }
 
-    const unmatchedChoice = await collectUnmatchedChoiceQuestions();
-    for (const q of unmatchedChoice) {
-      pushField({
-        id: q.id,
-        label: q.label,
-        type: q.fieldType || "select",
-        required: q.required !== false,
-        matchSource: isConditionalFollowUpLabel(q.label) ? "optional" : "unmatched",
-        profileKey: null,
-        currentValue: "",
-        options: (q.options || []).slice(0, 24)
-      });
+      const unmatchedChoice = await collectUnmatchedChoiceQuestions({ openMenus: true });
+      for (const q of unmatchedChoice) {
+        pushField({
+          id: q.id,
+          label: q.label,
+          type: q.fieldType || "select",
+          required: q.required !== false,
+          matchSource: isConditionalFollowUpLabel(q.label) ? "optional" : "unmatched",
+          profileKey: null,
+          currentValue: "",
+          options: (q.options || []).slice(0, 24)
+        });
+      }
+    } else {
+      // Still discover closed comboboxes without opening them.
+      const unmatchedChoice = await collectUnmatchedChoiceQuestions({ openMenus: false });
+      for (const q of unmatchedChoice) {
+        pushField({
+          id: q.id,
+          label: q.label,
+          type: q.fieldType || "select",
+          required: q.required !== false,
+          matchSource: isConditionalFollowUpLabel(q.label) ? "optional" : "unmatched",
+          profileKey: null,
+          currentValue: "",
+          options: (q.options || []).slice(0, 24)
+        });
+      }
     }
 
     dismissOpenMenus();
@@ -5369,7 +5523,7 @@
     return {
       ok: true,
       stepLabel: detectStepLabel(),
-      fields,
+      fields: dedupeScanFields(fields),
       fillableCount: probe.fillableCount,
       isApplicationForm: probe.isApplicationForm,
       actionButton,
@@ -6939,8 +7093,46 @@
 
     const type = (el.type || "text").toLowerCase();
     if (["hidden", "file", "submit", "button", "image", "reset", "password"].includes(type)) return;
-    // Combobox search inputs hold transient text, not a final answer.
-    if (isReactSelectInput(el) || looksLikeCombobox(el)) return;
+    // Combobox: learn the selected chip value, not the transient search text.
+    if (isReactSelectInput(el) || looksLikeCombobox(el)) {
+      const root = getReactSelectRoot(el) || el.closest?.(".select__control")?.parentElement;
+      const selected = cleanLabelText(
+        root?.querySelector?.(".select__single-value, [class*='select__single-value']")?.textContent || ""
+      );
+      if (!selected || /^select\.\.\.?$/i.test(selected)) return;
+      const profileKey = matchApplicantKeyFromControl(el);
+      if (profileKey) {
+        const value = canonicalValueForKey(profileKey, selected);
+        if (!value) return;
+        const sig = `k:${profileKey}`;
+        if (learnSentByQuestion.get(sig) === value) return;
+        learnSentByQuestion.set(sig, value);
+        try {
+          chrome.runtime.sendMessage({ type: "profile_learn_capture", key: profileKey, value });
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      const label = sanitizeFieldLabel(captureQuestionText(el));
+      if (!label || LEARN_SENSITIVE_RE.test(label) || isJunkLearnLabel(label)) return;
+      const labelNorm = normalize(label);
+      if (!labelNorm || labelNorm.length < 6) return;
+      if (learnSentByQuestion.get(labelNorm) === selected) return;
+      learnSentByQuestion.set(labelNorm, selected);
+      try {
+        chrome.runtime.sendMessage({
+          type: "qa_learn_capture",
+          question: label,
+          answer: selected,
+          fieldType: "select",
+          site: location.hostname || ""
+        });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
 
     const answer = readControlAnswer(el);
     if (!answer || answer.length > 2000) return;
@@ -7927,7 +8119,9 @@
       return true;
     }
     if (message?.type === "scan_application_fields") {
-      scanApplicationFields(message.applicantInfo || {}, message.extras || {})
+      scanApplicationFields(message.applicantInfo || {}, message.extras || {}, {
+        inventoryOnly: message.inventoryOnly !== false
+      })
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;

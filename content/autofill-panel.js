@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-09.panel10";
+  const PANEL_BUILD = "2026-09-09.panel11";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -143,6 +143,8 @@
             ? `<span class="field-badge">profile</span>`
             : f.matchSource === "extra"
               ? `<span class="field-badge">extra</span>`
+              : f.matchSource === "bank"
+                ? `<span class="field-badge bank">bank</span>`
               : f.matchSource === "unmatched"
                 ? `<span class="field-badge warn">needs AI</span>`
                 : f.matchSource === "optional"
@@ -473,10 +475,12 @@
       /* ignore */
     }
     const mo = new MutationObserver(() => {
-      if (state.expanded || looksLikeApplyContext()) scheduleRescan(1200);
+      // Never auto-rescan on every DOM mutation — that opens menus and steals page scroll.
+      // Only refresh when the apply URL path changes (handled by popstate/pushState above).
     });
     try {
-      mo.observe(document.documentElement, { childList: true, subtree: true });
+      // Observe nothing heavy; keep install for future hooks without subtree churn.
+      mo.disconnect();
     } catch {
       /* ignore */
     }

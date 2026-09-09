@@ -7736,7 +7736,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!answer) {
             throw new Error(`${providerLabel} returned an empty answer. Try again.`);
           }
-          await setStatus(`Custom Q&A: answer ready (${providerLabel}).`);
+          await saveCustomQaAnswer({
+            question,
+            answer,
+            source: provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt"
+          }).catch(() => null);
+          await setStatus(`Custom Q&A: answer ready (${providerLabel}) · saved to bank.`);
           safeSendResponse(sendResponse, {
             ok: true,
             answer,

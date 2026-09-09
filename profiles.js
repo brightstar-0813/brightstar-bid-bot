@@ -1047,9 +1047,11 @@ export async function mergeAutofillExtras(learned) {
 
 const EXTRA_TO_APPLICANT_KEY = [
   [["desired salary", "expected salary", "salary expectation", "salary", "compensation", "pay expectation"], "salaryExpectation"],
+  [["years of experience", "years experience", "total experience", "years of exp", "total years of relevant experience", "years of relevant experience"], "yearsExperience"],
+  [["relevant experience", "describe your experience"], "relevantExperience"],
+  [["current employer", "current company", "present employer"], "currentEmployer"],
+  [["current job title", "current title", "current position"], "currentJobTitle"],
   [["earliest start", "start date", "available date", "availability date", "when can you start"], "earliestStartDate"],
-  [["years of experience", "years experience", "total experience", "years of exp"], "yearsExperience"],
-  [["relevant experience"], "relevantExperience"],
   [["github"], "githubUrl"],
   [["portfolio", "personal website", "website url", "website"], "portfolioUrl"],
   [["willing to relocate", "relocate", "relocation"], "willingToRelocate"],
@@ -1214,6 +1216,8 @@ function emptyApplicantInfo() {
     felonyConviction: "",
     felonyExplanation: "",
     yearsExperience: "",
+    currentEmployer: "",
+    currentJobTitle: "",
     relevantExperience: "",
     englishLevel: "",
     linkedinUrl: "",
@@ -1247,6 +1251,32 @@ function todaysDateMmDdYyyy() {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${mm}/${dd}/${d.getFullYear()}`;
+}
+
+function estimateYearsFromWorkHistory(workHistory = []) {
+  const rows = Array.isArray(workHistory) ? workHistory : [];
+  let minYear = null;
+  const nowY = new Date().getFullYear();
+  for (const job of rows) {
+    const y = Number(job?.startYear || job?.start?.year || 0);
+    if (Number.isFinite(y) && y >= 1975 && y <= nowY) {
+      if (minYear == null || y < minYear) minYear = y;
+    }
+  }
+  if (minYear == null) return "";
+  const years = nowY - minYear;
+  if (years < 1 || years > 50) return "";
+  return String(years);
+}
+
+function currentJobFromWorkHistory(workHistory = []) {
+  const rows = Array.isArray(workHistory) ? workHistory : [];
+  const current = rows.find((j) => j?.current) || rows[0] || null;
+  if (!current) return { employer: "", title: "" };
+  return {
+    employer: String(current.company || "").trim(),
+    title: String(current.title || "").trim()
+  };
 }
 
 /** Map Brightstar person + extras onto the resume-bot applicant-info shape. */
@@ -1301,6 +1331,24 @@ export function personToApplicantInfo(person = {}) {
       "Job Board"
   ).trim();
   info.termsConsent = "yes";
+
+  const job = currentJobFromWorkHistory(person.workHistory);
+  info.currentEmployer = String(
+    extras["current employer"] || extras.currentEmployer || job.employer || ""
+  ).trim();
+  info.currentJobTitle = String(
+    extras["current job title"] || extras.currentJobTitle || extras["current title"] || job.title || ""
+  ).trim();
+  info.yearsExperience = String(
+    extras["years of experience"] ||
+      extras["total years of relevant experience"] ||
+      extras.yearsExperience ||
+      extras["years experience"] ||
+      ""
+  ).trim();
+  if (!info.yearsExperience) {
+    info.yearsExperience = estimateYearsFromWorkHistory(person.workHistory);
+  }
 
   for (const [key, value] of Object.entries(extras)) {
     const v = String(value || "").trim();

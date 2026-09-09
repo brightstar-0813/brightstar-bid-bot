@@ -1186,6 +1186,70 @@ function mergeScanFrameResults(frameResults = []) {
   return best;
 }
 
+function dedupeScanFieldsByLabel(fields = []) {
+  const rank = {
+    filled: 60,
+    profile: 50,
+    bank: 40,
+    extra: 35,
+    optional: 20,
+    unmatched: 10
+  };
+  const best = new Map();
+  for (const row of fields || []) {
+    const label = String(row?.label || "")
+      .replace(/\*?\s*Select\.\.\.?/gi, " ")
+      .replace(/\bYes\s*No\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!label) continue;
+    const norm = normalizeQuestion(label);
+    if (!norm) continue;
+    const next = { ...row, label: label.slice(0, 200) };
+    const prev = best.get(norm);
+    if (!prev) {
+      best.set(norm, next);
+      continue;
+    }
+    const pr = rank[prev.matchSource] || 0;
+    const nr = rank[next.matchSource] || 0;
+    if (nr > pr) best.set(norm, next);
+  }
+  return [...best.values()];
+}
+
+async function annotateScanFieldsWithBank(fields = [], profileId = "") {
+  const out = [];
+  for (const field of fields || []) {
+    if (!field) continue;
+    if (field.matchSource && field.matchSource !== "unmatched") {
+      out.push(field);
+      continue;
+    }
+    if (field.profileKey) {
+      out.push(field);
+      continue;
+    }
+    let match = null;
+    try {
+      match = await findQaMatch(profileId, field.label, { fieldType: field.type || "" });
+    } catch {
+      match = null;
+    }
+    const answer = String(match?.record?.answer || "").trim();
+    if (
+      answer &&
+      !isJunkAutofillAnswer(answer, { questionLabel: field.label }) &&
+      bankAnswerFitsQuestion(field.label, answer)
+    ) {
+      out.push({ ...field, matchSource: "bank", currentValue: field.currentValue || "" });
+    } else {
+      out.push(field);
+    }
+  }
+  return out;
+}
+
 function collectScanFieldsFromFrames(frameResults = []) {
   const seen = new Set();
   const out = [];
@@ -1249,10 +1313,13 @@ export async function scanFieldsOnTab(tabId) {
   const frameResults = await sendMessageToAllFrames(tabId, {
     type: "scan_application_fields",
     applicantInfo,
-    extras
+    extras,
+    inventoryOnly: true
   });
   const scan = mergeScanFrameResults(frameResults);
   const person = await getActivePerson();
+  const deduped = dedupeScanFieldsByLabel(scan.fields || []);
+  const annotated = await annotateScanFieldsWithBank(deduped, person?.id || "");
   const { complete, missing } = applyCompleteness(person || {});
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const site = tab?.url ? hostnameFromUrl(tab.url) : "";
@@ -1262,6 +1329,7 @@ export async function scanFieldsOnTab(tabId) {
   const siteId = tab?.url ? applySiteFromUrl(tab.url) : "";
   return {
     ...scan,
+    fields: annotated,
     profileIncomplete: !complete,
     profileMissing: missing,
     jobTitle: stored.last_job_title || "",
@@ -3766,6 +3834,14 @@ export async function answerCustomQaAsk({
   });
   const answer = cleanCustomQaAnswer(result.answer);
   if (!answer) throw new Error("OpenAI returned an empty answer. Try again or use ChatGPT tab.");
+  // Persist for this profile so the next Autofill can reuse it from the Q&A bank.
+  saveQa({
+    profileId,
+    question: q,
+    answer,
+    fieldType: "text",
+    source: "openai"
+  }).catch(() => {});
   return {
     ok: true,
     answer,
