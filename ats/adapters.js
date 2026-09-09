@@ -43,8 +43,8 @@ export const ATS_ADAPTERS = [
     id: "greenhouse",
     label: "Greenhouse",
     hostPatterns: [/(^|\.)greenhouse\.io$/i],
+    // Fill via in-page Autofill panel only — never force-submit without caller flag.
     autoSubmitAllowed: true,
-    alwaysAutoSubmit: true,
     isEmployerAts: true,
     stepBudget: 18,
     emailOtp: true
@@ -54,7 +54,6 @@ export const ATS_ADAPTERS = [
     label: "Ashby",
     hostPatterns: [/(^|\.)ashbyhq\.com$/i],
     autoSubmitAllowed: true,
-    alwaysAutoSubmit: true,
     isEmployerAts: true,
     stepBudget: 14
   },
@@ -63,7 +62,6 @@ export const ATS_ADAPTERS = [
     label: "Lever",
     hostPatterns: [/(^|\.)lever\.co$/i],
     autoSubmitAllowed: true,
-    alwaysAutoSubmit: true,
     isEmployerAts: true,
     stepBudget: 14
   },

@@ -1376,13 +1376,13 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
         : channelFilter === "jobright"
           ? `Showing Jobright jobs — ${queueCache.length} in queue.`
         : channelFilter === "workday"
-          ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+          ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "greenhouse"
-          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds files only (no auto-apply; use Autofill panel manually).`
+          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "ashby"
-          ? `Showing Ashby jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+          ? `Showing Ashby jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "lever"
-          ? `Showing Lever jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+          ? `Showing Lever jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "etc"
           ? `Showing other boards — ${queueCache.length} in queue.`
           : `Showing all US jobs — ${queueCache.length} in queue. Start builds files only (no auto-apply).`
@@ -1866,7 +1866,7 @@ function renderQueue() {
           : job.applied
             ? "Apply again"
             : sheetReadyContinue && !filesReady
-              ? "Continue apply (auto apply)"
+              ? "Continue apply (open + Autofill panel)"
               : "Apply to job"
     );
     applyBtn.title = inactiveJob
@@ -1876,8 +1876,8 @@ function renderQueue() {
         : job.applied
           ? `${appliedDocsTitle(job)}\nClick to apply again.`
           : sheetReadyContinue && !filesReady
-            ? "Sheet shows Ready (not Applied). Runs hosted auto-apply: open job, autofill, and submit when allowed."
-            : "Open this job, upload its resume and cover letter, autofill, and mark Applied on the Google Sheet";
+            ? "Sheet shows Ready (not Applied). Opens the job and Autofill panel (Dice still runs full auto-apply)."
+            : "Open this job and Autofill panel (Dice: auto-apply+submit). Mark Applied on the Google Sheet.";
     if (canApply) {
       applyBtn.addEventListener("click", () => applyAssist(job));
     }

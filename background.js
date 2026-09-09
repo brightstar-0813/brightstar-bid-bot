@@ -1609,15 +1609,10 @@ function isSkippedSheetDuplicateJob(j) {
 }
 
 function isHostedApplyBacklogJob(j, person = null) {
-  const hostedIndeed = isIndeedHostedApplyJob(j);
-  const workday = isWorkdayJob(j || {});
-  // Greenhouse: generate-only in batch — autofill is unreliable and can pause the run.
-  // Manual Autofill / Auto Apply from the in-page panel still works.
-  const ashby = isAshbyJob(j || {});
-  const lever = isLeverJob(j || {});
-  const jobgether = isJobgetherJob(j || {});
+  // Only Dice runs batch/queue auto-apply. Other ATS (Greenhouse, Workday, …)
+  // use the in-page Autofill panel (Q&A bank, uploads, fill) after Open/Apply.
   if (
-    !(isDiceJob(j) || hostedIndeed || workday || ashby || lever || jobgether) ||
+    !isDiceJob(j) ||
     j.status !== "done" ||
     j.applied ||
     isJobMarkedInactive(j) ||
@@ -6223,10 +6218,8 @@ async function runBatchLoop(outputDir) {
       const activePerson = await getActivePerson().catch(() => null);
       const batchAutoApply = await isBatchAutoApplyEnabled();
 
-      // Hosted Dice/Indeed/Workday/Ashby/Lever/Jobgether: apply already-built rows (no ChatGPT).
-      // Greenhouse is generate-only in batch — use the in-page Autofill panel manually.
-      // Gated by job type, not the visible source filter — except All channel (build only).
-      // Only the active person's rows (profileId / Applications-* folder).
+      // Dice only: apply already-built rows (no ChatGPT). Other boards = generate + panel.
+      // Gated by job type — All channel is build only. Active person's rows only.
       const backlog = batchAutoApply
         ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson))
         : null;
@@ -6436,24 +6429,10 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Hosted Dice, Indeed, Workday, Ashby, Lever, Jobgether: generate → auto-apply.
-        // Greenhouse: generate files only (manual Autofill via panel — batch auto-apply paused the run).
+        // Dice only: generate → auto-apply+submit. Other ATS: files only; use Autofill panel.
         // All channel: generate files only — no auto-apply.
-        const hostedApplyBoard = batchAutoApply
-          ? isIndeedHostedApplyJob(next)
-            ? "Indeed"
-            : isWorkdayJob(next)
-              ? "Workday"
-              : isAshbyJob(next)
-                ? "Ashby"
-                : isLeverJob(next)
-                  ? "Lever"
-                  : isJobgetherJob(next)
-                    ? "Jobgether"
-                    : isDiceJob(next)
-                      ? "Dice"
-                      : ""
-          : "";
+        const hostedApplyBoard =
+          batchAutoApply && isDiceJob(next) ? "Dice" : "";
         if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
           // Apply after build: Ready row on the sheet is expected — only Applied blocks apply.
           const applyRes = await runHostedInterleavedApply({
@@ -6950,31 +6929,31 @@ async function runIndeedGrabAndApply({ autoApply = true } = {}) {
     }
     if (!hosted) {
       await setStatus(
-        `Indeed: files ready for ${job.company} — external ATS (not Apply-on-Indeed). Use Apply manually.`
+        `Indeed: files ready for ${job.company} — external ATS (not Apply-on-Indeed). Use Apply + Autofill panel.`
       );
       await setGrab("idle", `External ATS — ${job.company} / ${job.title}`);
       return { ok: true, job, result, applied: false, external: true };
     }
 
-    const applyRes = await runHostedInterleavedApply(
-      {
-        csvRow: job.csvRow,
-        jobTitle: job.title,
-        companyName: job.company,
-        company: job.company,
-        jdLink: job.jdLink,
-        jobDir: result?.savedDir || job.jobDir || "",
-        applyAttempts: job.applyAttempts || 0
-      },
-      "Indeed"
+    // Indeed is panel-only (Dice alone keeps SW auto-apply). Open apply URL + Autofill panel.
+    await persistJobContextForAutofill({
+      csvRow: job.csvRow,
+      jobTitle: job.title,
+      companyName: job.company,
+      jdLink: job.jdLink,
+      jobDir: result?.savedDir || job.jobDir || ""
+    });
+    const opened = await openJobAndApply(job.jdLink, {
+      openOnly: true,
+      csvRow: job.csvRow,
+      jobDir: result?.savedDir || job.jobDir || "",
+      jdLink: job.jdLink
+    });
+    await setStatus(
+      `Indeed: ${opened?.detail || "Autofill panel ready"} — fill from the panel (Q&A bank, uploads).`
     );
-    await setGrab(
-      "idle",
-      applyRes?.status === "applied"
-        ? `Applied — ${job.company} / ${job.title}`
-        : `Finished — ${job.company} / ${job.title}`
-    );
-    return { ok: true, job, result, applyRes, applied: applyRes?.status === "applied" };
+    await setGrab("idle", `Panel ready — ${job.company} / ${job.title}`);
+    return { ok: true, job, result, opened, applied: false, panelOnly: true };
   } catch (err) {
     await setGrab("error", String(err?.message || err));
     throw err;
@@ -8065,11 +8044,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const queueJob = { ...(prior || {}), ...jobMeta };
         queueJob.jdLink = String(message.url || queueJob.jdLink || "").trim();
-        const hostedBoard = resolveHostedApplyBoard(queueJob);
+        const diceAutoApply = isDiceJob(queueJob);
+        // Dice only: skipped Ready rows can resume full auto-apply+submit.
+        // Greenhouse / other ATS: open + in-page Autofill panel (no SW multi-step).
         const continueHostedApply =
-          isSkippedSheetDuplicateJob(prior || queueJob) &&
-          hostedBoard &&
-          (await isAutofillEnabled());
+          diceAutoApply && isSkippedSheetDuplicateJob(prior || queueJob);
 
         if (continueHostedApply) {
           const located = await locateJobFolder({
@@ -8094,21 +8073,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             started: true,
             applied: false,
             hostedAutoApply: true,
-            status: `${hostedBoard} auto apply started for row ${queueJob.csvRow}…`
+            status: `Dice auto apply started for row ${queueJob.csvRow}…`
           });
-          const applyRes = await runHostedInterleavedApply(queueJob, hostedBoard, {
+          const applyRes = await runHostedInterleavedApply(queueJob, "Dice", {
             skipDuplicateCheck: true
           });
           const msg =
             applyRes?.status === "submitted"
               ? `Row ${queueJob.csvRow}: submitted and marked Applied.`
               : applyRes?.detail ||
-                `${hostedBoard} auto apply finished (${applyRes?.status || "needs review"}).`;
+                `Dice auto apply finished (${applyRes?.status || "needs review"}).`;
           await setStatus(msg);
           return;
         }
 
-        if (!(await isAutofillEnabled())) {
+        // Non-Dice (Greenhouse, Workday, …): mark Applied, open job, show Autofill panel.
+        // Dice with autofill off: same open-only path.
+        if (!diceAutoApply || !(await isAutofillEnabled())) {
           const href = String(message.url || jobMeta.jdLink || "").trim();
           if (!href) {
             reply({ ok: false, applied: false, started: false, error: "Missing job URL." });
@@ -8145,17 +8126,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               hasFiles: Boolean(jobMeta.jobDir)
             }).catch(() => {});
           }
+          const openHint = diceAutoApply
+            ? "Opening job link…"
+            : "Opening job — use the Autofill panel to fill (Q&A bank, uploads)…";
           const sheetStatus = sheetFailed
             ? sheetLabel || "Sheet update failed."
             : sheetLabel
-              ? `${sheetLabel}. Opening job link…`
-              : "Marked Applied. Opening job link…";
+              ? `${sheetLabel}. ${openHint}`
+              : `Marked Applied. ${openHint}`;
           reply({
             ok: !sheetFailed,
             applied: !sheetFailed,
             started: false,
             openedOnly: true,
-            autofillSkipped: true,
+            autofillSkipped: !diceAutoApply ? false : true,
+            panelOnly: !diceAutoApply,
             appliedDate: sheetFailed ? "" : appliedDate,
             jobDir: jobMeta.jobDir || "",
             status: sheetStatus
@@ -8174,9 +8159,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             await setStatus(
               sheetLabel
-                ? `${sheetLabel}. ${result?.detail || "Opened job link."}`
+                ? `${sheetLabel}. ${result?.detail || (diceAutoApply ? "Opened job link." : "Autofill panel ready.")}`
                 : result?.detail ||
-                  `Row ${jobMeta.csvRow}: marked Applied and opened job link.`
+                  `Row ${jobMeta.csvRow}: marked Applied and opened job.`
             );
           } catch (err) {
             await setStatus(
@@ -8216,8 +8201,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         await setStatus(
           sheetLabel
-            ? `${sheetLabel}. Opening job and running Auto Apply…`
-            : "Sheet marked Applied. Opening job and running Auto Apply…"
+            ? `${sheetLabel}. Opening job and running Dice Auto Apply…`
+            : "Sheet marked Applied. Opening job and running Dice Auto Apply…"
         );
         reply({
           ok: !sheetFailed,
@@ -8226,8 +8211,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           appliedDate: sheetFailed ? "" : appliedDate,
           jobDir: jobMeta.jobDir || "",
           status: sheetLabel
-            ? `${sheetLabel}. Opening job and running Auto Apply…`
-            : "Sheet marked Applied. Opening job and running Auto Apply…"
+            ? `${sheetLabel}. Opening job and running Dice Auto Apply…`
+            : "Sheet marked Applied. Opening job and running Dice Auto Apply…"
         });
 
         const located = await folderPromise;
@@ -8245,14 +8230,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const result = await openJobAndApply(message.url, {
           multiStep: message.multiStep !== false,
-          autoSubmit:
-            allowSubmit &&
-            (isDiceJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-              isGreenhouseJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-              isAshbyJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-              isLeverJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-              isWorkdayJob({ jdLink: jobMeta.jdLink || message.url || "" }) ||
-              isJobgetherJob({ jdLink: jobMeta.jdLink || message.url || "" })),
+          autoSubmit: allowSubmit,
           csvRow: jobMeta.csvRow,
           jobDir: jobMeta.jobDir || "",
           jdLink: jobMeta.jdLink || message.url || ""
