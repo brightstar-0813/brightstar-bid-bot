@@ -26,6 +26,7 @@ import {
   isTrackingNoiseLabel
 } from "./autofill-junk.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
+import { pickCitizenshipOption, normalizeCitizenshipLabel } from "./autofill-citizenship.js";
 import { getEnv } from "./env.js";
 import {
   DEFAULT_OPENAI_MODEL,
@@ -945,17 +946,37 @@ function matchExtraAnswer(questionLabel, extras = {}, options = []) {
     if (!kNorm) continue;
     let score = questionSimilarity(qNorm, kNorm);
     if (qNorm.includes(kNorm) || kNorm.includes(qNorm)) score = Math.max(score, 0.86);
+    // Profile extras key "citizenship" ↔ "Are you a U.S. citizen?"
+    if (
+      (kNorm === "citizenship" || kNorm === "citizen") &&
+      /\bcitizen/.test(qNorm)
+    ) {
+      score = Math.max(score, 0.92);
+    }
     if (!best || score > best.score) best = { answer: v, score, key };
   }
   if (!best || best.score < 0.78) return null;
 
   if (Array.isArray(options) && options.length) {
     const want = normalizeQuestion(best.answer);
+    const wantLoose = normalizeCitizenshipLabel(best.answer);
     const hit = options.find((opt) => {
       const o = normalizeQuestion(opt);
-      return o === want || o.includes(want) || want.includes(o);
+      const oLoose = normalizeCitizenshipLabel(opt);
+      return (
+        o === want ||
+        oLoose === wantLoose ||
+        o.includes(want) ||
+        want.includes(o) ||
+        oLoose.includes(wantLoose) ||
+        wantLoose.includes(oLoose)
+      );
     });
     if (hit) return { ...best, answer: hit };
+    if (/\bcitizen/.test(qNorm) || best.key === "citizenship") {
+      const picked = pickCitizenshipOption(best.answer, options);
+      if (picked) return { ...best, answer: picked };
+    }
   }
   return best;
 }

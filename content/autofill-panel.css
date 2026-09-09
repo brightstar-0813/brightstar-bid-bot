@@ -12,7 +12,7 @@
 
 .panel-root {
   position: fixed;
-  top: 72px;
+  top: 96px;
   right: 0;
   z-index: 2147483645;
   display: flex;
@@ -28,12 +28,13 @@
   background: linear-gradient(180deg, #3dd06f 0%, #2ec261 100%);
   color: #0a2e16;
   border: none;
-  border-radius: 8px 0 0 8px;
-  padding: 14px 10px;
-  font: 700 12px/1.2 system-ui, sans-serif;
-  letter-spacing: 0.04em;
+  border-radius: 10px 0 0 10px;
+  padding: 18px 12px;
+  font: 800 13px/1.15 system-ui, sans-serif;
+  letter-spacing: 0.06em;
   cursor: pointer;
-  box-shadow: -3px 2px 16px rgba(0, 0, 0, 0.22);
+  box-shadow: -4px 2px 18px rgba(0, 0, 0, 0.28);
+  animation: panel-tab-in 0.45s ease-out;
 }
 
 .panel-tab:hover {
@@ -44,6 +45,17 @@
   background: linear-gradient(180deg, #2b9cf0 0%, #1f7fd0 100%);
   color: #041526;
   animation: pulse-tab 1.4s ease-in-out infinite;
+}
+
+@keyframes panel-tab-in {
+  from {
+    opacity: 0;
+    transform: rotate(180deg) translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(180deg) translateY(0);
+  }
 }
 
 .panel-shell {

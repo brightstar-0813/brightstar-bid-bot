@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-09.panel08";
+  const PANEL_BUILD = "2026-09-09.panel10";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -121,13 +121,15 @@
     const needs = [];
     const matched = [];
     const filled = [];
+    const optional = [];
     for (const f of state.fields) {
       const st = fieldStatusMap.get(f.id) || (f.matchSource === "filled" ? "done" : "pending");
       if (st === "done" || f.matchSource === "filled") filled.push(f);
+      else if (f.matchSource === "optional") optional.push(f);
       else if (f.matchSource === "unmatched") needs.push(f);
       else matched.push(f);
     }
-    return { needs, matched, filled };
+    return { needs, matched, filled, optional };
   }
 
   function renderFieldRow(f) {
@@ -143,9 +145,11 @@
               ? `<span class="field-badge">extra</span>`
               : f.matchSource === "unmatched"
                 ? `<span class="field-badge warn">needs AI</span>`
-                : f.required
-                  ? `<span class="field-badge">req</span>`
-                  : "";
+                : f.matchSource === "optional"
+                  ? `<span class="field-badge">skip</span>`
+                  : f.required
+                    ? `<span class="field-badge">req</span>`
+                    : "";
     const statusClass =
       st === "filling" ? "filling" : st === "done" ? "done" : st === "error" ? "error" : st === "warn" ? "warn" : "pending";
     const req = f.required ? ` data-required="1"` : "";
@@ -163,7 +167,7 @@
       list.innerHTML = `<li class="panel-hint">No fields detected yet.</li>`;
       return;
     }
-    const { needs, matched, filled } = fieldBuckets();
+    const { needs, matched, filled, optional } = fieldBuckets();
     const sections = [];
     if (needs.length) {
       sections.push(
@@ -175,6 +179,12 @@
       sections.push(
         `<li class="field-group-title">Ready to fill (${matched.length})</li>`,
         ...matched.map(renderFieldRow)
+      );
+    }
+    if (optional.length) {
+      sections.push(
+        `<li class="field-group-title">Leave blank (${optional.length})</li>`,
+        ...optional.map(renderFieldRow)
       );
     }
     if (filled.length) {
@@ -503,19 +513,17 @@
     if (!(await isAutofillEnabled())) return;
     if (!shouldInitPanel()) return;
 
-    if (await probeAndMaybeShow({ expand: true })) return;
+    // Show the tab immediately on ATS/apply pages — never wait ~30s for a probe.
+    const applyCtx = looksLikeApplyContext();
+    if (applyCtx || isAtsHost()) {
+      showPanelTab({ expand: applyCtx || /greenhouse\.io$/i.test(location.hostname.toLowerCase()) });
+    }
+
+    if (await probeAndMaybeShow({ expand: applyCtx })) return;
 
     if (probeAttempts < MAX_PROBE_ATTEMPTS) {
       probeAttempts += 1;
       setTimeout(initPanelVisibility, 1500);
-      return;
-    }
-    // Always surface a panel tab on ATS hosts so Greenhouse apply pages are not blank
-    // when the form probe is slow or React has not marked fields yet.
-    if (isAtsHost() || looksLikeApplyContext()) {
-      const expand =
-        looksLikeApplyContext() || /greenhouse\.io$/i.test(location.hostname.toLowerCase());
-      showPanelTab({ expand });
     }
   }
 

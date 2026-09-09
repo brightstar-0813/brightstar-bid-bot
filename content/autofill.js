@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-08.detect02";
+  const SCRIPT_BUILD = "2026-09-09.scan02";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -394,7 +394,11 @@
       "address 1",
       "home address",
       "street",
-      "legal address"
+      "legal address",
+      "full mailing address",
+      "mailing address",
+      "complete mailing address",
+      "postal address"
     ],
     addressLine2: ["address line 2", "address 2", "apartment", "suite", "unit", "apt"],
     city: ["city", "town", "municipality"],
@@ -407,6 +411,18 @@
       "country of residence"
     ],
 
+    citizenship: [
+      "are you a u.s. citizen",
+      "are you a us citizen",
+      "are you a united states citizen",
+      "u.s. citizen",
+      "us citizen",
+      "citizenship status",
+      "citizenship",
+      "citizen status",
+      "immigration status",
+      "work authorization status"
+    ],
     workAuthorized: [
       "eligible to work in the united states",
       "eligible to work in the us",
@@ -613,6 +629,7 @@
     "preferredName",
     "email",
     "country",
+    "citizenship",
     "workAuthorized",
     "needsSponsorship",
     "postEmploymentRestrictions",
@@ -727,6 +744,7 @@
 
   /** Fields whose answers should be chosen from a dropdown/list, not typed as free text. */
   const SELECT_LIKE_KEYS = new Set([
+    "citizenship",
     "workAuthorized",
     "needsSponsorship",
     "postEmploymentRestrictions",
@@ -755,6 +773,30 @@
   ]);
 
   const VALUE_LABELS = {
+    citizenship: {
+      us_citizen: [
+        "U.S. Citizen",
+        "US Citizen",
+        "United States Citizen",
+        "Citizen"
+      ],
+      permanent_resident: [
+        "Lawful Permanent Resident",
+        "Permanent Resident",
+        "Permanent Resident (Green Card)",
+        "Green Card",
+        "LPR"
+      ],
+      work_auth: [
+        "Employment Authorization Document (EAD)",
+        "Employment Authorization Document",
+        "EAD",
+        "Non-citizen authorized to work",
+        "Authorized to work"
+      ],
+      visa_holder: ["Visa Holder", "Work Visa", "H-1B", "Other Visa"],
+      prefer_not: ["Prefer not to say", "Decline to self-identify", "I don't wish to answer"]
+    },
     workAuthorized: { yes: ["Yes"], no: ["No"] },
     needsSponsorship: { yes: ["Yes"], no: ["No"] },
     willingToRelocate: { yes: ["Yes"], no: ["No"] },
@@ -876,6 +918,24 @@
       .trim();
   }
 
+  /** Collapse "u s citizen" ↔ "us citizen" so Greenhouse labels match profile values. */
+  function normalizeLoose(text) {
+    return normalize(text).replace(/\b([a-z]) (?=[a-z]\b)/g, "$1");
+  }
+
+  function citizenshipToken(value) {
+    const v = normalizeLoose(value);
+    if (!v) return "";
+    if (/prefer not|decline|do not wish|don't wish/.test(v)) return "prefer_not";
+    if (/permanent resident|green card|\blpr\b/.test(v)) return "permanent_resident";
+    if (/visa holder|\bh ?1b\b|work visa|other visa/.test(v)) return "visa_holder";
+    if (/ead|employment authorization|non citizen authorized|authorized to work/.test(v)) {
+      return "work_auth";
+    }
+    if (/citizen/.test(v) && !/non citizen/.test(v)) return "us_citizen";
+    return "";
+  }
+
   function expandValueCandidates(key, value) {
     const raw = String(value ?? "").trim();
     if (!raw) return [];
@@ -885,6 +945,25 @@
       for (const label of map[raw]) {
         if (label && !out.includes(label)) out.push(label);
       }
+    }
+    if (key === "citizenship") {
+      const token =
+        citizenshipToken(raw) ||
+        (YES_VALUES.has(normalize(raw)) ? "us_citizen" : "");
+      if (token && map?.[token]) {
+        for (const label of map[token]) {
+          if (label && !out.includes(label)) out.push(label);
+        }
+      }
+      // Also allow Yes on pure Yes/No citizenship questions (status labels still first).
+      if (token === "us_citizen" && !out.some((c) => /^yes$/i.test(String(c).trim()))) {
+        out.push("Yes");
+      }
+      out.sort((a, b) => {
+        const aYn = /^(yes|no)$/i.test(String(a).trim()) ? 1 : 0;
+        const bYn = /^(yes|no)$/i.test(String(b).trim()) ? 1 : 0;
+        return aYn - bYn;
+      });
     }
     if (key === "state") {
       const code = raw.toUpperCase();
@@ -908,7 +987,7 @@
         }
       }
     }
-    if (/^(yes|no)$/i.test(raw)) {
+    if (/^(yes|no)$/i.test(raw) && key !== "citizenship") {
       const titled = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
       if (!out.includes(titled)) out.push(titled);
     }
@@ -1060,6 +1139,67 @@
     return /^(yes|no|y|n|true|false|agree|disagree|i agree|i do not agree)$/i.test(
       cleanLabelText(text)
     );
+  }
+
+  /** Follow-up multi-selects like "If Yes, select the government agency…" — leave blank is fine. */
+  function isConditionalFollowUpLabel(text) {
+    const t = normalize(text);
+    if (!t) return false;
+    if (/^if yes\b/.test(t)) return true;
+    if (/\bselect the (government )?agency\b/.test(t)) return true;
+    if (/\bcheck all that apply\b/.test(t) && /\b(agency|department|federal)\b/.test(t)) return true;
+    return false;
+  }
+
+  function dismissOpenMenus() {
+    try {
+      const active = document.activeElement;
+      if (active && active !== document.body) {
+        active.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
+        );
+        active.blur?.();
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
+      );
+      document.body?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      document.body?.click?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Option labels for a multi-checkbox question that shares one parent label. */
+  function collectCheckboxGroupOptionLabels(questionNorm) {
+    if (!questionNorm) return [];
+    const out = [];
+    const seen = new Set();
+    for (const el of document.querySelectorAll('input[type="checkbox"]')) {
+      try {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+      } catch {
+        /* ignore */
+      }
+      if (el.disabled) continue;
+      const q = normalize(displayQuestionLabel(el) || labelTextForControl(el) || "");
+      if (q !== questionNorm) continue;
+      const opt = cleanLabelText(radioOptionLabel(el) || el.value || "");
+      if (!opt || isBareChoiceOptionLabel(opt)) continue;
+      // Skip if option text is basically the whole question repeated.
+      if (normalize(opt) === questionNorm) continue;
+      const n = normalize(opt);
+      if (!n || seen.has(n)) continue;
+      seen.add(n);
+      out.push(opt);
+      if (out.length >= 40) break;
+    }
+    return out;
   }
 
   function isTrackingNoiseLabel(text) {
@@ -1274,6 +1414,10 @@
           continue;
         }
         if (key === "workAuthorized" && /\bsponsorship\b/.test(primary)) continue;
+        if (key === "workAuthorized" && /\bcitizen/.test(primary)) continue;
+        if (key === "citizenship" && /\b(authorized|eligible)\b/.test(primary) && /\bwork\b/.test(primary) && !/\bcitizen/.test(primary)) {
+          continue;
+        }
         if (key === "needsSponsorship" && /\beligible to work\b/.test(primary) && !/\bsponsorship\b/.test(primary)) {
           continue;
         }
@@ -1309,6 +1453,9 @@
     }
 
     // High-confidence Workday / ATS compliance questions (company name varies).
+    if (/\bcitizen/.test(primary) || /\bcitizenship\b/.test(primary) || /\bimmigration status\b/.test(primary)) {
+      return "citizenship";
+    }
     if (/\b(require|need)\b/.test(primary) && /\bsponsorship\b/.test(primary)) {
       return "needsSponsorship";
     }
@@ -1441,20 +1588,33 @@
     if (!opt || !want) return false;
     if (opt === want) return true;
 
+    const optLoose = normalizeLoose(optionText);
+    const wantLoose = normalizeLoose(desired);
+    if (optLoose && wantLoose && optLoose === wantLoose) return true;
+
     if (isYesNoValue(want)) {
       const yes = YES_VALUES.has(want);
+      // Status dropdowns (U.S. Citizen / LPR / EAD) are not Yes/No — never match via yes/no.
+      if (
+        /\b(citizen|permanent resident|green card|ead|visa holder|lawful)\b/.test(optLoose) &&
+        !/^(yes|no|y|n)$/.test(optLoose)
+      ) {
+        return false;
+      }
       if (yes) {
         return opt === "yes" || opt === "y" || opt.startsWith("yes ") || opt.startsWith("yes,");
       }
       return opt === "no" || opt === "n" || opt.startsWith("no ") || opt.startsWith("no,");
     }
 
-    if (opt.includes(want) || want.includes(opt)) return true;
+    if (opt.includes(want) || want.includes(opt) || optLoose.includes(wantLoose) || wantLoose.includes(optLoose)) {
+      return true;
+    }
 
     // Token overlap for longer labels (e.g. disability / veteran phrasing).
-    const wantTokens = want.split(" ").filter((t) => t.length > 2);
+    const wantTokens = wantLoose.split(" ").filter((t) => t.length > 2);
     if (wantTokens.length >= 3) {
-      const hit = wantTokens.filter((t) => opt.includes(t)).length;
+      const hit = wantTokens.filter((t) => optLoose.includes(t)).length;
       if (hit / wantTokens.length >= 0.6) return true;
     }
     return false;
@@ -1737,7 +1897,9 @@
     }
 
     // Filter the menu (Greenhouse React-Select), then pick — never leave typed text as the answer.
+    // Prefer longer / status labels over bare Yes/No so citizenship dropdowns pick "U.S. Citizen".
     const filterText =
+      candidates.find((c) => String(c).trim().length > 3 && !isYesNoValue(c)) ||
       candidates.find((c) => String(c).trim().length >= 1 && !isYesNoValue(c)) ||
       candidates.find((c) => /^(Yes|No)$/i.test(String(c).trim())) ||
       candidates[0];
@@ -2174,6 +2336,7 @@
   function matchYesNoGroupKey(question) {
     const primary = normalize(question);
     if (!primary) return null;
+    if (/\bcitizen/.test(primary) || /\bcitizenship\b/.test(primary)) return "citizenship";
     if (/\b(require|need)\b/.test(primary) && /\bsponsorship\b/.test(primary)) {
       return "needsSponsorship";
     }
@@ -3403,6 +3566,7 @@
     "state",
     "country",
     "cityCountryOfResidence",
+    "citizenship",
     "workAuthorized",
     "needsSponsorship",
     "postEmploymentRestrictions",
@@ -3605,6 +3769,13 @@
         el.setAttribute("data-resume-bot-choice-qid", groupIds.get(labelNorm));
         continue;
       }
+      // Conditional multi-select follow-ups ("If Yes, select agency…") — leave blank; no AI.
+      if (el.type === "checkbox" && isConditionalFollowUpLabel(label)) {
+        const id = stableQuestionId(label, "checkbox", { name: labelNorm.slice(0, 80), id: "" }, "rbc");
+        el.setAttribute("data-resume-bot-choice-qid", id);
+        if (isGroup) groupIds.set(labelNorm, id);
+        continue;
+      }
 
       const fieldType =
         el.tagName === "SELECT"
@@ -3682,17 +3853,11 @@
             .map((node) => cleanLabelText(node.textContent))
             .filter((t) => t && !EDITOR_STYLE_OPTION_RE.test(t))
             .slice(0, 40);
-          document.dispatchEvent(
-            new KeyboardEvent("keydown", {
-              key: "Escape",
-              code: "Escape",
-              bubbles: true,
-              cancelable: true
-            })
-          );
-          await sleep(60);
         } catch {
           options = [];
+        } finally {
+          dismissOpenMenus();
+          await sleep(40);
         }
       }
       if (!options.length) continue;
@@ -4954,12 +5119,26 @@
       let score = 0;
       if (qNorm === kNorm) score = 1;
       else if (qNorm.includes(kNorm) || kNorm.includes(qNorm)) score = 0.86;
-      else continue;
+      else if (
+        (kNorm === "citizenship" || kNorm === "citizen") &&
+        /\bcitizen/.test(qNorm)
+      ) {
+        score = 0.92;
+      } else continue;
       if (!best || score > best.score) best = { score, key };
     }
     if (!best || best.score < 0.78) return null;
     if (Array.isArray(options) && options.length) {
-      const hit = options.some((opt) => normalize(opt) === qNorm);
+      const want = normalizeLoose(String(extras[best.key] || ""));
+      const hit = options.some((opt) => {
+        const o = normalizeLoose(opt);
+        return (
+          o === want ||
+          o.includes(want) ||
+          want.includes(o) ||
+          (/\bcitizen/.test(want) && /\bcitizen/.test(o) && !/non citizen/.test(o))
+        );
+      });
       if (!hit && !options.some((opt) => normalize(opt).includes(qNorm))) return null;
     }
     return "extra";
@@ -5000,6 +5179,7 @@
     const fields = [];
     const seen = new Set();
     const seenRadioGroups = new Set();
+    const seenCheckboxQuestions = new Set();
 
     const pushField = (row) => {
       const key = `${row.label}|${row.type}|${row.id}`;
@@ -5024,6 +5204,13 @@
       if (isTrackingNoiseLabel(label) || isTrackingNoiseControl(el, label)) continue;
       if (isBareChoiceOptionLabel(label) && (type === "radio" || type === "checkbox")) continue;
 
+      // Multi-checkbox lists (agency DOC/DOD/…) share one parent question — emit once.
+      if (type === "checkbox") {
+        const qNorm = normalize(label);
+        if (qNorm && seenCheckboxQuestions.has(qNorm)) continue;
+        if (qNorm) seenCheckboxQuestions.add(qNorm);
+      }
+
       const profileKey = matchApplicantKeyFromControl(el);
       const fieldType = inferFieldType(el);
       const currentValue = readFilledAnswer(el);
@@ -5036,13 +5223,29 @@
                   )
                 : el.checked
             )
-          : Boolean(currentValue);
-      const options =
+          : type === "checkbox"
+            ? Boolean(
+                [...document.querySelectorAll('input[type="checkbox"]')].some((cb) => {
+                  if (!cb.checked) return false;
+                  const q = normalize(displayQuestionLabel(cb) || labelTextForControl(cb) || "");
+                  return q === normalize(label);
+                })
+              )
+            : Boolean(currentValue);
+
+      let options =
         fieldType === "select" || fieldType === "radio" ? collectControlOptions(el).slice(0, 24) : [];
+      if (type === "checkbox") {
+        const groupOpts = collectCheckboxGroupOptionLabels(normalize(label));
+        if (groupOpts.length >= 2) options = groupOpts.slice(0, 40);
+      }
 
       let matchSource = "unmatched";
       if (hasValue) {
         matchSource = "filled";
+      } else if (isConditionalFollowUpLabel(label) && type === "checkbox") {
+        // "If Yes, select agency…" — leaving all unchecked is the normal answer.
+        matchSource = "optional";
       } else if (profileKey) {
         const val = resolveApplicantValue(applicantInfo, profileKey);
         matchSource = val ? "profile" : "unmatched";
@@ -5050,11 +5253,16 @@
         matchSource = "extra";
       }
 
+      const idSeed =
+        type === "checkbox" && options.length >= 2
+          ? { name: normalize(label).slice(0, 80), id: "" }
+          : el;
+
       pushField({
-        id: stableQuestionId(label, fieldType, el),
+        id: stableQuestionId(label, fieldType, idSeed),
         label: label.slice(0, 200),
         type: fieldType,
-        required: isControlRequired(el),
+        required: isControlRequired(el) && !isConditionalFollowUpLabel(label),
         matchSource,
         profileKey: profileKey || null,
         currentValue: currentValue.slice(0, 100),
@@ -5144,12 +5352,14 @@
         label: q.label,
         type: q.fieldType || "select",
         required: q.required !== false,
-        matchSource: "unmatched",
+        matchSource: isConditionalFollowUpLabel(q.label) ? "optional" : "unmatched",
         profileKey: null,
         currentValue: "",
         options: (q.options || []).slice(0, 24)
       });
     }
+
+    dismissOpenMenus();
 
     const snapshot = getApplyActionSnapshot();
     const actionButton = snapshot.action

@@ -1085,6 +1085,7 @@ const APPLICANT_KEY_TO_PERSON = {
   disabilityStatus: "disability",
   veteranStatus: "veteran",
   workAuthorized: "workAuthorized",
+  citizenship: "citizenship",
   needsSponsorship: "sponsorship",
   hispanicLatino: "hispanicLatino"
 };
@@ -1277,6 +1278,7 @@ export function personToApplicantInfo(person = {}) {
   info.disabilityStatus = disabilityToken(person.disability);
   info.veteranStatus = veteranToken(person.veteran);
   info.hispanicLatino = yesNoToken(person.hispanicLatino) || String(person.hispanicLatino || "").trim();
+  info.citizenship = String(person.citizenship || extras.citizenship || "").trim();
   info.workAuthorized = yesNoToken(person.workAuthorized) || String(person.workAuthorized || "").trim().toLowerCase();
   info.needsSponsorship = yesNoToken(person.sponsorship) || String(person.sponsorship || "").trim().toLowerCase();
   info.signatureName = String(person.name || person.label || `${name.firstName} ${name.lastName}`.trim()).trim();

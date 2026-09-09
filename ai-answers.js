@@ -148,6 +148,7 @@ export function compactApplicantContext(applicantInfo = {}) {
     "schoolName",
     "fieldOfStudy",
     "workAuthorized",
+    "citizenship",
     "needsSponsorship",
     "postEmploymentRestrictions",
     "salaryExpectation",
