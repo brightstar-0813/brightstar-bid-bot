@@ -43,6 +43,7 @@ import {
   buildCustomQaAgentPrompt,
   cleanCustomQaAnswer,
   shouldBankAnswer,
+  isComplexQuestion,
   isCertificationQuestion,
   answerCertificationQuestion,
   parseCertificationList,
@@ -1173,17 +1174,31 @@ export async function highlightFieldOnTab(tabId, fieldId) {
 }
 
 function mergeScanFrameResults(frameResults = []) {
-  let best = { ok: false, fields: [], fillableCount: 0, stepLabel: "", isApplicationForm: false };
+  const all = [];
+  let bestMeta = {
+    ok: false,
+    fields: [],
+    fillableCount: 0,
+    stepLabel: "",
+    isApplicationForm: false,
+    actionButton: null,
+    validationReason: ""
+  };
   for (const row of frameResults) {
-    const fields = (row.fields || []).filter(
-      (f) => !isJunkQuestionLabel(f?.label) && !isTrackingNoiseLabel(f?.label)
-    );
-    const count = fields.length;
-    const bestCount = Array.isArray(best.fields) ? best.fields.length : 0;
-    if (row.ok && count >= bestCount) best = { ...row, fields };
-    else if (!best.ok && row.isApplicationForm) best = { ...row, fields };
+    if (!row) continue;
+    if (row.ok || row.isApplicationForm) bestMeta.ok = true;
+    bestMeta.isApplicationForm = bestMeta.isApplicationForm || Boolean(row.isApplicationForm);
+    bestMeta.fillableCount = Math.max(bestMeta.fillableCount, Number(row.fillableCount || 0));
+    if (row.stepLabel) bestMeta.stepLabel = row.stepLabel;
+    if (row.actionButton) bestMeta.actionButton = row.actionButton;
+    if (row.validationReason) bestMeta.validationReason = row.validationReason;
+    for (const f of row.fields || []) {
+      if (!f?.label) continue;
+      if (isJunkQuestionLabel(f.label) || isTrackingNoiseLabel(f.label)) continue;
+      all.push(f);
+    }
   }
-  return best;
+  return { ...bestMeta, fields: dedupeScanFieldsByLabel(all) };
 }
 
 function dedupeScanFieldsByLabel(fields = []) {
@@ -1266,24 +1281,48 @@ function collectScanFieldsFromFrames(frameResults = []) {
 
 /**
  * Persist scraped question/answer pairs from a form scan into the per-person Q&A bank.
- * Skips profile-mapped fields (contact, EEO, etc.) and JD-specific essays.
+ * Banks filled screening answers (Yes/No, salary text, certs, etc.) for reuse.
+ * Skips pure contact/identity profile fields that already live on the person record.
  */
 export async function bankScrapedQaFromFields(fields = [], { profileId = "", site = "" } = {}) {
+  const skipProfileKeys = new Set([
+    "firstName",
+    "lastName",
+    "middleName",
+    "preferredName",
+    "email",
+    "phone",
+    "linkedinUrl",
+    "portfolioUrl",
+    "githubUrl",
+    "addressLine1",
+    "addressLine2",
+    "city",
+    "state",
+    "zipCode",
+    "country",
+    "cityCountryOfResidence",
+    "resumeUpload",
+    "signatureName",
+    "signatureDate"
+  ]);
   let banked = 0;
   for (const field of fields) {
     const label = String(field?.label || "").trim();
     let answer = String(field?.currentValue || "").trim();
     if (!label || !answer || answer === "checked") continue;
-    if (field.profileKey || field.type === "file") continue;
+    if (field.type === "file") continue;
+    if (field.profileKey && skipProfileKeys.has(field.profileKey)) continue;
     if (isJunkQuestionLabel(label) || isSensitiveProfileQuestion(label)) continue;
     if (isJunkAutofillAnswer(answer, { questionLabel: label })) continue;
 
     const fieldType = field.type || "text";
-    const choiceLike = ["select", "radio", "checkbox", "choice"].includes(fieldType);
+    const choiceLike = ["select", "radio", "checkbox", "choice", "combobox"].includes(fieldType);
     if (choiceLike) answer = normalizeChoiceAnswerValue(answer) || answer;
 
     const q = { label, fieldType, multiline: fieldType === "textarea" };
-    if (!shouldBankAnswer(q, answer, fieldType)) continue;
+    // Always bank short filled answers / choices; still skip long JD essays.
+    if (isComplexQuestion(q) && answer.length > 160) continue;
     if (!bankAnswerFitsQuestion(label, answer)) continue;
 
     const saved = await saveQa({

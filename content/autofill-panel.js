@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-09.panel11";
+  const PANEL_BUILD = "2026-09-09.panel12";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -424,8 +424,9 @@
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (changes.custom_profiles || changes.active_person_id) {
-        runScan().catch(() => {});
+      // Do not rescan on every profile learn write — that steals focus while the user types.
+      if (changes.active_person_id) {
+        scheduleRescan(1500);
       }
       if (changes.last_job_title) state.jobTitle = changes.last_job_title.newValue || "";
       if (changes.last_job_company) state.jobCompany = changes.last_job_company.newValue || "";
@@ -443,6 +444,22 @@
     if (state.running) return;
     clearTimeout(rescanTimer);
     rescanTimer = setTimeout(() => {
+      if (state.running) return;
+      // Never rescan while the user is typing in the application form.
+      try {
+        const a = document.activeElement;
+        if (
+          a &&
+          a !== document.body &&
+          a.matches?.(
+            "input, textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox']"
+          )
+        ) {
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
       if (!state.expanded && !shouldInitPanel()) return;
       runScan().catch(() => {});
     }, delayMs);

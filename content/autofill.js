@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-09.scan03";
+  const SCRIPT_BUILD = "2026-09-09.scan04";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -79,23 +79,15 @@
   function flashHighlightElement(el) {
     if (!el || el.nodeType !== 1) return false;
     try {
-      el.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+      el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
     } catch {
       try {
-        el.scrollIntoView({ block: "center", inline: "nearest" });
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
       } catch {
         /* ignore */
       }
     }
-    try {
-      el.focus({ preventScroll: true });
-    } catch {
-      try {
-        el.focus();
-      } catch {
-        /* ignore */
-      }
-    }
+    // Outline only — do not focus (focus steals the caret from wherever the user was typing).
     const prevOutline = el.style.outline;
     const prevOffset = el.style.outlineOffset;
     const prevTransition = el.style.transition;
@@ -1184,13 +1176,20 @@
   }
 
   function dismissOpenMenus() {
+    // Soft dismiss only — never body.click()/mousedown. Those steal focus and make
+    // the caret/pointer feel like it jumps while the user is typing on the form.
     try {
       const active = document.activeElement;
-      if (active && active !== document.body) {
+      if (
+        active &&
+        active !== document.body &&
+        (isReactSelectInput(active) ||
+          looksLikeCombobox(active) ||
+          active.getAttribute?.("aria-expanded") === "true")
+      ) {
         active.dispatchEvent(
           new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
         );
-        active.blur?.();
       }
     } catch {
       /* ignore */
@@ -1199,11 +1198,26 @@
       document.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })
       );
-      document.body?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-      document.body?.click?.();
     } catch {
       /* ignore */
     }
+  }
+
+  function readReactSelectValue(el) {
+    if (!el) return "";
+    const root =
+      getReactSelectRoot(el) ||
+      el.closest?.(".select__control")?.parentElement ||
+      el.closest?.("[class*='select__control']")?.parentElement;
+    const selected = cleanLabelText(
+      root?.querySelector?.(
+        ".select__single-value, .select__multi-value__label, [class*='select__single-value']"
+      )?.textContent || ""
+    );
+    if (!selected || /^select\.\.\.?$/i.test(selected) || /^please select$/i.test(selected)) {
+      return "";
+    }
+    return selected;
   }
 
   /** Strip open-menu chrome ("Select... Yes No") from scanned question labels. */
@@ -1304,19 +1318,28 @@
   }
 
   function isTrackingNoiseControl(el, label = "") {
-    const nameId = `${el?.name || ""} ${el?.id || ""} ${el?.getAttribute?.("autocomplete") || ""}`;
-    if (isTrackingNoiseLabel(label) || isTrackingNoiseLabel(nameId.replace(/[\[\]_.-]+/g, " "))) {
-      return true;
-    }
+    // Only treat a non-empty label as noise — empty string must NOT blacklist real inputs.
+    if (label && isTrackingNoiseLabel(label)) return true;
+    const nameId = `${el?.name || ""} ${el?.id || ""} ${el?.getAttribute?.("autocomplete") || ""}`
+      .replace(/[\[\]_.-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (nameId && isTrackingNoiseLabel(nameId)) return true;
     if (el?.getAttribute?.("aria-hidden") === "true") return true;
     if (el?.closest?.('[aria-hidden="true"], [hidden], noscript, template')) return true;
+    // React-Select keeps a tiny absolute input inside a visible control — never drop those.
+    if (el?.closest?.(".select__control, [class*='select__control'], [class*='react-select']")) {
+      return false;
+    }
     try {
       const style = window.getComputedStyle(el);
-      if (Number(style.opacity) === 0) return true;
+      if (Number(style.opacity) === 0 && !isReactSelectInput(el) && !looksLikeCombobox(el)) {
+        return true;
+      }
       if (style.position === "absolute" || style.position === "fixed") {
         const rect = el.getBoundingClientRect();
         if (rect.width <= 1 && rect.height <= 1) return true;
-        if (rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight + 200) return true;
+        if (rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight + 800) return true;
       }
     } catch {
       /* ignore */
@@ -5341,12 +5364,8 @@
       const profileKey = matchApplicantKeyFromControl(el);
       const fieldType = inferFieldType(el);
       let currentValue = readFilledAnswer(el);
-      if (!currentValue && (isReactSelectInput(el) || looksLikeCombobox(el))) {
-        const root = getReactSelectRoot(el) || el.closest?.(".select__control")?.parentElement;
-        currentValue = cleanLabelText(
-          root?.querySelector?.(".select__single-value, [class*='select__single-value']")?.textContent || ""
-        );
-        if (/^select\.\.\.?$/i.test(currentValue)) currentValue = "";
+      if (!currentValue && (isReactSelectInput(el) || looksLikeCombobox(el) || fieldType === "select")) {
+        currentValue = readReactSelectValue(el);
       }
       const hasValue =
         type === "radio"
@@ -5513,7 +5532,8 @@
       }
     }
 
-    dismissOpenMenus();
+    // Never click the page during inventory scans — that steals caret/focus from the user.
+    if (!inventoryOnly) dismissOpenMenus();
 
     const snapshot = getApplyActionSnapshot();
     const actionButton = snapshot.action
