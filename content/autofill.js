@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-09.scan05";
+  const SCRIPT_BUILD = "2026-09-09.scan06";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -7151,6 +7151,37 @@
   const LEARN_SENSITIVE_RE =
     /\b(password|otp|captcha|ssn|social security|credit card|card number|cvv|routing|account number|search|first name|last name|full name|middle name|legal name|email|e-mail|phone|mobile|telephone|address|street|city|state|province|zip|postal|country|linkedin|github|portfolio|website|date of birth|dob|birthday|salary|compensation|desired pay|expected pay|disability|veteran|military|\brace\b|ethnic|gender|\bsex\b|hispanic|latino|felony|conviction|criminal)\b/i;
 
+  /** Profile keys that stay on the person record only — never the exportable Q&A bank. */
+  const PROFILE_ONLY_LEARN_KEYS = new Set([
+    "firstName",
+    "lastName",
+    "middleName",
+    "preferredName",
+    "email",
+    "phone",
+    "phoneDeviceType",
+    "phoneCountryCode",
+    "addressLine1",
+    "addressLine2",
+    "city",
+    "state",
+    "zipCode",
+    "country",
+    "cityCountryOfResidence",
+    "linkedinUrl",
+    "githubUrl",
+    "portfolioUrl",
+    "gender",
+    "hispanicLatino",
+    "raceEthnicity",
+    "veteranStatus",
+    "disabilityStatus",
+    "salaryExpectation",
+    "hourlyRate",
+    "signatureName",
+    "signatureDate"
+  ]);
+
   function captureQuestionText(el) {
     const q = questionLabelForControl(el);
     if (q) return q;
@@ -7200,6 +7231,55 @@
     return String(text || "").trim();
   }
 
+  /** Persist a user-filled screening answer into the per-person Q&A bank. */
+  function sendQaLearnCapture(label, answer, fieldType = "text") {
+    if (!learnEnabled) return false;
+    const clean = sanitizeFieldLabel(label);
+    const ans = String(answer || "").trim();
+    if (!clean || !ans || ans.length > 2000) return false;
+    if (LEARN_SENSITIVE_RE.test(clean) || isJunkLearnLabel(clean)) return false;
+    if (isInstructionalFieldLabel(clean) || isPlaceholderFieldLabel(clean)) return false;
+    if (/^(select\.\.\.?|please select|choose|--)$/i.test(ans)) return false;
+    const labelNorm = normalize(clean);
+    if (!labelNorm || labelNorm.length < 6) return false;
+    if (learnSentByQuestion.get(`qa:${labelNorm}`) === ans) return false;
+    learnSentByQuestion.set(`qa:${labelNorm}`, ans);
+    try {
+      chrome.runtime.sendMessage({
+        type: "qa_learn_capture",
+        question: clean.slice(0, 1000),
+        answer: ans.slice(0, 2000),
+        fieldType: fieldType || "text",
+        site: location.hostname || ""
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function sendProfileLearnCapture(profileKey, value) {
+    if (!profileKey || !value) return false;
+    const sig = `k:${profileKey}`;
+    if (learnSentByQuestion.get(sig) === value) return false;
+    learnSentByQuestion.set(sig, value);
+    try {
+      chrome.runtime.sendMessage({ type: "profile_learn_capture", key: profileKey, value });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function fieldTypeForLearn(el, type = "") {
+    if (el?.tagName === "SELECT") return "select";
+    if (el?.tagName === "TEXTAREA") return "textarea";
+    if (type === "checkbox") return "checkbox";
+    if (type === "radio") return "radio";
+    if (isReactSelectInput(el) || looksLikeCombobox(el)) return "select";
+    return "text";
+  }
+
   function maybeCaptureLearn(el) {
     if (!learnEnabled) return;
     if (Date.now() < learnSuppressUntil) return;
@@ -7208,40 +7288,22 @@
 
     const type = (el.type || "text").toLowerCase();
     if (["hidden", "file", "submit", "button", "image", "reset", "password"].includes(type)) return;
+
     // Combobox: learn the selected chip value, not the transient search text.
     if (isReactSelectInput(el) || looksLikeCombobox(el)) {
       const selected = readReactSelectValue(el) || readControlCurrentValue(el);
       if (!selected || /^select\.\.\.?$/i.test(selected)) return;
+      const label = sanitizeFieldLabel(
+        displayQuestionLabel(el) || captureQuestionText(el) || labelTextForControl(el) || ""
+      );
       const profileKey = matchApplicantKeyFromControl(el);
       if (profileKey) {
         const value = canonicalValueForKey(profileKey, selected);
-        if (!value) return;
-        const sig = `k:${profileKey}`;
-        if (learnSentByQuestion.get(sig) === value) return;
-        learnSentByQuestion.set(sig, value);
-        try {
-          chrome.runtime.sendMessage({ type: "profile_learn_capture", key: profileKey, value });
-        } catch {
-          /* ignore */
-        }
-        return;
+        if (value) sendProfileLearnCapture(profileKey, value);
       }
-      const label = sanitizeFieldLabel(captureQuestionText(el));
-      if (!label || LEARN_SENSITIVE_RE.test(label) || isJunkLearnLabel(label)) return;
-      const labelNorm = normalize(label);
-      if (!labelNorm || labelNorm.length < 6) return;
-      if (learnSentByQuestion.get(labelNorm) === selected) return;
-      learnSentByQuestion.set(labelNorm, selected);
-      try {
-        chrome.runtime.sendMessage({
-          type: "qa_learn_capture",
-          question: label,
-          answer: selected,
-          fieldType: "select",
-          site: location.hostname || ""
-        });
-      } catch {
-        /* ignore */
+      // Always bank screening dropdown answers Autofill could not map/fill.
+      if (!profileKey || !PROFILE_ONLY_LEARN_KEYS.has(profileKey)) {
+        sendQaLearnCapture(label, selected, "select");
       }
       return;
     }
@@ -7253,96 +7315,46 @@
     if (!answer || answer.length > 2000) return;
     if (looksLikeEditorChromeValue(answer)) return;
 
-    // Known profile field (name, contact, links, work-eligibility, education,
-    // EEO, salary, ...) → learn into the PROFILE with fill-if-empty semantics so
-    // the deterministic autofill reuses it. These are the most common questions
-    // and are kept out of the exportable Q&A bank.
     const profileKey = matchApplicantKeyFromControl(el);
     if (profileKey) {
       const value = canonicalValueForKey(profileKey, answer);
-      if (!value) return;
-      const sig = `k:${profileKey}`;
-      if (learnSentByQuestion.get(sig) === value) return;
-      learnSentByQuestion.set(sig, value);
-      try {
-        chrome.runtime.sendMessage({ type: "profile_learn_capture", key: profileKey, value });
-      } catch {
-        /* extension context invalidated — ignore */
-      }
-      // Also bank reusable screening answers (sponsorship, work auth, etc.).
-      if (
-        [
-          "needsSponsorship",
-          "workAuthorized",
-          "citizenship",
-          "willingToRelocate",
-          "over18",
-          "yearsExperience",
-          "relevantExperience"
-        ].includes(profileKey)
-      ) {
-        const label = sanitizeFieldLabel(captureQuestionText(el));
-        if (label && !LEARN_SENSITIVE_RE.test(label) && !isJunkLearnLabel(label)) {
-          const labelNorm = normalize(label);
-          if (labelNorm && learnSentByQuestion.get(`qa:${labelNorm}`) !== value) {
-            learnSentByQuestion.set(`qa:${labelNorm}`, value);
-            try {
-              chrome.runtime.sendMessage({
-                type: "qa_learn_capture",
-                question: label.slice(0, 1000),
-                answer: String(value).slice(0, 2000),
-                fieldType: el.tagName === "SELECT" ? "select" : type === "radio" ? "radio" : "text",
-                site: location.hostname
-              });
-            } catch {
-              /* ignore */
-            }
-          }
-        }
-      }
-      return;
+      if (value) sendProfileLearnCapture(profileKey, value);
+      // Contact / EEO / salary stay on the person profile only.
+      if (PROFILE_ONLY_LEARN_KEYS.has(profileKey)) return;
     }
 
-    // Novel questions (dropdown / checkbox / radio / short text) go into the
-    // per-profile Q&A bank. Long essays stay out — those are JD-specific.
+    // Novel + screening questions (dropdown / checkbox / radio / short text) → Q&A bank.
     const isChoice = el.tagName === "SELECT" || type === "radio" || type === "checkbox";
     if (!isChoice) {
       if (el.tagName === "TEXTAREA" && answer.length > 160) return;
       if (answer.length > 400) return;
     }
 
-    const label = captureQuestionText(el);
-    if (!label) return;
-    if (LEARN_SENSITIVE_RE.test(label)) return;
-    if (isJunkLearnLabel(label)) return;
+    const label = sanitizeFieldLabel(
+      displayQuestionLabel(el) || captureQuestionText(el) || labelTextForControl(el) || ""
+    );
+    sendQaLearnCapture(label, answer, fieldTypeForLearn(el, type));
+  }
 
-    const labelNorm = normalize(label);
-    if (!labelNorm || labelNorm.length < 6) return;
-
-    if (learnSentByQuestion.get(labelNorm) === answer) return;
-    learnSentByQuestion.set(labelNorm, answer);
-
-    const fieldType =
-      el.tagName === "SELECT"
-        ? "select"
-        : el.tagName === "TEXTAREA"
-          ? "textarea"
-          : type === "checkbox"
-            ? "checkbox"
-            : type === "radio"
-              ? "radio"
-              : "text";
-
+  /** After a menu pick, bank every newly filled combobox/select (Greenhouse React-Select). */
+  function bankFilledChoicesAfterUserPick() {
+    if (!learnEnabled || Date.now() < learnSuppressUntil) return;
     try {
-      chrome.runtime.sendMessage({
-        type: "qa_learn_capture",
-        question: label.slice(0, 1000),
-        answer: answer.slice(0, 2000),
-        fieldType,
-        site: location.hostname
-      });
+      for (const el of collectFillableControls()) {
+        const type = (el.type || "").toLowerCase();
+        if (type === "hidden" || type === "file" || type === "password") continue;
+        if (
+          el.tagName === "SELECT" ||
+          type === "radio" ||
+          type === "checkbox" ||
+          isReactSelectInput(el) ||
+          looksLikeCombobox(el)
+        ) {
+          maybeCaptureLearn(el);
+        }
+      }
     } catch {
-      /* extension context invalidated — ignore */
+      /* ignore */
     }
   }
 
@@ -7357,21 +7369,46 @@
   function onLearnOptionClick(event) {
     try {
       const opt = event.target?.closest?.(
-        '[role="option"], .select__option, [class*="select__option"], [id*="-option-"]'
+        '[role="option"], .select__option, [class*="select__option"], [id*="-option-"], li[class*="option"]'
       );
       if (!opt) return;
-      // After React-Select commits the chip, capture from the open combobox input.
+      const picked = cleanLabelText(opt.textContent || "");
+      // Capture from the active combobox, then sweep filled selects so we do not miss the chip.
       setTimeout(() => {
-        const active = document.activeElement;
-        if (active && (isReactSelectInput(active) || looksLikeCombobox(active))) {
-          maybeCaptureLearn(active);
-          return;
+        try {
+          const active = document.activeElement;
+          if (active && (isReactSelectInput(active) || looksLikeCombobox(active))) {
+            maybeCaptureLearn(active);
+          } else {
+            const combo = document.querySelector(
+              'input.select__input, [role="combobox"], .select__input, [aria-expanded="true"]'
+            );
+            if (combo && (isReactSelectInput(combo) || looksLikeCombobox(combo))) {
+              maybeCaptureLearn(combo);
+            }
+          }
+          // If we know the option text, also try banking against the focused field's label.
+          if (picked && !/^(select\.\.\.?|please select)$/i.test(picked)) {
+            const focused =
+              document.querySelector(
+                ".select__control--is-focused, [class*='select__control--is-focused'], [class*='select__control--menu-is']"
+              ) || document.activeElement;
+            const input =
+              focused?.matches?.("input, select, textarea")
+                ? focused
+                : focused?.querySelector?.("input, select, textarea");
+            if (input) {
+              const label = sanitizeFieldLabel(
+                displayQuestionLabel(input) || captureQuestionText(input) || ""
+              );
+              sendQaLearnCapture(label, picked, "select");
+            }
+          }
+          bankFilledChoicesAfterUserPick();
+        } catch {
+          /* ignore */
         }
-        const combo = document.querySelector(
-          'input.select__input, [role="combobox"][aria-expanded="true"], .select__input'
-        );
-        if (combo) maybeCaptureLearn(combo);
-      }, 120);
+      }, 180);
     } catch {
       /* ignore */
     }

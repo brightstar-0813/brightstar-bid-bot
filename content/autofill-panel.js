@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-09.panel13";
+  const PANEL_BUILD = "2026-09-09.panel14";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -429,6 +429,10 @@
       // Do not rescan on every profile learn write — that steals focus while the user types.
       if (changes.active_person_id) {
         scheduleRescan(1500);
+      }
+      // User-filled answers landed in the Q&A bank — refresh panel badges.
+      if (changes.qa_bank_version) {
+        scheduleRescan(700, { force: false });
       }
       if (changes.last_job_title) state.jobTitle = changes.last_job_title.newValue || "";
       if (changes.last_job_company) state.jobCompany = changes.last_job_company.newValue || "";

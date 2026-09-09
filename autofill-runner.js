@@ -3791,8 +3791,14 @@ export async function handleQaLearnCapture(message) {
   const question = String(message.question || "").trim();
   const answer = String(message.answer || "").trim();
   if (!question || !answer) return { ok: false };
+  if (isJunkQuestionLabel(question) || isSensitiveProfileQuestion(question)) {
+    return { ok: false, skipped: "sensitive_or_junk" };
+  }
+  if (isJunkAutofillAnswer(answer, { questionLabel: question })) {
+    return { ok: false, skipped: "junk_answer" };
+  }
   const { person } = await getApplicantInfoForAutofill();
-  await saveQa({
+  const saved = await saveQa({
     profileId: person?.id || "",
     question,
     answer,
@@ -3800,10 +3806,16 @@ export async function handleQaLearnCapture(message) {
     source: "user",
     site: message.site || ""
   });
+  if (!saved) return { ok: false };
   await mergeAutofillExtras({ [normalizeQuestion(question).slice(0, 48) || question]: answer }).catch(
     () => null
   );
-  return { ok: true };
+  try {
+    await chrome.storage.local.set({ qa_bank_version: Date.now() });
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, id: saved.id || "" };
 }
 
 /** Used by the content-script Easy Apply path when leftover questions need answers. */
