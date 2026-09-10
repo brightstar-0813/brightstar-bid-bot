@@ -3187,6 +3187,10 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
     await rememberAiChatFromTab(tabId, AI_PROVIDERS.CHATGPT).catch(() => "");
   }
 
+  const usersBeforeSend = await readChatReadiness(tabId, AI_PROVIDERS.CHATGPT)
+    .then((s) => Number(s.userBlocks || 0))
+    .catch(() => 0);
+
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await focusTabForInput(tabId);
@@ -3194,8 +3198,18 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
     await enforcePostRateLimitCooldown();
     await waitOutChatGptRateLimit(tabId);
     if (attempt > 0) {
+      // First attempt may have posted the prompt but failed confirmation — do not
+      // paste+Send again (that creates two identical resume requests).
+      try {
+        const state = await readChatReadiness(tabId, AI_PROVIDERS.CHATGPT);
+        if (Number(state.userBlocks || 0) > usersBeforeSend || Number(state.assistantBlocks || 0) > 0) {
+          await setStatus("ChatGPT already accepted the prompt — continuing without re-send…");
+          return { blocksBefore: 0, latestBefore: "" };
+        }
+      } catch {
+        /* fall through to cautious retry */
+      }
       await setStatus("Retrying ChatGPT Send…");
-      // Fresh focus + short pause helps when the first click hit mic instead of Send.
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
     try {
@@ -3496,36 +3510,35 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       };
 
       const sendMessage = (el, { force = false } = {}) => {
+        // One primary action only — stacking click + Enter + form submit double-posts
+        // the same resume prompt as two identical user bubbles.
         if (clickSendButton({ force })) return true;
         if (submitComposerForm(el)) return true;
         pressEnterToSend(el);
-        if (clickSendButton({ force })) return true;
-        el.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "Enter",
-            code: "Enter",
-            keyCode: 13,
-            which: 13,
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            ctrlKey: true,
-            metaKey: true
-          })
-        );
         return clickSendButton({ force });
       };
 
       const countUserBlocks = () =>
-        document.querySelectorAll("[data-message-author-role='user']").length;
+        document.querySelectorAll(
+          [
+            "[data-message-author-role='user']",
+            "[data-message-author-role=user]",
+            "[data-turn='user']",
+            '[data-testid*="user-message"]'
+          ].join(", ")
+        ).length;
 
       const isGenerating = () => {
         const stopBtn =
           document.querySelector("button[data-testid='stop-button']") ||
           document.querySelector("button[aria-label='Stop streaming']") ||
           document.querySelector("button[aria-label='Stop generating']") ||
-          document.querySelector("button[aria-label*='Stop']");
-        return Boolean(stopBtn && stopBtn.offsetParent !== null);
+          document.querySelector("button[aria-label*='Stop']") ||
+          document.querySelector('[data-is-streaming="true"]');
+        return Boolean(
+          (stopBtn && stopBtn.offsetParent !== null) ||
+            stopBtn?.getAttribute?.("data-is-streaming") === "true"
+        );
       };
 
       const promptWasSent = (el, usersBefore) => {
@@ -3540,7 +3553,15 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       };
 
       const getAssistantBlocks = () =>
-        Array.from(document.querySelectorAll("[data-message-author-role='assistant']"));
+        Array.from(
+          document.querySelectorAll(
+            [
+              "[data-message-author-role='assistant']",
+              "[data-turn='assistant']",
+              '[data-testid="assistant-message"]'
+            ].join(", ")
+          )
+        );
 
       const scorePayload = (text) => {
         const t = String(text || "");
@@ -3621,6 +3642,8 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       }
 
       // Wait for the real Send control (not the mic) to enable after ProseMirror paste.
+      // After the first Send click, only wait for confirmation — never click Send again
+      // (that is what created two identical resume prompts in the same chat).
       let sent = false;
       let clickedSend = false;
       for (let i = 0; i < 48; i += 1) {
@@ -3629,50 +3652,76 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
           sent = true;
           break;
         }
+        if (clickedSend) {
+          // Already submitted once — give the user bubble / stop button time to appear.
+          await sleep(400);
+          continue;
+        }
         const btn = findSendButton();
         if (btn && isSendEnabled(btn)) {
           if (sendMessage(input, { force: false })) clickedSend = true;
-          await sleep(500);
-          if (promptWasSent(findInput() || input, usersBefore) || composerLooksCleared(findInput() || input)) {
+          await sleep(700);
+          if (
+            promptWasSent(findInput() || input, usersBefore) ||
+            composerLooksCleared(findInput() || input)
+          ) {
             sent = true;
             break;
           }
         } else {
-          // Nudge the editor so ChatGPT swaps mic → Send.
+          // Nudge the editor so ChatGPT swaps mic → Send (do not re-send).
           input.focus();
-          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " }));
+          input.dispatchEvent(
+            new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " })
+          );
           await sleep(200);
-          // Re-assert prompt if ChatGPT wiped/partialled the composer.
-          if (!inputHasText(input) || (input.innerText || input.textContent || "").trim().length < 40) {
+          // Re-assert prompt if ChatGPT wiped/partialled the composer — only before first send.
+          if (
+            !inputHasText(input) ||
+            (input.innerText || input.textContent || "").trim().length < 40
+          ) {
             setInputValue(input, fullPrompt);
             await sleep(350);
-          }
-        }
-        if (i > 0 && i % 10 === 0) {
-          if (sendMessage(input, { force: false })) clickedSend = true;
-          await sleep(450);
-          if (promptWasSent(findInput() || input, usersBefore) || (clickedSend && composerLooksCleared(findInput() || input))) {
-            sent = true;
-            break;
           }
         }
         await sleep(250);
       }
 
-      // Last resorts: form submit + force-click Send (never speech).
-      if (!sent) {
-        for (let round = 0; round < 3; round += 1) {
+      // Last resorts: only if we never clicked Send yet.
+      if (!sent && !clickedSend) {
+        for (let round = 0; round < 2; round += 1) {
           input = findInput() || input;
           if (!inputHasText(input)) {
             setInputValue(input, fullPrompt);
             await sleep(400);
           }
           input.focus();
-          if (submitComposerForm(input)) clickedSend = true;
-          if (sendMessage(input, { force: true })) clickedSend = true;
-          await sleep(700);
+          if (clickSendButton({ force: true })) clickedSend = true;
+          else if (submitComposerForm(input)) clickedSend = true;
+          else {
+            pressEnterToSend(input);
+            clickedSend = true;
+          }
+          await sleep(800);
           const afterRound = findInput() || input;
-          if (promptWasSent(afterRound, usersBefore) || (clickedSend && composerLooksCleared(afterRound))) {
+          if (
+            promptWasSent(afterRound, usersBefore) ||
+            (clickedSend && composerLooksCleared(afterRound))
+          ) {
+            sent = true;
+            break;
+          }
+        }
+      } else if (!sent && clickedSend) {
+        // One more wait after a single click before declaring failure.
+        for (let w = 0; w < 10; w += 1) {
+          await sleep(400);
+          const afterWait = findInput() || input;
+          if (
+            promptWasSent(afterWait, usersBefore) ||
+            composerLooksCleared(afterWait) ||
+            isGenerating()
+          ) {
             sent = true;
             break;
           }
@@ -3680,7 +3729,13 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       }
 
       const after = findInput() || input;
-      if (!(promptWasSent(after, usersBefore) || (clickedSend && composerLooksCleared(after)))) {
+      if (
+        !(
+          promptWasSent(after, usersBefore) ||
+          (clickedSend && composerLooksCleared(after)) ||
+          isGenerating()
+        )
+      ) {
         throw new Error(
           "Prompt was typed but ChatGPT did not accept Send. Keep the ChatGPT tab focused (close/minimize the extension popup) and try again."
         );
