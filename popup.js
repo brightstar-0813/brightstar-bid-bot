@@ -2920,10 +2920,10 @@ async function generateCustomQaAsk() {
         : res.source === "profile"
           ? `profile facts${who}`
           : res.source === "openai"
-            ? `OpenAI${res.model ? ` · ${res.model}` : ""}${who}`
+            ? `OpenAI${res.model ? ` · ${res.model}` : ""}${res.reusedThread ? " · same job thread" : ""}${who}`
             : res.source === "claude"
-              ? `Claude tab${who}`
-              : `ChatGPT tab${who}`;
+              ? `Claude tab${res.reusedChat ? " · same job chat" : ""}${who}`
+              : `ChatGPT tab${res.reusedChat ? " · same job chat" : ""}${who}`;
     setCustomQaMeta(src);
     setStatus(`Custom Q&A ready (${src}). Copy or Save to bank.`);
   } finally {

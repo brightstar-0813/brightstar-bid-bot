@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   answerCertificationQuestion,
   bankAnswerFitsQuestion,
+  buildCustomQaFollowUpPrompt,
+  buildCustomQaJobKey,
   compactApplicantContext,
   buildCustomQaPayload,
   normalizeSkillList,
@@ -95,6 +97,28 @@ test("buildCustomQaPayload exposes knownFacts for grounding", () => {
   assert.match(payload.knownFacts.currentRole, /Accenture/);
   assert.equal(payload.candidateProfile.firstName, "Edrwin");
   assert.ok(String(payload.resumeExcerpt || "").includes("Apex"));
+});
+
+test("buildCustomQaJobKey is stable per profile + job link", () => {
+  const a = buildCustomQaJobKey("p1", {
+    jdLink: "https://boards.greenhouse.io/acme/jobs/1/",
+    jobTitle: "Dev",
+    companyName: "Acme"
+  });
+  const b = buildCustomQaJobKey("p1", {
+    jdLink: "https://boards.greenhouse.io/acme/jobs/1",
+    jobTitle: "Other"
+  });
+  const c = buildCustomQaJobKey("p2", { jdLink: "https://boards.greenhouse.io/acme/jobs/1" });
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+});
+
+test("buildCustomQaFollowUpPrompt keeps question-only follow-up", () => {
+  const prompt = buildCustomQaFollowUpPrompt("Are you authorized to work in the US?");
+  assert.match(prompt, /same conversation/i);
+  assert.match(prompt, /Are you authorized to work in the US\?/);
+  assert.doesNotMatch(prompt, /CONTEXT \(JSON\)/);
 });
 
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {

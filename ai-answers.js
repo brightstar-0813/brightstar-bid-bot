@@ -804,7 +804,43 @@ export const CUSTOM_QA_SYSTEM_PROMPT =
   "Do not invent employers, degrees, visas, certifications, tools, metrics, or clearances that are not supported by knownFacts / candidateProfile / resume. " +
   "Certification questions: knownFacts.certifications (and candidateProfile.certifications) are authoritative. " +
   "If the asked credential is absent from that list, answer No (or omit naming it). Never invent a Salesforce or other certification. " +
-  "If a fact is missing (especially work authorization, sponsorship, salary, or compliance), give a cautious brief answer based only on listed profile facts — do not fabricate.";
+  "If a fact is missing (especially work authorization, sponsorship, salary, or compliance), give a cautious brief answer based only on listed profile facts — do not fabricate. " +
+  "When this conversation already includes a job description and resume/profile for one role, stay grounded in that same job — do not switch employers or invent a different posting.";
+
+/**
+ * Stable key for one job apply / batch row (profile + JD link or title/company).
+ * Custom Q&A reuses one AI chat / OpenAI thread while this key stays the same.
+ */
+export function buildCustomQaJobKey(profileId = "", jobMeta = {}) {
+  const id = String(profileId || "").trim() || "profile";
+  const link = String(jobMeta.jdLink || jobMeta.jobLink || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\/+$/, "");
+  if (link) return `${id}::${link}`;
+  const company = String(jobMeta.companyName || jobMeta.company || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  const title = String(jobMeta.jobTitle || jobMeta.title || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  const jobPart = [company, title].filter(Boolean).join("|") || "no-job";
+  return `${id}::${jobPart}`;
+}
+
+/** Follow-up ask in an existing job chat (JD + resume already in context). */
+export function buildCustomQaFollowUpPrompt(question) {
+  const q = String(question || "").trim();
+  return (
+    `Continue in this same conversation for the current job application. ` +
+    `Use the job description, resume/profile, and prior answers already in this chat. ` +
+    `Do not ask clarifying questions.\n\n` +
+    `QUESTION:\n${q}\n\n` +
+    `Reply with ONLY the answer text.`
+  );
+}
 
 /**
  * Strip common LLM wrappers from a single-answer reply.
@@ -884,6 +920,7 @@ export function buildCustomQaAgentPrompt(opts = {}) {
   const payload = buildCustomQaPayload(opts);
   return (
     `${CUSTOM_QA_SYSTEM_PROMPT}\n\n` +
+    `This chat is for ONE job application. Keep using this same conversation for follow-up screening questions.\n\n` +
     `CONTEXT (JSON):\n${JSON.stringify(payload, null, 2)}\n\n` +
     `QUESTION:\n${payload.question}\n\n` +
     `Reply with ONLY the answer text.`
@@ -892,7 +929,8 @@ export function buildCustomQaAgentPrompt(opts = {}) {
 
 /**
  * One-shot profile-grounded answer via OpenAI Chat Completions.
- * @returns {Promise<{ answer: string, usage: object|null }>}
+ * Pass priorMessages (user/assistant turns for this job) to continue the same thread.
+ * @returns {Promise<{ answer: string, usage: object|null, source?: string, messages?: object[] }>}
  */
 export async function generateSingleProfileAnswer({
   apiKey,
@@ -903,7 +941,8 @@ export async function generateSingleProfileAnswer({
   resumeText = "",
   applicationBrief = null,
   skills = [],
-  recentRoles = []
+  recentRoles = [],
+  priorMessages = null
 }) {
   const q = String(question || "").trim();
   if (!q) return { answer: "", usage: null };
@@ -924,21 +963,35 @@ export async function generateSingleProfileAnswer({
     recentRoles
   });
   const certQ = isCertificationQuestion(q);
+  const history = Array.isArray(priorMessages)
+    ? priorMessages.filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+    : [];
+  const userContent =
+    history.length > 0
+      ? buildCustomQaFollowUpPrompt(q)
+      : JSON.stringify(payload, null, 2);
+  const messages = [
+    { role: "system", content: CUSTOM_QA_SYSTEM_PROMPT },
+    ...history.slice(-12),
+    { role: "user", content: userContent }
+  ];
   const result = await chatCompletion({
     apiKey,
     model,
     jsonMode: false,
     temperature: certQ ? 0.15 : 0.4,
     maxTokens: 700,
-    messages: [
-      { role: "system", content: CUSTOM_QA_SYSTEM_PROMPT },
-      { role: "user", content: JSON.stringify(payload, null, 2) }
-    ]
+    messages
   });
 
   let answer = cleanCustomQaAnswer(result.content);
   if (answer && !bankAnswerFitsQuestion(q, answer)) {
     // Soft fail: still return; caller may choose to keep or discard.
   }
-  return { answer, usage: result.usage || null, source: "openai" };
+  const nextMessages = [
+    ...history,
+    { role: "user", content: userContent },
+    { role: "assistant", content: answer || String(result.content || "").trim() }
+  ].slice(-12);
+  return { answer, usage: result.usage || null, source: "openai", messages: nextMessages };
 }

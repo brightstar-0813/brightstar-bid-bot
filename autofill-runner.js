@@ -48,6 +48,8 @@ import {
   generateFormInventoryAnswers,
   generateSingleProfileAnswer,
   buildCustomQaAgentPrompt,
+  buildCustomQaFollowUpPrompt,
+  buildCustomQaJobKey,
   cleanCustomQaAnswer,
   shouldBankAnswer,
   isComplexQuestion,
@@ -2290,8 +2292,10 @@ async function getAutofillAiContext() {
   const data = await chrome.storage.local.get([
     "last_job_title",
     "last_company_name",
+    "last_job_company",
     "last_jd_text",
-    "last_jd_link"
+    "last_jd_link",
+    "last_apply_jd_link"
   ]);
   const person = await getActivePerson();
   const resume = (await getStoredResumeJson()) || {};
@@ -2305,14 +2309,83 @@ async function getAutofillAiContext() {
   return {
     jobMeta: {
       jobTitle: data.last_job_title || "",
-      companyName: data.last_company_name || "",
+      companyName: data.last_company_name || data.last_job_company || "",
       jdText: data.last_jd_text || "",
-      jdLink: data.last_jd_link || ""
+      jdLink: data.last_jd_link || data.last_apply_jd_link || ""
     },
     resumeText: String(person?.masterResume || "").trim(),
     certifications,
     skills,
     recentRoles
+  };
+}
+
+const CUSTOM_QA_SESSION_KEY = "custom_qa_session";
+
+async function loadCustomQaSession() {
+  try {
+    const data = await chrome.storage.local.get([CUSTOM_QA_SESSION_KEY]);
+    const row = data[CUSTOM_QA_SESSION_KEY];
+    return row && typeof row === "object" && !Array.isArray(row) ? row : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveCustomQaSession(patch = {}) {
+  const prev = await loadCustomQaSession();
+  const next = { ...prev, ...patch, updatedAt: Date.now() };
+  await chrome.storage.local.set({ [CUSTOM_QA_SESSION_KEY]: next });
+  return next;
+}
+
+/**
+ * Decide whether Custom Q&A should continue the existing AI chat for this job
+ * or seed a new chat with JD + profile/resume context.
+ */
+export async function resolveCustomQaChatReuse(jobKey = "") {
+  const key = String(jobKey || "").trim();
+  const session = await loadCustomQaSession();
+  let chatId = "";
+  try {
+    const stored = await chrome.storage.local.get(["last_ai_chat_id"]);
+    chatId = String(stored.last_ai_chat_id || "").trim();
+  } catch {
+    chatId = "";
+  }
+  const hasChat = Boolean(chatId);
+  const sameSessionJob = Boolean(key && session.jobKey && session.jobKey === key);
+  const seeded = sameSessionJob && Boolean(session.agentSeeded);
+
+  // Confirmed: this job’s chat already has JD + resume/profile (batch or prior Custom Q&A).
+  if (hasChat && seeded) {
+    return {
+      reuseChat: true,
+      useFollowUp: true,
+      jobKey: key,
+      session,
+      chatId
+    };
+  }
+
+  // Same job bound, chat open, but not marked seeded yet — continue the tab and
+  // send the full JD/profile seed into that conversation (do not open another chat).
+  if (hasChat && sameSessionJob) {
+    return {
+      reuseChat: true,
+      useFollowUp: false,
+      jobKey: key,
+      session,
+      chatId
+    };
+  }
+
+  return {
+    reuseChat: false,
+    useFollowUp: false,
+    jobKey: key,
+    session: sameSessionJob ? session : {},
+    chatId
   };
 }
 
@@ -3941,8 +4014,9 @@ export async function answerQuestionsFromBank(
 }
 
 /**
- * Ask dialog: bank match first, then OpenAI grounded on the active person profile.
- * ChatGPT/Claude tab engine is handled in background.js (needs automateChatGpt).
+ * Ask dialog: bank match first, then OpenAI grounded on the active person + current job.
+ * Reuses one OpenAI message thread per job (same batch / apply). ChatGPT/Claude tab
+ * continuity is handled in background.js via prepareCustomQaAsk + newChat flag.
  */
 export async function answerCustomQaAsk({
   question,
@@ -3989,6 +4063,13 @@ export async function answerCustomQaAsk({
   }
   const model = strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
   const ctx = await getAutofillAiContext();
+  const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
+  const chatMode = await resolveCustomQaChatReuse(jobKey);
+  const priorMessages =
+    chatMode.reuseChat && Array.isArray(chatMode.session?.openaiMessages)
+      ? chatMode.session.openaiMessages
+      : [];
+
   const info = await withResumeCertifications({
     ...applicantInfo,
     skills: ctx.skills,
@@ -4026,10 +4107,18 @@ export async function answerCustomQaAsk({
     jobMeta: ctx.jobMeta,
     resumeText: ctx.resumeText,
     skills: ctx.skills,
-    recentRoles: info.recentRoles || ctx.recentRoles
+    recentRoles: info.recentRoles || ctx.recentRoles,
+    priorMessages
   });
   const answer = cleanCustomQaAnswer(result.answer);
   if (!answer) throw new Error("OpenAI returned an empty answer. Try again or use ChatGPT tab.");
+  if (Array.isArray(result.messages)) {
+    await saveCustomQaSession({
+      jobKey,
+      openaiMessages: result.messages,
+      agentSeeded: Boolean(chatMode.session?.agentSeeded)
+    }).catch(() => null);
+  }
   // Persist for this profile so the next Autofill can reuse it from the Q&A bank.
   saveQa({
     profileId,
@@ -4045,7 +4134,9 @@ export async function answerCustomQaAsk({
     model: result.source === "profile" ? undefined : model,
     usage: result.usage || null,
     profileId,
-    personLabel
+    personLabel,
+    jobKey,
+    reusedThread: priorMessages.length > 0
   };
 }
 
@@ -4116,15 +4207,44 @@ export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
     }
   }
 
-  const prompt = buildCustomQaAgentPrompt({
+  const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
+  const chatMode = await resolveCustomQaChatReuse(jobKey);
+  const prompt = chatMode.useFollowUp
+    ? buildCustomQaFollowUpPrompt(q)
+    : buildCustomQaAgentPrompt({
+        question: q,
+        applicantInfo: info,
+        jobMeta: ctx.jobMeta,
+        resumeText: ctx.resumeText,
+        skills: ctx.skills,
+        recentRoles: info.recentRoles || ctx.recentRoles
+      });
+  return {
+    bankHit: null,
+    prompt,
+    profileId,
+    personLabel,
     question: q,
-    applicantInfo: info,
-    jobMeta: ctx.jobMeta,
-    resumeText: ctx.resumeText,
-    skills: ctx.skills,
-    recentRoles: info.recentRoles || ctx.recentRoles
+    jobKey,
+    reuseChat: chatMode.reuseChat,
+    useFollowUp: chatMode.useFollowUp,
+    jobMeta: ctx.jobMeta
+  };
+}
+
+/** Mark Custom Q&A agent chat as seeded for this job after a successful ask. */
+export async function markCustomQaAgentSession(jobKey, { seeded = true } = {}) {
+  const key = String(jobKey || "").trim();
+  if (!key) return null;
+  const prev = await loadCustomQaSession();
+  const same = prev.jobKey === key;
+  const openaiMessages = same ? prev.openaiMessages || [] : [];
+  return saveCustomQaSession({
+    jobKey: key,
+    // seeded:false binds the job without clearing an already-seeded chat flag.
+    agentSeeded: Boolean(seeded) || (same && Boolean(prev.agentSeeded)),
+    openaiMessages
   });
-  return { bankHit: null, prompt, profileId, personLabel, question: q };
 }
 
 export async function saveCustomQaAnswer({

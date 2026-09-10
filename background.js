@@ -68,11 +68,12 @@ import {
   runCustomOpenAiQaOnTab,
   answerCustomQaAsk,
   prepareCustomQaAsk,
+  markCustomQaAgentSession,
   saveCustomQaAnswer
 } from "./autofill-runner.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { isOpenAiQaAssistEnabled } from "./openai.js";
-import { cleanCustomQaAnswer } from "./ai-answers.js";
+import { cleanCustomQaAnswer, buildCustomQaJobKey } from "./ai-answers.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -1074,6 +1075,18 @@ async function persistJobContextForAutofill(job = {}) {
     last_jd_text: String(job.jdText || "").trim()
   });
   await setActiveApplyJob({ csvRow, jobDir, jdLink });
+  // Bind Custom Q&A to this job so ChatGPT/Claude/OpenAI reuse one chat/thread.
+  try {
+    const person = await getActivePerson().catch(() => null);
+    const jobKey = buildCustomQaJobKey(person?.id || job.profileId || "", {
+      jdLink,
+      jobTitle: job.jobTitle || job.title || "",
+      companyName: job.companyName || job.company || ""
+    });
+    await markCustomQaAgentSession(jobKey, { seeded: false });
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Mark the sheet row Applied (or a custom Status) after apply / inactive detection. */
@@ -6163,6 +6176,19 @@ async function runAutoJob(jobMeta) {
     jobAiChatId = await rememberAiChatFromTab(tab.id, provider);
   }
   const aiChatId = jobAiChatId;
+  try {
+    const jobKey = buildCustomQaJobKey(profileId || person?.id || "", {
+      jdLink: jobMeta.jdLink || "",
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      companyName: jobMeta.companyName || jobMeta.company || ""
+    });
+    // Resume (+ CL) already live in this chat — Custom Q&A should continue it.
+    if (jobKey && jobAiChatId) {
+      await markCustomQaAgentSession(jobKey, { seeded: true });
+    }
+  } catch {
+    /* ignore */
+  }
 
   return { ...result, atsEvaluation, aiTabId: tab.id, aiChatId, aiProvider: provider };
   } catch (err) {
@@ -7730,29 +7756,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           const provider = await getStoredAiProvider();
           const providerLabel = aiProviderLabel(provider);
-          await setStatus(`Custom Q&A: asking ${providerLabel} tab…`);
+          const reuseChat = Boolean(prep.reuseChat);
+          await setStatus(
+            reuseChat
+              ? `Custom Q&A: continuing ${providerLabel} chat for this job…`
+              : `Custom Q&A: starting ${providerLabel} chat with this job’s JD + profile…`
+          );
           const tab = await ensureAiTab(provider);
           const raw = await automateChatGpt(tab.id, prep.prompt, {
-            newChat: true,
+            // One chat per job apply: reuse while job key matches; seed once with JD+resume.
+            newChat: !reuseChat,
             expectResumeJson: false,
-            statusLabel: `Custom Q&A via ${providerLabel}…`
+            statusLabel: reuseChat
+              ? `Custom Q&A follow-up via ${providerLabel}…`
+              : `Custom Q&A via ${providerLabel} (new job chat)…`
           });
           const answer = cleanCustomQaAnswer(raw);
           if (!answer) {
             throw new Error(`${providerLabel} returned an empty answer. Try again.`);
           }
+          await markCustomQaAgentSession(prep.jobKey, { seeded: true }).catch(() => null);
           await saveCustomQaAnswer({
             question,
             answer,
             source: provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt"
           }).catch(() => null);
-          await setStatus(`Custom Q&A: answer ready (${providerLabel}) · saved to bank.`);
+          await setStatus(
+            reuseChat
+              ? `Custom Q&A: answer ready (${providerLabel}, same job chat) · saved to bank.`
+              : `Custom Q&A: answer ready (${providerLabel}) · saved to bank.`
+          );
           safeSendResponse(sendResponse, {
             ok: true,
             answer,
             source: provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt",
             profileId: prep.profileId,
-            personLabel: prep.personLabel
+            personLabel: prep.personLabel,
+            jobKey: prep.jobKey || "",
+            reusedChat: reuseChat
           });
           return;
         }
