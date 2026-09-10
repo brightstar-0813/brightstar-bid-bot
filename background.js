@@ -2975,6 +2975,105 @@ async function readChatReadiness(tabId, provider) {
 }
 
 /**
+ * Soft-delete empty Recents "New chat" stubs that are not the active conversation.
+ * ChatGPT often leaves a twin blank entry after navigate-to-/ + first message.
+ */
+async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {}) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  if (p !== AI_PROVIDERS.CHATGPT) return 0;
+  const keep = String(keepChatId || "").trim();
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [keep],
+      func: async (keepId) => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const origin = location.origin.includes("openai.com")
+          ? "https://chat.openai.com"
+          : "https://chatgpt.com";
+
+        const stubIds = [];
+        const seen = new Set();
+        for (const a of document.querySelectorAll('a[href*="/c/"]')) {
+          const href = String(a.getAttribute("href") || a.href || "");
+          const id = (href.match(/\/c\/([a-zA-Z0-9_-]+)/) || [])[1] || "";
+          if (!id || seen.has(id) || (keepId && id === keepId)) continue;
+          const title = String(a.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          // Empty draft shells ChatGPT leaves in Recents after / navigation.
+          if (!/^(new chat|untitled)$/i.test(title)) continue;
+          seen.add(id);
+          stubIds.push(id);
+          if (stubIds.length >= 6) break;
+        }
+        if (!stubIds.length) return { removed: 0, ids: [] };
+
+        let token = "";
+        let accountId = "";
+        try {
+          const session = await fetch(`${origin}/api/auth/session`, {
+            credentials: "include"
+          }).then((r) => r.json());
+          token = session?.accessToken || session?.access_token || "";
+          accountId =
+            session?.account?.id ||
+            session?.user?.id ||
+            session?.chatgpt_account_id ||
+            session?.account?.account_id ||
+            "";
+        } catch {
+          /* ignore */
+        }
+        if (!token) return { removed: 0, ids: stubIds, error: "no-token" };
+
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        };
+        if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
+
+        let removed = 0;
+        for (const id of stubIds) {
+          try {
+            const patch = await fetch(`${origin}/backend-api/conversation/${id}`, {
+              method: "PATCH",
+              credentials: "include",
+              headers,
+              body: JSON.stringify({ is_visible: false })
+            });
+            if (patch.ok || patch.status === 204 || patch.status === 404) {
+              removed += 1;
+              const link =
+                document.querySelector(`a[href="/c/${id}"]`) ||
+                document.querySelector(`a[href*="/c/${id}"]`);
+              const row =
+                link?.closest("li") ||
+                link?.closest('[data-testid*="history"]') ||
+                link?.closest("div.group") ||
+                link?.parentElement;
+              try {
+                (row || link)?.remove();
+              } catch {
+                /* ignore */
+              }
+            }
+          } catch {
+            /* ignore one stub */
+          }
+          await sleep(200);
+        }
+        return { removed, ids: stubIds };
+      }
+    });
+    return Number(results?.[0]?.result?.removed || 0);
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Hard-guarantee a blank chat before each job. Clicking "New chat"
  * control silently no-ops on some builds, and the poller then harvests the
  * PREVIOUS job's resume JSON — wrong resume, saved under the new company.
@@ -3021,17 +3120,14 @@ async function ensureFreshChat(tabId, provider) {
 
   if (await waitForBlankComposer(40)) return { ok: true, navigated: true };
 
-  // SPA sometimes keeps the prior thread visible after / load — hard reload once.
-  // Do NOT click in-page New chat after navigate (that creates a twin empty chat).
-  try {
-    await chrome.tabs.update(tabId, { url: `${base}${base.includes("?") ? "&" : "?"}fresh=${Date.now()}` });
-    await withTimeout(waitForTabComplete(tabId, 30000), 32000, `Timed out reloading a blank ${label} chat.`);
-  } catch {
-    return { ok: false, navigated: true };
-  }
-
+  // SPA sometimes keeps the prior thread visible after / load.
+  // Do NOT navigate a second time with ?fresh= — that seeds a twin empty "New chat".
+  // Wait longer once; in-page New chat is handled only by shouldUseInPageNewChat
+  // when this returns navigated:true + ok:false is NOT used for a click (navigated blocks it).
   if (await waitForBlankComposer(24)) return { ok: true, navigated: true };
-  // Navigated to blank URL but composer not ready — never click New chat again.
+
+  // Navigated to blank URL but old thread still painted — stay put; caller must not
+  // click New chat after a / navigation (twin stub). Treat as navigated so UI click is skipped.
   return { ok: false, navigated: true };
 }
 
@@ -3063,6 +3159,11 @@ async function isBlankFreshAiChat(tabId, provider) {
  * click is still needed. Never double-open when navigation already left a blank shell.
  */
 async function shouldUseInPageNewChat(tabId, provider, freshResult) {
+  const p = normalizeAiProvider(provider);
+  // ChatGPT: never click in-page New chat. Navigate-to-/ already seeds one Recents
+  // "New chat"; a second click creates the twin empty stub next to the real job chat.
+  if (p === AI_PROVIDERS.CHATGPT) return false;
+
   // chatgpt.com/ / claude.ai/new already seeds one Recents "New chat".
   // Clicking New chat (or a[href='/']) again creates a twin empty entry — common on one-off.
   if (freshResult?.navigated) return false;
@@ -4219,10 +4320,17 @@ async function deleteCurrentAiConversation(
           });
           // If we are still sitting on the deleted /c/<id> page, leave it so the
           // red "Failed to delete… Conversation has been deleted" banner clears.
+          // Use a single navigate — do not call ensureFreshChat here (that can
+          // stack with leaveBlank and seed twin empty "New chat" stubs).
           try {
             const stillOn = await readAiConversationId(tabId, provider);
             if (stillOn === id) {
-              await ensureFreshChat(tabId, provider);
+              await chrome.tabs.update(tabId, { url: aiProviderNewChatUrl(provider) });
+              await withTimeout(
+                waitForTabComplete(tabId, 20000),
+                22000,
+                `Timed out leaving deleted ${label} chat.`
+              ).catch(() => null);
             }
           } catch {
             /* ignore */
@@ -5371,7 +5479,11 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
   // Capture /c/<id> after send so mid-poll failures (rate limit, timeout) and
   // twin empty shells can still be deleted during inter-job cooldown.
-  await rememberAiChatFromTab(tabId, provider).catch(() => "");
+  const activeChatId = await rememberAiChatFromTab(tabId, provider).catch(() => "");
+  // Drop leftover empty "New chat" Recents stubs from / navigation (twin issue).
+  if (startNewChat || activeChatId) {
+    await dismissEmptyNewChatStubs(tabId, provider, { keepChatId: activeChatId }).catch(() => 0);
+  }
 
   // Active polling budget (rate-limit cooldowns do NOT count against this).
   const timeoutMs = expectResumeJson ? 12 * 60 * 1000 : 4 * 60 * 1000;
@@ -6259,6 +6371,9 @@ async function runAutoJob(jobMeta) {
     // so a later failure can delete it before batch retry (avoids twin "Rewrite…" chats).
     if (isFirst) {
       jobAiChatId = await rememberAiChatFromTab(tab.id, provider);
+      await dismissEmptyNewChatStubs(tab.id, provider, { keepChatId: jobAiChatId }).catch(
+        () => 0
+      );
     }
 
     if (batchControl.skipCurrent || batchControl.stop) {
