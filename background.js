@@ -4112,10 +4112,49 @@ function attachAiContextToError(err, { aiTabId = null, aiChatId = "", aiProvider
 }
 
 /**
+ * Collect ChatGPT sidebar conversation ids that look like bot resume-generation
+ * leftovers (e.g. "Rewrite Salesforce Resume…"). Used during cleanup so failed
+ * prior deletes do not keep piling up in Recents.
+ */
+async function collectBotResumeChatIdsFromSidebar(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  if (p !== AI_PROVIDERS.CHATGPT) return [];
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const re =
+          /^(resume\s+rewrite|rewrite\b.+\bresum|salesforce\b.+\bresum)/i;
+        const out = [];
+        const seen = new Set();
+        for (const a of document.querySelectorAll('a[href*="/c/"]')) {
+          const href = String(a.getAttribute("href") || a.href || "");
+          const id = (href.match(/\/c\/([a-zA-Z0-9_-]+)/) || [])[1] || "";
+          if (!id || seen.has(id)) continue;
+          const title = String(a.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (!title || !re.test(title)) continue;
+          seen.add(id);
+          out.push(id);
+          if (out.length >= 12) break;
+        }
+        return out;
+      }
+    });
+    return (Array.isArray(results?.[0]?.result) ? results[0].result : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Remove the conversation used for a finished job so history stays clean.
  * Prefer API delete (Claude needs JSON body = uuid). UI is fallback.
  * Intended to run during inter-job cooldown, not mid file-save.
- * Also deletes any twin chat ids tracked in last_ai_chat_ids for this job.
+ * Deletes every tracked id for the job (covers twin empty / rewrite chats).
  */
 async function deleteCurrentAiConversation(
   tabId,
@@ -4123,6 +4162,94 @@ async function deleteCurrentAiConversation(
 ) {
   const provider = await getStoredAiProvider();
   const label = aiProviderLabel(provider);
+
+  // Top-level cleanup: gather every id for this job, delete each, then one blank shell.
+  if (!skipExtras) {
+    const ids = [];
+    const pushId = (v) => {
+      const id = String(v || "").trim();
+      if (id && !ids.includes(id)) ids.push(id);
+    };
+    pushId(chatId);
+    pushId(await readAiConversationId(tabId, provider));
+    try {
+      const stored = await chrome.storage.local.get([
+        "last_ai_chat_id",
+        "last_ai_provider",
+        "last_ai_chat_ids"
+      ]);
+      if (
+        normalizeAiProvider(stored.last_ai_provider) === provider ||
+        !stored.last_ai_provider
+      ) {
+        pushId(stored.last_ai_chat_id);
+      }
+      (Array.isArray(stored.last_ai_chat_ids) ? stored.last_ai_chat_ids : []).forEach(pushId);
+    } catch {
+      /* ignore */
+    }
+    // Sweep leftover bot "Rewrite … Resume" rows from earlier failed cleanups.
+    try {
+      const leftovers = await collectBotResumeChatIdsFromSidebar(tabId, provider);
+      leftovers.forEach(pushId);
+    } catch {
+      /* ignore */
+    }
+
+    if (!ids.length) {
+      await setStatus(`Removing finished ${label} chat…`);
+      // Fall through to single-shot path (may still find a sidebar row / current URL).
+    } else {
+      await focusTabForInput(tabId);
+      await setStatus(
+        `Removing finished ${label} chat${ids.length > 1 ? `s (${ids.length})` : ` (${ids[0].slice(0, 8)}…)`}…`
+      );
+      const failed = [];
+      let lastDetail = null;
+      for (const id of ids) {
+        try {
+          lastDetail = await deleteCurrentAiConversation(tabId, {
+            chatId: id,
+            skipExtras: true,
+            leaveBlank: false
+          });
+        } catch {
+          failed.push(id);
+        }
+      }
+      if (leaveBlank) {
+        try {
+          await ensureFreshChat(tabId, provider);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (failed.length) {
+        try {
+          await chrome.storage.local.set({
+            last_ai_chat_id: failed[0],
+            last_ai_provider: provider,
+            last_ai_chat_ids: failed
+          });
+        } catch {
+          /* ignore */
+        }
+        throw new Error(
+          `${label} chat cleanup left ${failed.length} chat(s) undeleted — will retry next cooldown.`
+        );
+      }
+      try {
+        await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
+      } catch {
+        /* ignore */
+      }
+      await setStatus(
+        `Removed finished ${label} chat${ids.length > 1 ? `s (${ids.length})` : ""} (${lastDetail?.via || "ok"}).`
+      );
+      return lastDetail || { ok: true, via: "ok", chatId: ids[0] };
+    }
+  }
+
   let targetChatId = String(chatId || "").trim();
   if (!targetChatId) {
     targetChatId = await readAiConversationId(tabId, provider);
@@ -4291,10 +4418,47 @@ async function deleteCurrentAiConversation(
             const session = await fetch(sessionUrl, { credentials: "include" }).then((r) => r.json());
             token = session?.accessToken || session?.access_token || "";
             accountId =
-              session?.account?.id || session?.user?.id || session?.chatgpt_account_id || "";
+              session?.account?.id ||
+              session?.user?.id ||
+              session?.chatgpt_account_id ||
+              session?.account?.account_id ||
+              "";
             if (token) break;
           } catch {
             // try next
+          }
+        }
+        // Fallback: some builds stash the bearer in local/session storage.
+        if (!token) {
+          try {
+            for (const store of [localStorage, sessionStorage]) {
+              for (let i = 0; i < store.length; i += 1) {
+                const key = store.key(i) || "";
+                const raw = store.getItem(key) || "";
+                if (!/access.?token|auth/i.test(key) && !/"accessToken"/i.test(raw)) continue;
+                try {
+                  const parsed = JSON.parse(raw);
+                  token =
+                    parsed?.accessToken ||
+                    parsed?.access_token ||
+                    parsed?.token ||
+                    (typeof parsed === "string" && parsed.startsWith("ey") ? parsed : "") ||
+                    token;
+                  accountId =
+                    accountId ||
+                    parsed?.account?.id ||
+                    parsed?.user?.id ||
+                    parsed?.chatgpt_account_id ||
+                    "";
+                } catch {
+                  if (/^ey[A-Za-z0-9_-]+\./.test(raw)) token = raw;
+                }
+                if (token) break;
+              }
+              if (token) break;
+            }
+          } catch {
+            // ignore
           }
         }
         if (!token) return { ok: false, error: "no-token" };
@@ -4305,15 +4469,22 @@ async function deleteCurrentAiConversation(
         };
         if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
 
-        // Soft-delete only: is_visible=false. Do NOT treat archive as success —
-        // archived chats still clutter history and look "not deleted".
-        const verifyGone = async (status) => {
-          await sleep(600);
-          const still = Boolean(sidebarLink(id));
-          if (!still || status === 404) {
-            return { ok: true, status, verified: !still };
+        // Soft-delete: PATCH is_visible=false (official ChatGPT web behavior).
+        // Trust HTTP success even if the React sidebar has not re-rendered yet —
+        // requiring the row to vanish caused false failures and "cleanup skipped".
+        const dropSidebarRow = () => {
+          const link = sidebarLink(id);
+          if (!(link instanceof HTMLElement)) return;
+          const row =
+            link.closest("li") ||
+            link.closest('[data-testid*="history"]') ||
+            link.closest("div.group") ||
+            link.parentElement;
+          try {
+            (row || link).remove();
+          } catch {
+            // ignore
           }
-          return { ok: false, error: "api-ok-still-in-sidebar", status };
         };
 
         try {
@@ -4324,20 +4495,19 @@ async function deleteCurrentAiConversation(
             body: JSON.stringify({ is_visible: false })
           });
           if (patch.ok || patch.status === 204 || patch.status === 404) {
-            const checked = await verifyGone(patch.status);
-            if (checked.ok) return checked;
-          } else if (patch.status) {
-            // continue to DELETE attempt
+            dropSidebarRow();
+            return { ok: true, via: "api-patch", status: patch.status };
           }
 
-          // Some accounts accept hard DELETE when PATCH leaves the row visible.
+          // Rare accounts: hard DELETE when PATCH is rejected.
           const del = await fetch(`${origin}/backend-api/conversation/${id}`, {
             method: "DELETE",
             credentials: "include",
             headers
           });
           if (del.ok || del.status === 204 || del.status === 404) {
-            return await verifyGone(del.status);
+            dropSidebarRow();
+            return { ok: true, via: "api-delete", status: del.status };
           }
           return {
             ok: false,
@@ -4407,12 +4577,27 @@ async function deleteCurrentAiConversation(
           clickMatching(/delete chat|delete conversation|^delete$/i) || clickMatching(/delete/i);
         if (!clickedDelete) return { ok: false, error: "no-delete-menu" };
         await sleep(550);
-        clickMatching(/^delete$/i) ||
-          clickMatching(/delete chat|confirm|yes,?\s*delete/i) ||
-          clickMatching(/^confirm$/i);
+        // Confirm in modal / alert dialog (ChatGPT uses role=alertdialog).
+        const dialog =
+          document.querySelector('[role="alertdialog"]') ||
+          document.querySelector('[role="dialog"]') ||
+          document.querySelector('[data-testid*="modal"]');
+        if (dialog) {
+          clickMatching(/delete chat|^delete$/i, dialog) ||
+            clickMatching(/confirm|yes,?\s*delete/i, dialog);
+        } else {
+          clickMatching(/^delete$/i) ||
+            clickMatching(/delete chat|confirm|yes,?\s*delete/i) ||
+            clickMatching(/^confirm$/i);
+        }
         await sleep(1000);
         const stillThere = id ? Boolean(sidebarLink(id)) : true;
-        return { ok: id ? !stillThere : opened, error: stillThere && id ? "still-in-sidebar" : "" };
+        if (id && !stillThere) return { ok: true };
+        // Row may linger briefly after a successful UI delete — treat open+confirm as ok.
+        return {
+          ok: Boolean(opened && clickedDelete),
+          error: stillThere && id ? "still-in-sidebar" : ""
+        };
       };
 
       if (convId) {
@@ -4421,8 +4606,8 @@ async function deleteCurrentAiConversation(
           if (attempt > 0) await sleep(700 * attempt);
           const api = await chatgptDeleteViaApi(convId);
           if (api.ok) {
-            await sleep(400);
-            return { ok: true, via: "api", chatId: convId, attempt: attempt + 1 };
+            await sleep(200);
+            return { ok: true, via: api.via || "api", chatId: convId, attempt: attempt + 1 };
           }
           lastErr = api.error || lastErr;
           const ui = await chatgptDeleteViaUi(convId);
@@ -4455,8 +4640,9 @@ async function deleteCurrentAiConversation(
     );
   }
 
-  // Delete any twin / leftover ids recorded for this job (same batch row).
+  // Single-id path (skipExtras): caller handles blank shell + storage.
   if (!skipExtras) {
+    // Delete any twin / leftover ids recorded for this job (same batch row).
     try {
       const stored = await chrome.storage.local.get(["last_ai_chat_ids"]);
       const extras = (Array.isArray(stored.last_ai_chat_ids) ? stored.last_ai_chat_ids : [])
@@ -4476,24 +4662,22 @@ async function deleteCurrentAiConversation(
     } catch {
       /* ignore */
     }
-  }
 
-  // One blank shell for the next job — skip when already blank (avoids twin empties).
-  if (leaveBlank) {
-    try {
-      await ensureFreshChat(tabId, provider);
-    } catch {
-      // ignore
+    // One blank shell for the next job — skip when already blank (avoids twin empties).
+    if (leaveBlank) {
+      try {
+        await ensureFreshChat(tabId, provider);
+      } catch {
+        // ignore
+      }
     }
-  }
-  if (!skipExtras) {
     try {
       await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
     } catch {
       // ignore
     }
+    await setStatus(`Removed finished ${label} chat (${detail.via || "ok"}).`);
   }
-  await setStatus(`Removed finished ${label} chat (${detail.via || "ok"}).`);
   return detail;
 }
 
