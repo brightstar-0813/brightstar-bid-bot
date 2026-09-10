@@ -3273,14 +3273,50 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
 
       const firePointerClick = (el) => {
         if (!(el instanceof HTMLElement)) return false;
+        // One activation only. Dispatching click AND el.click() double-submits
+        // the same prompt (two identical user bubbles / twin chats).
+        if (typeof el.click === "function") {
+          el.click();
+          return true;
+        }
         const opts = { bubbles: true, cancelable: true, view: window };
-        el.dispatchEvent(new PointerEvent("pointerdown", { ...opts, pointerId: 1, pointerType: "mouse" }));
-        el.dispatchEvent(new MouseEvent("mousedown", opts));
-        el.dispatchEvent(new PointerEvent("pointerup", { ...opts, pointerId: 1, pointerType: "mouse" }));
-        el.dispatchEvent(new MouseEvent("mouseup", opts));
         el.dispatchEvent(new MouseEvent("click", opts));
-        if (typeof el.click === "function") el.click();
         return true;
+      };
+
+      /**
+       * Prefer insertText — ClipboardEvent paste turns large prompts into
+       * "Pasted text(….txt)" Document chips and ChatGPT may also keep the text,
+       * which looks like a double request and can fork a second chat.
+       */
+      const removePastedChips = () => {
+        const roots = [
+          document.querySelector("#prompt-textarea")?.closest("form"),
+          document.querySelector("form:has(#prompt-textarea)"),
+          document.querySelector("[class*='composer']"),
+          document.body
+        ].filter(Boolean);
+        const seen = new Set();
+        for (const root of roots) {
+          if (seen.has(root)) continue;
+          seen.add(root);
+          for (const node of root.querySelectorAll(
+            '[data-testid*="file" i], [data-testid*="attachment" i], [class*="attachment"], [class*="file-thumbnail"], button, a, span, div'
+          )) {
+            const label = `${node.getAttribute?.("aria-label") || ""} ${node.textContent || ""}`
+              .replace(/\s+/g, " ")
+              .trim();
+            if (!/pasted text|pasted\s*\(|\.txt\b/i.test(label)) continue;
+            const chip =
+              node.closest('[data-testid*="file"], [data-testid*="attachment"], [class*="attachment"], li, button, div') ||
+              node;
+            try {
+              chip.remove();
+            } catch {
+              /* ignore */
+            }
+          }
+        }
       };
 
       const setInputValue = (el, text) => {
@@ -3298,83 +3334,88 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
           }
           el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
           el.dispatchEvent(new Event("change", { bubbles: true }));
-          return;
+          return (el.value || "").trim().length > 20;
         }
-        if (el.isContentEditable) {
-          el.focus();
+        if (!el.isContentEditable) return false;
+        el.focus();
 
-          // Clear existing content first.
-          try {
-            document.execCommand("selectAll", false);
-            document.execCommand("delete", false);
-          } catch {
-            // ignore
-          }
+        // Clear existing content + any leftover Pasted-text chips first.
+        try {
+          document.execCommand("selectAll", false);
+          document.execCommand("delete", false);
+        } catch {
+          // ignore
+        }
+        removePastedChips();
 
-          // 1) Preferred: simulate paste (ProseMirror handles this and enables Send).
-          let inserted = false;
+        let inserted = false;
+        // 1) insertText — keeps prompt as composer text (no Document chip).
+        try {
+          inserted = Boolean(document.execCommand("insertText", false, text));
+        } catch {
+          inserted = false;
+        }
+        inserted = inserted || (el.innerText || el.textContent || "").trim().length > 40;
+
+        // 2) beforeinput + input events
+        if (!inserted) {
           try {
-            const dt = new DataTransfer();
-            dt.setData("text/plain", text);
-            const pasteEvent = new ClipboardEvent("paste", {
-              bubbles: true,
-              cancelable: true,
-              clipboardData: dt
-            });
-            inserted = el.dispatchEvent(pasteEvent) === false ||
-              (el.innerText || el.textContent || "").trim().length > 0;
-            // dispatchEvent returns false if prevented; ChatGPT often prevents default and inserts.
-            inserted = (el.innerText || el.textContent || "").trim().length > 20;
+            el.dispatchEvent(
+              new InputEvent("beforeinput", {
+                bubbles: true,
+                cancelable: true,
+                inputType: "insertText",
+                data: text
+              })
+            );
+            el.dispatchEvent(
+              new InputEvent("input", {
+                bubbles: true,
+                cancelable: true,
+                inputType: "insertText",
+                data: text
+              })
+            );
+            inserted = (el.innerText || el.textContent || "").trim().length > 40;
           } catch {
             inserted = false;
           }
+        }
 
-          // 2) insertText — also updates ProseMirror / enables Send.
-          if (!inserted) {
-            try {
-              inserted = document.execCommand("insertText", false, text);
-            } catch {
-              inserted = false;
-            }
-            inserted = inserted || (el.innerText || el.textContent || "").trim().length > 20;
-          }
-
-          // 3) beforeinput + insertText InputEvent
-          if (!inserted) {
-            try {
-              el.dispatchEvent(
-                new InputEvent("beforeinput", {
-                  bubbles: true,
-                  cancelable: true,
-                  inputType: "insertText",
-                  data: text
-                })
-              );
-              el.dispatchEvent(
-                new InputEvent("input", {
-                  bubbles: true,
-                  cancelable: true,
-                  inputType: "insertText",
-                  data: text
-                })
-              );
-              inserted = (el.innerText || el.textContent || "").trim().length > 20;
-            } catch {
-              inserted = false;
-            }
-          }
-
-          // 4) Last resort: DOM write (may leave Send disabled — we force-click later).
-          if (!inserted && !(el.innerText || el.textContent || "").trim()) {
-            el.innerHTML = "";
-            for (const line of String(text).split("\n")) {
-              const p = document.createElement("p");
-              p.textContent = line || "\u00a0";
-              el.appendChild(p);
-            }
-            el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+        // 3) Clipboard paste only as last resort (may create Pasted text chip).
+        if (!inserted) {
+          try {
+            const dt = new DataTransfer();
+            dt.setData("text/plain", text);
+            el.dispatchEvent(
+              new ClipboardEvent("paste", {
+                bubbles: true,
+                cancelable: true,
+                clipboardData: dt
+              })
+            );
+            inserted = (el.innerText || el.textContent || "").trim().length > 40;
+            // If ChatGPT turned this into a file chip, strip it and fall through to DOM write.
+            removePastedChips();
+            if ((el.innerText || el.textContent || "").trim().length < 40) inserted = false;
+          } catch {
+            inserted = false;
           }
         }
+
+        // 4) DOM write fallback
+        if (!inserted) {
+          el.innerHTML = "";
+          for (const line of String(text).split("\n")) {
+            const p = document.createElement("p");
+            p.textContent = line || "\u00a0";
+            el.appendChild(p);
+          }
+          el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+          inserted = (el.innerText || el.textContent || "").trim().length > 40;
+        }
+        removePastedChips();
+        return inserted;
       };
 
       const inputHasText = (el) => {
@@ -3624,26 +3665,30 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       }
 
       let filled = false;
-      for (let attempt = 0; attempt < 4; attempt += 1) {
+      // One insert only — looping setInputValue with paste created multiple
+      // "Pasted text….txt" chips and duplicate user bubbles.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        input = findInput() || input;
         input.focus();
         await sleep(150);
-        setInputValue(input, fullPrompt);
-        await sleep(500);
+        filled = Boolean(setInputValue(input, fullPrompt));
+        await sleep(400);
+        removePastedChips();
         input = findInput() || input;
-        if (inputHasText(input)) {
-          filled = true;
+        if (filled && inputHasText(input) && (input.innerText || input.textContent || "").trim().length > 80) {
           break;
         }
+        filled = false;
       }
       if (!filled) {
         throw new Error(
           "Prompt text did not appear in the ChatGPT input. Keep the ChatGPT tab visible and try again."
         );
       }
+      removePastedChips();
 
-      // Wait for the real Send control (not the mic) to enable after ProseMirror paste.
-      // After the first Send click, only wait for confirmation — never click Send again
-      // (that is what created two identical resume prompts in the same chat).
+      // Wait for the real Send control (not the mic) to enable after insert.
+      // After the first Send click, only wait for confirmation — never click Send again.
       let sent = false;
       let clickedSend = false;
       for (let i = 0; i < 48; i += 1) {
@@ -3653,14 +3698,14 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
           break;
         }
         if (clickedSend) {
-          // Already submitted once — give the user bubble / stop button time to appear.
           await sleep(400);
           continue;
         }
         const btn = findSendButton();
         if (btn && isSendEnabled(btn)) {
-          if (sendMessage(input, { force: false })) clickedSend = true;
-          await sleep(700);
+          // Single click only — do not also submit form / press Enter in the same turn.
+          if (clickSendButton({ force: false })) clickedSend = true;
+          await sleep(800);
           if (
             promptWasSent(findInput() || input, usersBefore) ||
             composerLooksCleared(findInput() || input)
@@ -3669,20 +3714,12 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
             break;
           }
         } else {
-          // Nudge the editor so ChatGPT swaps mic → Send (do not re-send).
           input.focus();
           input.dispatchEvent(
             new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " })
           );
           await sleep(200);
-          // Re-assert prompt if ChatGPT wiped/partialled the composer — only before first send.
-          if (
-            !inputHasText(input) ||
-            (input.innerText || input.textContent || "").trim().length < 40
-          ) {
-            setInputValue(input, fullPrompt);
-            await sleep(350);
-          }
+          // Do not re-insert the full prompt here (causes Pasted-text / double bubbles).
         }
         await sleep(250);
       }
@@ -3691,8 +3728,9 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
       if (!sent && !clickedSend) {
         for (let round = 0; round < 2; round += 1) {
           input = findInput() || input;
-          if (!inputHasText(input)) {
+          if (!inputHasText(input) || (input.innerText || input.textContent || "").trim().length < 40) {
             setInputValue(input, fullPrompt);
+            removePastedChips();
             await sleep(400);
           }
           input.focus();
@@ -3713,7 +3751,6 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
           }
         }
       } else if (!sent && clickedSend) {
-        // One more wait after a single click before declaring failure.
         for (let w = 0; w < 10; w += 1) {
           await sleep(400);
           const afterWait = findInput() || input;
@@ -3791,13 +3828,12 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
 
           const firePointerClick = (el) => {
             if (!(el instanceof HTMLElement)) return false;
-            const opts = { bubbles: true, cancelable: true, view: window };
-            el.dispatchEvent(new PointerEvent("pointerdown", { ...opts, pointerId: 1, pointerType: "mouse" }));
-            el.dispatchEvent(new MouseEvent("mousedown", opts));
-            el.dispatchEvent(new PointerEvent("pointerup", { ...opts, pointerId: 1, pointerType: "mouse" }));
-            el.dispatchEvent(new MouseEvent("mouseup", opts));
-            el.dispatchEvent(new MouseEvent("click", opts));
-            if (typeof el.click === "function") el.click();
+            // One activation only — click + el.click() double-submits.
+            if (typeof el.click === "function") {
+              el.click();
+              return true;
+            }
+            el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
             return true;
           };
 
