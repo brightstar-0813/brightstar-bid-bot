@@ -52,6 +52,13 @@ test("bankAnswerFitsQuestion accepts Yes/No for hold-cert prompts", () => {
   );
 });
 
+test("bankAnswerFitsQuestion rejects bare Yes/No on non-question labels", () => {
+  assert.equal(bankAnswerFitsQuestion("English US (English US)", "Yes"), false);
+  assert.equal(bankAnswerFitsQuestion("Preferred language", "No"), false);
+  assert.equal(bankAnswerFitsQuestion("Are you authorized to work in the US?", "Yes"), true);
+  assert.equal(bankAnswerFitsQuestion("Choose Password:", "secret"), false);
+});
+
 test("compactApplicantContext includes role, skills, and certs", () => {
   const ctx = compactApplicantContext({
     firstName: "Edrwin",

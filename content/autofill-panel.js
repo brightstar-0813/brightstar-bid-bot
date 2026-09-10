@@ -2,7 +2,7 @@
  * In-page autofill sidebar (Jobright-style). Top frame only.
  */
 (() => {
-  const PANEL_BUILD = "2026-09-09.panel14";
+  const PANEL_BUILD = "2026-09-10.panel15";
   if (window !== window.top) return;
   if (window.__brightstarAutofillPanelBuild === PANEL_BUILD) return;
   window.__brightstarAutofillPanelBuild = PANEL_BUILD;
@@ -92,7 +92,8 @@
     site: "",
     siteLabel: "",
     resultStatus: "",
-    stats: { filled: 0, bank: 0, ai: 0, steps: 0 }
+    stats: { filled: 0, bank: 0, ai: 0, steps: 0 },
+    answerFieldId: ""
   };
 
   const fieldStatusMap = new Map();
@@ -134,6 +135,30 @@
     return { needs, matched, filled, optional };
   }
 
+  function renderAnswerEditor(f) {
+    if (state.answerFieldId !== f.id) return "";
+    const opts = Array.isArray(f.options) ? f.options.filter(Boolean).slice(0, 40) : [];
+    const choice =
+      opts.length >= 2 ||
+      ["select", "radio", "checkbox", "combobox", "choice"].includes(String(f.type || "").toLowerCase());
+    if (choice && opts.length) {
+      const optionsHtml = [
+        `<option value="">Select…</option>`,
+        ...opts.map(
+          (o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`
+        )
+      ].join("");
+      return `<div class="field-answer" data-answer-for="${escapeHtml(f.id)}">
+        <select class="field-answer-input" data-field-id="${escapeHtml(f.id)}">${optionsHtml}</select>
+        <button type="button" class="field-answer-btn" data-apply-id="${escapeHtml(f.id)}">Apply</button>
+      </div>`;
+    }
+    return `<div class="field-answer" data-answer-for="${escapeHtml(f.id)}">
+      <input type="text" class="field-answer-input" data-field-id="${escapeHtml(f.id)}" placeholder="Type answer…" />
+      <button type="button" class="field-answer-btn" data-apply-id="${escapeHtml(f.id)}">Apply</button>
+    </div>`;
+  }
+
   function renderFieldRow(f) {
     const st = fieldStatusMap.get(f.id) || (f.matchSource === "filled" ? "done" : "pending");
     const badge =
@@ -147,20 +172,30 @@
               ? `<span class="field-badge">extra</span>`
               : f.matchSource === "bank"
                 ? `<span class="field-badge bank">bank</span>`
-              : f.matchSource === "unmatched"
-                ? `<span class="field-badge warn">needs AI</span>`
-                : f.matchSource === "optional"
-                  ? `<span class="field-badge">skip</span>`
-                  : f.required
-                    ? `<span class="field-badge">req</span>`
-                    : "";
+                : f.matchSource === "credential"
+                  ? `<span class="field-badge">login</span>`
+                  : f.matchSource === "unmatched"
+                    ? `<span class="field-badge warn">needs you</span>`
+                    : f.matchSource === "optional"
+                      ? `<span class="field-badge">skip</span>`
+                      : f.required
+                        ? `<span class="field-badge">req</span>`
+                        : "";
     const statusClass =
       st === "filling" ? "filling" : st === "done" ? "done" : st === "error" ? "error" : st === "warn" ? "warn" : "pending";
     const req = f.required ? ` data-required="1"` : "";
-    return `<li class="field-row" data-field-id="${escapeHtml(f.id)}"${req} title="Click to highlight on page">
-      <span class="field-status ${statusClass}"></span>
-      <span class="field-label">${escapeHtml(f.label)}</span>
-      ${badge}
+    const open = state.answerFieldId === f.id ? ` data-open="1"` : "";
+    const isNeed = f.matchSource === "unmatched" && st !== "done";
+    const title = isNeed
+      ? "Click to answer here or highlight on page"
+      : "Click to highlight on page";
+    return `<li class="field-row${isNeed ? " needs-answer" : ""}" data-field-id="${escapeHtml(f.id)}"${req}${open} title="${title}">
+      <div class="field-row-main">
+        <span class="field-status ${statusClass}"></span>
+        <span class="field-label">${escapeHtml(f.label)}</span>
+        ${badge}
+      </div>
+      ${isNeed ? renderAnswerEditor(f) : ""}
     </li>`;
   }
 
@@ -408,13 +443,38 @@
       updateUi();
     });
     qs("#fieldList")?.addEventListener("click", (e) => {
+      const applyBtn = e.target?.closest?.("[data-apply-id]");
+      if (applyBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        applyPanelAnswer(applyBtn.getAttribute("data-apply-id")).catch(() => {});
+        return;
+      }
+      if (e.target?.closest?.(".field-answer")) {
+        e.stopPropagation();
+        return;
+      }
       const row = e.target?.closest?.("[data-field-id]");
       if (!row) return;
       const fieldId = row.getAttribute("data-field-id");
       if (!fieldId) return;
+      const field = state.fields.find((f) => f.id === fieldId);
+      if (field?.matchSource === "unmatched") {
+        state.answerFieldId = state.answerFieldId === fieldId ? "" : fieldId;
+        updateUi();
+      }
       chrome.runtime
         .sendMessage({ type: "autofill_panel_highlight", fieldId })
         .catch(() => {});
+    });
+
+    qs("#fieldList")?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      const input = e.target?.closest?.(".field-answer-input");
+      if (!input) return;
+      e.preventDefault();
+      const fieldId = input.getAttribute("data-field-id");
+      if (fieldId) applyPanelAnswer(fieldId).catch(() => {});
     });
 
     chrome.storage.local.get(["allowSubmitOnAssist", "last_job_title", "last_job_company"], (data) => {
@@ -608,6 +668,9 @@
     state.statusText = result.fields?.length
       ? `${result.fields.length} field${result.fields.length === 1 ? "" : "s"} detected`
       : "Scan complete";
+    if (state.answerFieldId && !state.fields.some((f) => f.id === state.answerFieldId)) {
+      state.answerFieldId = "";
+    }
     fieldStatusMap.clear();
     for (const f of state.fields) {
       if (f.matchSource === "filled") fieldStatusMap.set(f.id, "done");
@@ -617,6 +680,50 @@
       ? Math.round((filled / state.fields.length) * 100)
       : 0;
     updateUi();
+  }
+
+  async function applyPanelAnswer(fieldId) {
+    const id = String(fieldId || "").trim();
+    if (!id || state.running) return;
+    const field = state.fields.find((f) => f.id === id);
+    if (!field) return;
+    const wrap = qs(`[data-answer-for="${CSS.escape(id)}"]`);
+    const input = wrap?.querySelector?.(".field-answer-input");
+    const answer = String(input?.value || "").trim();
+    if (!answer) {
+      state.statusText = "Enter an answer first.";
+      updateUi();
+      return;
+    }
+    fieldStatusMap.set(id, "filling");
+    state.statusText = "Applying answer…";
+    updateUi();
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: "autofill_panel_answer",
+        fieldId: id,
+        label: field.label || "",
+        answer,
+        fieldType: field.type || "text",
+        options: field.options || []
+      });
+      if (!res?.ok) {
+        fieldStatusMap.set(id, "error");
+        state.statusText = res?.error || "Could not apply answer.";
+        updateUi();
+        return;
+      }
+      fieldStatusMap.set(id, "done");
+      fieldStatusMap.set(`${id}:source`, "bank");
+      state.answerFieldId = "";
+      state.statusText = "Answer saved to Q&A bank.";
+      updateUi();
+      runScan().catch(() => {});
+    } catch (err) {
+      fieldStatusMap.set(id, "error");
+      state.statusText = String(err?.message || err);
+      updateUi();
+    }
   }
 
   async function runScan() {

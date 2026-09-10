@@ -8,6 +8,7 @@
  */
 
 import { isJunkAutofillAnswer, isJunkQuestionLabel } from "./autofill-junk.js";
+import { shouldOverwriteQaRecord } from "./autofill-classify.js";
 
 export const QA_FIELD_TYPES = [
   { value: "text", label: "Text field" },
@@ -217,6 +218,13 @@ export async function saveQa({
   const existing = await reqToPromise(
     index.get(IDBKeyRange.only([profileId, questionNorm]))
   ).catch(() => null);
+
+  if (
+    existing &&
+    !shouldOverwriteQaRecord(existing, { source, answer: a, silent })
+  ) {
+    return existing;
+  }
 
   const record = existing
     ? {

@@ -357,8 +357,8 @@
 
 .field-row {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 6px 0;
   border-bottom: 1px solid #f0f2f5;
   font-size: 12px;
@@ -366,12 +366,61 @@
   border-radius: 4px;
 }
 
+.field-row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .field-row:hover {
   background: #f7faf8;
 }
 
+.field-row[data-open="1"] {
+  background: #f3faf6;
+}
+
 .field-row:last-child {
   border-bottom: none;
+}
+
+.field-answer {
+  display: flex;
+  gap: 6px;
+  padding-left: 24px;
+  cursor: default;
+}
+
+.field-answer-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #c9d4cc;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  color: #1a1f2e;
+  background: #fff;
+}
+
+.field-answer-input:focus {
+  outline: none;
+  border-color: #3dd06f;
+  box-shadow: 0 0 0 2px rgba(61, 208, 111, 0.2);
+}
+
+.field-answer-btn {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #3dd06f;
+  color: #0a2e16;
+  font: 700 11px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.field-answer-btn:hover {
+  background: #34c264;
 }
 
 .field-status {

@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-09.scan06";
+  const SCRIPT_BUILD = "2026-09-10.panel15";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -403,7 +403,19 @@
     middleName: ["middle name", "middle initial", "mi"],
     preferredName: ["preferred name", "preferred first name", "nickname", "what should we call you"],
     email: ["email", "e-mail", "email address", "work email"],
-    phone: ["phone number", "mobile phone", "cell phone", "telephone number", "primary phone"],
+    phone: [
+      "phone number",
+      "mobile phone",
+      "cell phone",
+      "telephone number",
+      "primary phone",
+      "home phone",
+      "work phone",
+      "mobile",
+      "cell",
+      "telephone",
+      "phone"
+    ],
     phoneDeviceType: ["phone device type", "device type"],
     phoneCountryCode: ["country phone code", "phone country code", "country code"],
     country: ["country", "country/region"],
@@ -615,7 +627,13 @@
       "how did you find",
       "general source",
       "source information",
-      "where did you hear"
+      "where did you hear",
+      "specific source",
+      "referral name",
+      "referral source",
+      "please specify your specific source",
+      "source/referral",
+      "source / referral"
     ],
     signatureName: [
       "signature",
@@ -627,7 +645,15 @@
       "name as it appears"
     ],
     signatureDate: ["today's date", "todays date", "signature date", "date signed"],
-    selfIdentifyLanguage: ["language", "preferred language", "select a language"],
+    selfIdentifyLanguage: [
+      "language",
+      "preferred language",
+      "select a language",
+      "english us",
+      "english (us)",
+      "application language",
+      "language preference"
+    ],
 
     gender: ["gender", "gender identity", "sex", "please select your gender"],
     hispanicLatino: [
@@ -1285,6 +1311,7 @@
   function matchSourceRank(src) {
     const order = {
       filled: 60,
+      credential: 55,
       profile: 50,
       bank: 40,
       extra: 35,
@@ -1292,6 +1319,49 @@
       unmatched: 10
     };
     return order[src] || 0;
+  }
+
+  const OPTIONAL_EMPTY_PROFILE_KEYS = new Set([
+    "addressLine2",
+    "middleName",
+    "preferredName",
+    "selfIdentifyLanguage",
+    "portfolioUrl",
+    "githubUrl",
+    "phoneDeviceType",
+    "phoneCountryCode"
+  ]);
+
+  const REQUIRED_CONTACT_PROFILE_KEYS = new Set([
+    "firstName",
+    "lastName",
+    "email",
+    "phone",
+    "addressLine1",
+    "city",
+    "state",
+    "zipCode",
+    "country"
+  ]);
+
+  function isPasswordFieldLabel(label) {
+    return /\b(password|passcode|retype password|confirm password|choose password|new password|current password)\b/i.test(
+      String(label || "")
+    );
+  }
+
+  function isPasswordLikeControl(type, label) {
+    const t = String(type || "").toLowerCase();
+    if (t === "password") return true;
+    return isPasswordFieldLabel(label);
+  }
+
+  function classifyEmptyProfileKey(profileKey, { required = false } = {}) {
+    const key = String(profileKey || "").trim();
+    if (!key) return "unmatched";
+    if (OPTIONAL_EMPTY_PROFILE_KEYS.has(key)) return "optional";
+    if (!required && !REQUIRED_CONTACT_PROFILE_KEYS.has(key)) return "optional";
+    return "unmatched";
   }
 
   function dedupeScanFields(fields = []) {
@@ -4129,6 +4199,14 @@
         ...document.querySelectorAll(`[data-resume-bot-choice-qid="${CSS.escape(id)}"]`)
       ];
       if (!els.length) continue;
+
+      // When the inventory listed concrete options, refuse answers that match none.
+      const declared = Array.isArray(row.options) ? row.options.filter(Boolean) : [];
+      if (declared.length) {
+        const hit = declared.some((opt) => optionMatches(opt, answer));
+        if (!hit) continue;
+      }
+
       let ok = false;
       for (const el of els) {
         if (isEditorChrome(el) || nearestEssayEditor(el)) continue;
@@ -4140,6 +4218,66 @@
       if (ok) filled.push({ id, preview: answer.slice(0, 80) });
     }
     return { filledCount: filled.length, filled };
+  }
+
+  /**
+   * Fill a single field by stable panel id (in-panel blocker answers).
+   */
+  async function fillPanelFieldAnswer({ fieldId = "", label = "", answer = "", fieldType = "" } = {}) {
+    suppressLearn();
+    const targetId = String(fieldId || "").trim();
+    const value = String(answer || "").trim();
+    if (!targetId || !value) return { ok: false, error: "Missing field or answer." };
+    if (isPasswordLikeControl(fieldType, label) || isPasswordFieldLabel(label)) {
+      return { ok: false, error: "Password fields are not filled from the panel." };
+    }
+
+    // Prefer elements already stamped during unmatched collection.
+    let el =
+      document.querySelector(`[data-resume-bot-qid="${CSS.escape(targetId)}"]`) ||
+      document.querySelector(`[data-resume-bot-choice-qid="${CSS.escape(targetId)}"]`);
+
+    if (!el) {
+      for (const node of collectFillableControls()) {
+        const lbl = sanitizeFieldLabel(
+          displayQuestionLabel(node) || questionTextForAi(node) || labelTextForControl(node) || ""
+        );
+        if (!lbl) continue;
+        const ft = inferFieldType(node);
+        if (stableQuestionId(lbl, ft, node) === targetId) {
+          el = node;
+          break;
+        }
+      }
+    }
+
+    if (!el) {
+      for (const group of collectChoiceChipGroups()) {
+        if (group.kind === "start") continue;
+        const q = group.question || "";
+        if (!q) continue;
+        const id = stableQuestionId(q, "select", group.buttons?.[0], "rbc");
+        if (id !== targetId) continue;
+        const btn = (group.buttons || []).find((b, i) =>
+          optionMatches(group.labels?.[i] || chipChoiceText(b), value)
+        );
+        if (btn) {
+          btn.click?.();
+          return { ok: true, filled: true, id: targetId, preview: value.slice(0, 80) };
+        }
+        return { ok: false, error: "No matching choice option." };
+      }
+      return { ok: false, error: "Field not found on this step." };
+    }
+
+    const type = (el.type || "").toLowerCase();
+    if (type === "password") {
+      return { ok: false, error: "Password fields are not filled from the panel." };
+    }
+
+    const ok = await fillControl(el, value, null);
+    if (!ok) return { ok: false, error: "Could not fill this field." };
+    return { ok: true, filled: true, id: targetId, preview: value.slice(0, 80) };
   }
 
   function collectFillableControls() {
@@ -5398,10 +5536,15 @@
    * Dry-run inventory of fillable fields for the autofill panel (no values written).
    * @param {object} applicantInfo
    * @param {object} extras
-   * @param {{ inventoryOnly?: boolean }} [opts] inventoryOnly skips opening combobox menus (panel scan).
+   * @param {{ inventoryOnly?: boolean, hasCredentials?: boolean, credentials?: object }} [opts]
    */
   async function scanApplicationFields(applicantInfo = {}, extras = {}, opts = {}) {
     const inventoryOnly = opts.inventoryOnly !== false;
+    const hasCredentials = Boolean(
+      opts.hasCredentials ||
+        String(opts.credentials?.password || "").trim() ||
+        String(opts.credentials?.username || "").trim()
+    );
     const probe = probeApplicationForm();
     if (!probe.isApplicationForm && !probe.hasFormFields) {
       return {
@@ -5489,15 +5632,18 @@
         if (groupOpts.length >= 2) options = groupOpts.slice(0, 40);
       }
 
+      const required = isControlRequired(el) && !isConditionalFollowUpLabel(label);
       let matchSource = "unmatched";
       if (hasValue) {
         matchSource = "filled";
+      } else if (isPasswordLikeControl(type, label)) {
+        matchSource = hasCredentials ? "credential" : "optional";
       } else if (isConditionalFollowUpLabel(label) && type === "checkbox") {
         // "If Yes, select agency…" — leaving all unchecked is the normal answer.
         matchSource = "optional";
       } else if (profileKey) {
         const val = resolveApplicantValue(applicantInfo, profileKey);
-        matchSource = val ? "profile" : "unmatched";
+        matchSource = val ? "profile" : classifyEmptyProfileKey(profileKey, { required });
       } else if (matchExtraForScan(label, extras, options)) {
         matchSource = "extra";
       }
@@ -5511,7 +5657,7 @@
         id: stableQuestionId(label, fieldType, idSeed),
         label,
         type: fieldType,
-        required: isControlRequired(el) && !isConditionalFollowUpLabel(label),
+        required: required && matchSource !== "optional",
         matchSource,
         profileKey: profileKey || null,
         currentValue: currentValue.slice(0, 100),
@@ -5554,12 +5700,13 @@
 
       let matchSource = "unmatched";
       if (profileKey && resolveApplicantValue(applicantInfo, profileKey)) matchSource = "profile";
+      else if (profileKey) matchSource = classifyEmptyProfileKey(profileKey, { required: true });
       else if (matchExtraForScan(label, extras, options)) matchSource = "extra";
       pushField({
         id: stableQuestionId(label, "select", group.buttons?.[0], "rbc"),
         label,
         type: "select",
-        required: true,
+        required: matchSource !== "optional",
         matchSource,
         profileKey: profileKey || null,
         currentValue: "",
@@ -7241,7 +7388,11 @@
     if (isInstructionalFieldLabel(clean) || isPlaceholderFieldLabel(clean)) return false;
     if (/^(select\.\.\.?|please select|choose|--)$/i.test(ans)) return false;
     const labelNorm = normalize(clean);
-    if (!labelNorm || labelNorm.length < 6) return false;
+    const choiceType = ["select", "combobox", "checkbox", "radio", "choice"].includes(
+      String(fieldType || "").toLowerCase()
+    );
+    // Choice labels can be shorter ("Source"); free-text needs a real question.
+    if (!labelNorm || labelNorm.length < (choiceType ? 3 : 6)) return false;
     if (learnSentByQuestion.get(`qa:${labelNorm}`) === ans) return false;
     learnSentByQuestion.set(`qa:${labelNorm}`, ans);
     try {
@@ -7361,6 +7512,18 @@
   function onLearnEvent(event) {
     try {
       maybeCaptureLearn(event.target);
+      // Delayed sweep so React-Select chips / referral text settle before banking.
+      const type = event?.type || "";
+      if (type === "change" || type === "focusout") {
+        setTimeout(() => {
+          try {
+            maybeCaptureLearn(event.target);
+            bankFilledChoicesAfterUserPick();
+          } catch {
+            /* ignore */
+          }
+        }, 350);
+      }
     } catch {
       /* never let capture break the page */
     }
@@ -8327,7 +8490,9 @@
     }
     if (message?.type === "scan_application_fields") {
       scanApplicationFields(message.applicantInfo || {}, message.extras || {}, {
-        inventoryOnly: message.inventoryOnly !== false
+        inventoryOnly: message.inventoryOnly !== false,
+        hasCredentials: Boolean(message.hasCredentials),
+        credentials: message.credentials || {}
       })
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
@@ -8350,6 +8515,17 @@
     if (message?.type === "autofill_choice_answers") {
       fillChoiceAnswers(message.answers || [])
         .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+      return true;
+    }
+    if (message?.type === "autofill_panel_field_answer") {
+      fillPanelFieldAnswer({
+        fieldId: message.fieldId || message.id || "",
+        label: message.label || "",
+        answer: message.answer || "",
+        fieldType: message.fieldType || ""
+      })
+        .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;
     }

@@ -151,26 +151,49 @@ export function bankAnswerFitsQuestion(questionLabel, answer) {
   const q = String(questionLabel || "");
   const a = String(answer || "").trim();
   if (!a) return false;
-  if (!isCertificationQuestion(q)) return true;
-  // Yes/No hold-cert questions may legitimately be answered with Yes or No alone.
-  if (
-    /^(yes|no)$/i.test(a) &&
-    (/\b(do you|have you|hold|any current|currently hold)\b/i.test(q) || /\bany\b.{0,40}\bcertif/i.test(q))
-  ) {
+
+  // Never bank/apply password-like values into unrelated questions.
+  if (/\b(password|passcode|otp|ssn|social security)\b/i.test(q)) return false;
+
+  if (isCertificationQuestion(q)) {
+    // Yes/No hold-cert questions may legitimately be answered with Yes or No alone.
+    if (
+      /^(yes|no)$/i.test(a) &&
+      (/\b(do you|have you|hold|any current|currently hold)\b/i.test(q) || /\bany\b.{0,40}\bcertif/i.test(q))
+    ) {
+      return true;
+    }
+    if (!/\b(certif|credential|administrator|architect|platform developer|app builder|consultant)\b/i.test(a)) {
+      return false;
+    }
+    if (/stakeholder|business objectives|adaptable for future/i.test(a) && !/\bcertified\b/i.test(a)) {
+      return false;
+    }
+    if (/application architect/i.test(q) && /\badministrator\b/i.test(q)) {
+      const mentionsArch = /application architect/i.test(a);
+      const mentionsAdmin = /\badministrator\b/i.test(a);
+      const mentionsBoth = /\bboth\b/i.test(a);
+      if (!(mentionsBoth || (mentionsArch && mentionsAdmin))) return false;
+    }
     return true;
   }
-  if (!/\b(certif|credential|administrator|architect|platform developer|app builder|consultant)\b/i.test(a)) {
+
+  // Short generic answers are only valid for clear yes/no / decline prompts.
+  if (/^(yes|no|y|n)$/i.test(a)) {
+    if (
+      /\b(are you|do you|have you|will you|can you|were you|is there|did you)\b/i.test(q) ||
+      /\b(yes\/no|y\/n)\b/i.test(q) ||
+      /\?/.test(q)
+    ) {
+      return true;
+    }
+    // Non-question labels (source lists, language pickers) should not eat bare Yes/No.
     return false;
   }
-  if (/stakeholder|business objectives|adaptable for future/i.test(a) && !/\bcertified\b/i.test(a)) {
-    return false;
+  if (/^(n\/?a|na|none|nil|-)$/i.test(a)) {
+    return /\b(n\/?a|not applicable|if none|if not|optional|none)\b/i.test(q);
   }
-  if (/application architect/i.test(q) && /\badministrator\b/i.test(q)) {
-    const mentionsArch = /application architect/i.test(a);
-    const mentionsAdmin = /\badministrator\b/i.test(a);
-    const mentionsBoth = /\bboth\b/i.test(a);
-    if (!(mentionsBoth || (mentionsArch && mentionsAdmin))) return false;
-  }
+
   return true;
 }
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { normalizeQuestion, questionSimilarity } from "../qa-store.js";
+import { shouldOverwriteQaRecord } from "../autofill-classify.js";
 
 test("normalizeQuestion strips noise and punctuation", () => {
   assert.equal(normalizeQuestion("First Name*"), "first name");
@@ -15,4 +16,14 @@ test("questionSimilarity scores near duplicates higher", () => {
   const c = normalizeQuestion("What is your desired salary?");
   assert.ok(questionSimilarity(a, b) > 0.5);
   assert.ok(questionSimilarity(a, c) < 0.4);
+});
+
+test("overwrite gate blocks scraped clobber of user answers", () => {
+  assert.equal(
+    shouldOverwriteQaRecord(
+      { source: "ai", answer: "Employee Referral" },
+      { source: "scraped", answer: "Other", silent: true }
+    ),
+    false
+  );
 });

@@ -26,6 +26,12 @@ import {
   normalizeChoiceAnswerValue,
   isTrackingNoiseLabel
 } from "./autofill-junk.js";
+import {
+  choiceAnswerMatchesOptions,
+  isPasswordFieldLabel,
+  isShortGenericAnswer,
+  matchSourceRank
+} from "./autofill-classify.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { pickCitizenshipOption, normalizeCitizenshipLabel } from "./autofill-citizenship.js";
 import { getEnv } from "./env.js";
@@ -1176,6 +1182,73 @@ export async function highlightFieldOnTab(tabId, fieldId) {
   return { ok: false, error: "Field not found on this page." };
 }
 
+/**
+ * Apply a user answer from the in-page panel to the matching field, then bank it.
+ */
+export async function applyPanelFieldAnswerOnTab(
+  tabId,
+  { fieldId = "", label = "", answer = "", fieldType = "", options = [] } = {}
+) {
+  if (!tabId) return { ok: false, error: "Missing tab." };
+  const value = String(answer || "").trim();
+  const id = String(fieldId || "").trim();
+  const question = String(label || "").trim();
+  if (!id || !value) return { ok: false, error: "Missing field or answer." };
+  if (isPasswordFieldLabel(question) || String(fieldType).toLowerCase() === "password") {
+    return { ok: false, error: "Password fields are not filled from the panel." };
+  }
+
+  const choiceLike = ["select", "combobox", "checkbox", "radio", "choice"].includes(
+    String(fieldType || "").toLowerCase()
+  );
+  if (choiceLike && Array.isArray(options) && options.length) {
+    if (!choiceAnswerMatchesOptions(value, options)) {
+      return { ok: false, error: "Answer does not match an available option." };
+    }
+  }
+
+  await ensureAutofillScript(tabId);
+  const frameResults = await sendMessageToAllFrames(tabId, {
+    type: "autofill_panel_field_answer",
+    fieldId: id,
+    label: question,
+    answer: value,
+    fieldType: fieldType || "text"
+  });
+  let filled = null;
+  for (const row of frameResults || []) {
+    if (row?.ok && row?.filled) {
+      filled = row;
+      break;
+    }
+  }
+  if (!filled) {
+    const err =
+      (frameResults || []).find((r) => r?.error)?.error || "Field not found on this page.";
+    return { ok: false, error: err };
+  }
+
+  if (question && !isJunkQuestionLabel(question) && !isSensitiveProfileQuestion(question)) {
+    const { person } = await getApplicantInfoForAutofill();
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    await saveQa({
+      profileId: person?.id || "",
+      question,
+      answer: value,
+      fieldType: fieldType || (choiceLike ? "select" : "text"),
+      source: "user",
+      site: tab?.url ? hostnameFromUrl(tab.url) : ""
+    }).catch(() => null);
+    try {
+      await chrome.storage.local.set({ qa_bank_version: Date.now() });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { ok: true, ...filled };
+}
+
 function mergeScanFrameResults(frameResults = []) {
   const all = [];
   let bestMeta = {
@@ -1205,14 +1278,6 @@ function mergeScanFrameResults(frameResults = []) {
 }
 
 function dedupeScanFieldsByLabel(fields = []) {
-  const rank = {
-    filled: 60,
-    profile: 50,
-    bank: 40,
-    extra: 35,
-    optional: 20,
-    unmatched: 10
-  };
   const best = new Map();
   for (const row of fields || []) {
     const label = String(row?.label || "")
@@ -1229,9 +1294,12 @@ function dedupeScanFieldsByLabel(fields = []) {
       best.set(norm, next);
       continue;
     }
-    const pr = rank[prev.matchSource] || 0;
-    const nr = rank[next.matchSource] || 0;
+    const pr = matchSourceRank(prev.matchSource);
+    const nr = matchSourceRank(next.matchSource);
     if (nr > pr) best.set(norm, next);
+    else if (nr === pr && (next.options?.length || 0) > (prev.options?.length || 0)) {
+      best.set(norm, next);
+    }
   }
   return [...best.values()];
 }
@@ -1323,6 +1391,7 @@ export async function bankScrapedQaFromFields(fields = [], { profileId = "", sit
     let answer = String(field?.currentValue || "").trim();
     if (!label || !answer || answer === "checked") continue;
     if (field.type === "file") continue;
+    if (isPasswordFieldLabel(label) || String(field.type || "").toLowerCase() === "password") continue;
     if (field.profileKey && skipProfileKeys.has(field.profileKey)) continue;
     if (isJunkQuestionLabel(label) || isSensitiveProfileQuestion(label)) continue;
     if (isJunkAutofillAnswer(answer, { questionLabel: label })) continue;
@@ -1359,22 +1428,31 @@ export async function bankScrapedQaFromFields(fields = [], { profileId = "", sit
 
 export async function scanFieldsOnTab(tabId) {
   await ensureAutofillScript(tabId);
-  const { applicantInfo, extras } = await getApplicantInfoForAutofill();
+  const { applicantInfo, extras, credentials, person } = await getApplicantInfoForAutofill();
+  const atsCreds = credentials || personToAtsCredentials(person);
+  const hasCredentials = Boolean(
+    String(atsCreds?.password || "").trim() || String(atsCreds?.username || "").trim()
+  );
   const frameResults = await sendMessageToAllFrames(tabId, {
     type: "scan_application_fields",
     applicantInfo,
     extras,
-    inventoryOnly: true
+    inventoryOnly: true,
+    hasCredentials,
+    credentials: {
+      password: String(atsCreds?.password || "").trim() ? "1" : "",
+      username: String(atsCreds?.username || "").trim()
+    }
   });
   const scan = mergeScanFrameResults(frameResults);
-  const person = await getActivePerson();
+  const activePerson = person || (await getActivePerson());
   const deduped = dedupeScanFieldsByLabel(scan.fields || []);
-  const annotated = await annotateScanFieldsWithBank(deduped, person?.id || "");
-  const { complete, missing } = applyCompleteness(person || {});
+  const annotated = await annotateScanFieldsWithBank(deduped, activePerson?.id || "");
+  const { complete, missing } = applyCompleteness(activePerson || {});
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const site = tab?.url ? hostnameFromUrl(tab.url) : "";
   const scrapedFields = collectScanFieldsFromFrames(frameResults);
-  bankScrapedQaFromFields(scrapedFields, { profileId: person?.id || "", site }).catch(() => {});
+  bankScrapedQaFromFields(scrapedFields, { profileId: activePerson?.id || "", site }).catch(() => {});
   const stored = await chrome.storage.local.get(["last_job_title", "last_job_company"]);
   const siteId = tab?.url ? applySiteFromUrl(tab.url) : "";
   return {
@@ -1509,6 +1587,16 @@ function essayBankMatchIsSpecific(questionLabel, recordQuestion) {
   return questionSimilarity(a, b) >= (isCertificationQuestion(a) ? 0.9 : 0.78);
 }
 
+/** Short Yes/No / N/A bank hits need a closer question match than long essay answers. */
+function shortAnswerBankMatchIsSpecific(questionLabel, recordQuestion, answer) {
+  if (!isShortGenericAnswer(answer)) return true;
+  const a = normalizeQuestion(questionLabel);
+  const b = normalizeQuestion(recordQuestion || "");
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return questionSimilarity(a, b) >= 0.9;
+}
+
 async function loadAutofillCertifications(applicantInfo = {}) {
   const chunks = [applicantInfo.certifications];
   try {
@@ -1594,10 +1682,12 @@ async function resolveQuestionAnswers(
       bankAnswer &&
       !isJunkAutofillAnswer(bankAnswer, { questionLabel: q.label }) &&
       bankAnswerFitsQuestion(q.label, bankAnswer) &&
-      (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question));
+      (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question)) &&
+      shortAnswerBankMatchIsSpecific(q.label, match.record?.question, bankAnswer) &&
+      (!choice || choiceAnswerMatchesOptions(bankAnswer, q.options || []));
     if (bankOk) {
       const answerOut = choice ? normalizeChoiceAnswerValue(bankAnswer) || bankAnswer : bankAnswer;
-      resolved.push({ id: q.id, answer: answerOut, source: "bank" });
+      resolved.push({ id: q.id, answer: answerOut, source: "bank", options: q.options || [] });
       recordQaUsage(match.record.id).catch(() => {});
       bankHits += 1;
       continue;
@@ -1607,12 +1697,13 @@ async function resolveQuestionAnswers(
     if (
       extra?.answer &&
       !isJunkAutofillAnswer(extra.answer, { questionLabel: q.label }) &&
-      bankAnswerFitsQuestion(q.label, extra.answer)
+      bankAnswerFitsQuestion(q.label, extra.answer) &&
+      (!choice || choiceAnswerMatchesOptions(extra.answer, q.options || []))
     ) {
       const extraOut = choice
         ? normalizeChoiceAnswerValue(extra.answer) || extra.answer
         : extra.answer;
-      resolved.push({ id: q.id, answer: extraOut, source: "extra" });
+      resolved.push({ id: q.id, answer: extraOut, source: "extra", options: q.options || [] });
       extraHits += 1;
       saveQa({
         profileId: profileId || "",
@@ -2284,7 +2375,13 @@ async function enrichAnswersWithAi(questions, answers, {
       if (!row?.id || !row?.answer) continue;
       const q = stillNeed.find((item) => item.id === row.id);
       if (q?.label && !bankAnswerFitsQuestion(q.label, row.answer)) continue;
-      answers.push({ id: row.id, answer: row.answer, source: "ai" });
+      if (choice && !choiceAnswerMatchesOptions(row.answer, q?.options || [])) continue;
+      answers.push({
+        id: row.id,
+        answer: row.answer,
+        source: "ai",
+        options: q?.options || []
+      });
       aiHits += 1;
       if (!q?.label) continue;
       if (

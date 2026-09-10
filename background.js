@@ -62,6 +62,7 @@ import {
   locateJobFolder,
   handleProfileLearnCapture,
   highlightFieldOnTab,
+  applyPanelFieldAnswerOnTab,
   handleQaLearnCapture,
   answerQuestionsFromBank,
   runCustomOpenAiQaOnTab,
@@ -7884,6 +7885,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         const result = await highlightFieldOnTab(tab.id, message.fieldId || message.id || "");
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "autofill_panel_answer") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        if (!tab?.id) {
+          safeSendResponse(sendResponse, { ok: false, error: "No application tab found." });
+          return;
+        }
+        const result = await applyPanelFieldAnswerOnTab(tab.id, {
+          fieldId: message.fieldId || message.id || "",
+          label: message.label || "",
+          answer: message.answer || "",
+          fieldType: message.fieldType || "text",
+          options: message.options || []
+        });
         safeSendResponse(sendResponse, result);
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
