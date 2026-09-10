@@ -830,12 +830,33 @@ export function buildCustomQaJobKey(profileId = "", jobMeta = {}) {
   return `${id}::${jobPart}`;
 }
 
-/** Follow-up ask in an existing job chat (JD + resume already in context). */
-export function buildCustomQaFollowUpPrompt(question) {
+/**
+ * Follow-up ask in an existing job chat.
+ * Always re-attach a JD excerpt so answers stay grounded even when the long
+ * resume/CL thread has pushed the original posting out of the model context.
+ */
+export function buildCustomQaFollowUpPrompt(question, jobMeta = {}) {
   const q = String(question || "").trim();
+  const title = String(jobMeta.jobTitle || jobMeta.title || "").trim();
+  const company = String(jobMeta.companyName || jobMeta.company || "").trim();
+  const link = String(jobMeta.jdLink || jobMeta.jobLink || "").trim();
+  const jd = String(jobMeta.jdText || "").trim().slice(0, 2800);
+  const jobBits = [
+    title && `Title: ${title}`,
+    company && `Company: ${company}`,
+    link && `Link: ${link}`
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const jdBlock = jd
+    ? `\n\nJOB DESCRIPTION (same role — ground the answer in this posting):\n${jd}`
+    : "";
+  const header = jobBits
+    ? `Continue in this same conversation for this job application:\n${jobBits}${jdBlock}\n\n`
+    : `Continue in this same conversation for the current job application.${jdBlock}\n\n`;
   return (
-    `Continue in this same conversation for the current job application. ` +
-    `Use the job description, resume/profile, and prior answers already in this chat. ` +
+    header +
+    `Use the job description above, plus resume/profile and prior answers already in this chat. ` +
     `Do not ask clarifying questions.\n\n` +
     `QUESTION:\n${q}\n\n` +
     `Reply with ONLY the answer text.`
@@ -968,7 +989,7 @@ export async function generateSingleProfileAnswer({
     : [];
   const userContent =
     history.length > 0
-      ? buildCustomQaFollowUpPrompt(q)
+      ? buildCustomQaFollowUpPrompt(q, jobMeta)
       : JSON.stringify(payload, null, 2);
   const messages = [
     { role: "system", content: CUSTOM_QA_SYSTEM_PROMPT },

@@ -1068,11 +1068,34 @@ async function persistJobContextForAutofill(job = {}) {
       jobDir = "";
     }
   }
+  // Prefer explicit jdText; otherwise keep prior storage / queue JD so Custom Q&A
+  // still gets the posting when Apply opens the panel without re-passing jdText.
+  let jdText = String(job.jdText || "").trim();
+  if (!jdText) {
+    try {
+      const prev = await chrome.storage.local.get(["last_jd_text", "last_jd_link"]);
+      const prevLink = String(prev.last_jd_link || "").trim();
+      if (prev.last_jd_text && (!jdLink || !prevLink || prevLink === jdLink)) {
+        jdText = String(prev.last_jd_text || "").trim();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!jdText && csvRow !== "") {
+    try {
+      const queue = await getQueue();
+      const row = queue.find((j) => Number(j.csvRow) === Number(csvRow));
+      jdText = String(row?.jdText || "").trim();
+    } catch {
+      /* ignore */
+    }
+  }
   await chrome.storage.local.set({
     last_job_title: String(job.jobTitle || job.title || "").trim(),
     last_company_name: String(job.companyName || job.company || "").trim(),
     last_jd_link: jdLink,
-    last_jd_text: String(job.jdText || "").trim()
+    last_jd_text: jdText
   });
   await setActiveApplyJob({ csvRow, jobDir, jdLink });
   // Bind Custom Q&A to this job so ChatGPT/Claude/OpenAI reuse one chat/thread.
@@ -2979,6 +3002,16 @@ async function ensureFreshChat(tabId, provider) {
     return false;
   };
 
+  // Already on a blank shell (e.g. post-delete cooldown) — do not navigate again.
+  // Re-hitting / or /new often creates a second empty Recents "New chat".
+  try {
+    if (await isBlankFreshAiChat(tabId, p)) {
+      return { ok: true, navigated: false };
+    }
+  } catch {
+    /* continue to navigate */
+  }
+
   try {
     await chrome.tabs.update(tabId, { url: base });
     await withTimeout(waitForTabComplete(tabId, 30000), 32000, `Timed out loading a new ${label} chat.`);
@@ -3034,6 +3067,11 @@ async function shouldUseInPageNewChat(tabId, provider, freshResult) {
   // Clicking New chat (or a[href='/']) again creates a twin empty entry — common on one-off.
   if (freshResult?.navigated) return false;
   if (freshResult?.ok) return false;
+  try {
+    if (await isBlankFreshAiChat(tabId, provider)) return false;
+  } catch {
+    /* fall through */
+  }
   // Navigate failed entirely — fall back to in-page New chat only if still on a prior thread.
   return aiTabStillOnPriorConversation(tabId, provider);
 }
@@ -3044,6 +3082,8 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
     const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT);
     needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CHATGPT, fresh);
+    // Blank /c/<id> shells count toward cleanup if a twin is created later.
+    await rememberAiChatFromTab(tabId, AI_PROVIDERS.CHATGPT).catch(() => "");
   }
 
   let lastError = null;
@@ -3568,6 +3608,7 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
     await setStatus("Opening a fresh Claude chat…");
     const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CLAUDE);
     needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CLAUDE, fresh);
+    await rememberAiChatFromTab(tabId, AI_PROVIDERS.CLAUDE).catch(() => "");
   }
 
   let lastError = null;
@@ -4032,6 +4073,7 @@ async function readAiConversationId(tabId, provider) {
 /**
  * Persist conversation id as soon as the first resume message creates /c/<id>
  * so failed jobs can still delete the chat before a batch retry.
+ * Also accumulates ids for this job so twin empty chats can be cleaned up.
  */
 async function rememberAiChatFromTab(tabId, provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
@@ -4043,9 +4085,20 @@ async function rememberAiChatFromTab(tabId, provider) {
     }
   }
   if (chatId) {
-    await chrome.storage.local
-      .set({ last_ai_chat_id: chatId, last_ai_provider: p })
-      .catch(() => {});
+    try {
+      const stored = await chrome.storage.local.get(["last_ai_chat_ids"]);
+      const prev = Array.isArray(stored.last_ai_chat_ids) ? stored.last_ai_chat_ids : [];
+      const ids = [...new Set([...prev.map(String), chatId])].filter(Boolean).slice(-8);
+      await chrome.storage.local.set({
+        last_ai_chat_id: chatId,
+        last_ai_provider: p,
+        last_ai_chat_ids: ids
+      });
+    } catch {
+      await chrome.storage.local
+        .set({ last_ai_chat_id: chatId, last_ai_provider: p })
+        .catch(() => {});
+    }
   }
   return chatId || "";
 }
@@ -4062,8 +4115,12 @@ function attachAiContextToError(err, { aiTabId = null, aiChatId = "", aiProvider
  * Remove the conversation used for a finished job so history stays clean.
  * Prefer API delete (Claude needs JSON body = uuid). UI is fallback.
  * Intended to run during inter-job cooldown, not mid file-save.
+ * Also deletes any twin chat ids tracked in last_ai_chat_ids for this job.
  */
-async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
+async function deleteCurrentAiConversation(
+  tabId,
+  { chatId = "", skipExtras = false, leaveBlank = true } = {}
+) {
   const provider = await getStoredAiProvider();
   const label = aiProviderLabel(provider);
   let targetChatId = String(chatId || "").trim();
@@ -4073,7 +4130,7 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
   if (!targetChatId) {
     try {
       const stored = await chrome.storage.local.get(["last_ai_chat_id", "last_ai_provider"]);
-      if (normalizeAiProvider(stored.last_ai_provider) === provider) {
+      if (normalizeAiProvider(stored.last_ai_provider) === provider || !stored.last_ai_provider) {
         targetChatId = String(stored.last_ai_chat_id || "").trim();
       }
     } catch {
@@ -4397,16 +4454,44 @@ async function deleteCurrentAiConversation(tabId, { chatId = "" } = {}) {
       `${label} chat cleanup did not confirm${detail?.error ? ` (${detail.error})` : ""}.`
     );
   }
-  // Leave a blank chat so the next job does not reopen the deleted URL.
-  try {
-    await ensureFreshChat(tabId, provider);
-  } catch {
-    // ignore
+
+  // Delete any twin / leftover ids recorded for this job (same batch row).
+  if (!skipExtras) {
+    try {
+      const stored = await chrome.storage.local.get(["last_ai_chat_ids"]);
+      const extras = (Array.isArray(stored.last_ai_chat_ids) ? stored.last_ai_chat_ids : [])
+        .map((id) => String(id || "").trim())
+        .filter((id) => id && id !== targetChatId && id !== String(detail.chatId || "").trim());
+      for (const extraId of extras) {
+        try {
+          await deleteCurrentAiConversation(tabId, {
+            chatId: extraId,
+            skipExtras: true,
+            leaveBlank: false
+          });
+        } catch {
+          /* keep cleaning others */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   }
-  try {
-    await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider"]);
-  } catch {
-    // ignore
+
+  // One blank shell for the next job — skip when already blank (avoids twin empties).
+  if (leaveBlank) {
+    try {
+      await ensureFreshChat(tabId, provider);
+    } catch {
+      // ignore
+    }
+  }
+  if (!skipExtras) {
+    try {
+      await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
+    } catch {
+      // ignore
+    }
   }
   await setStatus(`Removed finished ${label} chat (${detail.via || "ok"}).`);
   return detail;
@@ -5005,11 +5090,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
   const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat);
 
-  // Capture /c/<id> immediately after the first send so mid-poll failures
-  // (rate limit, timeout) can still delete this chat before a batch retry.
-  if (startNewChat) {
-    await rememberAiChatFromTab(tabId, provider).catch(() => "");
-  }
+  // Capture /c/<id> after send so mid-poll failures (rate limit, timeout) and
+  // twin empty shells can still be deleted during inter-job cooldown.
+  await rememberAiChatFromTab(tabId, provider).catch(() => "");
 
   // Active polling budget (rate-limit cooldowns do NOT count against this).
   const timeoutMs = expectResumeJson ? 12 * 60 * 1000 : 4 * 60 * 1000;

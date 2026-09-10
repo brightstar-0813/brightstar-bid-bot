@@ -2295,7 +2295,9 @@ async function getAutofillAiContext() {
     "last_job_company",
     "last_jd_text",
     "last_jd_link",
-    "last_apply_jd_link"
+    "last_apply_jd_link",
+    "job_queue",
+    "active_apply_job"
   ]);
   const person = await getActivePerson();
   const resume = (await getStoredResumeJson()) || {};
@@ -2306,12 +2308,52 @@ async function getAutofillAiContext() {
   const recentRoles = normalizeRecentRoles(
     resume.experience || resume.workHistory || person?.workHistory || []
   );
+  let jobTitle = data.last_job_title || "";
+  let companyName = data.last_company_name || data.last_job_company || "";
+  let jdText = String(data.last_jd_text || "").trim();
+  let jdLink = data.last_jd_link || data.last_apply_jd_link || "";
+
+  // If panel/apply wiped or never set JD text, recover from the matching queue row.
+  if (!jdText || !jobTitle || !companyName) {
+    try {
+      const queue = Array.isArray(data.job_queue) ? data.job_queue : [];
+      const active = data.active_apply_job && typeof data.active_apply_job === "object"
+        ? data.active_apply_job
+        : {};
+      const csvRow = active.csvRow != null && String(active.csvRow).trim() !== ""
+        ? Number(active.csvRow)
+        : NaN;
+      const linkNorm = String(jdLink || active.jdLink || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\/+$/, "");
+      const row =
+        queue.find((j) => Number.isFinite(csvRow) && Number(j.csvRow) === csvRow) ||
+        queue.find((j) => {
+          const jl = String(j.jdLink || j.url || "")
+            .trim()
+            .toLowerCase()
+            .replace(/\/+$/, "");
+          return linkNorm && jl && jl === linkNorm;
+        }) ||
+        null;
+      if (row) {
+        if (!jdText) jdText = String(row.jdText || "").trim();
+        if (!jobTitle) jobTitle = String(row.jobTitle || row.title || "").trim();
+        if (!companyName) companyName = String(row.companyName || row.company || "").trim();
+        if (!jdLink) jdLink = String(row.jdLink || row.url || "").trim();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   return {
     jobMeta: {
-      jobTitle: data.last_job_title || "",
-      companyName: data.last_company_name || data.last_job_company || "",
-      jdText: data.last_jd_text || "",
-      jdLink: data.last_jd_link || data.last_apply_jd_link || ""
+      jobTitle,
+      companyName,
+      jdText,
+      jdLink
     },
     resumeText: String(person?.masterResume || "").trim(),
     certifications,
@@ -4209,8 +4251,9 @@ export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
 
   const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
   const chatMode = await resolveCustomQaChatReuse(jobKey);
+  // Follow-ups still include this job's JD excerpt (one chat per job).
   const prompt = chatMode.useFollowUp
-    ? buildCustomQaFollowUpPrompt(q)
+    ? buildCustomQaFollowUpPrompt(q, ctx.jobMeta)
     : buildCustomQaAgentPrompt({
         question: q,
         applicantInfo: info,

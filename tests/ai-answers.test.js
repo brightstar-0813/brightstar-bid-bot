@@ -114,10 +114,19 @@ test("buildCustomQaJobKey is stable per profile + job link", () => {
   assert.notEqual(a, c);
 });
 
-test("buildCustomQaFollowUpPrompt keeps question-only follow-up", () => {
-  const prompt = buildCustomQaFollowUpPrompt("Are you authorized to work in the US?");
+test("buildCustomQaFollowUpPrompt includes job JD excerpt", () => {
+  const prompt = buildCustomQaFollowUpPrompt("Are you authorized to work in the US?", {
+    jobTitle: "Salesforce Developer",
+    companyName: "Acme",
+    jdLink: "https://boards.greenhouse.io/acme/jobs/1",
+    jdText: "Build Apex and LWC for enterprise CRM. Must be authorized to work in the US."
+  });
   assert.match(prompt, /same conversation/i);
   assert.match(prompt, /Are you authorized to work in the US\?/);
+  assert.match(prompt, /Salesforce Developer/);
+  assert.match(prompt, /Acme/);
+  assert.match(prompt, /JOB DESCRIPTION/i);
+  assert.match(prompt, /Build Apex and LWC/);
   assert.doesNotMatch(prompt, /CONTEXT \(JSON\)/);
 });
 
