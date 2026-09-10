@@ -4206,13 +4206,27 @@ async function deleteCurrentAiConversation(
       );
       const failed = [];
       let lastDetail = null;
-      for (const id of ids) {
+      for (let i = 0; i < ids.length; i += 1) {
+        const id = ids[i];
+        await setStatus(
+          `Removing finished ${label} chat (${i + 1}/${ids.length}: ${id.slice(0, 8)}…)…`
+        );
         try {
           lastDetail = await deleteCurrentAiConversation(tabId, {
             chatId: id,
             skipExtras: true,
             leaveBlank: false
           });
+          // If we are still sitting on the deleted /c/<id> page, leave it so the
+          // red "Failed to delete… Conversation has been deleted" banner clears.
+          try {
+            const stillOn = await readAiConversationId(tabId, provider);
+            if (stillOn === id) {
+              await ensureFreshChat(tabId, provider);
+            }
+          } catch {
+            /* ignore */
+          }
         } catch {
           failed.push(id);
         }
@@ -4379,7 +4393,7 @@ async function deleteCurrentAiConversation(
         return { ok: !stillThere || Boolean(chatId), via: "ui", chatId };
       }
 
-      // ChatGPT — hide/delete via backend API, then verify sidebar (UI fallback).
+      // ChatGPT — hide/delete via backend API, then verify sidebar (UI is last resort).
       const origin = location.origin.includes("openai.com")
         ? "https://chat.openai.com"
         : "https://chatgpt.com";
@@ -4397,6 +4411,33 @@ async function deleteCurrentAiConversation(
         );
       };
 
+      const pageSaysAlreadyDeleted = () => {
+        const t = String(document.body?.innerText || "").slice(0, 8000);
+        return /conversation has been deleted|chat (?:has )?been deleted/i.test(t);
+      };
+
+      const conversationAlreadyGone = (id) => {
+        if (!id) return pageSaysAlreadyDeleted();
+        // Sidebar row still present → not gone, regardless of banners.
+        if (sidebarLink(id)) return false;
+        // No sidebar row: gone, or never listed. Banner on this /c/<id> confirms it.
+        const onThisChat = new RegExp(`/c/${id}(?:[/?#]|$)`).test(
+          `${location.pathname}${location.search}`
+        );
+        if (onThisChat && pageSaysAlreadyDeleted()) return true;
+        if (!onThisChat) return true;
+        // Still on /c/<id> URL with no sidebar row and empty composer → treat as gone.
+        const hasComposer =
+          Boolean(document.querySelector("#prompt-textarea")) ||
+          Boolean(document.querySelector('[data-testid="composer"]')) ||
+          Boolean(document.querySelector('div[contenteditable="true"]'));
+        const hasMessages =
+          document.querySelectorAll(
+            '[data-message-author-role], [data-testid*="conversation-turn"]'
+          ).length > 0;
+        return hasComposer && !hasMessages;
+      };
+
       const firePointerClick = (el) => {
         if (!(el instanceof HTMLElement)) return false;
         const opts = { bubbles: true, cancelable: true, view: window };
@@ -4409,13 +4450,28 @@ async function deleteCurrentAiConversation(
         return true;
       };
 
+      const fetchWithTimeout = async (url, opts = {}, ms = 8000) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        try {
+          return await fetch(url, { ...opts, signal: ctrl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
       const chatgptDeleteViaApi = async (id) => {
         if (!id) return { ok: false, error: "missing-id" };
+        if (conversationAlreadyGone(id)) {
+          return { ok: true, via: "already-gone" };
+        }
         let token = "";
         let accountId = "";
         for (const sessionUrl of [`${origin}/api/auth/session`, "/api/auth/session"]) {
           try {
-            const session = await fetch(sessionUrl, { credentials: "include" }).then((r) => r.json());
+            const session = await fetchWithTimeout(sessionUrl, { credentials: "include" }, 6000).then(
+              (r) => r.json()
+            );
             token = session?.accessToken || session?.access_token || "";
             accountId =
               session?.account?.id ||
@@ -4470,8 +4526,7 @@ async function deleteCurrentAiConversation(
         if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
 
         // Soft-delete: PATCH is_visible=false (official ChatGPT web behavior).
-        // Trust HTTP success even if the React sidebar has not re-rendered yet —
-        // requiring the row to vanish caused false failures and "cleanup skipped".
+        // Trust HTTP success even if the React sidebar has not re-rendered yet.
         const dropSidebarRow = () => {
           const link = sidebarLink(id);
           if (!(link instanceof HTMLElement)) return;
@@ -4488,26 +4543,38 @@ async function deleteCurrentAiConversation(
         };
 
         try {
-          const patch = await fetch(`${origin}/backend-api/conversation/${id}`, {
-            method: "PATCH",
-            credentials: "include",
-            headers,
-            body: JSON.stringify({ is_visible: false })
-          });
+          const patch = await fetchWithTimeout(
+            `${origin}/backend-api/conversation/${id}`,
+            {
+              method: "PATCH",
+              credentials: "include",
+              headers,
+              body: JSON.stringify({ is_visible: false })
+            },
+            8000
+          );
           if (patch.ok || patch.status === 204 || patch.status === 404) {
             dropSidebarRow();
             return { ok: true, via: "api-patch", status: patch.status };
           }
 
           // Rare accounts: hard DELETE when PATCH is rejected.
-          const del = await fetch(`${origin}/backend-api/conversation/${id}`, {
-            method: "DELETE",
-            credentials: "include",
-            headers
-          });
+          const del = await fetchWithTimeout(
+            `${origin}/backend-api/conversation/${id}`,
+            {
+              method: "DELETE",
+              credentials: "include",
+              headers
+            },
+            8000
+          );
           if (del.ok || del.status === 204 || del.status === 404) {
             dropSidebarRow();
             return { ok: true, via: "api-delete", status: del.status };
+          }
+          // PATCH/DELETE rejected, but chat may already be gone (race / prior attempt).
+          if (conversationAlreadyGone(id)) {
+            return { ok: true, via: "already-gone-after-api", status: del.status || patch.status };
           }
           return {
             ok: false,
@@ -4515,11 +4582,22 @@ async function deleteCurrentAiConversation(
             status: del.status || patch.status
           };
         } catch (err) {
+          if (conversationAlreadyGone(id)) {
+            return { ok: true, via: "already-gone-on-error" };
+          }
           return { ok: false, error: String(err?.message || err || "api-failed") };
         }
       };
 
       const chatgptDeleteViaUi = async (id) => {
+        // Never UI-delete a chat that is already gone — that produces the red
+        // "Failed to delete chat… Conversation has been deleted" banner and stalls.
+        if (id && conversationAlreadyGone(id)) {
+          return { ok: true, via: "already-gone" };
+        }
+        if (id && !sidebarLink(id)) {
+          return { ok: true, via: "no-sidebar-row" };
+        }
         let opened = false;
         if (id) {
           const link = sidebarLink(id);
@@ -4575,7 +4653,10 @@ async function deleteCurrentAiConversation(
         }
         const clickedDelete =
           clickMatching(/delete chat|delete conversation|^delete$/i) || clickMatching(/delete/i);
-        if (!clickedDelete) return { ok: false, error: "no-delete-menu" };
+        if (!clickedDelete) {
+          if (conversationAlreadyGone(id)) return { ok: true, via: "already-gone" };
+          return { ok: false, error: "no-delete-menu" };
+        }
         await sleep(550);
         // Confirm in modal / alert dialog (ChatGPT uses role=alertdialog).
         const dialog =
@@ -4590,29 +4671,40 @@ async function deleteCurrentAiConversation(
             clickMatching(/delete chat|confirm|yes,?\s*delete/i) ||
             clickMatching(/^confirm$/i);
         }
-        await sleep(1000);
+        await sleep(800);
+        if (conversationAlreadyGone(id) || pageSaysAlreadyDeleted()) {
+          return { ok: true, via: "ui-or-already-gone" };
+        }
         const stillThere = id ? Boolean(sidebarLink(id)) : true;
-        if (id && !stillThere) return { ok: true };
-        // Row may linger briefly after a successful UI delete — treat open+confirm as ok.
+        if (id && !stillThere) return { ok: true, via: "ui" };
         return {
-          ok: Boolean(opened && clickedDelete),
+          ok: Boolean(opened && clickedDelete && !stillThere),
           error: stillThere && id ? "still-in-sidebar" : ""
         };
       };
 
       if (convId) {
+        if (conversationAlreadyGone(convId)) {
+          return { ok: true, via: "already-gone", chatId: convId };
+        }
         let lastErr = "";
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          if (attempt > 0) await sleep(700 * attempt);
+        // Prefer API; UI only when the sidebar row is still present after API failure.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (attempt > 0) await sleep(500 * attempt);
           const api = await chatgptDeleteViaApi(convId);
           if (api.ok) {
-            await sleep(200);
             return { ok: true, via: api.via || "api", chatId: convId, attempt: attempt + 1 };
           }
           lastErr = api.error || lastErr;
+          if (!sidebarLink(convId) || conversationAlreadyGone(convId)) {
+            return { ok: true, via: "already-gone-after-api-fail", chatId: convId };
+          }
           const ui = await chatgptDeleteViaUi(convId);
-          if (ui.ok) return { ok: true, via: "ui", chatId: convId, attempt: attempt + 1 };
+          if (ui.ok) return { ok: true, via: ui.via || "ui", chatId: convId, attempt: attempt + 1 };
           lastErr = ui.error || api.error || lastErr;
+          if (conversationAlreadyGone(convId)) {
+            return { ok: true, via: "already-gone", chatId: convId };
+          }
         }
         return {
           ok: false,
@@ -4622,10 +4714,13 @@ async function deleteCurrentAiConversation(
         };
       }
 
+      if (pageSaysAlreadyDeleted()) {
+        return { ok: true, via: "already-gone", chatId: "" };
+      }
       const uiOnly = await chatgptDeleteViaUi("");
       return {
         ok: Boolean(uiOnly.ok),
-        via: uiOnly.ok ? "ui" : "failed",
+        via: uiOnly.ok ? uiOnly.via || "ui" : "failed",
         chatId: "",
         error: uiOnly.error || "missing-chat-id"
       };
