@@ -102,7 +102,7 @@ export const BUILTIN_PROFILES = [
     kind: "resume",
     name: "Edrwin Revolorio",
     email: "edrwin.revolorio1996@outlook.com",
-    phone: "+1 (713) 659-9480",
+    phone: "+1 (317) 563-1795",
     linkedin: "https://www.linkedin.com/in/edwin-revolorio/",
     portfolio: "",
     password: DEFAULT_ATS_PASSWORD,

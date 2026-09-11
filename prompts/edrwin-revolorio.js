@@ -200,7 +200,7 @@ Return exactly this shape (field names must match):
   "name": "Edrwin Revolorio",
   "headline": "Senior Salesforce Engineer | Technical Lead",
   "location": "Indianapolis, Indiana, United States",
-  "phone": "+1 (713) 659-9480",
+  "phone": "+1 (317) 563-1795",
   "email": "edrwin.revolorio1996@outlook.com",
   "linkedin": "https://www.linkedin.com/in/edwin-revolorio/",
   "profile": "Senior Salesforce Engineer and Technical Lead with 8+ years in technology and 7+ years delivering Salesforce solutions across consulting, enterprise transformation, and cloud services.",
@@ -517,7 +517,7 @@ CANDIDATE INFORMATION (SOURCE OF TRUTH)
 
 Name: Edrwin Revolorio
 Location: Indianapolis, Indiana, United States
-Phone: +1 (713) 659-9480
+Phone: +1 (317) 563-1795
 Email: edrwin.revolorio1996@outlook.com
 LinkedIn: https://www.linkedin.com/in/edwin-revolorio/
 Base identity: Senior Salesforce Engineer | Technical Lead / Salesforce Architect
