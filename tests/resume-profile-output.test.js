@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   isGenericApplicationsDir,
   isGenericResumeFilePrefix,
+  joinDownloadsRelativeDirs,
   normalizeDownloadsRelativeDir,
   normalizeResumeFilePrefix,
   outputDirFromPerson,
   personOutputNameToken,
+  resolveOutputDirForPerson,
   resumeFilePrefixFromName
 } from "../resume-profile.js";
 
@@ -54,16 +56,47 @@ test("normalizeDownloadsRelativeDir rejects absolute paths", () => {
     "Applications-Pat"
   );
   assert.equal(
+    normalizeDownloadsRelativeDir("C:/Users/me/Downloads/BrightstarBids/Lewis"),
+    "BrightstarBids/Lewis"
+  );
+  assert.equal(
     normalizeDownloadsRelativeDir("D:\\Work\\JobHunting\\Applications-Custom\\x"),
-    "Applications-Custom"
+    "Applications-Custom/x"
   );
   assert.equal(normalizeDownloadsRelativeDir("/tmp/foo", "Applications"), "Applications");
-  assert.equal(normalizeDownloadsRelativeDir("Applications-Pat/extra"), "Applications-Pat");
+  assert.equal(normalizeDownloadsRelativeDir("Applications-Pat/extra"), "Applications-Pat/extra");
   assert.equal(normalizeDownloadsRelativeDir("Applications"), "Applications");
+});
+
+test("join and resolve support shared root + person folder", () => {
+  assert.equal(joinDownloadsRelativeDirs("BrightstarBids", "Applications-Lewis"), "BrightstarBids/Applications-Lewis");
+  assert.equal(
+    joinDownloadsRelativeDirs("BrightstarBids", "BrightstarBids/Lewis"),
+    "BrightstarBids/Lewis"
+  );
+  assert.equal(
+    resolveOutputDirForPerson(
+      { resumeFilePrefix: "Lewis_Resume", outputDir: "" },
+      { saveRoot: "BrightstarBids" }
+    ),
+    "BrightstarBids/Applications-Lewis"
+  );
+  assert.equal(
+    resolveOutputDirForPerson({ outputDir: "TeamA/Lewis" }, { saveRoot: "BrightstarBids" }),
+    "BrightstarBids/TeamA/Lewis"
+  );
+});
+
+test("outputDirFromPerson prefers custom outputDir", () => {
+  assert.equal(
+    outputDirFromPerson({ outputDir: "TeamA/Lewis", resumeFilePrefix: "Lewis_Resume" }),
+    "TeamA/Lewis"
+  );
 });
 
 test("isGenericApplicationsDir detects bare Applications only", () => {
   assert.equal(isGenericApplicationsDir("Applications"), true);
   assert.equal(isGenericApplicationsDir("Applications-Lewis"), false);
+  assert.equal(isGenericApplicationsDir("BrightstarBids/Lewis"), false);
   assert.equal(isGenericApplicationsDir(""), true);
 });

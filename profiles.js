@@ -28,7 +28,8 @@ import {
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
 import {
   normalizeResumeFilePrefix,
-  outputDirFromPerson
+  outputDirFromPerson,
+  resolveOutputDirForPerson
 } from "./resume-profile.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { clearQa, cloneQaBank } from "./qa-store.js";
@@ -162,7 +163,7 @@ const PERSON_SHEET_KEY = "person_sheet_config";
 
 export async function getPersonSheetConfig(personId) {
   const id = String(personId || "").trim();
-  if (!id) return { spreadsheetUrl: "", sheetsWebAppUrl: "", sheetTabName: "" };
+  if (!id) return { spreadsheetUrl: "", sheetsWebAppUrl: "", sheetTabName: "", outputDir: "" };
   const data = await chrome.storage.local.get(PERSON_SHEET_KEY);
   const map =
     data[PERSON_SHEET_KEY] && typeof data[PERSON_SHEET_KEY] === "object" && !Array.isArray(data[PERSON_SHEET_KEY])
@@ -172,13 +173,14 @@ export async function getPersonSheetConfig(personId) {
   return {
     spreadsheetUrl: String(row.spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(row.sheetsWebAppUrl || "").trim(),
-    sheetTabName: sanitizeSheetTabName(row.sheetTabName || "")
+    sheetTabName: sanitizeSheetTabName(row.sheetTabName || ""),
+    outputDir: String(row.outputDir || "").trim()
   };
 }
 
 export async function setPersonSheetConfig(
   personId,
-  { spreadsheetUrl, sheetsWebAppUrl, sheetTabName } = {}
+  { spreadsheetUrl, sheetsWebAppUrl, sheetTabName, outputDir } = {}
 ) {
   const id = String(personId || "").trim();
   if (!id) return;
@@ -201,7 +203,9 @@ export async function setPersonSheetConfig(
     sheetTabName:
       sheetTabName !== undefined
         ? sanitizeSheetTabName(sheetTabName)
-        : sanitizeSheetTabName(prev.sheetTabName || "")
+        : sanitizeSheetTabName(prev.sheetTabName || ""),
+    outputDir:
+      outputDir !== undefined ? String(outputDir || "").trim() : String(prev.outputDir || "").trim()
   };
   await chrome.storage.local.set({ [PERSON_SHEET_KEY]: map });
 }
@@ -368,7 +372,14 @@ export function applyUsApplicantDefaults(person = {}, { onlyEmpty = true } = {})
 export async function syncActivePersonOutputContext(person) {
   const p = normalizePerson(person);
   const resumeFilePrefix = normalizeResumeFilePrefix(p.resumeFilePrefix, p.name || p.label);
-  const outputDir = outputDirFromPerson({ ...p, resumeFilePrefix });
+  const sheet = p.id ? await getPersonSheetConfig(p.id).catch(() => ({})) : {};
+  const data = await chrome.storage.local.get(["output_save_root"]);
+  const saveRoot = String(data.output_save_root || "").trim();
+  const personFolder = String(p.outputDir || sheet.outputDir || "").trim();
+  const outputDir = resolveOutputDirForPerson(
+    { ...p, resumeFilePrefix, outputDir: personFolder },
+    { saveRoot }
+  );
   const templateId = String(p.templateId || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   await chrome.storage.local.set({
     output_dir: outputDir,
@@ -376,7 +387,7 @@ export async function syncActivePersonOutputContext(person) {
     resume_file_prefix: resumeFilePrefix,
     selected_template_id: templateId
   });
-  return { outputDir, resumeFilePrefix, templateId };
+  return { outputDir, resumeFilePrefix, templateId, personFolder, saveRoot };
 }
 
 /** Active person used for prompts, contact autofill, and cover letter. */
@@ -391,7 +402,8 @@ export async function getActivePerson() {
     sheetTabName:
       sheet.sheetTabName ||
       person.sheetTabName ||
-      defaultSheetTabNameForPerson(person)
+      defaultSheetTabNameForPerson(person),
+    outputDir: sheet.outputDir || person.outputDir || ""
   };
 }
 
@@ -430,6 +442,7 @@ function normalizePerson(p) {
     spreadsheetUrl: "",
     sheetsWebAppUrl: "",
     sheetTabName: "",
+    outputDir: "",
     builtin: false,
     kind: "resume"
   };
@@ -480,6 +493,7 @@ function normalizePerson(p) {
     spreadsheetUrl: p.spreadsheetUrl || "",
     sheetsWebAppUrl: p.sheetsWebAppUrl || "",
     sheetTabName: sanitizeSheetTabName(p.sheetTabName || ""),
+    outputDir: String(p.outputDir || "").trim(),
     builtin: Boolean(p.builtin),
     kind: p.kind || "resume"
   };
@@ -691,7 +705,8 @@ export async function addCustomProfile({
   roleTrack = "sf",
   spreadsheetUrl = "",
   sheetsWebAppUrl = "",
-  sheetTabName = ""
+  sheetTabName = "",
+  outputDir = ""
 } = {}) {
   const displayName = String(label || name || "").trim();
   const prompt = String(promptTemplate || "").trim();
@@ -779,14 +794,16 @@ export async function addCustomProfile({
     educationHistory: Array.isArray(educationHistory) ? educationHistory : [],
     spreadsheetUrl: String(spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim(),
-    sheetTabName: sanitizeSheetTabName(sheetTabName) || defaultSheetTabNameForPerson({ label: displayName, name })
+    sheetTabName: sanitizeSheetTabName(sheetTabName) || defaultSheetTabNameForPerson({ label: displayName, name }),
+    outputDir: String(outputDir || "").trim()
   };
   custom.push(profile);
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: custom });
   await setPersonSheetConfig(profile.id, {
     spreadsheetUrl: profile.spreadsheetUrl,
     sheetsWebAppUrl: profile.sheetsWebAppUrl,
-    sheetTabName: profile.sheetTabName
+    sheetTabName: profile.sheetTabName,
+    outputDir: profile.outputDir
   });
   return profile;
 }
@@ -861,6 +878,7 @@ export async function savePersonProfile(person) {
     sheetTabName:
       sanitizeSheetTabName(person?.sheetTabName) ||
       defaultSheetTabNameForPerson({ label: displayName, name: person?.name }),
+    outputDir: String(person?.outputDir || "").trim(),
     kind: "resume"
   };
 
@@ -896,7 +914,8 @@ export async function savePersonProfile(person) {
       sheetsWebAppUrl: mergedPayload.sheetsWebAppUrl,
       sheetTabName:
         mergedPayload.sheetTabName ||
-        defaultSheetTabNameForPerson({ label: displayName, name: mergedPayload.name })
+        defaultSheetTabNameForPerson({ label: displayName, name: mergedPayload.name }),
+      outputDir: mergedPayload.outputDir
     });
     const profile = next.find((p) => p.id === existingId);
     await syncActivePersonOutputContext(profile);

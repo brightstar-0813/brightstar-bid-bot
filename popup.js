@@ -77,7 +77,8 @@ import {
   outputDirFromPerson,
   namesLikelyDifferent,
   normalizeDownloadsRelativeDir,
-  isGenericApplicationsDir
+  isGenericApplicationsDir,
+  resolveOutputDirForPerson
 } from "./resume-profile.js";
 import {
   mergeExtractedProfileIntoPerson,
@@ -233,6 +234,10 @@ const outputDirEl = document.getElementById("outputDir");
 const spreadsheetUrlEl = document.getElementById("spreadsheetUrl");
 const sheetsWebAppUrlEl = document.getElementById("sheetsWebAppUrl");
 const sheetTabNameEl = document.getElementById("sheetTabName");
+const outputSaveRootEl = document.getElementById("outputSaveRoot");
+const personOutputDirEl = document.getElementById("personOutputDir");
+const outputRoutePreviewEl = document.getElementById("outputRoutePreview");
+const OUTPUT_SAVE_ROOT_KEY = "output_save_root";
 const copyAppsScriptBtn = document.getElementById("copyAppsScript");
 const slackWebhookUrlEl = document.getElementById("slackWebhookUrl");
 const testSlackBtn = document.getElementById("testSlack");
@@ -619,10 +624,14 @@ async function syncOutputDirFromPerson(person) {
   return outputDir;
 }
 
-/** Resolve Output folder for batch/one-off: person Applications-* wins over bare "Applications". */
+/** Resolve Output folder for batch/one-off: shared root + person folder. */
 async function resolveUiOutputDir() {
   const person = await getActivePerson().catch(() => null);
-  const personDir = person ? outputDirFromPerson(person) : "";
+  const data = await chrome.storage.local.get([OUTPUT_SAVE_ROOT_KEY]);
+  const saveRoot = normalizeDownloadsRelativeDir(data[OUTPUT_SAVE_ROOT_KEY] || "", "");
+  const personDir = person
+    ? resolveOutputDirForPerson(person, { saveRoot })
+    : "";
   let outputDir = normalizeDownloadsRelativeDir(
     (outputDirEl?.value || "").trim(),
     personDir || DEFAULT_OUTPUT_DIR
@@ -631,12 +640,17 @@ async function resolveUiOutputDir() {
     outputDir = personDir;
   }
   if (outputDirEl) outputDirEl.value = outputDir;
+  updateOutputRoutePreview(outputDir);
   return { outputDir, person };
 }
 
-/** Load shared workbook URLs + this person's sheet tab into the Integrations UI. */
+/** Load shared workbook URLs + this person's sheet tab / output folder into the Integrations UI. */
 async function syncSheetConfigFromPerson(person) {
-  const data = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
+  const data = await chrome.storage.local.get([
+    "spreadsheet_url",
+    "sheets_web_app_url",
+    OUTPUT_SAVE_ROOT_KEY
+  ]);
   const spreadsheetUrl = String(
     data.spreadsheet_url || person?.spreadsheetUrl || ""
   ).trim();
@@ -645,16 +659,37 @@ async function syncSheetConfigFromPerson(person) {
   ).trim();
   const sheetTabName =
     sanitizeSheetTabName(person?.sheetTabName || "") || defaultSheetTabNameForPerson(person || {});
+  const saveRoot = normalizeDownloadsRelativeDir(data[OUTPUT_SAVE_ROOT_KEY] || "", "");
+  const personFolder =
+    normalizeDownloadsRelativeDir(person?.outputDir || "", "") ||
+    outputDirFromPerson({ ...person, outputDir: "" });
+  const resolved = resolveOutputDirForPerson(
+    { ...person, outputDir: personFolder },
+    { saveRoot }
+  );
   if (spreadsheetUrlEl) spreadsheetUrlEl.value = spreadsheetUrl;
   if (sheetsWebAppUrlEl) sheetsWebAppUrlEl.value = sheetsWebAppUrl;
   if (sheetTabNameEl) sheetTabNameEl.value = sheetTabName;
+  if (outputSaveRootEl) outputSaveRootEl.value = saveRoot;
+  if (personOutputDirEl) personOutputDirEl.value = personFolder;
+  if (outputDirEl) outputDirEl.value = resolved;
+  updateOutputRoutePreview(resolved);
   await chrome.storage.local.set({
     spreadsheet_url: spreadsheetUrl,
-    sheets_web_app_url: sheetsWebAppUrl
+    sheets_web_app_url: sheetsWebAppUrl,
+    [OUTPUT_SAVE_ROOT_KEY]: saveRoot,
+    output_dir: resolved,
+    batch_output_dir: resolved
   });
   if (person?.id) {
-    await setPersonSheetConfig(person.id, { sheetTabName });
+    await setPersonSheetConfig(person.id, { sheetTabName, outputDir: personFolder });
   }
+}
+
+function updateOutputRoutePreview(resolved) {
+  if (!outputRoutePreviewEl) return;
+  const path = String(resolved || outputDirEl?.value || "").trim() || "…";
+  outputRoutePreviewEl.textContent = `Resolved: Downloads / ${path}`;
 }
 
 async function persistActivePersonSheetFromUi() {
@@ -663,13 +698,28 @@ async function persistActivePersonSheetFromUi() {
   const sheetsWebAppUrl = sheetsWebAppUrlEl?.value?.trim() || "";
   const sheetTabName =
     sanitizeSheetTabName(sheetTabNameEl?.value || "") || defaultSheetTabNameForPerson(person || {});
+  const saveRoot = normalizeDownloadsRelativeDir(outputSaveRootEl?.value || "", "");
+  const personFolder =
+    normalizeDownloadsRelativeDir(personOutputDirEl?.value || "", "") ||
+    outputDirFromPerson({ ...person, outputDir: "" });
+  const resolved = resolveOutputDirForPerson(
+    { ...person, outputDir: personFolder },
+    { saveRoot }
+  );
   if (sheetTabNameEl) sheetTabNameEl.value = sheetTabName;
+  if (outputSaveRootEl) outputSaveRootEl.value = saveRoot;
+  if (personOutputDirEl) personOutputDirEl.value = personFolder;
+  if (outputDirEl) outputDirEl.value = resolved;
+  updateOutputRoutePreview(resolved);
   await chrome.storage.local.set({
     spreadsheet_url: spreadsheetUrl,
-    sheets_web_app_url: sheetsWebAppUrl
+    sheets_web_app_url: sheetsWebAppUrl,
+    [OUTPUT_SAVE_ROOT_KEY]: saveRoot,
+    output_dir: resolved,
+    batch_output_dir: resolved
   });
   if (person?.id) {
-    await setPersonSheetConfig(person.id, { sheetTabName });
+    await setPersonSheetConfig(person.id, { sheetTabName, outputDir: personFolder });
   }
 }
 
@@ -695,13 +745,21 @@ async function loadActivePersonIntoForm() {
 
 async function persistJobFields() {
   const person = await getActivePerson().catch(() => null);
-  const personDir = person ? outputDirFromPerson(person) : "";
+  const personDir = person ? outputDirFromPerson({ ...person, outputDir: person.outputDir || "" }) : "";
+  const data = await chrome.storage.local.get([OUTPUT_SAVE_ROOT_KEY]);
+  const saveRoot = normalizeDownloadsRelativeDir(data[OUTPUT_SAVE_ROOT_KEY] || "", "");
   let outputDir = normalizeDownloadsRelativeDir(
     (outputDirEl?.value || "").trim(),
-    personDir || DEFAULT_OUTPUT_DIR
+    resolveOutputDirForPerson(person || {}, { saveRoot }) || DEFAULT_OUTPUT_DIR
   );
-  if (isGenericApplicationsDir(outputDir) && personDir) outputDir = personDir;
+  if (isGenericApplicationsDir(outputDir) && personDir) {
+    outputDir = resolveOutputDirForPerson(
+      { ...person, outputDir: personDir },
+      { saveRoot }
+    );
+  }
   if (outputDirEl) outputDirEl.value = outputDir;
+  updateOutputRoutePreview(outputDir);
   await chrome.storage.local.set({
     last_job_title: jobTitleEl.value,
     last_company_name: companyNameEl.value,
@@ -3276,6 +3334,8 @@ for (const el of [
   spreadsheetUrlEl,
   sheetsWebAppUrlEl,
   sheetTabNameEl,
+  outputSaveRootEl,
+  personOutputDirEl,
   slackWebhookUrlEl,
   chatgptJobGapSecEl,
   chatgptHardPauseHitsEl

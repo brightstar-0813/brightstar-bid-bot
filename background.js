@@ -39,7 +39,8 @@ import {
   normalizeDownloadsRelativeDir,
   normalizeResumeFilePrefix,
   outputDirFromPerson,
-  personOutputNameToken
+  personOutputNameToken,
+  resolveOutputDirForPerson
 } from "./resume-profile.js";
 import {
   setLastGeneratedDocs,
@@ -1905,24 +1906,36 @@ function sanitizePathSegment(value, fallback = "untitled") {
 }
 
 /**
- * Prefer the active person's Applications-{Name} folder.
- * Explicit override wins only when it already matches that person folder
- * (never keep a stale Applications-Other or absolute path).
+ * Prefer the active person's resolved save folder (shared root + person folder).
+ * Explicit override wins when it already targets that person route.
  */
 async function resolveOutputDir(explicit = "") {
+  let person = null;
   let personDir = "";
   try {
-    const person = await getActivePerson();
-    personDir = outputDirFromPerson(person);
+    person = await getActivePerson();
+    const data = await chrome.storage.local.get(["output_save_root"]);
+    const saveRoot = String(data.output_save_root || "").trim();
+    personDir = resolveOutputDirForPerson(person, { saveRoot });
   } catch {
     personDir = "";
   }
 
   const fromArg = normalizeDownloadsRelativeDir(explicit, "");
   if (fromArg && personDir) {
-    const argTop = fromArg.split("/")[0].toLowerCase();
-    const personTop = personDir.split("/")[0].toLowerCase();
-    if (argTop === personTop || fromArg.toLowerCase().startsWith(`${personTop}/`)) {
+    const personKey = personDir.toLowerCase();
+    const argKey = fromArg.toLowerCase();
+    const personFolder = String(
+      person?.outputDir || outputDirFromPerson({ ...(person || {}), outputDir: "" }) || ""
+    )
+      .trim()
+      .toLowerCase();
+    if (
+      argKey === personKey ||
+      argKey.startsWith(personKey + "/") ||
+      personKey.startsWith(argKey + "/") ||
+      (personFolder && argKey.includes("/" + personFolder))
+    ) {
       return fromArg;
     }
   }
@@ -1937,16 +1950,16 @@ async function resolveOutputDir(explicit = "") {
       ""
     );
     if (stored && personDir) {
-      const storedTop = stored.split("/")[0].toLowerCase();
-      const personTop = personDir.split("/")[0].toLowerCase();
-      if (storedTop === personTop) return stored;
+      const storedKey = stored.toLowerCase();
+      const personKey = personDir.toLowerCase();
+      if (storedKey === personKey || storedKey.startsWith(personKey + "/")) return stored;
     }
     if (stored && !isGenericApplicationsDir(stored) && !personDir) return stored;
     if (stored && !personDir) return stored;
   } catch {
     // ignore
   }
-  return personDir || "Applications";
+  return personDir || fromArg || "Applications";
 }
 
 function joinDownloadPath(...parts) {
@@ -6247,9 +6260,7 @@ async function runGenerationPipeline({ jobMeta, jsonText }) {
     resumeFilePrefix,
     personName: person?.name || person?.label || data?.name || "",
     templateId: await pickTemplateId(jobMeta || {}, person || {}),
-    outputDir: person
-      ? outputDirFromPerson({ ...person, resumeFilePrefix })
-      : await resolveOutputDir(jobMeta?.outputDir || "")
+    outputDir: await resolveOutputDir(jobMeta?.outputDir || "")
   };
   return saveResumeAndCoverLetter(tab?.id, rawText, data, enrichedMeta, {
     runCoverLetter: true
@@ -6826,8 +6837,8 @@ async function runAutoJob(jobMeta) {
     templateId: await pickTemplateId(jobMeta, person),
     resumeFilePrefix,
     personName: person.name || person.label || "",
-    // Person folder is source of truth — do not keep a stale generic Start override.
-    outputDir: outputDirFromPerson({ ...person, resumeFilePrefix }),
+    // Person folder (+ shared root) is source of truth — do not keep a stale Start override.
+    outputDir: await resolveOutputDir(jobMeta.outputDir || ""),
     roleTrack,
     sessionRoleTrack
   };
@@ -9261,7 +9272,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             jdLink: job.jdLink || "",
             jdText: job.jdText || "",
             salary: job.salary || "",
-            outputDir: outputDirFromPerson({ ...person, resumeFilePrefix }),
+            outputDir: await resolveOutputDir(),
             templateId: await pickTemplateId({}, person),
             resumeFilePrefix,
             personName: person.name || person.label || ""

@@ -373,7 +373,11 @@
                     <span>Sheet tab name</span>
                     <input id="inlineSheetTabName" type="text" autocomplete="off" placeholder="Defaults to person name" />
                   </label>
-                  <p class="hint">Uses the shared spreadsheet from Integrations. Missing tabs are created on first write.</p>
+                  <label class="field">
+                    <span>Output folder (under Downloads root)</span>
+                    <input id="inlineOutputDir" type="text" autocomplete="off" placeholder="Applications-Lewis" />
+                  </label>
+                  <p class="hint">Uses the shared save root from Integrations. Chrome can only write under Downloads.</p>
                 </div>
 
                 <p id="inlineProfileSaveStatus" class="inline-profile-save-status" hidden></p>
@@ -556,8 +560,9 @@
           </div>
           <label class="field">
             <span>Output folder (under Downloads)</span>
-            <input id="outputDir" type="text" placeholder="Applications-Lewis" autocomplete="off" />
+            <input id="outputDir" type="text" placeholder="BrightstarBids/Applications-Lewis" autocomplete="off" />
           </label>
+          <p class="hint" id="outputDirHint">Chrome saves under Downloads only. Set a shared root in Integrations and a folder per person.</p>
           <div class="batch-toolbar" role="toolbar" aria-label="Batch and queue controls">
             <div class="batch-toolbar-cluster" role="group" aria-label="Run controls">
               <div class="btn-group">
@@ -800,6 +805,16 @@
                 <span>Sheet tab (active person)</span>
                 <input id="sheetTabName" type="text" placeholder="Dmario Lewis" autocomplete="off" />
               </label>
+              <label class="field">
+                <span>Save root (under Downloads, shared)</span>
+                <input id="outputSaveRoot" type="text" placeholder="BrightstarBids" autocomplete="off" />
+              </label>
+              <p class="hint">Optional shared prefix for every person, e.g. BrightstarBids → Downloads/BrightstarBids/…</p>
+              <label class="field">
+                <span>Person folder (active person)</span>
+                <input id="personOutputDir" type="text" placeholder="Applications-Lewis" autocomplete="off" />
+              </label>
+              <p class="hint" id="outputRoutePreview">Resolved: Downloads / …</p>
             </div>
             <div class="subblock" id="chatgptPacingSection">
               <p class="subsection-title">AI pacing</p>

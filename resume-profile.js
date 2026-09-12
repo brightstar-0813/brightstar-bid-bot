@@ -407,6 +407,11 @@ export function personOutputNameToken(person = {}) {
 
 /** Downloads subfolder for a person, e.g. Lewis_Resume / "D'mario Lewis" → Applications-Lewis */
 export function outputDirFromPerson(person = {}) {
+  const custom = String(person?.outputDir || "").trim();
+  if (custom) {
+    const normalized = normalizeDownloadsRelativeDir(custom, "");
+    if (normalized) return normalized;
+  }
   return `Applications-${personOutputNameToken(person)}`;
 }
 
@@ -421,9 +426,19 @@ export function isGenericApplicationsDir(dir) {
   return /^Applications$/i.test(top);
 }
 
+function cleanPathSegment(seg) {
+  return String(seg || "")
+    .replace(/[<>:"|?*\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim()
+    .slice(0, 80);
+}
+
 /**
  * chrome.downloads only accepts paths relative to the Downloads folder.
  * Absolute Windows/Unix paths are rejected (Chrome then saves as "download").
+ * Allows nested routes such as BrightstarBids/Lewis (max 4 segments).
  */
 export function normalizeDownloadsRelativeDir(raw, fallback = "Applications") {
   let s = String(raw || "")
@@ -431,25 +446,61 @@ export function normalizeDownloadsRelativeDir(raw, fallback = "Applications") {
     .replace(/\\/g, "/");
   if (!s) return fallback;
 
-  const looksAbsolute = /^[a-zA-Z]:\//.test(s) || s.startsWith("/") || s.startsWith("//");
-  if (looksAbsolute) {
+  // Prefer the portion after /Downloads/ when an absolute path is pasted.
+  const afterDownloads = s.match(/\/Downloads\/(.+)$/i);
+  if (afterDownloads?.[1]) {
+    s = afterDownloads[1];
+  } else if (/^[a-zA-Z]:\//.test(s) || s.startsWith("/") || s.startsWith("//")) {
     const hit = s.match(/\/(Applications-[^/]+|Applications)(?:\/|$)/i);
-    if (hit?.[1]) s = hit[1];
-    else {
+    if (hit?.[1]) {
+      // Keep Applications-* plus any trailing segments after it when present.
+      const idx = s.toLowerCase().lastIndexOf(`/${hit[1].toLowerCase()}`);
+      s = idx >= 0 ? s.slice(idx + 1) : hit[1];
+    } else {
       const leaf = s.split("/").filter(Boolean).pop() || "";
       if (/^Applications-/i.test(leaf)) s = leaf;
       else return fallback;
     }
   }
 
-  const top = s.split("/").filter(Boolean)[0] || fallback;
-  const cleaned = top
-    .replace(/[<>:"|?*\u0000-\u001F]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[. ]+$/g, "")
-    .trim()
-    .slice(0, 80);
-  return cleaned || fallback;
+  const parts = s
+    .split("/")
+    .map(cleanPathSegment)
+    .filter(Boolean)
+    .filter((p) => p !== "." && p !== "..")
+    .slice(0, 4);
+  if (!parts.length) return fallback;
+  return parts.join("/");
+}
+
+/** Join Downloads-relative parts without duplicating a shared root prefix. */
+export function joinDownloadsRelativeDirs(...parts) {
+  const cleaned = parts
+    .map((p) => normalizeDownloadsRelativeDir(p, ""))
+    .filter(Boolean);
+  if (!cleaned.length) return "Applications";
+  let out = cleaned[0];
+  for (let i = 1; i < cleaned.length; i += 1) {
+    const next = cleaned[i];
+    if (next === out || next.startsWith(`${out}/`)) {
+      out = next;
+      continue;
+    }
+    if (out.startsWith(`${next}/`)) continue;
+    out = normalizeDownloadsRelativeDir(`${out}/${next}`, out);
+  }
+  return out || "Applications";
+}
+
+/**
+ * Final Downloads-relative folder for a person:
+ * optional shared root + person folder (custom or Applications-{Token}).
+ */
+export function resolveOutputDirForPerson(person = {}, { saveRoot = "" } = {}) {
+  const personFolder = outputDirFromPerson(person);
+  const root = normalizeDownloadsRelativeDir(saveRoot, "");
+  if (!root) return personFolder;
+  return joinDownloadsRelativeDirs(root, personFolder);
 }
 
 export function namesLikelyDifferent(a, b) {

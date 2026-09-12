@@ -443,7 +443,8 @@ async function loadProfileById(profileId) {
   const config = await getPersonSheetConfig(resolvedId);
   const withSheet = {
     ...full,
-    sheetTabName: config?.sheetTabName || full.sheetTabName || full.label || full.name || ""
+    sheetTabName: config?.sheetTabName || full.sheetTabName || full.label || full.name || "",
+    outputDir: config?.outputDir || full.outputDir || ""
   };
   populateProfileSelect(resolvedId);
   await loadPersonIntoForm(withSheet);
