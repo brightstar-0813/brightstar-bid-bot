@@ -68,7 +68,7 @@ Do not change without an explicit product decision:
 7. Bad row: retry once → `failed` → continue batch.
 8. Never commit `.env` / secrets.
 9. After code changes, remind: **Reload** unpacked extension on `chrome://extensions`.
-10. **PDF output:** custom people must get `LastName_Resume` (never bare `Resume`) and `Applications-{Token}` under Downloads. Source of truth is the active person (`resume-profile.js` + `syncActivePersonOutputContext`); do not freeze batch on generic `Applications` or absolute paths (Chrome saves those as `download`).
+10. **PDF output:** custom people must get `LastName_Resume` (never bare `Resume`). Save folder under Downloads defaults to the person's **sheet tab name** (e.g. `Lewis-SF`); fallback is `Applications-{Token}`. Source of truth is the active person (`resume-profile.js` + `syncActivePersonOutputContext`); do not freeze batch on generic `Applications` or absolute paths (Chrome saves those as `download`).
 11. **Custom profile parity:** Save-as-mine keeps rich / FIXED COMPANY HISTORY prompts (`resetEeo` ≠ `resetPrompts`); person template + sheet config are isolated; `last_resume_json` is scoped by `profileId`; queue rows get `profileId` on ingest/Start.
 
 ## Change workflow

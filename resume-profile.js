@@ -405,13 +405,19 @@ export function personOutputNameToken(person = {}) {
   return token || "Applicant";
 }
 
-/** Downloads subfolder for a person, e.g. Lewis_Resume / "D'mario Lewis" → Applications-Lewis */
+/**
+ * Downloads subfolder for a person.
+ * Prefer explicit outputDir; else sheet tab name (same label as the Google Sheet tab);
+ * else Applications-{Token}.
+ */
 export function outputDirFromPerson(person = {}) {
   const custom = String(person?.outputDir || "").trim();
   if (custom) {
     const normalized = normalizeDownloadsRelativeDir(custom, "");
     if (normalized) return normalized;
   }
+  const fromTab = normalizeDownloadsRelativeDir(String(person?.sheetTabName || "").trim(), "");
+  if (fromTab) return fromTab;
   return `Applications-${personOutputNameToken(person)}`;
 }
 
@@ -493,14 +499,11 @@ export function joinDownloadsRelativeDirs(...parts) {
 }
 
 /**
- * Final Downloads-relative folder for a person:
- * optional shared root + person folder (custom or Applications-{Token}).
+ * Final Downloads-relative folder for a person.
+ * saveRoot is ignored (kept for call-site compat); sheet tab / outputDir is the single folder.
  */
-export function resolveOutputDirForPerson(person = {}, { saveRoot = "" } = {}) {
-  const personFolder = outputDirFromPerson(person);
-  const root = normalizeDownloadsRelativeDir(saveRoot, "");
-  if (!root) return personFolder;
-  return joinDownloadsRelativeDirs(root, personFolder);
+export function resolveOutputDirForPerson(person = {}, { saveRoot: _saveRoot = "" } = {}) {
+  return outputDirFromPerson(person);
 }
 
 export function namesLikelyDifferent(a, b) {

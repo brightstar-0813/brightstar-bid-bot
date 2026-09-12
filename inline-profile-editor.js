@@ -31,7 +31,7 @@ import {
   getTrackPromptTemplate
 } from "./role-tracks.js";
 import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
-import { parseEmployersFromResume, outputDirFromPerson } from "./resume-profile.js";
+import { parseEmployersFromResume } from "./resume-profile.js";
 import { DEFAULT_TEMPLATE_ID, getAllTemplates } from "./templates/index.js";
 import { showToast } from "./ui-toast.js";
 import { confirmDialog } from "./ui-dialog.js";
@@ -229,10 +229,6 @@ export function createInlineProfileEditor(opts) {
     if (tabEl) {
       tabEl.value = person?.sheetTabName || person?.label || person?.name || "";
     }
-    const outEl = formRoot.querySelector("#inlineOutputDir");
-    if (outEl) {
-      outEl.value = person?.outputDir || outputDirFromPerson({ ...person, outputDir: "" });
-    }
     populateSelect(person?.id || NEW_PROFILE_ID);
     syncSaveLabel();
     renderCompleteness(person || {});
@@ -272,8 +268,7 @@ export function createInlineProfileEditor(opts) {
         editingPersonId: asNew || selectEl?.value === NEW_PROFILE_ID ? null : editingPersonId,
         roleTrack: activeRoleTrack,
         templateId: templateSelectEl?.value,
-        sheetTabName: formRoot.querySelector("#inlineSheetTabName")?.value?.trim() || "",
-        outputDir: formRoot.querySelector("#inlineOutputDir")?.value?.trim() || ""
+        sheetTabName: formRoot.querySelector("#inlineSheetTabName")?.value?.trim() || ""
       });
       const saved = result?.profile || result;
       editingPersonId = saved?.id || editingPersonId;

@@ -38,7 +38,7 @@ export const PERSON_FIELD_GROUPS = {
   ],
   resume: ["resumeFilePrefix", "signatureTitle", "masterResume", "requiredExperience"],
   prompts: ["roleTrack", "promptTemplate", "coverLetterPrompt", "templateId"],
-  integrations: ["sheetTabName", "outputDir"]
+  integrations: ["sheetTabName"]
 };
 
 /** Map person keys to form element ids in profile-editor / legacy popup. */
@@ -68,8 +68,7 @@ export const PERSON_FIELD_IDS = {
   requiredExperience: "personRequiredExperience",
   promptTemplate: "personResumePrompt",
   coverLetterPrompt: "personCoverPrompt",
-  sheetTabName: "sheetTabName",
-  outputDir: "personOutputDir"
+  sheetTabName: "sheetTabName"
 };
 
 export function extrasToText(extras) {
@@ -157,15 +156,6 @@ export function fillPersonForm(root, person, opts = {}) {
   set("promptTemplate", person.promptTemplate || "");
   set("coverLetterPrompt", person.coverLetterPrompt || "");
   set("sheetTabName", person.sheetTabName || person.label || person.name || "");
-  set(
-    "outputDir",
-    person.outputDir ||
-      (person.resumeFilePrefix || person.name || person.label
-        ? `Applications-${String(person.resumeFilePrefix || "")
-            .replace(/_Resume$/i, "")
-            .replace(/[^A-Za-z0-9]+/g, "") || "Applicant"}`
-        : "")
-  );
 
   const templateEl = root.querySelector("#templateSelect");
   if (templateEl && person.templateId) templateEl.value = person.templateId;
@@ -240,7 +230,7 @@ export function readPersonFromForm(root, opts = {}) {
     coverLetterPrompt: val("coverLetterPrompt"),
     templateId: opts.templateId || templateEl?.value || DEFAULT_TEMPLATE_ID,
     sheetTabName: val("sheetTabName"),
-    outputDir: val("outputDir"),
+    outputDir: val("sheetTabName"),
     // Omit history unless the caller (full editor wizard) provided arrays —
     // otherwise savePersonProfile preserves existing custom history.
     ...(Array.isArray(opts.workHistory) ? { workHistory: opts.workHistory } : {}),
@@ -371,7 +361,8 @@ export function mergeExtractedProfileIntoPerson(person, parsed, resumeText, { re
 export async function savePersonFromForm(root, opts = {}) {
   let person = readPersonFromForm(root, opts);
   if (opts.sheetTabName != null) person.sheetTabName = String(opts.sheetTabName).trim();
-  if (opts.outputDir != null) person.outputDir = String(opts.outputDir).trim();
+  // Save folder always mirrors sheet tab name.
+  person.outputDir = String(person.sheetTabName || opts.outputDir || "").trim();
   if (Array.isArray(opts.workHistory)) person.workHistory = opts.workHistory;
   if (Array.isArray(opts.educationHistory)) person.educationHistory = opts.educationHistory;
   // Seed US apply defaults for new customs / incomplete people (only fills empty fields).

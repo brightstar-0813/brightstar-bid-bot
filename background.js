@@ -1906,7 +1906,7 @@ function sanitizePathSegment(value, fallback = "untitled") {
 }
 
 /**
- * Prefer the active person's resolved save folder (shared root + person folder).
+ * Prefer the active person's save folder (sheet tab name under Downloads).
  * Explicit override wins when it already targets that person route.
  */
 async function resolveOutputDir(explicit = "") {
@@ -1914,9 +1914,7 @@ async function resolveOutputDir(explicit = "") {
   let personDir = "";
   try {
     person = await getActivePerson();
-    const data = await chrome.storage.local.get(["output_save_root"]);
-    const saveRoot = String(data.output_save_root || "").trim();
-    personDir = resolveOutputDirForPerson(person, { saveRoot });
+    personDir = resolveOutputDirForPerson(person);
   } catch {
     personDir = "";
   }
@@ -1926,7 +1924,7 @@ async function resolveOutputDir(explicit = "") {
     const personKey = personDir.toLowerCase();
     const argKey = fromArg.toLowerCase();
     const personFolder = String(
-      person?.outputDir || outputDirFromPerson({ ...(person || {}), outputDir: "" }) || ""
+      person?.sheetTabName || person?.outputDir || outputDirFromPerson({ ...(person || {}), outputDir: "" }) || ""
     )
       .trim()
       .toLowerCase();

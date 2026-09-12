@@ -33,13 +33,17 @@ test("normalizeResumeFilePrefix upgrades bare Resume from person name", () => {
   assert.equal(normalizeResumeFilePrefix("", "Maria Garcia"), "Garcia_Resume");
 });
 
-test("outputDirFromPerson matches built-in and custom naming", () => {
+test("outputDirFromPerson prefers sheet tab, then Applications-{Token}", () => {
   assert.equal(outputDirFromPerson({ resumeFilePrefix: "Lewis_Resume" }), "Applications-Lewis");
   assert.equal(
     outputDirFromPerson({ resumeFilePrefix: "Resume", name: "Sandeep Kumar" }),
     "Applications-Kumar"
   );
   assert.equal(outputDirFromPerson({ name: "Ada Lovelace" }), "Applications-Lovelace");
+  assert.equal(
+    outputDirFromPerson({ sheetTabName: "Lewis-SF", resumeFilePrefix: "Lewis_Resume" }),
+    "Lewis-SF"
+  );
 });
 
 test("personOutputNameToken prefers configured prefix over JSON-ish fallbacks", () => {
@@ -68,28 +72,32 @@ test("normalizeDownloadsRelativeDir rejects absolute paths", () => {
   assert.equal(normalizeDownloadsRelativeDir("Applications"), "Applications");
 });
 
-test("join and resolve support shared root + person folder", () => {
+test("resolveOutputDirForPerson uses sheet tab as the single save folder", () => {
   assert.equal(joinDownloadsRelativeDirs("BrightstarBids", "Applications-Lewis"), "BrightstarBids/Applications-Lewis");
   assert.equal(
-    joinDownloadsRelativeDirs("BrightstarBids", "BrightstarBids/Lewis"),
-    "BrightstarBids/Lewis"
-  );
-  assert.equal(
     resolveOutputDirForPerson(
-      { resumeFilePrefix: "Lewis_Resume", outputDir: "" },
+      { resumeFilePrefix: "Lewis_Resume", outputDir: "", sheetTabName: "Lewis-SF" },
       { saveRoot: "BrightstarBids" }
     ),
-    "BrightstarBids/Applications-Lewis"
+    "Lewis-SF"
   );
   assert.equal(
     resolveOutputDirForPerson({ outputDir: "TeamA/Lewis" }, { saveRoot: "BrightstarBids" }),
-    "BrightstarBids/TeamA/Lewis"
+    "TeamA/Lewis"
+  );
+  assert.equal(
+    resolveOutputDirForPerson({ resumeFilePrefix: "Lewis_Resume", outputDir: "" }),
+    "Applications-Lewis"
   );
 });
 
-test("outputDirFromPerson prefers custom outputDir", () => {
+test("outputDirFromPerson prefers custom outputDir over sheet tab", () => {
   assert.equal(
-    outputDirFromPerson({ outputDir: "TeamA/Lewis", resumeFilePrefix: "Lewis_Resume" }),
+    outputDirFromPerson({
+      outputDir: "TeamA/Lewis",
+      sheetTabName: "Lewis-SF",
+      resumeFilePrefix: "Lewis_Resume"
+    }),
     "TeamA/Lewis"
   );
 });

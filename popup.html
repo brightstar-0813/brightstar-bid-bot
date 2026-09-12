@@ -370,14 +370,10 @@
                     <textarea id="personCoverPrompt" class="prompt-input" rows="4"></textarea>
                   </label>
                   <label class="field">
-                    <span>Sheet tab name</span>
-                    <input id="inlineSheetTabName" type="text" autocomplete="off" placeholder="Defaults to person name" />
+                    <span>Sheet tab / save folder</span>
+                    <input id="inlineSheetTabName" type="text" autocomplete="off" placeholder="Lewis-SF" />
                   </label>
-                  <label class="field">
-                    <span>Output folder (under Downloads root)</span>
-                    <input id="inlineOutputDir" type="text" autocomplete="off" placeholder="Applications-Lewis" />
-                  </label>
-                  <p class="hint">Uses the shared save root from Integrations. Chrome can only write under Downloads.</p>
+                  <p class="hint">Same name as the Google Sheet tab and the folder under Downloads.</p>
                 </div>
 
                 <p id="inlineProfileSaveStatus" class="inline-profile-save-status" hidden></p>
@@ -560,9 +556,9 @@
           </div>
           <label class="field">
             <span>Output folder (under Downloads)</span>
-            <input id="outputDir" type="text" placeholder="BrightstarBids/Applications-Lewis" autocomplete="off" />
+            <input id="outputDir" type="text" placeholder="Lewis-SF" autocomplete="off" />
           </label>
-          <p class="hint" id="outputDirHint">Chrome saves under Downloads only. Set a shared root in Integrations and a folder per person.</p>
+          <p class="hint" id="outputDirHint">Matches this profile’s sheet tab name. Chrome saves under Downloads only.</p>
           <div class="batch-toolbar" role="toolbar" aria-label="Batch and queue controls">
             <div class="batch-toolbar-cluster" role="group" aria-label="Run controls">
               <div class="btn-group">
@@ -790,7 +786,7 @@
           <div class="panel-body" id="sheetPanelBody" hidden>
             <div class="subblock" id="spreadsheetSection">
               <p class="subsection-title">Shared workbook</p>
-              <p class="hint">Same spreadsheet and save root for every profile.</p>
+              <p class="hint">Same spreadsheet for every profile.</p>
               <label class="field">
                 <span>Spreadsheet link</span>
                 <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />
@@ -802,22 +798,13 @@
                 </label>
                 <button type="button" id="copyAppsScript" class="ghost compact">Copy script</button>
               </div>
-              <label class="field">
-                <span>Save root (under Downloads)</span>
-                <input id="outputSaveRoot" type="text" placeholder="BrightstarBids" autocomplete="off" />
-              </label>
-              <p class="hint">Optional shared prefix, e.g. BrightstarBids → Downloads/BrightstarBids/…</p>
             </div>
             <div class="subblock" id="personSheetSection">
               <p class="subsection-title" id="personSheetSectionTitle">This profile</p>
-              <p class="hint" id="personSheetSectionHint">Tab name and folder follow the active profile.</p>
+              <p class="hint" id="personSheetSectionHint">Sheet tab name is also the save folder under Downloads.</p>
               <label class="field">
-                <span>Sheet tab</span>
-                <input id="sheetTabName" type="text" placeholder="Dmario Lewis" autocomplete="off" />
-              </label>
-              <label class="field">
-                <span>Person folder</span>
-                <input id="personOutputDir" type="text" placeholder="Applications-Lewis" autocomplete="off" />
+                <span>Sheet tab / save folder</span>
+                <input id="sheetTabName" type="text" placeholder="Lewis-SF" autocomplete="off" />
               </label>
               <p class="hint" id="outputRoutePreview">Resolved: Downloads / …</p>
             </div>

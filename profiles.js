@@ -373,13 +373,15 @@ export async function syncActivePersonOutputContext(person) {
   const p = normalizePerson(person);
   const resumeFilePrefix = normalizeResumeFilePrefix(p.resumeFilePrefix, p.name || p.label);
   const sheet = p.id ? await getPersonSheetConfig(p.id).catch(() => ({})) : {};
-  const data = await chrome.storage.local.get(["output_save_root"]);
-  const saveRoot = String(data.output_save_root || "").trim();
-  const personFolder = String(p.outputDir || sheet.outputDir || "").trim();
-  const outputDir = resolveOutputDirForPerson(
-    { ...p, resumeFilePrefix, outputDir: personFolder },
-    { saveRoot }
-  );
+  const sheetTabName =
+    sanitizeSheetTabName(p.sheetTabName || sheet.sheetTabName || "") ||
+    defaultSheetTabNameForPerson(p);
+  const outputDir = resolveOutputDirForPerson({
+    ...p,
+    resumeFilePrefix,
+    sheetTabName,
+    outputDir: sheetTabName
+  });
   const templateId = String(p.templateId || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   await chrome.storage.local.set({
     output_dir: outputDir,
@@ -387,7 +389,7 @@ export async function syncActivePersonOutputContext(person) {
     resume_file_prefix: resumeFilePrefix,
     selected_template_id: templateId
   });
-  return { outputDir, resumeFilePrefix, templateId, personFolder, saveRoot };
+  return { outputDir, resumeFilePrefix, templateId, personFolder: sheetTabName, saveRoot: "" };
 }
 
 /** Active person used for prompts, contact autofill, and cover letter. */
@@ -403,7 +405,11 @@ export async function getActivePerson() {
       sheet.sheetTabName ||
       person.sheetTabName ||
       defaultSheetTabNameForPerson(person),
-    outputDir: sheet.outputDir || person.outputDir || ""
+    outputDir:
+      sanitizeSheetTabName(sheet.sheetTabName || person.sheetTabName || "") ||
+      sheet.outputDir ||
+      person.outputDir ||
+      ""
   };
 }
 
