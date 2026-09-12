@@ -210,8 +210,12 @@ const indeedGrabApplyBtn = document.getElementById("indeedGrabApply");
 const indeedGrabOnlyBtn = document.getElementById("indeedGrabOnly");
 const indeedGrabStateEl = document.getElementById("indeedGrabState");
 const indeedGrabStatusEl = document.getElementById("indeedGrabStatus");
-const toggleIntegrationsPanelBtn = document.getElementById("toggleIntegrationsPanel");
-const integrationsPanelBody = document.getElementById("integrationsPanelBody");
+const toggleSheetPanelBtn = document.getElementById("toggleSheetPanel");
+const sheetPanelBody = document.getElementById("sheetPanelBody");
+const togglePacingSlackPanelBtn = document.getElementById("togglePacingSlackPanel");
+const pacingSlackPanelBody = document.getElementById("pacingSlackPanelBody");
+const personSheetSectionTitleEl = document.getElementById("personSheetSectionTitle");
+const personSheetSectionHintEl = document.getElementById("personSheetSectionHint");
 const jobsSectionEl = document.getElementById("jobsSection");
 const indeedSectionEl = document.getElementById("indeedSection");
 const manualSectionEl = document.getElementById("manualSection");
@@ -644,7 +648,7 @@ async function resolveUiOutputDir() {
   return { outputDir, person };
 }
 
-/** Load shared workbook URLs + this person's sheet tab / output folder into the Integrations UI. */
+/** Load shared workbook URLs + active profile sheet tab / folder into the Sheet panel. */
 async function syncSheetConfigFromPerson(person) {
   const data = await chrome.storage.local.get([
     "spreadsheet_url",
@@ -673,6 +677,7 @@ async function syncSheetConfigFromPerson(person) {
   if (outputSaveRootEl) outputSaveRootEl.value = saveRoot;
   if (personOutputDirEl) personOutputDirEl.value = personFolder;
   if (outputDirEl) outputDirEl.value = resolved;
+  updatePersonSheetSectionLabels(person);
   updateOutputRoutePreview(resolved);
   await chrome.storage.local.set({
     spreadsheet_url: spreadsheetUrl,
@@ -690,6 +695,18 @@ function updateOutputRoutePreview(resolved) {
   if (!outputRoutePreviewEl) return;
   const path = String(resolved || outputDirEl?.value || "").trim() || "…";
   outputRoutePreviewEl.textContent = `Resolved: Downloads / ${path}`;
+}
+
+function updatePersonSheetSectionLabels(person) {
+  const label = String(person?.label || person?.name || "").trim();
+  if (personSheetSectionTitleEl) {
+    personSheetSectionTitleEl.textContent = label ? `This profile · ${label}` : "This profile";
+  }
+  if (personSheetSectionHintEl) {
+    personSheetSectionHintEl.textContent = label
+      ? `Tab name and folder for ${label}. Switch profiles to edit someone else.`
+      : "Tab name and folder follow the active profile.";
+  }
 }
 
 async function persistActivePersonSheetFromUi() {
@@ -2492,13 +2509,22 @@ async function openAsWindowApp() {
   }
 }
 
-function setIntegrationsPanelOpen(open) {
-  if (!integrationsPanelBody || !toggleIntegrationsPanelBtn) return;
-  integrationsPanelBody.hidden = !open;
-  toggleIntegrationsPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  toggleIntegrationsPanelBtn.textContent = open
-    ? "Hide sheet, pacing & Slack"
-    : "Show sheet, pacing & Slack";
+function setSheetPanelOpen(open) {
+  if (!sheetPanelBody || !toggleSheetPanelBtn) return;
+  sheetPanelBody.hidden = !open;
+  toggleSheetPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  toggleSheetPanelBtn.textContent = open
+    ? "Hide Google Sheet & saves"
+    : "Show Google Sheet & saves";
+}
+
+function setPacingSlackPanelOpen(open) {
+  if (!pacingSlackPanelBody || !togglePacingSlackPanelBtn) return;
+  pacingSlackPanelBody.hidden = !open;
+  togglePacingSlackPanelBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  togglePacingSlackPanelBtn.textContent = open
+    ? "Hide pacing & Slack"
+    : "Show pacing & Slack";
 }
 
 function normalizeBidMarket(value) {
@@ -3219,9 +3245,13 @@ keepOpenBtn?.addEventListener("click", dockOutOfPopup);
 openAsWindowBtn?.addEventListener("click", () => {
   openAsWindowApp().catch((e) => setStatus(String(e.message || e)));
 });
-toggleIntegrationsPanelBtn?.addEventListener("click", () => {
-  const open = integrationsPanelBody?.hidden !== false;
-  setIntegrationsPanelOpen(open);
+toggleSheetPanelBtn?.addEventListener("click", () => {
+  const open = sheetPanelBody?.hidden !== false;
+  setSheetPanelOpen(open);
+});
+togglePacingSlackPanelBtn?.addEventListener("click", () => {
+  const open = pacingSlackPanelBody?.hidden !== false;
+  setPacingSlackPanelOpen(open);
 });
 previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));

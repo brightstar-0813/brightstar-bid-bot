@@ -783,15 +783,16 @@
               <p class="section-title">Integrations</p>
             </div>
           </header>
-          <button type="button" class="panel-toggle" id="toggleIntegrationsPanel" aria-expanded="false">
-            Show sheet, pacing &amp; Slack
+
+          <button type="button" class="panel-toggle" id="toggleSheetPanel" aria-expanded="false">
+            Show Google Sheet &amp; saves
           </button>
-          <div class="panel-body" id="integrationsPanelBody" hidden>
+          <div class="panel-body" id="sheetPanelBody" hidden>
             <div class="subblock" id="spreadsheetSection">
-              <p class="subsection-title">Google Sheet</p>
-              <p class="hint">One workbook for everyone. Each person writes to their own tab.</p>
+              <p class="subsection-title">Shared workbook</p>
+              <p class="hint">Same spreadsheet and save root for every profile.</p>
               <label class="field">
-                <span>Spreadsheet link (shared)</span>
+                <span>Spreadsheet link</span>
                 <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />
               </label>
               <div class="row-split">
@@ -802,20 +803,31 @@
                 <button type="button" id="copyAppsScript" class="ghost compact">Copy script</button>
               </div>
               <label class="field">
-                <span>Sheet tab (active person)</span>
+                <span>Save root (under Downloads)</span>
+                <input id="outputSaveRoot" type="text" placeholder="BrightstarBids" autocomplete="off" />
+              </label>
+              <p class="hint">Optional shared prefix, e.g. BrightstarBids → Downloads/BrightstarBids/…</p>
+            </div>
+            <div class="subblock" id="personSheetSection">
+              <p class="subsection-title" id="personSheetSectionTitle">This profile</p>
+              <p class="hint" id="personSheetSectionHint">Tab name and folder follow the active profile.</p>
+              <label class="field">
+                <span>Sheet tab</span>
                 <input id="sheetTabName" type="text" placeholder="Dmario Lewis" autocomplete="off" />
               </label>
               <label class="field">
-                <span>Save root (under Downloads, shared)</span>
-                <input id="outputSaveRoot" type="text" placeholder="BrightstarBids" autocomplete="off" />
-              </label>
-              <p class="hint">Optional shared prefix for every person, e.g. BrightstarBids → Downloads/BrightstarBids/…</p>
-              <label class="field">
-                <span>Person folder (active person)</span>
+                <span>Person folder</span>
                 <input id="personOutputDir" type="text" placeholder="Applications-Lewis" autocomplete="off" />
               </label>
               <p class="hint" id="outputRoutePreview">Resolved: Downloads / …</p>
             </div>
+          </div>
+
+          <button type="button" class="panel-toggle" id="togglePacingSlackPanel" aria-expanded="false">
+            Show pacing &amp; Slack
+          </button>
+          <div class="panel-body" id="pacingSlackPanelBody" hidden>
+            <p class="hint integrations-shared-hint">Same for every profile.</p>
             <div class="subblock" id="chatgptPacingSection">
               <p class="subsection-title">AI pacing</p>
               <div class="row-split">

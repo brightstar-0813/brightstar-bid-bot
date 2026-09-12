@@ -525,6 +525,14 @@ button.primary:hover,
   color: var(--ink);
 }
 
+.panel-body + .panel-toggle {
+  margin-top: 6px;
+}
+
+.integrations-shared-hint {
+  margin: 2px 0 8px;
+}
+
 .panel-toggle[aria-expanded="true"] {
   border-color: var(--control-hover-border);
   color: var(--gold-bright);
