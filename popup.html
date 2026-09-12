@@ -369,16 +369,11 @@
                     <span>Cover letter prompt ({JD})</span>
                     <textarea id="personCoverPrompt" class="prompt-input" rows="4"></textarea>
                   </label>
-                  <div class="grid-2 grid-2-stack">
-                    <label class="field">
-                      <span>Spreadsheet URL</span>
-                      <input id="inlineSpreadsheetUrl" type="url" autocomplete="off" />
-                    </label>
-                    <label class="field">
-                      <span>Apps Script URL</span>
-                      <input id="inlineSheetsWebAppUrl" type="url" autocomplete="off" />
-                    </label>
-                  </div>
+                  <label class="field">
+                    <span>Sheet tab name</span>
+                    <input id="inlineSheetTabName" type="text" autocomplete="off" placeholder="Defaults to person name" />
+                  </label>
+                  <p class="hint">Uses the shared spreadsheet from Integrations. Missing tabs are created on first write.</p>
                 </div>
 
                 <p id="inlineProfileSaveStatus" class="inline-profile-save-status" hidden></p>
@@ -789,8 +784,9 @@
           <div class="panel-body" id="integrationsPanelBody" hidden>
             <div class="subblock" id="spreadsheetSection">
               <p class="subsection-title">Google Sheet</p>
+              <p class="hint">One workbook for everyone. Each person writes to their own tab.</p>
               <label class="field">
-                <span>Spreadsheet link</span>
+                <span>Spreadsheet link (shared)</span>
                 <input id="spreadsheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit" autocomplete="off" />
               </label>
               <div class="row-split">
@@ -800,6 +796,10 @@
                 </label>
                 <button type="button" id="copyAppsScript" class="ghost compact">Copy script</button>
               </div>
+              <label class="field">
+                <span>Sheet tab (active person)</span>
+                <input id="sheetTabName" type="text" placeholder="Dmario Lewis" autocomplete="off" />
+              </label>
             </div>
             <div class="subblock" id="chatgptPacingSection">
               <p class="subsection-title">AI pacing</p>

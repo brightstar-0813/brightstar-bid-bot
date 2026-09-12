@@ -9,6 +9,27 @@ export function extractSpreadsheetId(urlOrId) {
   return "";
 }
 
+/**
+ * Google Sheets tab names cannot include \ / ? * [ ] and max out at 100 chars.
+ */
+export function sanitizeSheetTabName(name) {
+  let s = String(name || "")
+    .trim()
+    .replace(/[:\\/?*[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (s.length > 100) s = s.slice(0, 100).trim();
+  return s;
+}
+
+/** Default tab label for a person when no custom sheetTabName is saved. */
+export function defaultSheetTabNameForPerson(person = {}) {
+  return (
+    sanitizeSheetTabName(person?.sheetTabName || person?.label || person?.name || person?.id || "") ||
+    "Profile"
+  );
+}
+
 export function formatApplicationDate(date = new Date()) {
   const month = date.getMonth() + 1;
   const day = date.getDate();
@@ -149,6 +170,7 @@ async function postSheetWebApp(webAppUrl, payload) {
 export async function appendJobToSpreadsheet({
   spreadsheetUrl,
   webAppUrl,
+  sheetName = "",
   jobNo,
   jobTitle,
   companyName,
@@ -164,6 +186,7 @@ export async function appendJobToSpreadsheet({
   const payload = {
     action: "append",
     spreadsheetId,
+    sheetName: sanitizeSheetTabName(sheetName),
     jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
     applicationDate: formatApplicationDate(),
     jobTitle: jobTitle || "",
@@ -184,6 +207,7 @@ export async function appendJobToSpreadsheet({
 export async function markJobAppliedOnSpreadsheet({
   spreadsheetUrl,
   webAppUrl,
+  sheetName = "",
   jobNo,
   jobTitle,
   companyName,
@@ -201,6 +225,7 @@ export async function markJobAppliedOnSpreadsheet({
   const payload = {
     action: "markApplied",
     spreadsheetId,
+    sheetName: sanitizeSheetTabName(sheetName),
     jobNo: jobNo !== "" && jobNo != null ? String(jobNo) : "",
     applicationDate: formatApplicationDate(),
     jobTitle: jobTitle || "",
@@ -224,7 +249,7 @@ export async function markJobAppliedOnSpreadsheet({
  * Fetch job links + companies already on the sheet (for link and company dedupe).
  * @returns {Promise<{ links: string[], companies: string[] }>}
  */
-export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl }) {
+export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl, sheetName = "" }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
     throw new Error("Invalid Google Spreadsheet link.");
@@ -232,7 +257,8 @@ export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl })
 
   const parsed = await postSheetWebApp(webAppUrl, {
     action: "listLinks",
-    spreadsheetId
+    spreadsheetId,
+    sheetName: sanitizeSheetTabName(sheetName)
   });
 
   const links = Array.isArray(parsed?.links) ? parsed.links : [];
@@ -260,7 +286,8 @@ export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl })
         status: String(row?.status || "").trim()
       }))
       .filter((row) => row.link),
-    appliedLinks: appliedLinks.map((l) => String(l || "").trim()).filter(Boolean)
+    appliedLinks: appliedLinks.map((l) => String(l || "").trim()).filter(Boolean),
+    sheetName: String(parsed?.sheetName || sheetName || "").trim()
   };
 }
 
@@ -268,8 +295,8 @@ export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl })
  * Fetch all job links already recorded on the sheet (column Link / E).
  * @returns {Promise<string[]>}
  */
-export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl }) {
-  const { links } = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
+export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl, sheetName = "" }) {
+  const { links } = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl, sheetName });
   return links;
 }
 

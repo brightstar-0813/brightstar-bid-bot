@@ -38,7 +38,7 @@ export const PERSON_FIELD_GROUPS = {
   ],
   resume: ["resumeFilePrefix", "signatureTitle", "masterResume", "requiredExperience"],
   prompts: ["roleTrack", "promptTemplate", "coverLetterPrompt", "templateId"],
-  integrations: ["spreadsheetUrl", "sheetsWebAppUrl"]
+  integrations: ["sheetTabName"]
 };
 
 /** Map person keys to form element ids in profile-editor / legacy popup. */
@@ -68,8 +68,7 @@ export const PERSON_FIELD_IDS = {
   requiredExperience: "personRequiredExperience",
   promptTemplate: "personResumePrompt",
   coverLetterPrompt: "personCoverPrompt",
-  spreadsheetUrl: "spreadsheetUrl",
-  sheetsWebAppUrl: "sheetsWebAppUrl"
+  sheetTabName: "sheetTabName"
 };
 
 export function extrasToText(extras) {
@@ -156,8 +155,7 @@ export function fillPersonForm(root, person, opts = {}) {
   set("requiredExperience", requiredExperienceToText(person.requiredExperience || []));
   set("promptTemplate", person.promptTemplate || "");
   set("coverLetterPrompt", person.coverLetterPrompt || "");
-  set("spreadsheetUrl", person.spreadsheetUrl || "");
-  set("sheetsWebAppUrl", person.sheetsWebAppUrl || "");
+  set("sheetTabName", person.sheetTabName || person.label || person.name || "");
 
   const templateEl = root.querySelector("#templateSelect");
   if (templateEl && person.templateId) templateEl.value = person.templateId;
@@ -231,8 +229,7 @@ export function readPersonFromForm(root, opts = {}) {
     promptTemplate: val("promptTemplate"),
     coverLetterPrompt: val("coverLetterPrompt"),
     templateId: opts.templateId || templateEl?.value || DEFAULT_TEMPLATE_ID,
-    spreadsheetUrl: val("spreadsheetUrl"),
-    sheetsWebAppUrl: val("sheetsWebAppUrl"),
+    sheetTabName: val("sheetTabName"),
     // Omit history unless the caller (full editor wizard) provided arrays —
     // otherwise savePersonProfile preserves existing custom history.
     ...(Array.isArray(opts.workHistory) ? { workHistory: opts.workHistory } : {}),
@@ -362,8 +359,7 @@ export function mergeExtractedProfileIntoPerson(person, parsed, resumeText, { re
  */
 export async function savePersonFromForm(root, opts = {}) {
   let person = readPersonFromForm(root, opts);
-  if (opts.spreadsheetUrl != null) person.spreadsheetUrl = String(opts.spreadsheetUrl).trim();
-  if (opts.sheetsWebAppUrl != null) person.sheetsWebAppUrl = String(opts.sheetsWebAppUrl).trim();
+  if (opts.sheetTabName != null) person.sheetTabName = String(opts.sheetTabName).trim();
   if (Array.isArray(opts.workHistory)) person.workHistory = opts.workHistory;
   if (Array.isArray(opts.educationHistory)) person.educationHistory = opts.educationHistory;
   // Seed US apply defaults for new customs / incomplete people (only fills empty fields).
@@ -410,8 +406,7 @@ export async function savePersonFromForm(root, opts = {}) {
       templateId: person.templateId,
       signatureTitle: person.signatureTitle,
       roleTrack: person.roleTrack,
-      spreadsheetUrl: person.spreadsheetUrl,
-      sheetsWebAppUrl: person.sheetsWebAppUrl,
+      sheetTabName: person.sheetTabName,
       workHistory: person.workHistory || [],
       educationHistory: person.educationHistory || []
     });

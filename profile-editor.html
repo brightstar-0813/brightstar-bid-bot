@@ -346,7 +346,7 @@
 
         <!-- Batch (Brightstar CSV / prompts — not autofill) -->
         <div class="profile-tab-panel" data-panel="batch" id="profilePanelBatch" role="tabpanel" hidden aria-hidden="true">
-          <p class="tab-intro">Engineering track, AI prompts, and Google Sheet — for CSV batch bidding.</p>
+          <p class="tab-intro">Engineering track, AI prompts, and this person's Google Sheet tab.</p>
           <div class="profile-acc">
             <details class="profile-acc-item" open>
               <summary>Track &amp; template</summary>
@@ -382,18 +382,13 @@
             </details>
 
             <details class="profile-acc-item">
-              <summary>Google Sheet</summary>
+              <summary>Google Sheet tab</summary>
               <div class="profile-acc-body">
-                <div class="grid-2 grid-2-stack">
-                  <label class="field">
-                    <span>Spreadsheet URL</span>
-                    <input id="spreadsheetUrl" type="url" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/…" />
-                  </label>
-                  <label class="field">
-                    <span>Apps Script URL</span>
-                    <input id="sheetsWebAppUrl" type="url" autocomplete="off" placeholder="https://script.google.com/macros/…" />
-                  </label>
-                </div>
+                <label class="field">
+                  <span>Sheet tab name</span>
+                  <input id="sheetTabName" type="text" autocomplete="off" placeholder="Defaults to person name" />
+                </label>
+                <p class="hint">One shared workbook in Integrations — this person writes to this tab (created if missing).</p>
               </div>
             </details>
           </div>

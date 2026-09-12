@@ -6,7 +6,9 @@ import {
   fetchExistingJobLinks,
   fetchExistingSheetDedupKeys,
   buildKnownLinkSet,
-  normalizeJobLink
+  normalizeJobLink,
+  defaultSheetTabNameForPerson,
+  sanitizeSheetTabName
 } from "./sheets.js";
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
 import {
@@ -14,6 +16,7 @@ import {
   buildPrompt,
   getActivePerson,
   getAutofillContact,
+  getPersonSheetConfig,
   resolveExperienceRulesForPerson,
   resolveRoleTrackForPerson,
   DEFAULT_PROFILE_ID
@@ -992,18 +995,19 @@ async function trySlackDuplicates(duplicates, sheetLinkCount) {
 
 async function getSheetConfig() {
   const person = await getActivePerson().catch(() => null);
-  const fromPerson = {
-    spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
-    webAppUrl: String(person?.sheetsWebAppUrl || "").trim()
-  };
-  // Any person-scoped sheet field wins in full — never fill gaps from another person's globals.
-  if (fromPerson.spreadsheetUrl || fromPerson.webAppUrl) return fromPerson;
-
+  const personCfg = person?.id ? await getPersonSheetConfig(person.id).catch(() => ({})) : {};
   const data = await chrome.storage.local.get(["spreadsheet_url", "sheets_web_app_url"]);
-  return {
-    spreadsheetUrl: String(data.spreadsheet_url || "").trim(),
-    webAppUrl: String(data.sheets_web_app_url || "").trim()
-  };
+  // Shared workbook first; legacy per-person URLs remain a fallback for older installs.
+  const spreadsheetUrl = String(
+    data.spreadsheet_url || personCfg.spreadsheetUrl || person?.spreadsheetUrl || ""
+  ).trim();
+  const webAppUrl = String(
+    data.sheets_web_app_url || personCfg.sheetsWebAppUrl || person?.sheetsWebAppUrl || ""
+  ).trim();
+  const sheetTabName =
+    sanitizeSheetTabName(personCfg.sheetTabName || person?.sheetTabName || "") ||
+    defaultSheetTabNameForPerson(person || {});
+  return { spreadsheetUrl, webAppUrl, sheetTabName };
 }
 
 /** Persist harvested resume JSON scoped to the active person (avoids cross-profile autofill history). */
@@ -1118,13 +1122,14 @@ async function persistJobContextForAutofill(job = {}) {
 async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
   const jdLink = String(jobMeta.jdLink || jobMeta.url || "").trim();
   if (!jdLink) return { skipped: true, reason: "no-link" };
-  const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+  const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
   if (!spreadsheetUrl || !webAppUrl) return { skipped: true, reason: "no-sheet" };
   const statusText = String(statusOverride || "").trim();
   try {
     const result = await markJobAppliedOnSpreadsheet({
       spreadsheetUrl,
       webAppUrl,
+      sheetName: sheetTabName,
       jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
       jobTitle: jobMeta.jobTitle || jobMeta.title || "",
       companyName: jobMeta.companyName || jobMeta.company || "",
@@ -1293,12 +1298,13 @@ async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "gener
     }
   }
 
-  const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+  const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
   if (!spreadsheetUrl || !webAppUrl) return { covered: false };
   try {
     const keys = await fetchExistingSheetDedupKeys({
       spreadsheetUrl,
-      webAppUrl
+      webAppUrl,
+      sheetName: sheetTabName
     });
     const known = buildKnownLinkSet(keys.links || []);
     const applied = buildKnownLinkSet(keys.appliedLinks || []);
@@ -1674,7 +1680,7 @@ function isHostedApplyBacklogJob(j, person = null) {
  * twice in this queue). Alerts Slack with the skipped list.
  */
 async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
-  const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+  const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
   let links = [];
   let sheetError = "";
   let sheetConfigured = Boolean(spreadsheetUrl && webAppUrl);
@@ -1682,7 +1688,11 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   if (sheetConfigured) {
     await setStatus("Checking Google Sheet for job links already bid…");
     try {
-      const keys = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
+      const keys = await fetchExistingSheetDedupKeys({
+        spreadsheetUrl,
+        webAppUrl,
+        sheetName: sheetTabName
+      });
       links = keys.links || [];
     } catch (err) {
       sheetError = String(err?.message || err);
@@ -6169,10 +6179,12 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
 
   let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
   let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
-  if (!spreadsheetUrl || !sheetsWebAppUrl) {
+  let sheetTabName = String(jobMeta.sheetTabName || jobMeta.sheetName || "").trim();
+  if (!spreadsheetUrl || !sheetsWebAppUrl || !sheetTabName) {
     const sheetCfg = await getSheetConfig();
     if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheetUrl || "").trim();
     if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.webAppUrl || "").trim();
+    if (!sheetTabName) sheetTabName = String(sheetCfg.sheetTabName || "").trim();
   }
   if (spreadsheetUrl && sheetsWebAppUrl) {
     const manualBid = jobMeta.bidSource === "one-off" || jobMeta.oneOff === true;
@@ -6182,6 +6194,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         const sheetResult = await markJobAppliedOnSpreadsheet({
           spreadsheetUrl,
           webAppUrl: sheetsWebAppUrl,
+          sheetName: sheetTabName,
           jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
@@ -6194,6 +6207,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         const sheetResult = await appendJobToSpreadsheet({
           spreadsheetUrl,
           webAppUrl: sheetsWebAppUrl,
+          sheetName: sheetTabName,
           jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
@@ -9446,11 +9460,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             );
             return;
           }
-          const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+          const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
           const link = normalizeJobLink(meta.jdLink || "");
           if (link && spreadsheetUrl && webAppUrl) {
             try {
-              const keys = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
+              const keys = await fetchExistingSheetDedupKeys({
+                spreadsheetUrl,
+                webAppUrl,
+                sheetName: sheetTabName
+              });
               const linkHit = buildKnownLinkSet(keys.links).has(link);
               if (linkHit) {
                 await markJobSkippedAsDuplicate(csvRow, "same job link already on Google Sheet");

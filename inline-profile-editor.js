@@ -225,10 +225,10 @@ export function createInlineProfileEditor(opts) {
     setActiveRoleTrackUi(track);
     populateTemplates(person?.templateId || DEFAULT_TEMPLATE_ID);
     fillPersonForm(formRoot, person || {}, { roleTrack: track });
-    const sheetUrlEl = formRoot.querySelector("#inlineSpreadsheetUrl");
-    const sheetAppEl = formRoot.querySelector("#inlineSheetsWebAppUrl");
-    if (sheetUrlEl) sheetUrlEl.value = person?.spreadsheetUrl || "";
-    if (sheetAppEl) sheetAppEl.value = person?.sheetsWebAppUrl || "";
+    const tabEl = formRoot.querySelector("#inlineSheetTabName");
+    if (tabEl) {
+      tabEl.value = person?.sheetTabName || person?.label || person?.name || "";
+    }
     populateSelect(person?.id || NEW_PROFILE_ID);
     syncSaveLabel();
     renderCompleteness(person || {});
@@ -248,8 +248,7 @@ export function createInlineProfileEditor(opts) {
     const sheet = await getPersonSheetConfig(full.id);
     await loadPerson({
       ...full,
-      spreadsheetUrl: sheet?.spreadsheetUrl || full.spreadsheetUrl || "",
-      sheetsWebAppUrl: sheet?.sheetsWebAppUrl || full.sheetsWebAppUrl || ""
+      sheetTabName: sheet?.sheetTabName || full.sheetTabName || full.label || full.name || ""
     });
   }
 
@@ -268,8 +267,7 @@ export function createInlineProfileEditor(opts) {
         editingPersonId: asNew || selectEl?.value === NEW_PROFILE_ID ? null : editingPersonId,
         roleTrack: activeRoleTrack,
         templateId: templateSelectEl?.value,
-        spreadsheetUrl: formRoot.querySelector("#inlineSpreadsheetUrl")?.value?.trim() || "",
-        sheetsWebAppUrl: formRoot.querySelector("#inlineSheetsWebAppUrl")?.value?.trim() || ""
+        sheetTabName: formRoot.querySelector("#inlineSheetTabName")?.value?.trim() || ""
       });
       const saved = result?.profile || result;
       editingPersonId = saved?.id || editingPersonId;

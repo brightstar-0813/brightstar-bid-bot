@@ -32,6 +32,10 @@ import {
 } from "./resume-profile.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { clearQa, cloneQaBank } from "./qa-store.js";
+import {
+  defaultSheetTabNameForPerson,
+  sanitizeSheetTabName
+} from "./sheets.js";
 
 export const COVER_LETTER_PROFILE_ID = "cover-letter";
 export const GENERIC_SENIOR_PROMPT = genericSeniorPrompt;
@@ -45,6 +49,7 @@ export {
   isTrackDefaultPrompt,
   isTrackDefaultCoverLetter
 } from "./role-tracks.js";
+export { defaultSheetTabNameForPerson, sanitizeSheetTabName } from "./sheets.js";
 export const GENERIC_COVER_LETTER_PROMPT = coverLetterPrompt;
 
 /** Default ATS / MyWorkday account password for create-account + sign-in. */
@@ -152,12 +157,12 @@ export const PROFILES = BUILTIN_PROFILES;
 
 const CUSTOM_PROFILES_KEY = "custom_profiles";
 const ACTIVE_PERSON_ID_KEY = "active_person_id";
-/** Per-person Google Sheet URLs (works for built-ins without saving a custom copy). */
+/** Per-person Google Sheet tab (+ legacy per-person workbook URLs). */
 const PERSON_SHEET_KEY = "person_sheet_config";
 
 export async function getPersonSheetConfig(personId) {
   const id = String(personId || "").trim();
-  if (!id) return { spreadsheetUrl: "", sheetsWebAppUrl: "" };
+  if (!id) return { spreadsheetUrl: "", sheetsWebAppUrl: "", sheetTabName: "" };
   const data = await chrome.storage.local.get(PERSON_SHEET_KEY);
   const map =
     data[PERSON_SHEET_KEY] && typeof data[PERSON_SHEET_KEY] === "object" && !Array.isArray(data[PERSON_SHEET_KEY])
@@ -166,11 +171,15 @@ export async function getPersonSheetConfig(personId) {
   const row = map[id] && typeof map[id] === "object" ? map[id] : {};
   return {
     spreadsheetUrl: String(row.spreadsheetUrl || "").trim(),
-    sheetsWebAppUrl: String(row.sheetsWebAppUrl || "").trim()
+    sheetsWebAppUrl: String(row.sheetsWebAppUrl || "").trim(),
+    sheetTabName: sanitizeSheetTabName(row.sheetTabName || "")
   };
 }
 
-export async function setPersonSheetConfig(personId, { spreadsheetUrl = "", sheetsWebAppUrl = "" } = {}) {
+export async function setPersonSheetConfig(
+  personId,
+  { spreadsheetUrl, sheetsWebAppUrl, sheetTabName } = {}
+) {
   const id = String(personId || "").trim();
   if (!id) return;
   const data = await chrome.storage.local.get(PERSON_SHEET_KEY);
@@ -179,9 +188,20 @@ export async function setPersonSheetConfig(personId, { spreadsheetUrl = "", shee
       ? data[PERSON_SHEET_KEY]
       : {})
   };
+  const prev = map[id] && typeof map[id] === "object" ? map[id] : {};
   map[id] = {
-    spreadsheetUrl: String(spreadsheetUrl || "").trim(),
-    sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim()
+    spreadsheetUrl:
+      spreadsheetUrl !== undefined
+        ? String(spreadsheetUrl || "").trim()
+        : String(prev.spreadsheetUrl || "").trim(),
+    sheetsWebAppUrl:
+      sheetsWebAppUrl !== undefined
+        ? String(sheetsWebAppUrl || "").trim()
+        : String(prev.sheetsWebAppUrl || "").trim(),
+    sheetTabName:
+      sheetTabName !== undefined
+        ? sanitizeSheetTabName(sheetTabName)
+        : sanitizeSheetTabName(prev.sheetTabName || "")
   };
   await chrome.storage.local.set({ [PERSON_SHEET_KEY]: map });
 }
@@ -367,7 +387,11 @@ export async function getActivePerson() {
   return {
     ...person,
     spreadsheetUrl: sheet.spreadsheetUrl || person.spreadsheetUrl || "",
-    sheetsWebAppUrl: sheet.sheetsWebAppUrl || person.sheetsWebAppUrl || ""
+    sheetsWebAppUrl: sheet.sheetsWebAppUrl || person.sheetsWebAppUrl || "",
+    sheetTabName:
+      sheet.sheetTabName ||
+      person.sheetTabName ||
+      defaultSheetTabNameForPerson(person)
   };
 }
 
@@ -405,6 +429,7 @@ function normalizePerson(p) {
     educationHistory: [],
     spreadsheetUrl: "",
     sheetsWebAppUrl: "",
+    sheetTabName: "",
     builtin: false,
     kind: "resume"
   };
@@ -454,6 +479,7 @@ function normalizePerson(p) {
     educationHistory: Array.isArray(p.educationHistory) ? p.educationHistory : [],
     spreadsheetUrl: p.spreadsheetUrl || "",
     sheetsWebAppUrl: p.sheetsWebAppUrl || "",
+    sheetTabName: sanitizeSheetTabName(p.sheetTabName || ""),
     builtin: Boolean(p.builtin),
     kind: p.kind || "resume"
   };
@@ -664,7 +690,8 @@ export async function addCustomProfile({
   educationHistory = [],
   roleTrack = "sf",
   spreadsheetUrl = "",
-  sheetsWebAppUrl = ""
+  sheetsWebAppUrl = "",
+  sheetTabName = ""
 } = {}) {
   const displayName = String(label || name || "").trim();
   const prompt = String(promptTemplate || "").trim();
@@ -751,16 +778,16 @@ export async function addCustomProfile({
     workHistory: Array.isArray(workHistory) ? workHistory : [],
     educationHistory: Array.isArray(educationHistory) ? educationHistory : [],
     spreadsheetUrl: String(spreadsheetUrl || "").trim(),
-    sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim()
+    sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim(),
+    sheetTabName: sanitizeSheetTabName(sheetTabName) || defaultSheetTabNameForPerson({ label: displayName, name })
   };
   custom.push(profile);
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: custom });
-  if (profile.spreadsheetUrl || profile.sheetsWebAppUrl) {
-    await setPersonSheetConfig(profile.id, {
-      spreadsheetUrl: profile.spreadsheetUrl,
-      sheetsWebAppUrl: profile.sheetsWebAppUrl
-    });
-  }
+  await setPersonSheetConfig(profile.id, {
+    spreadsheetUrl: profile.spreadsheetUrl,
+    sheetsWebAppUrl: profile.sheetsWebAppUrl,
+    sheetTabName: profile.sheetTabName
+  });
   return profile;
 }
 
@@ -831,6 +858,9 @@ export async function savePersonProfile(person) {
     educationHistory: Array.isArray(person?.educationHistory) ? person.educationHistory : undefined,
     spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(person?.sheetsWebAppUrl || "").trim(),
+    sheetTabName:
+      sanitizeSheetTabName(person?.sheetTabName) ||
+      defaultSheetTabNameForPerson({ label: displayName, name: person?.name }),
     kind: "resume"
   };
 
@@ -863,7 +893,10 @@ export async function savePersonProfile(person) {
     await setActivePersonId(existingId);
     await setPersonSheetConfig(existingId, {
       spreadsheetUrl: mergedPayload.spreadsheetUrl,
-      sheetsWebAppUrl: mergedPayload.sheetsWebAppUrl
+      sheetsWebAppUrl: mergedPayload.sheetsWebAppUrl,
+      sheetTabName:
+        mergedPayload.sheetTabName ||
+        defaultSheetTabNameForPerson({ label: displayName, name: mergedPayload.name })
     });
     const profile = next.find((p) => p.id === existingId);
     await syncActivePersonOutputContext(profile);

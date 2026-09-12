@@ -1,22 +1,23 @@
 /**
  * One-time setup for Google Sheets append + duplicate check:
  *
- * 1. Open your spreadsheet
+ * 1. Open your spreadsheet (one workbook for all profiles)
  * 2. Extensions → Apps Script
  * 3. Paste this code and Save
  * 4. Deploy → New deployment → Type: Web app
  *    - Execute as: Me
  *    - Who has access: Anyone
  * 5. Copy the Web App URL into the extension's "Web App URL" field
- *    (redeploy after updates so listLinks / markApplied are live)
+ *    (redeploy after updates so listLinks / markApplied / sheetName are live)
  *
  * POST body (text/plain JSON):
  *   action: "append" (default) | "listLinks" | "markApplied"
- *   spreadsheetId, and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
+ *   spreadsheetId, optional sheetName (tab per profile; created if missing)
+ *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
  *
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
- * Dedup: same job link (normalized) is treated as duplicate.
+ * Dedup: same job link (normalized) is treated as duplicate within that tab.
  */
 function doPost(e) {
   try {
@@ -26,7 +27,7 @@ function doPost(e) {
     }
 
     const ss = SpreadsheetApp.openById(String(data.spreadsheetId));
-    const sheet = ss.getSheets()[0];
+    const sheet = resolveSheet_(ss, data.sheetName);
     const action = String(data.action || "append").toLowerCase();
 
     if (action === "listlinks" || action === "list_links") {
@@ -43,6 +44,7 @@ function doPost(e) {
         });
       return json_({
         ok: true,
+        sheetName: sheet.getName(),
         links: links,
         companies: companies,
         companyRows: companyRows,
@@ -65,7 +67,13 @@ function doPost(e) {
       const row = findRowByLink_(sheet, jobLink);
       if (row > 0) {
         sheet.getRange(row, statusColumnForRow_(sheet, row)).setValue(status);
-        return json_({ ok: true, updated: true, appended: false, row: row });
+        return json_({
+          ok: true,
+          updated: true,
+          appended: false,
+          row: row,
+          sheetName: sheet.getName()
+        });
       }
       sheet.appendRow([
         data.jobNo || "",
@@ -76,11 +84,16 @@ function doPost(e) {
         data.salary || "",
         status
       ]);
-      return json_({ ok: true, updated: false, appended: true });
+      return json_({
+        ok: true,
+        updated: false,
+        appended: true,
+        sheetName: sheet.getName()
+      });
     }
 
     if (jobLink && linkExists_(sheet, jobLink)) {
-      return json_({ ok: true, duplicate: true, reason: "link" });
+      return json_({ ok: true, duplicate: true, reason: "link", sheetName: sheet.getName() });
     }
 
     sheet.appendRow([
@@ -93,7 +106,7 @@ function doPost(e) {
       data.status || "Ready"
     ]);
 
-    return json_({ ok: true, duplicate: false });
+    return json_({ ok: true, duplicate: false, sheetName: sheet.getName() });
   } catch (err) {
     return json_({
       ok: false,
@@ -112,6 +125,25 @@ function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
     ContentService.MimeType.JSON
   );
+}
+
+/** Pick an existing tab by name, or create it with the standard header row. */
+function resolveSheet_(ss, sheetName) {
+  var name = String(sheetName || "")
+    .trim()
+    .replace(/[:\\\/\?\*\[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (name.length > 100) name = name.slice(0, 100).trim();
+  if (!name) {
+    var sheets = ss.getSheets();
+    return sheets && sheets.length ? sheets[0] : ss.insertSheet("Sheet1");
+  }
+  var existing = ss.getSheetByName(name);
+  if (existing) return existing;
+  var created = ss.insertSheet(name);
+  created.getRange(1, 1, 1, 7).setValues([["No", "Date", "Title", "Company", "Link", "Salary", "Status"]]);
+  return created;
 }
 
 function normalizeLink_(url) {
