@@ -109,6 +109,9 @@ const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
 const PROFILE_EDITOR_PANEL_OPEN_KEY = "profile_editor_panel_open";
+const BID_MARKET_KEY = "bid_market";
+const BID_MARKETS = { US: "us", NON_US: "non_us" };
+const DEFAULT_BID_MARKET = BID_MARKETS.US;
 const PREVIEW_WINDOW_KEY = "template_preview_window_id";
 const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state"; // legacy; cleared on reset
 const INDEED_GRAB_STATUS_KEY = "indeed_grab_status";
@@ -428,6 +431,7 @@ const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
 const templateSelectEl = document.getElementById("templateSelect");
 const deleteProfileBtn = document.getElementById("deleteProfile");
+const addProfileBtn = document.getElementById("addProfile");
 const personResumeFileEl = document.getElementById("personResumeFile");
 const personImportNoticeEl = document.getElementById("personImportNotice");
 const toggleProfileEditorPanelBtn = document.getElementById("toggleProfileEditorPanel");
@@ -504,6 +508,16 @@ const indeedGrabStatusEl = document.getElementById("indeedGrabStatus");
 const toggleIntegrationsPanelBtn = document.getElementById("toggleIntegrationsPanel");
 const integrationsPanelBody = document.getElementById("integrationsPanelBody");
 const jobsSectionEl = document.getElementById("jobsSection");
+const indeedSectionEl = document.getElementById("indeedSection");
+const manualSectionEl = document.getElementById("manualSection");
+const applySectionEl = document.getElementById("applySection");
+const jobsStepNumEl = document.getElementById("jobsStepNum");
+const manualStepNumEl = document.getElementById("manualStepNum");
+const applyStepNumEl = document.getElementById("applyStepNum");
+const manualSectionTitleEl = document.getElementById("manualSectionTitle");
+const bidMarketUsBtn = document.getElementById("bidMarketUs");
+const bidMarketNonUsBtn = document.getElementById("bidMarketNonUs");
+let bidMarketCache = DEFAULT_BID_MARKET;
 
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
@@ -535,7 +549,16 @@ const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
 const previewTemplateBtn = document.getElementById("previewTemplate");
 const pasteJdBtn = document.getElementById("pasteJd");
+const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
+const rebuildOneOffBtn = document.getElementById("rebuildOneOff");
+const oneOffExtraPromptEl = document.getElementById("oneOffExtraPrompt");
+const oneOffAtsBlock = document.getElementById("oneOffAtsBlock");
+const oneOffAtsScoreEl = document.getElementById("oneOffAtsScore");
+const oneOffViewGapsBtn = document.getElementById("oneOffViewGaps");
+const oneOffAtsGapsEl = document.getElementById("oneOffAtsGaps");
+const LAST_ONE_OFF_ATS_KEY = "last_one_off_ats";
+let lastOneOffAtsCache = null;
 const autofillPageBtn = document.getElementById("autofillPage");
 const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const customQaPageBtn = document.getElementById("customQaPage");
@@ -968,6 +991,7 @@ async function persistJobFields() {
     last_company_name: companyNameEl.value,
     last_jd_link: jdLinkEl.value,
     last_jd_text: jdTextEl.value,
+    last_one_off_extra_prompt: oneOffExtraPromptEl?.value || "",
     output_dir: outputDir,
     batch_output_dir: outputDir,
     slack_webhook_url: slackWebhookUrlEl.value.trim()
@@ -1107,6 +1131,8 @@ async function loadSettings() {
     "last_company_name",
     "last_jd_link",
     "last_jd_text",
+    "last_one_off_extra_prompt",
+    LAST_ONE_OFF_ATS_KEY,
     "output_dir",
     "spreadsheet_url",
     "sheets_web_app_url",
@@ -1116,6 +1142,7 @@ async function loadSettings() {
     STRONG_HUMANIZE_MODE_KEY,
     MANUAL_PANEL_OPEN_KEY,
     PROFILE_EDITOR_PANEL_OPEN_KEY,
+    BID_MARKET_KEY,
     "generation_status",
     "generation_running",
     QUEUE_KEY,
@@ -1138,6 +1165,10 @@ async function loadSettings() {
   companyNameEl.value = data.last_company_name || "";
   jdLinkEl.value = data.last_jd_link || "";
   jdTextEl.value = data.last_jd_text || "";
+  if (oneOffExtraPromptEl) {
+    oneOffExtraPromptEl.value = data.last_one_off_extra_prompt || "";
+  }
+  renderOneOffAts(data[LAST_ONE_OFF_ATS_KEY] || null);
   // Output folder + Google Sheet follow the active person (synced in loadActivePersonIntoForm).
   if (!String(outputDirEl.value || "").trim()) {
     outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
@@ -1162,7 +1193,13 @@ async function loadSettings() {
   }
   renderAiProvider(data[AI_PROVIDER_KEY]);
   renderHumanizeMode(data[STRONG_HUMANIZE_MODE_KEY]);
-  setManualPanelOpen(Boolean(data[MANUAL_PANEL_OPEN_KEY]), { persist: false });
+  renderBidMarket(data[BID_MARKET_KEY] || DEFAULT_BID_MARKET, {
+    expandManual: false
+  });
+  setManualPanelOpen(
+    Boolean(data[MANUAL_PANEL_OPEN_KEY]) || isNonUsBidMarket(data[BID_MARKET_KEY]),
+    { persist: false }
+  );
   if (inlineProfileEditor && Boolean(data[PROFILE_EDITOR_PANEL_OPEN_KEY])) {
     inlineProfileEditor
       .open({ profileId: data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID })
@@ -1496,6 +1533,101 @@ function atsScoreTitle(job) {
     lines.push(`Missing keywords: ${evaluation.missingKeywords.slice(0, 8).join(", ")}`);
   }
   return lines.join("\n");
+}
+
+function oneOffGapsHtml(evaluation = {}) {
+  const products = Array.isArray(evaluation.missingProducts) ? evaluation.missingProducts : [];
+  const keywords = Array.isArray(evaluation.missingKeywords) ? evaluation.missingKeywords : [];
+  const parts = [];
+  if (products.length) {
+    parts.push(
+      `<div class="one-off-ats-gap-group"><strong>Missing products</strong><ul>${products
+        .map((p) => `<li>${escapeHtml(String(p))}</li>`)
+        .join("")}</ul></div>`
+    );
+  }
+  if (keywords.length) {
+    parts.push(
+      `<div class="one-off-ats-gap-group"><strong>Missing keywords</strong><ul>${keywords
+        .slice(0, 16)
+        .map((k) => `<li>${escapeHtml(String(k))}</li>`)
+        .join("")}</ul></div>`
+    );
+  }
+  if (!parts.length) {
+    return `<p class="one-off-ats-gap-empty">No keyword/product gaps recorded.</p>`;
+  }
+  return parts.join("");
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function canRebuildOneOff() {
+  if (lastOneOffAtsCache?.ok && lastOneOffAtsCache.atsScore != null) return true;
+  if (String(jdLinkEl?.value || "").trim()) return true;
+  return Boolean(lastOneOffAtsCache?.jdLink);
+}
+
+function renderOneOffAts(payload) {
+  lastOneOffAtsCache = payload && typeof payload === "object" ? payload : null;
+  if (!oneOffAtsBlock || !oneOffAtsScoreEl) {
+    if (rebuildOneOffBtn) rebuildOneOffBtn.disabled = !canRebuildOneOff();
+    return;
+  }
+  const scoreRaw = payload?.atsScore;
+  const hasScore = scoreRaw != null && Number.isFinite(Number(scoreRaw));
+  if (!hasScore) {
+    oneOffAtsBlock.hidden = true;
+    if (oneOffAtsGapsEl) {
+      oneOffAtsGapsEl.hidden = true;
+      oneOffAtsGapsEl.innerHTML = "";
+    }
+    if (oneOffViewGapsBtn) oneOffViewGapsBtn.setAttribute("aria-expanded", "false");
+    if (rebuildOneOffBtn && !document.body.classList.contains("is-busy")) {
+      rebuildOneOffBtn.disabled = !canRebuildOneOff();
+    }
+    return;
+  }
+  const score = Math.max(0, Math.min(100, Math.round(Number(scoreRaw))));
+  const grade = String(payload.atsGrade || "").trim();
+  const tier =
+    score >= 85 ? "is-excellent" : score >= 70 ? "is-good" : score >= 55 ? "is-fair" : "is-low";
+  oneOffAtsBlock.hidden = false;
+  oneOffAtsScoreEl.className = `ats-score ${tier}`;
+  oneOffAtsScoreEl.style.setProperty("--ats", String(score));
+  oneOffAtsScoreEl.title = atsScoreTitle({
+    atsScore: score,
+    atsGrade: grade,
+    atsEvaluation: payload.atsEvaluation || {}
+  });
+  oneOffAtsScoreEl.setAttribute(
+    "aria-label",
+    `ATS match ${score} out of 100${grade ? `, ${grade}` : ""}`
+  );
+  oneOffAtsScoreEl.innerHTML =
+    `<span class="ats-score-kicker">ATS</span>` +
+    `<span class="ats-score-value">${score}</span>` +
+    (grade
+      ? `<span class="ats-score-grade">${escapeHtml(grade)}</span>`
+      : `<span class="ats-score-grade ats-score-grade-empty"></span>`) +
+    `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
+  if (oneOffAtsGapsEl) {
+    oneOffAtsGapsEl.innerHTML = oneOffGapsHtml(payload.atsEvaluation || {});
+    oneOffAtsGapsEl.hidden = true;
+  }
+  if (oneOffViewGapsBtn) {
+    oneOffViewGapsBtn.setAttribute("aria-expanded", "false");
+    oneOffViewGapsBtn.textContent = "View gaps";
+  }
+  if (rebuildOneOffBtn && !document.body.classList.contains("is-busy")) {
+    rebuildOneOffBtn.disabled = false;
+  }
 }
 
 /** CSV row the batch is actively generating or Dice-applying (status line or running badge). */
@@ -2592,18 +2724,110 @@ function setIntegrationsPanelOpen(open) {
     : "Show sheet, pacing & Slack";
 }
 
+function normalizeBidMarket(value) {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_");
+  if (v === BID_MARKETS.NON_US || v === "nonus" || v === "not_us" || v === "intl" || v === "international") {
+    return BID_MARKETS.NON_US;
+  }
+  return BID_MARKETS.US;
+}
+
+function isNonUsBidMarket(market = bidMarketCache) {
+  return normalizeBidMarket(market) === BID_MARKETS.NON_US;
+}
+
+function renderBidMarket(market, { expandManual = false } = {}) {
+  bidMarketCache = normalizeBidMarket(market);
+  const nonUs = isNonUsBidMarket(bidMarketCache);
+  document.body.classList.toggle("bid-market-non-us", nonUs);
+  document.body.classList.toggle("bid-market-us", !nonUs);
+
+  for (const btn of [bidMarketUsBtn, bidMarketNonUsBtn]) {
+    if (!btn) continue;
+    const active = btn.dataset.market === bidMarketCache;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  if (jobsSectionEl) {
+    jobsSectionEl.hidden = nonUs;
+    jobsSectionEl.setAttribute("aria-hidden", nonUs ? "true" : "false");
+  }
+  // Indeed grab stays product-hidden; never surface it for Non-US.
+  if (indeedSectionEl && nonUs) {
+    indeedSectionEl.hidden = true;
+    indeedSectionEl.setAttribute("aria-hidden", "true");
+  }
+
+  if (jobsStepNumEl) jobsStepNumEl.textContent = "4";
+  if (manualStepNumEl) manualStepNumEl.textContent = nonUs ? "4" : "5";
+  if (applyStepNumEl) applyStepNumEl.textContent = nonUs ? "5" : "6";
+  if (manualSectionTitleEl) {
+    manualSectionTitleEl.textContent = nonUs ? "Manual bid" : "Manual one-off";
+  }
+  if (manualSectionEl) {
+    manualSectionEl.classList.toggle("section-hero", nonUs);
+  }
+
+  if (nonUs && expandManual) {
+    setManualPanelOpen(true);
+  }
+}
+
+async function setBidMarket(market) {
+  const next = normalizeBidMarket(market);
+  const prev = bidMarketCache;
+  renderBidMarket(next, { expandManual: next === BID_MARKETS.NON_US });
+  await chrome.storage.local.set({ [BID_MARKET_KEY]: next });
+  if (next === BID_MARKETS.NON_US && prev !== BID_MARKETS.NON_US) {
+    setStatus("Non-US market — batch queue hidden. Use Manual bid for each job.");
+  } else if (next === BID_MARKETS.US && prev !== BID_MARKETS.US) {
+    setStatus("US market — CSV queue and batch controls available.");
+  }
+}
+
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
   runOneOffBtn.disabled = busy;
+  if (fillFromOpenTabBtn) fillFromOpenTabBtn.disabled = busy;
+  if (rebuildOneOffBtn) {
+    rebuildOneOffBtn.disabled = busy || !canRebuildOneOff();
+  }
   document.body.classList.toggle("is-busy", Boolean(busy));
   syncBatchPill();
 }
 
-async function runOneOff() {
+async function fillFromOpenTab() {
+  setStatus("Scraping active tab…");
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "scrape_active_job_tab" });
+    if (!res?.ok) {
+      setStatus(res?.error || "Could not scrape this tab.");
+      return;
+    }
+    if (res.jobTitle) jobTitleEl.value = res.jobTitle;
+    if (res.companyName) companyNameEl.value = res.companyName;
+    if (res.jdLink) jdLinkEl.value = res.jdLink;
+    if (res.jdText) jdTextEl.value = res.jdText;
+    await persistJobFields();
+    setManualPanelOpen(true);
+    const site = res.site ? ` (${res.site})` : "";
+    setStatus(`Filled from open tab${site}. Review fields, then Generate.`);
+    if (rebuildOneOffBtn) rebuildOneOffBtn.disabled = !canRebuildOneOff();
+  } catch (err) {
+    setStatus(`Scrape failed: ${String(err?.message || err)}`);
+  }
+}
+
+async function runOneOff({ forceRebuild = false } = {}) {
   const jobTitle = (jobTitleEl.value || "").trim();
   const companyName = (companyNameEl.value || "").trim();
   const jd = (jdTextEl.value || "").trim();
   const jdLink = (jdLinkEl.value || "").trim();
+  const additionalPrompt = (oneOffExtraPromptEl?.value || "").trim();
   const { outputDir, person } = await resolveUiOutputDir();
 
   if (!jobTitle) {
@@ -2630,15 +2854,23 @@ async function runOneOff() {
 
   await persistJobFields();
   setBusy(true);
-  setStatus("Starting one-off generation (auto — no JSON paste)…");
+  setManualPanelOpen(true);
+  setStatus(
+    forceRebuild
+      ? "Starting rebuild (force regenerate)…"
+      : "Starting one-off generation (auto — no JSON paste)…"
+  );
 
   const res = await chrome.runtime.sendMessage({
     type: "run_one_off",
+    forceRebuild: Boolean(forceRebuild),
     jobMeta: {
       jobTitle,
       companyName,
       jdLink,
       jdText: jd,
+      additionalPrompt,
+      forceRebuild: Boolean(forceRebuild),
       outputDir,
       spreadsheetUrl: spreadsheetUrlEl.value.trim(),
       sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
@@ -2652,10 +2884,7 @@ async function runOneOff() {
   if (!res?.ok) {
     setStatus(res?.error || "One-off failed to start.");
     setBusy(false);
-    return;
   }
-
-  setManualPanelOpen(false);
 }
 
 async function refreshQaBank() {
@@ -3093,6 +3322,17 @@ toggleManualPanelBtn.addEventListener("click", () => {
 
 deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
 
+addProfileBtn?.addEventListener("click", () => {
+  if (!inlineProfileEditor?.startNew) {
+    setStatus("Profile editor panel is unavailable.");
+    return;
+  }
+  inlineProfileEditor
+    .startNew()
+    .then(() => setStatus("New profile — fill details and Save."))
+    .catch((err) => setStatus(String(err?.message || err)));
+});
+
 activeRoleTrackBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     const track = normalizeRoleTrackId(btn.dataset.track);
@@ -3193,6 +3433,9 @@ forceSaveChatgptBtn.addEventListener("click", async () => {
 });
 
 pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
+fillFromOpenTabBtn?.addEventListener("click", () => {
+  fillFromOpenTab().catch((e) => setStatus(String(e.message || e)));
+});
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 copySheetRowBtn.addEventListener("click", copySheetRow);
 keepOpenBtn?.addEventListener("click", dockOutOfPopup);
@@ -3207,7 +3450,19 @@ previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
 });
 testSlackBtn.addEventListener("click", testSlackWebhook);
-runOneOffBtn.addEventListener("click", runOneOff);
+runOneOffBtn.addEventListener("click", () => {
+  runOneOff().catch((e) => setStatus(String(e.message || e)));
+});
+rebuildOneOffBtn?.addEventListener("click", () => {
+  runOneOff({ forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
+});
+oneOffViewGapsBtn?.addEventListener("click", () => {
+  if (!oneOffAtsGapsEl) return;
+  const open = oneOffAtsGapsEl.hidden;
+  oneOffAtsGapsEl.hidden = !open;
+  oneOffViewGapsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  oneOffViewGapsBtn.textContent = open ? "Hide gaps" : "View gaps";
+});
 autofillPageBtn.addEventListener("click", autofillThisPage);
 autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
 customQaPageBtn?.addEventListener("click", () => toggleCustomQaAskPanel({ focus: true }));
@@ -3285,11 +3540,19 @@ humanizeOnBtn?.addEventListener("click", () => {
   setHumanizeMode(STRONG_HUMANIZE_MODES.ON).catch((e) => setStatus(String(e.message || e)));
 });
 
+bidMarketUsBtn?.addEventListener("click", () => {
+  setBidMarket(BID_MARKETS.US).catch((e) => setStatus(String(e.message || e)));
+});
+bidMarketNonUsBtn?.addEventListener("click", () => {
+  setBidMarket(BID_MARKETS.NON_US).catch((e) => setStatus(String(e.message || e)));
+});
+
 for (const el of [
   jobTitleEl,
   companyNameEl,
   jdLinkEl,
   jdTextEl,
+  oneOffExtraPromptEl,
   outputDirEl,
   spreadsheetUrlEl,
   sheetsWebAppUrlEl,
@@ -3381,6 +3644,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[SESSION_ROLE_TRACK_KEY]) {
     syncActiveTrackUi().catch(() => {});
+  }
+  if (changes[BID_MARKET_KEY] && changes[BID_MARKET_KEY].newValue !== undefined) {
+    renderBidMarket(changes[BID_MARKET_KEY].newValue, {
+      expandManual: normalizeBidMarket(changes[BID_MARKET_KEY].newValue) === BID_MARKETS.NON_US
+    });
+  }
+  if (changes[LAST_ONE_OFF_ATS_KEY]) {
+    renderOneOffAts(changes[LAST_ONE_OFF_ATS_KEY].newValue || null);
+    if (changes[LAST_ONE_OFF_ATS_KEY].newValue?.ok && changes[LAST_ONE_OFF_ATS_KEY].newValue?.atsScore != null) {
+      setManualPanelOpen(true);
+    }
   }
 });
 

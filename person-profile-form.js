@@ -6,6 +6,7 @@
 import {
   savePersonProfile,
   addCustomProfile,
+  setActivePersonId,
   BUILTIN_PROFILES,
   DEFAULT_ATS_PASSWORD,
   applyUsApplicantDefaults
@@ -414,6 +415,10 @@ export async function savePersonFromForm(root, opts = {}) {
       workHistory: person.workHistory || [],
       educationHistory: person.educationHistory || []
     });
+    // Brand-new customs must become the active person (builtin fork already does this).
+    if (saved?.id) {
+      await setActivePersonId(saved.id);
+    }
     return { profile: saved, created: true, fromBuiltin: false };
   }
 

@@ -14,31 +14,54 @@
   <body>
     <main class="app">
       <header class="topbar">
-        <div class="brand">
-          <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
-          <div class="brand-copy">
-            <h1>Brightstar Bid bot</h1>
-            <p class="hype">Bid bright. Win more.</p>
+        <div class="topbar-main">
+          <div class="brand">
+            <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
+            <div class="brand-copy">
+              <h1>Brightstar Bid bot</h1>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <div class="theme-picker" role="group" aria-label="Theme">
+              <div class="theme-swatches" id="themeSwatches"></div>
+            </div>
+            <button
+              type="button"
+              id="openAsWindow"
+              class="ghost compact icon-button topbar-icon"
+              title="Open as window app"
+              aria-label="Open as window app"
+            ></button>
+            <button
+              type="button"
+              id="keepOpen"
+              class="ghost compact icon-button topbar-icon"
+              title="Keep open in side panel"
+              aria-label="Keep open in side panel"
+            ></button>
           </div>
         </div>
-        <div class="topbar-actions">
-          <div class="theme-picker" role="group" aria-label="Theme">
-            <div class="theme-swatches" id="themeSwatches"></div>
-          </div>
+        <div class="bid-market-switch" role="radiogroup" aria-label="Bid market">
           <button
             type="button"
-            id="openAsWindow"
-            class="ghost compact icon-button topbar-icon"
-            title="Open as window app"
-            aria-label="Open as window app"
-          ></button>
+            class="bid-market-chip is-active"
+            id="bidMarketUs"
+            data-market="us"
+            aria-pressed="true"
+            title="US jobs — CSV queue and batch"
+          >
+            US
+          </button>
           <button
             type="button"
-            id="keepOpen"
-            class="ghost compact icon-button topbar-icon"
-            title="Keep open in side panel"
-            aria-label="Keep open in side panel"
-          ></button>
+            class="bid-market-chip"
+            id="bidMarketNonUs"
+            data-market="non_us"
+            aria-pressed="false"
+            title="Non-US — manual bid only (no batch)"
+          >
+            Non-US
+          </button>
         </div>
       </header>
 
@@ -56,6 +79,9 @@
               <span>Active person</span>
               <select id="profileSelect"></select>
             </label>
+            <button type="button" id="addProfile" class="ghost compact" title="Create a new custom profile">
+              Add profile
+            </button>
             <button type="button" id="deleteProfile" class="ghost danger compact" hidden title="Delete selected person">
               Delete
             </button>
@@ -109,6 +135,9 @@
                 <button type="submit" form="inlineProfileForm" id="inlineProfileSave" class="primary compact">Save</button>
                 <button type="button" id="inlineProfileSaveAsNew" class="ghost compact" title="Create a separate copy">
                   Save as new
+                </button>
+                <button type="button" id="inlineOpenFullEditor" class="ghost compact" title="Open full editor for work history and education">
+                  Open full editor
                 </button>
                 <button type="button" id="inlineProfileDelete" class="ghost danger compact" hidden title="Delete this profile">
                   Delete
@@ -425,10 +454,10 @@
           </div>
         </section>
 
-        <!-- Jobs queue (CSV + shared batch) -->
+        <!-- Jobs queue (CSV + shared batch) — US bid only -->
         <section class="section section-hero" id="jobsSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">4</span>
+            <span class="step" id="jobsStepNum" aria-hidden="true">4</span>
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
             </div>
@@ -573,11 +602,11 @@
         </section>
 
         <!-- Manual one-off -->
-        <section class="section">
+        <section class="section" id="manualSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">5</span>
+            <span class="step" id="manualStepNum" aria-hidden="true">5</span>
             <div class="section-copy">
-              <p class="section-title">Manual one-off</p>
+              <p class="section-title" id="manualSectionTitle">Manual one-off</p>
             </div>
           </header>
           <button type="button" class="panel-toggle" id="toggleManualPanel" aria-expanded="false">
@@ -607,9 +636,32 @@
               <span>Job description (JD)</span>
               <textarea id="jdText" placeholder="Paste the job description here..." rows="3"></textarea>
             </label>
+            <label class="field">
+              <span>Additional prompt (this run only)</span>
+              <textarea
+                id="oneOffExtraPrompt"
+                placeholder="Optional: extra instructions appended to the resume tailor prompt for this generate only…"
+                rows="2"
+              ></textarea>
+            </label>
             <div class="row row-2">
+              <button type="button" id="fillFromOpenTab" class="ghost" title="Scrape title, company, link, and JD from the active browser tab">
+                Fill from open tab
+              </button>
               <button type="button" id="pasteJd" class="ghost">Paste JD</button>
+            </div>
+            <div class="row row-2">
               <button type="button" id="runOneOff" class="primary">Generate (auto)</button>
+              <button type="button" id="rebuildOneOff" class="ghost" disabled title="Force regenerate even if this link is already on the sheet">
+                Rebuild
+              </button>
+            </div>
+            <div id="oneOffAtsBlock" class="one-off-ats" hidden>
+              <div class="row-split one-off-ats-header">
+                <span id="oneOffAtsScore" class="ats-score" aria-label="ATS score"></span>
+                <button type="button" id="oneOffViewGaps" class="ghost compact">View gaps</button>
+              </div>
+              <div id="oneOffAtsGaps" class="one-off-ats-gaps" hidden></div>
             </div>
           </div>
         </section>
@@ -639,9 +691,9 @@
         </section>
 
         <!-- Apply -->
-        <section class="section section-apply">
+        <section class="section section-apply" id="applySection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">6</span>
+            <span class="step" id="applyStepNum" aria-hidden="true">6</span>
             <div class="section-copy">
               <p class="section-title">Apply assist</p>
             </div>

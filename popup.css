@@ -41,14 +41,21 @@ body.ctx-window {
 .topbar {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: nowrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 10px 14px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--topbar-bg);
   backdrop-filter: blur(10px);
+}
+
+.topbar-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .brand {
@@ -72,6 +79,7 @@ body.ctx-window {
 
 .brand-copy {
   min-width: 0;
+  overflow: hidden;
 }
 
 h1 {
@@ -81,6 +89,8 @@ h1 {
   font-weight: 750;
   letter-spacing: -0.02em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hype {
@@ -554,6 +564,49 @@ button.primary:hover,
 
 .role-track-toggle {
   grid-template-columns: repeat(4, 1fr);
+}
+
+.bid-market-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: stretch;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.bid-market-chip {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bid-market-chip:hover {
+  color: var(--fg);
+}
+
+.bid-market-chip.is-active {
+  background: color-mix(in srgb, var(--gold) 22%, transparent);
+  color: var(--gold-bright, var(--gold));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent);
+}
+
+body.bid-market-non-us #jobsSection,
+body.bid-market-non-us #indeedSection {
+  display: none !important;
 }
 
 .role-track-btn {
@@ -1185,6 +1238,40 @@ input[type="file"]::file-selector-button {
   --ats-tone: var(--danger);
   --ats-tone-soft: color-mix(in srgb, var(--danger) 28%, transparent);
   border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+.one-off-ats {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.one-off-ats-header {
+  align-items: center;
+  gap: 10px;
+}
+
+.one-off-ats-gaps {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.one-off-ats-gap-group + .one-off-ats-gap-group {
+  margin-top: 8px;
+}
+
+.one-off-ats-gaps ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.one-off-ats-gap-empty {
+  margin: 0;
+  opacity: 0.85;
 }
 
 .badge-ats.is-excellent {

@@ -607,6 +607,10 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (applyHumanize) {
     prompt = `${prompt}\n\n${buildStrongHumanizeAppendix(roleTrack)}`;
   }
+  const additional = String(extras.additionalPrompt || "").trim();
+  if (additional) {
+    prompt = `${prompt}\n\n---\nAdditional instructions for this job only (follow in addition to the rules above):\n${additional}`;
+  }
   return prompt;
 }
 

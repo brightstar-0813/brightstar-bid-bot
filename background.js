@@ -149,6 +149,8 @@ const APPLY_HISTORY_KEY = "apply_history";
 const ALL_US_JOBS_KEY = "all_us_jobs";
 const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
+const LAST_ONE_OFF_ATS_KEY = "last_one_off_ats";
+const LAST_ONE_OFF_RESULT_KEY = "last_one_off_result";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const AUTOFILL_ENABLED_KEY = "autofill_enabled";
 
@@ -1321,6 +1323,7 @@ async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "gener
  * Returns a human reason if the job should be skipped, else "".
  */
 async function getPreGenerateSkipReason(jobMeta = {}) {
+  if (jobMeta.forceRebuild || jobMeta.forceRegenerate) return "";
   const linkDup = await isJobLinkAlreadyCovered(jobMeta.jdLink || "", {
     excludeCsvRow: jobMeta.csvRow,
     purpose: "generate"
@@ -6259,6 +6262,105 @@ async function updateQueueJob(csvRow, patch) {
   return next.find((j) => Number(j.csvRow) === Number(csvRow));
 }
 
+async function persistOneOffResult(payload = {}) {
+  const record = {
+    ok: payload.ok !== false,
+    error: String(payload.error || ""),
+    jdLink: String(payload.jdLink || ""),
+    csvRow: payload.csvRow != null && payload.csvRow !== "" ? Number(payload.csvRow) : null,
+    atsScore: payload.atsScore != null && Number.isFinite(Number(payload.atsScore))
+      ? Math.round(Number(payload.atsScore))
+      : null,
+    atsGrade: String(payload.atsGrade || ""),
+    atsEvaluation: payload.atsEvaluation || null,
+    updatedAt: Date.now()
+  };
+  await chrome.storage.local.set({
+    [LAST_ONE_OFF_ATS_KEY]: record,
+    [LAST_ONE_OFF_RESULT_KEY]: record
+  });
+  return record;
+}
+
+/**
+ * Upsert a queue row for Manual one-off, keyed by normalized JD link (per active person).
+ * Returns csvRow for runAutoJob ATS / Apply badge wiring.
+ */
+async function ensureOneOffQueueJob(meta = {}) {
+  const link = normalizeJobLink(meta.jdLink || "");
+  const data = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY]);
+  const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  const allUs = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  const person = await getActivePerson().catch(() => null);
+
+  let existing = null;
+  if (link) {
+    existing =
+      queue.find((j) => {
+        if (normalizeJobLink(j.jdLink || "") !== link) return false;
+        if (person && !jobBelongsToPerson(j, person)) return false;
+        return true;
+      }) || null;
+  }
+  if (!existing && meta.csvRow != null && meta.csvRow !== "") {
+    existing = queue.find((j) => Number(j.csvRow) === Number(meta.csvRow)) || null;
+  }
+
+  const maxRow = Math.max(
+    0,
+    ...queue.map((j) => Number(j.csvRow) || 0),
+    ...allUs.map((j) => Number(j.csvRow) || 0)
+  );
+  const csvRow = existing?.csvRow != null ? Number(existing.csvRow) : maxRow + 1;
+  const title = String(meta.jobTitle || existing?.title || existing?.jobTitle || "").trim();
+  const company = String(meta.companyName || existing?.company || existing?.companyName || "").trim();
+  const patch = {
+    csvRow,
+    title,
+    company,
+    jobTitle: title,
+    companyName: company,
+    jdLink: String(meta.jdLink || existing?.jdLink || "").trim(),
+    jdText: String(meta.jdText || existing?.jdText || "").trim(),
+    status: "running",
+    error: "",
+    bidSource: "one-off",
+    source: existing?.source || "one-off",
+    profileId: meta.profileId || person?.id || existing?.profileId || "",
+    applied: Boolean(existing?.applied),
+    attempts: Number(existing?.attempts || 0),
+    jobDir: existing?.jobDir || ""
+  };
+
+  const nextQueue = existing
+    ? queue.map((j) => (Number(j.csvRow) === csvRow ? { ...j, ...patch } : j))
+    : [...queue, patch];
+  let nextAll = allUs;
+  const allIdx = allUs.findIndex((j) => Number(j.csvRow) === csvRow);
+  if (allIdx >= 0) {
+    nextAll = allUs.map((j, i) => (i === allIdx ? { ...j, ...patch } : j));
+  } else if (link) {
+    const byLink = allUs.findIndex((j) => {
+      if (normalizeJobLink(j.jdLink || "") !== link) return false;
+      if (person && !jobBelongsToPerson(j, person)) return false;
+      return true;
+    });
+    if (byLink >= 0) {
+      nextAll = allUs.map((j, i) => (i === byLink ? { ...j, ...patch } : j));
+    } else {
+      nextAll = [...allUs, patch];
+    }
+  } else {
+    nextAll = [...allUs, patch];
+  }
+
+  await chrome.storage.local.set({
+    [QUEUE_KEY]: nextQueue,
+    [ALL_US_JOBS_KEY]: nextAll
+  });
+  return csvRow;
+}
+
 async function rememberApplyHistory(csvRow, entry) {
   const data = await chrome.storage.local.get(APPLY_HISTORY_KEY);
   const map = data[APPLY_HISTORY_KEY] && typeof data[APPLY_HISTORY_KEY] === "object" ? data[APPLY_HISTORY_KEY] : {};
@@ -6386,7 +6488,8 @@ async function runAutoJob(jobMeta) {
     sessionRoleTrack,
     jdLink: jobMeta.jdLink || "",
     site: jobMeta.board || "",
-    strongHumanizeMode: humanizeMode
+    strongHumanizeMode: humanizeMode,
+    additionalPrompt: jobMeta.additionalPrompt || ""
   });
 
   await setStatus(
@@ -7313,6 +7416,59 @@ async function scrapeIndeedJobFromTab(tabId) {
   return result.jobData;
 }
 
+/** Scrape title/company/link/JD from the user's active tab (any supported ATS / schema.org). */
+async function scrapeActiveJobTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab?.id) {
+    throw new Error("No active tab.");
+  }
+  const url = String(tab.url || "");
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error("Open a job posting tab (http/https), then try again.");
+  }
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: false },
+      files: ["content/autofill.js"]
+    });
+  } catch {
+    // Already injected or host not injectable.
+  }
+  await sleep(200);
+  let result;
+  try {
+    result = await chrome.tabs.sendMessage(tab.id, { type: "scrape_job_page" });
+  } catch (err) {
+    throw new Error(
+      `Could not scrape this tab (${String(err?.message || err)}). Open a Greenhouse, Workday, Indeed, Dice, Jobright, or similar job page.`
+    );
+  }
+  if (!result?.ok || !result.jobData) {
+    throw new Error(
+      result?.error ||
+        "No job details found on this page. Open a supported job listing, or paste the JD manually."
+    );
+  }
+  const d = result.jobData || {};
+  const jobTitle = String(d.jobTitle || d.title || "").trim();
+  const companyName = String(d.companyName || d.company || "").trim();
+  const jdText = String(d.jdText || "").trim();
+  const jdLink = String(d.jdLink || d.applyLink || url).trim();
+  if (!jdText && !jobTitle) {
+    throw new Error(
+      "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, or similar job listing."
+    );
+  }
+  return {
+    jobTitle,
+    companyName,
+    jdText,
+    jdLink,
+    site: result.site || ""
+  };
+}
+
 async function enqueueIndeedGrabbedJob(raw) {
   const data = await chrome.storage.local.get([
     ALL_US_JOBS_KEY,
@@ -7922,6 +8078,15 @@ async function pollCsvSources({ reason = "poll", force = false } = {}) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const type = message?.type;
   const senderTabId = sender?.tab?.id ?? null;
+
+  if (type === "scrape_active_job_tab") {
+    scrapeActiveJobTab()
+      .then((data) => safeSendResponse(sendResponse, { ok: true, ...data }))
+      .catch((err) =>
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) })
+      );
+    return true;
+  }
 
   if (type === "open_app_window") {
     openBotAppWindow()
@@ -9246,7 +9411,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (type === "run_one_off") {
-        if (isRunning) {
+    if (isRunning) {
       safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
       return false;
     }
@@ -9255,51 +9420,99 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.set({ generation_running: true });
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
+      const forceRebuild = Boolean(message.forceRebuild || message.jobMeta?.forceRebuild);
+      let meta = {
+        ...(message.jobMeta || {}),
+        bidSource: "one-off",
+        forceRebuild
+      };
       try {
-                const meta = { ...(message.jobMeta || {}), bidSource: "one-off" };
-        const preSkipReason = await getPreGenerateSkipReason(meta);
-        if (preSkipReason) {
-          if (meta.csvRow != null && meta.csvRow !== "") {
-            await markJobSkippedAsDuplicate(meta.csvRow, preSkipReason);
-          }
-          await chrome.storage.local.set({ generation_running: false });
-          await setStatus(
-            `Skipped duplicate — ${preSkipReason}: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
-          );
-          return;
-        }
-        const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
-        const link = normalizeJobLink(meta.jdLink || "");
-        if (link && spreadsheetUrl && webAppUrl) {
-          try {
-            const keys = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
-            const linkHit = buildKnownLinkSet(keys.links).has(link);
-            if (linkHit) {
-              await chrome.storage.local.set({ generation_running: false });
-              await setStatus(
-                `Skipped duplicate — same job link already on Google Sheet: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
-              );
-              await trySlackDuplicates(
-                [
-                  {
-                    csvRow: meta.csvRow,
-                    company: meta.companyName,
-                    title: meta.jobTitle,
-                    jdLink: meta.jdLink
-                  }
-                ],
-                keys.links.length
-              );
-              return;
-            }
-          } catch (dupErr) {
+        const csvRow = await ensureOneOffQueueJob(meta);
+        meta = { ...meta, csvRow };
+
+        if (!forceRebuild) {
+          const preSkipReason = await getPreGenerateSkipReason(meta);
+          if (preSkipReason) {
+            await markJobSkippedAsDuplicate(csvRow, preSkipReason);
+            await persistOneOffResult({
+              ok: false,
+              error: preSkipReason,
+              jdLink: meta.jdLink,
+              csvRow
+            });
+            await chrome.storage.local.set({ generation_running: false });
             await setStatus(
-              `Sheet duplicate check failed (${String(dupErr?.message || dupErr)}); continuing one-off…`
+              `Skipped duplicate — ${preSkipReason}: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
             );
+            return;
+          }
+          const { spreadsheetUrl, webAppUrl } = await getSheetConfig();
+          const link = normalizeJobLink(meta.jdLink || "");
+          if (link && spreadsheetUrl && webAppUrl) {
+            try {
+              const keys = await fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl });
+              const linkHit = buildKnownLinkSet(keys.links).has(link);
+              if (linkHit) {
+                await markJobSkippedAsDuplicate(csvRow, "same job link already on Google Sheet");
+                await persistOneOffResult({
+                  ok: false,
+                  error: "same job link already on Google Sheet",
+                  jdLink: meta.jdLink,
+                  csvRow
+                });
+                await chrome.storage.local.set({ generation_running: false });
+                await setStatus(
+                  `Skipped duplicate — same job link already on Google Sheet: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
+                );
+                await trySlackDuplicates(
+                  [
+                    {
+                      csvRow,
+                      company: meta.companyName,
+                      title: meta.jobTitle,
+                      jdLink: meta.jdLink
+                    }
+                  ],
+                  keys.links.length
+                );
+                return;
+              }
+            } catch (dupErr) {
+              await setStatus(
+                `Sheet duplicate check failed (${String(dupErr?.message || dupErr)}); continuing one-off…`
+              );
+            }
           }
         }
 
         const result = await runAutoJob(meta);
+        await updateQueueJob(csvRow, {
+          status: "done",
+          jobDir: result.savedDir,
+          profileId: meta.profileId || "",
+          atsScore: result.atsEvaluation?.score ?? null,
+          atsGrade: result.atsEvaluation?.grade || "",
+          atsEvaluation: result.atsEvaluation || null,
+          bidSource: "one-off",
+          error: result.coverLetterSaved
+            ? ""
+            : "Cover letter not created — auto-apply deferred until cover PDF exists"
+        });
+        await rememberApplyHistory(csvRow, {
+          jobDir: result.savedDir,
+          jdLink: meta.jdLink || "",
+          status: "done",
+          title: meta.jobTitle,
+          company: meta.companyName
+        }).catch(() => {});
+        await persistOneOffResult({
+          ok: true,
+          jdLink: meta.jdLink,
+          csvRow,
+          atsScore: result.atsEvaluation?.score ?? null,
+          atsGrade: result.atsEvaluation?.grade || "",
+          atsEvaluation: result.atsEvaluation || null
+        });
         await chrome.storage.local.set({ generation_running: false });
         await setStatus(result.status);
       } catch (err) {
@@ -9307,10 +9520,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const msg = String(err?.message || err);
         if (msg.startsWith("__DUPLICATE_SKIP__:")) {
           const reason = msg.slice("__DUPLICATE_SKIP__:".length) || "duplicate job link";
-          const meta = message.jobMeta || {};
           if (meta.csvRow != null && meta.csvRow !== "") {
             await markJobSkippedAsDuplicate(meta.csvRow, reason);
           }
+          await persistOneOffResult({
+            ok: false,
+            error: reason,
+            jdLink: meta.jdLink,
+            csvRow: meta.csvRow
+          });
           await setStatus(
             `Skipped duplicate — ${reason}: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
           );
@@ -9318,10 +9536,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (msg.startsWith("__INACTIVE_SKIP__:")) {
           const reason = msg.slice("__INACTIVE_SKIP__:".length) || "inactive job";
-          const meta = message.jobMeta || {};
           if (meta.csvRow != null && meta.csvRow !== "") {
             await markJobSkippedAsInactive(meta.csvRow, reason, meta);
           }
+          await persistOneOffResult({
+            ok: false,
+            error: reason,
+            jdLink: meta.jdLink,
+            csvRow: meta.csvRow
+          });
           await setStatus(
             `Skipped inactive job — ${meta.companyName || ""} / ${meta.jobTitle || ""}`
           );
@@ -9329,17 +9552,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (msg.startsWith("__ALREADY_APPLIED_SKIP__:")) {
           const reason = msg.slice("__ALREADY_APPLIED_SKIP__:".length) || "already applied";
-          const meta = message.jobMeta || {};
           if (meta.csvRow != null && meta.csvRow !== "") {
             await markJobSkippedAsAlreadyApplied(meta.csvRow, reason, meta);
           }
+          await persistOneOffResult({
+            ok: false,
+            error: reason,
+            jdLink: meta.jdLink,
+            csvRow: meta.csvRow
+          });
           await setStatus(
             `Already applied — marked Applied: ${meta.companyName || ""} / ${meta.jobTitle || ""}`
           );
           return;
         }
+        if (meta.csvRow != null && meta.csvRow !== "") {
+          await updateQueueJob(meta.csvRow, { status: "error", error: msg }).catch(() => {});
+        }
+        await persistOneOffResult({
+          ok: false,
+          error: msg,
+          jdLink: meta.jdLink,
+          csvRow: meta.csvRow
+        });
         await setStatus(`Generation failed: ${msg}`);
-        const meta = message.jobMeta || {};
         await trySlackJobStatus({
           outcome: "failed",
           company: meta.companyName,

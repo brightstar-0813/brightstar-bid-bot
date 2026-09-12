@@ -35,6 +35,7 @@ import { parseEmployersFromResume } from "./resume-profile.js";
 import { DEFAULT_TEMPLATE_ID, getAllTemplates } from "./templates/index.js";
 import { showToast } from "./ui-toast.js";
 import { confirmDialog } from "./ui-dialog.js";
+import { openProfileEditor } from "./open-profile-editor.js";
 
 const NEW_PROFILE_ID = "__new__";
 
@@ -56,6 +57,7 @@ export function createInlineProfileEditor(opts) {
   const selectEl = panelEl.querySelector("#inlineProfileSelect");
   const saveBtn = panelEl.querySelector("#inlineProfileSave");
   const saveAsNewBtn = panelEl.querySelector("#inlineProfileSaveAsNew");
+  const openFullEditorBtn = panelEl.querySelector("#inlineOpenFullEditor");
   const deleteBtn = panelEl.querySelector("#inlineProfileDelete");
   const completenessEl = panelEl.querySelector("#inlineCompleteness");
   const saveStatusEl = panelEl.querySelector("#inlineProfileSaveStatus");
@@ -271,6 +273,9 @@ export function createInlineProfileEditor(opts) {
       });
       const saved = result?.profile || result;
       editingPersonId = saved?.id || editingPersonId;
+      if (saved?.id) {
+        await setActivePersonId(saved.id);
+      }
       await refreshAndSelect(saved?.id);
       await loadPerson(saved);
       const msg = result?.fromBuiltin ? `Saved as ${saved.label}` : `Saved ${saved.label}`;
@@ -320,6 +325,16 @@ export function createInlineProfileEditor(opts) {
     await loadById(target);
   }
 
+  /** Start a blank custom profile in the inline editor. */
+  async function startNew() {
+    setPanelOpen(true, { persist: true });
+    setActiveTab("apply");
+    profilesCache = await getResumeProfiles();
+    await loadPerson(blankPerson());
+    populateSelect(NEW_PROFILE_ID);
+    setSaveStatus("Fill contact details, then Save to create a new profile.", { ok: true });
+  }
+
   if (panelEl.dataset.bound !== "1") {
     panelEl.dataset.bound = "1";
 
@@ -343,6 +358,15 @@ export function createInlineProfileEditor(opts) {
 
     saveAsNewBtn?.addEventListener("click", () => {
       saveProfile({ asNew: true }).catch(() => {});
+    });
+
+    openFullEditorBtn?.addEventListener("click", () => {
+      const id =
+        selectEl?.value === NEW_PROFILE_ID ? "" : String(selectEl?.value || editingPersonId || "").trim();
+      openProfileEditor({
+        profileId: id || "",
+        tab: activeTab === "batch" ? "batch" : activeTab
+      }).catch((err) => opts.setStatus?.(String(err?.message || err), "err"));
     });
 
     deleteBtn?.addEventListener("click", async () => {
@@ -400,6 +424,7 @@ export function createInlineProfileEditor(opts) {
   return {
     open,
     close,
+    startNew,
     refreshAndSelect,
     setPanelOpen,
     isOpen: () => isOpen
