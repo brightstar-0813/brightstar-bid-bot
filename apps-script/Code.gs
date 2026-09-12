@@ -8,14 +8,14 @@
  *    - Execute as: Me
  *    - Who has access: Anyone
  * 5. Copy the Web App URL into the extension's "Web App URL" field
- *    (redeploy after updates so listLinks / markApplied / sheetName are live)
+ *    (redeploy after updates so listLinks / markApplied / sheetName / JD column are live)
  *
  * POST body (text/plain JSON):
  *   action: "append" (default) | "listLinks" | "markApplied"
  *   spreadsheetId, optional sheetName (tab per profile; created if missing)
- *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
+ *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status, jdText
  *
- * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
+ * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G JD | H Status
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
  * Dedup: same job link (normalized) is treated as duplicate within that tab.
  */
@@ -60,7 +60,7 @@ function doPost(e) {
     const companyName = String(data.companyName || "").trim();
 
     if (action === "markapplied" || action === "mark_applied" || action === "applied") {
-      ensureStatusHeader_(sheet);
+      ensureSheetLayout_(sheet);
       const appliedOn = String(data.applicationDate || "").trim();
       const status =
         String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
@@ -75,15 +75,7 @@ function doPost(e) {
           sheetName: sheet.getName()
         });
       }
-      sheet.appendRow([
-        data.jobNo || "",
-        data.applicationDate || "",
-        data.jobTitle || "",
-        companyName,
-        jobLink,
-        data.salary || "",
-        status
-      ]);
+      sheet.appendRow(buildDataRow_(data, status));
       return json_({
         ok: true,
         updated: false,
@@ -96,15 +88,8 @@ function doPost(e) {
       return json_({ ok: true, duplicate: true, reason: "link", sheetName: sheet.getName() });
     }
 
-    sheet.appendRow([
-      data.jobNo || "",
-      data.applicationDate || "",
-      data.jobTitle || "",
-      companyName,
-      jobLink,
-      data.salary || "",
-      data.status || "Ready"
-    ]);
+    ensureSheetLayout_(sheet);
+    sheet.appendRow(buildDataRow_(data, data.status || "Ready"));
 
     return json_({ ok: true, duplicate: false, sheetName: sheet.getName() });
   } catch (err) {
@@ -142,8 +127,32 @@ function resolveSheet_(ss, sheetName) {
   var existing = ss.getSheetByName(name);
   if (existing) return existing;
   var created = ss.insertSheet(name);
-  created.getRange(1, 1, 1, 7).setValues([["No", "Date", "Title", "Company", "Link", "Salary", "Status"]]);
+  created.getRange(1, 1, 1, 8).setValues([
+    ["No", "Date", "Title", "Company", "Link", "Salary", "JD", "Status"]
+  ]);
   return created;
+}
+
+/** One data row matching A–H: No | Date | Title | Company | Link | Salary | JD | Status */
+function buildDataRow_(data, status) {
+  return [
+    data.jobNo || "",
+    data.applicationDate || "",
+    data.jobTitle || "",
+    String(data.companyName || "").trim(),
+    String(data.jobLink || "").trim(),
+    data.salary || "",
+    truncateJd_(data.jdText || data.jd || data.jobDescription || ""),
+    status || "Ready"
+  ];
+}
+
+/** Sheets cells cap at 50k chars; keep headroom for safety. */
+function truncateJd_(text) {
+  var s = String(text || "").trim();
+  var max = 45000;
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + "…";
 }
 
 function normalizeLink_(url) {
@@ -176,7 +185,7 @@ function normalizeLink_(url) {
 }
 
 function headerRow_(sheet) {
-  var lastCol = Math.max(sheet.getLastColumn(), 7);
+  var lastCol = Math.max(sheet.getLastColumn(), 8);
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
 }
 
@@ -188,7 +197,7 @@ function rowLooksLikeHeader_(row) {
     .join(" ");
   if (!joined) return false;
   if (/https?:\/\//i.test(joined)) return false;
-  return /\b(link|title|company|compay|status|date|salary)\b/.test(joined);
+  return /\b(link|title|company|compay|status|date|salary|jd)\b/.test(joined);
 }
 
 function cellLooksLikeUrl_(value) {
@@ -221,28 +230,77 @@ function statusColumnIndex_(headerRow) {
     var idx = headers.indexOf(names[i]);
     if (idx >= 0) return idx;
   }
-  return 6; // column G
+  return 7; // column H (last)
 }
 
-function ensureStatusHeader_(sheet) {
+function findNamedColumnIndex_(headerRow, names) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function jdColumnIndex_(headerRow) {
+  var idx = findNamedColumnIndex_(headerRow, ["jd", "job description", "description", "job desc"]);
+  return idx >= 0 ? idx : 6; // column G
+}
+
+function swapColumns_(sheet, colA, colB) {
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  var aVals = sheet.getRange(1, colA, lastRow, colA).getValues();
+  var bVals = sheet.getRange(1, colB, lastRow, colB).getValues();
+  sheet.getRange(1, colA, lastRow, colA).setValues(bVals);
+  sheet.getRange(1, colB, lastRow, colB).setValues(aVals);
+}
+
+/**
+ * Keep Status as the last column. Insert or reorder JD before it on older tabs.
+ * Classic 7-col tabs (… Salary | Status) get JD inserted before Status.
+ * Mistaken … Status | JD tabs are swapped to … JD | Status.
+ */
+function ensureSheetLayout_(sheet) {
   var headers = headerRow_(sheet);
   if (!rowLooksLikeHeader_(headers)) return;
-  var idx = statusColumnIndex_(headers);
-  if (!String(headers[idx] || "").trim()) {
-    sheet.getRange(1, idx + 1).setValue("Status");
+
+  var statusIdx = findNamedColumnIndex_(headers, ["status", "applied", "state"]);
+  var jdIdx = findNamedColumnIndex_(headers, ["jd", "job description", "description", "job desc"]);
+
+  if (statusIdx >= 0 && jdIdx >= 0) {
+    if (statusIdx < jdIdx) swapColumns_(sheet, statusIdx + 1, jdIdx + 1);
+    return;
+  }
+
+  if (statusIdx >= 0 && jdIdx < 0) {
+    // Insert blank column before Status so Status stays last.
+    sheet.insertColumns(statusIdx + 1);
+    sheet.getRange(1, statusIdx + 1).setValue("JD");
+    return;
+  }
+
+  if (statusIdx < 0) {
+    if (!String(headers[7] || "").trim()) sheet.getRange(1, 8).setValue("Status");
+  }
+  if (jdIdx < 0) {
+    if (!String(headers[6] || "").trim()) sheet.getRange(1, 7).setValue("JD");
   }
 }
 
 function statusColumnForRow_(sheet, row) {
   var headers = headerRow_(sheet);
   if (rowLooksLikeHeader_(headers)) return statusColumnIndex_(headers) + 1;
-  var width = Math.max(sheet.getLastColumn(), 7);
+  var width = Math.max(sheet.getLastColumn(), 8);
   var values = sheet.getRange(row, 1, 1, width).getValues()[0] || [];
   var last = 0;
   for (var i = 0; i < values.length; i++) {
     if (String(values[i] || "").trim()) last = i + 1;
   }
-  return Math.max(7, last + 1);
+  return Math.max(8, last + 1);
 }
 
 function companyColumnIndex_(headerRow) {

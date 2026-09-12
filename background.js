@@ -1136,6 +1136,7 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
       companyName: jobMeta.companyName || jobMeta.company || "",
       jdLink,
       salary: jobMeta.salary || "",
+      jdText: jobMeta.jdText || "",
       ...(statusText ? { status: statusText } : {})
     });
     if (jobMeta.csvRow != null && jobMeta.csvRow !== "" && !statusText) {
@@ -6210,7 +6211,8 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
           jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || ""
+          salary: jobMeta.salary || "",
+          jdText: jobMeta.jdText || ""
         });
         const label = sheetResult.status || formatAppliedStatus();
         status = `${status} Sheet: ${label}.`;
@@ -6223,7 +6225,8 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
           jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || ""
+          salary: jobMeta.salary || "",
+          jdText: jobMeta.jdText || ""
         });
         status = sheetResult.duplicate
           ? `${status} (already on Google Sheet — not re-appended)`

@@ -2356,11 +2356,12 @@ async function copySheetRow() {
     jobTitle,
     companyName,
     jdLink,
+    jdText: (jdTextEl?.value || "").trim(),
     includeDate: true
   });
   try {
     await navigator.clipboard.writeText(tsv);
-    setStatus("Sheet row copied (No | Date | Title | Company | Link).");
+    setStatus("Sheet row copied (No | Date | Title | Company | Link | Salary | JD | Status).");
   } catch {
     setStatus("Clipboard write failed.");
   }

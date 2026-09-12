@@ -102,10 +102,16 @@ export function normalizeJobLink(url) {
 }
 
 /**
- * Tab-separated row matching sheet columns A–G:
- * No | Date | Title | Company | Link | Salary | Status
+ * Tab-separated row matching sheet columns A–H:
+ * No | Date | Title | Company | Link | Salary | JD | Status
  * Paste into the first cell of an empty row in Google Sheets.
  */
+export function truncateSheetJd(text, max = 45000) {
+  const s = String(text || "").trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1))}…`;
+}
+
 export function buildSheetRowTsv({
   jobNo = "",
   jobTitle,
@@ -113,6 +119,7 @@ export function buildSheetRowTsv({
   jdLink,
   salary = "",
   status = "",
+  jdText = "",
   includeDate = true
 }) {
   const cells = [
@@ -122,6 +129,7 @@ export function buildSheetRowTsv({
     companyName || "",
     jdLink || "",
     salary || "",
+    truncateSheetJd(jdText),
     status || ""
   ];
   return cells.join("\t");
@@ -176,6 +184,7 @@ export async function appendJobToSpreadsheet({
   companyName,
   jdLink,
   salary,
+  jdText = "",
   status = "Ready"
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
@@ -193,6 +202,7 @@ export async function appendJobToSpreadsheet({
     companyName: companyName || "",
     jobLink: jdLink || "",
     salary: salary || "",
+    jdText: truncateSheetJd(jdText),
     status: status || "Ready"
   };
 
@@ -213,6 +223,7 @@ export async function markJobAppliedOnSpreadsheet({
   companyName,
   jdLink,
   salary,
+  jdText = "",
   status
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
@@ -232,6 +243,7 @@ export async function markJobAppliedOnSpreadsheet({
     companyName: companyName || "",
     jobLink: jdLink || "",
     salary: salary || "",
+    jdText: truncateSheetJd(jdText),
     status: statusValue
   };
 

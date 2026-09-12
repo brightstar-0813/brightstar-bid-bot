@@ -192,7 +192,7 @@ The output folder follows the active person (`Applications-{ResumePrefix}` from 
 
 After each job’s files finish (batch or one-off), the extension can append a row:
 
-| No | Date | Title | Company | Link | Salary | Status |
+| No | Date | Title | Company | Link | Salary | JD | Status |
 |----|------|-------|---------|------|--------|--------|
 | CSV row # | M/D/YYYY | job title | company | JD URL | (optional) | Ready, then Applied M/D/YYYY |
 
