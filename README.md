@@ -192,9 +192,9 @@ The output folder follows the active person (`Applications-{ResumePrefix}` from 
 
 After each job’s files finish (batch or one-off), the extension can append a row:
 
-| No | Date | Title | Company | Link | Salary | JD | Status |
-|----|------|-------|---------|------|--------|----|--------|
-| CSV row # | M/D/YYYY | job title | company | JD URL | (optional) | job description | Ready, then Applied M/D/YYYY |
+| No | Date | Title | Company | Link | Salary | Status |
+|----|------|-------|---------|------|--------|--------|
+| CSV row # | M/D/YYYY | job title | company | JD URL | (optional) | Ready, then Applied M/D/YYYY |
 
 **Status column:** CSV batch resume build writes **Ready**. A successful **manual one-off** bid writes **Applied M/D/YYYY** immediately. Clicking **Apply** in the queue also sets **Applied M/D/YYYY** (the day you clicked Apply — column B stays the resume-build date). On the hosted **Dice/Indeed** interleaved paths, **Applied** is set only after a confirmed Submit. Duplicate-by-link still skips jobs that are already on the sheet.
 

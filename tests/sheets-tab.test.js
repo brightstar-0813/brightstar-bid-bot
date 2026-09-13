@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildSheetRowTsv,
   defaultSheetTabNameForPerson,
-  sanitizeSheetTabName,
-  truncateSheetJd
+  sanitizeSheetTabName
 } from "../sheets.js";
 
 test("sanitizeSheetTabName strips illegal Google Sheets characters", () => {
@@ -24,7 +23,7 @@ test("defaultSheetTabNameForPerson prefers label then name", () => {
   assert.equal(defaultSheetTabNameForPerson({}), "Profile");
 });
 
-test("buildSheetRowTsv puts JD before Status (Status last)", () => {
+test("buildSheetRowTsv ends with Status and has no JD column", () => {
   const row = buildSheetRowTsv({
     jobNo: "12",
     jobTitle: "SF Architect",
@@ -32,18 +31,7 @@ test("buildSheetRowTsv puts JD before Status (Status last)", () => {
     jdLink: "https://example.com/job",
     salary: "150k",
     status: "Ready",
-    jdText: "Build Lightning apps",
     includeDate: false
   });
-  assert.equal(
-    row,
-    "12\t\tSF Architect\tAcme\thttps://example.com/job\t150k\tBuild Lightning apps\tReady"
-  );
-});
-
-test("truncateSheetJd caps long descriptions", () => {
-  const long = "a".repeat(50000);
-  const out = truncateSheetJd(long, 100);
-  assert.equal(out.length, 100);
-  assert.ok(out.endsWith("…"));
+  assert.equal(row, "12\t\tSF Architect\tAcme\thttps://example.com/job\t150k\tReady");
 });
