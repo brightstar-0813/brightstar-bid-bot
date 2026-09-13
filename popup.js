@@ -7,7 +7,6 @@
   setActivePersonId,
   savePersonProfile,
   addCustomProfile,
-  deleteCustomProfile,
   getTrackPromptTemplate,
   getTrackCoverLetterTemplate,
   resolveRoleTrackForPerson,
@@ -134,7 +133,6 @@ let currentWindowId = null;
 const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
 const templateSelectEl = document.getElementById("templateSelect");
-const deleteProfileBtn = document.getElementById("deleteProfile");
 const addProfileBtn = document.getElementById("addProfile");
 const personResumeFileEl = document.getElementById("personResumeFile");
 const personImportNoticeEl = document.getElementById("personImportNotice");
@@ -584,12 +582,6 @@ function populateTemplateSelect(selectedId) {
   templateSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_TEMPLATE_ID;
 }
 
-function syncDeleteButton() {
-  const selected = profilesCache.find((p) => p.id === profileSelectEl.value);
-  const canDelete = Boolean(selected && !selected.builtin);
-  deleteProfileBtn.hidden = !canDelete;
-}
-
 function populateProfileSelect(selectedId) {
   profileSelectEl.innerHTML = "";
   for (const profile of profilesCache) {
@@ -600,7 +592,6 @@ function populateProfileSelect(selectedId) {
   }
   const validIds = new Set(profilesCache.map((p) => p.id));
   profileSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_PROFILE_ID;
-  syncDeleteButton();
   syncActivePersonChip();
 }
 
@@ -2302,35 +2293,8 @@ async function onMasterResumeFile(file) {
   }
 }
 
-async function removeSelectedProfile() {
-  const profileId = profileSelectEl.value;
-  const selected = profilesCache.find((p) => p.id === profileId);
-  if (!selected || selected.builtin) {
-    setStatus("Built-in profiles cannot be deleted.");
-    return;
-  }
-  if (
-    !(await confirmDialog({
-      title: "Delete person?",
-      message: `"${selected.label}" will be removed permanently.`,
-      confirmText: "Delete",
-      danger: true
-    }))
-  )
-    return;
-  try {
-    await deleteCustomProfile(profileId);
-    await refreshProfiles(DEFAULT_PROFILE_ID);
-    await loadActivePersonIntoForm();
-    setStatus(`Deleted: ${selected.label}`);
-  } catch (err) {
-    setStatus(String(err.message || err));
-  }
-}
-
 async function onProfileChange() {
   const profileId = profileSelectEl.value;
-  syncDeleteButton();
   syncActivePersonChip();
   await setActivePersonId(profileId);
   await loadActivePersonIntoForm();
@@ -3150,8 +3114,6 @@ toggleManualPanelBtn.addEventListener("click", () => {
   setManualPanelOpen(manualPanelBody.hidden);
 });
 
-deleteProfileBtn.addEventListener("click", () => removeSelectedProfile());
-
 addProfileBtn?.addEventListener("click", () => {
   if (!inlineProfileEditor?.startNew) {
     setStatus("Profile editor panel is unavailable.");
@@ -3159,7 +3121,7 @@ addProfileBtn?.addEventListener("click", () => {
   }
   inlineProfileEditor
     .startNew()
-    .then(() => setStatus("New profile â€” fill details and Save."))
+    .then(() => setStatus("New profile — fill details and Save."))
     .catch((err) => setStatus(String(err?.message || err)));
 });
 

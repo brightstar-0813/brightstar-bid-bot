@@ -382,8 +382,11 @@ export function createInlineProfileEditor(opts) {
       )
         return;
       await deleteCustomProfile(id);
+      await setActivePersonId(DEFAULT_PROFILE_ID);
       await refreshAndSelect(DEFAULT_PROFILE_ID);
       await loadById(selectEl.value);
+      setSaveStatus(`Deleted ${selected.label}`, { ok: true });
+      opts.onSaved?.({ id: DEFAULT_PROFILE_ID, label: "default" });
     });
 
     roleTrackBtns.forEach((btn) => {

@@ -80,10 +80,7 @@
               <select id="profileSelect"></select>
             </label>
             <button type="button" id="addProfile" class="ghost compact" title="Create a new custom profile">
-              Add profile
-            </button>
-            <button type="button" id="deleteProfile" class="ghost danger compact" hidden title="Delete selected person">
-              Delete
+              Add
             </button>
           </div>
           <div class="field">
@@ -131,22 +128,9 @@
           </button>
           <div class="panel-body profile-editor-panel" id="profileEditorPanelBody" hidden>
             <div id="inlineProfileEditor" class="inline-profile-editor profile-editor">
-              <div class="inline-profile-toolbar row-split">
-                <button type="submit" form="inlineProfileForm" id="inlineProfileSave" class="primary compact">Save</button>
-                <button type="button" id="inlineProfileSaveAsNew" class="ghost compact" title="Create a separate copy">
-                  Save as new
-                </button>
-                <button type="button" id="inlineOpenFullEditor" class="ghost compact" title="Open full editor for work history and education">
-                  Open full editor
-                </button>
-                <button type="button" id="inlineProfileDelete" class="ghost danger compact" hidden title="Delete this profile">
-                  Delete
-                </button>
-              </div>
-
               <div class="profile-toolbar inline-profile-toolbar">
                 <label class="field grow">
-                  <span>Editing profile</span>
+                  <span>Profile</span>
                   <select id="inlineProfileSelect"></select>
                 </label>
               </div>
@@ -376,7 +360,21 @@
                   <p class="hint">Same name as the Google Sheet tab and the folder under Downloads.</p>
                 </div>
 
-                <p id="inlineProfileSaveStatus" class="inline-profile-save-status" hidden></p>
+                <div class="inline-profile-actions">
+                  <button type="submit" id="inlineProfileSave" class="primary">Save</button>
+                  <div class="inline-profile-tools" role="group" aria-label="More profile actions">
+                    <button type="button" id="inlineProfileSaveAsNew" class="ghost compact" title="Create a separate copy">
+                      Duplicate
+                    </button>
+                    <button type="button" id="inlineOpenFullEditor" class="ghost compact" title="Work history and education">
+                      Full editor
+                    </button>
+                  </div>
+                  <button type="button" id="inlineProfileDelete" class="ghost danger compact inline-profile-delete" hidden title="Delete this profile">
+                    Delete profile
+                  </button>
+                  <p id="inlineProfileSaveStatus" class="inline-profile-save-status" hidden></p>
+                </div>
               </form>
             </div>
           </div>
