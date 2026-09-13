@@ -9,18 +9,23 @@ import { isResumePreviewable, sampleResumeForPerson } from "./templates/preview-
 import { loadAndApplyTheme, watchThemeChanges, mountThemeSwatches } from "./theme.js";
 
 const PREVIEW_SOURCE_KEY = "template_preview_source";
+const ONE_OFF_DRAFT_KEY = "one_off_draft";
 
 const templateSelectEl = document.getElementById("templateSelect");
 const sourceSampleBtn = document.getElementById("sourceSample");
+const sourceDraftBtn = document.getElementById("sourceDraft");
 const sourceLastBtn = document.getElementById("sourceLast");
 const useStyleBtn = document.getElementById("useStyle");
 const pageEl = document.getElementById("page");
 const ledeEl = document.getElementById("previewLede");
 const statusEl = document.getElementById("status");
 
-let templateId = new URLSearchParams(location.search).get("template") || DEFAULT_TEMPLATE_ID;
+const params = new URLSearchParams(location.search);
+let templateId = params.get("template") || DEFAULT_TEMPLATE_ID;
 let source = "sample";
 let hasLastResume = false;
+let hasDraft = false;
+let draftTemplateId = "";
 
 function setStatus(message, tone = "") {
   const text = String(message || "").trim();
@@ -63,11 +68,31 @@ function populateTemplates() {
 
 function syncSourceButtons() {
   sourceSampleBtn.classList.toggle("active", source === "sample");
+  sourceDraftBtn?.classList.toggle("active", source === "draft");
   sourceLastBtn.classList.toggle("active", source === "last");
+  if (sourceDraftBtn) {
+    sourceDraftBtn.disabled = !hasDraft;
+    sourceDraftBtn.title = hasDraft ? "Manual bid draft resume" : "Draft a Manual bid first";
+  }
   sourceLastBtn.disabled = !hasLastResume;
 }
 
+async function loadDraftResume() {
+  const stored = await chrome.storage.local.get(ONE_OFF_DRAFT_KEY);
+  const draft = stored[ONE_OFF_DRAFT_KEY];
+  if (isResumePreviewable(draft?.resumeData)) {
+    draftTemplateId = String(draft.templateId || draft.jobMeta?.templateId || "").trim();
+    return draft.resumeData;
+  }
+  return null;
+}
+
 async function loadResumeData() {
+  if (source === "draft") {
+    const data = await loadDraftResume();
+    if (data) return { data, kind: "draft" };
+    source = "sample";
+  }
   if (source === "last") {
     const stored = await chrome.storage.local.get("last_resume_json");
     if (isResumePreviewable(stored.last_resume_json)) {
@@ -87,25 +112,57 @@ async function renderPreview() {
   pageEl.srcdoc = html;
   if (ledeEl) {
     ledeEl.hidden = false;
-    ledeEl.textContent =
-      kind === "last" ? `Last generated · ${template.label}` : `Sample · ${template.label}`;
+    if (kind === "draft") ledeEl.textContent = `Manual draft · ${template.label}`;
+    else if (kind === "last") ledeEl.textContent = `Last generated · ${template.label}`;
+    else ledeEl.textContent = `Sample · ${template.label}`;
+  }
+  if (kind === "draft") {
+    setStatus("Draft resume — Confirm & save in the bot when ready.", "ok");
   }
 }
 
 async function initSource() {
-  const stored = await chrome.storage.local.get(["last_resume_json", PREVIEW_SOURCE_KEY]);
+  const stored = await chrome.storage.local.get([
+    "last_resume_json",
+    PREVIEW_SOURCE_KEY,
+    ONE_OFF_DRAFT_KEY
+  ]);
   hasLastResume = isResumePreviewable(stored.last_resume_json);
-  source = stored[PREVIEW_SOURCE_KEY] === "last" && hasLastResume ? "last" : "sample";
+  hasDraft = isResumePreviewable(stored[ONE_OFF_DRAFT_KEY]?.resumeData);
+  draftTemplateId = String(
+    stored[ONE_OFF_DRAFT_KEY]?.templateId || stored[ONE_OFF_DRAFT_KEY]?.jobMeta?.templateId || ""
+  ).trim();
+
+  const querySource = String(params.get("source") || "").trim().toLowerCase();
+  if (querySource === "draft" && hasDraft) {
+    source = "draft";
+    if (draftTemplateId) templateId = draftTemplateId;
+  } else if (querySource === "last" && hasLastResume) {
+    source = "last";
+  } else if (stored[PREVIEW_SOURCE_KEY] === "draft" && hasDraft) {
+    source = "draft";
+  } else if (stored[PREVIEW_SOURCE_KEY] === "last" && hasLastResume) {
+    source = "last";
+  } else {
+    source = "sample";
+  }
 }
 
 async function setSource(next) {
-  if (next === "last" && !hasLastResume) {
+  if (next === "draft" && !hasDraft) {
+    setStatus("No Manual draft yet — showing sample layout.", "warn");
+    source = "sample";
+  } else if (next === "last" && !hasLastResume) {
     setStatus("No generated resume yet — showing sample layout.", "warn");
     source = "sample";
   } else {
     source = next;
   }
   await chrome.storage.local.set({ [PREVIEW_SOURCE_KEY]: source });
+  if (source === "draft" && draftTemplateId) {
+    templateId = draftTemplateId;
+    templateSelectEl.value = templateId;
+  }
   await renderPreview();
 }
 
@@ -124,16 +181,60 @@ templateSelectEl.addEventListener("change", () => {
 });
 
 sourceSampleBtn.addEventListener("click", () => setSource("sample"));
+sourceDraftBtn?.addEventListener("click", () => setSource("draft"));
 sourceLastBtn.addEventListener("click", () => setSource("last"));
 useStyleBtn.addEventListener("click", () => useThisStyle().catch((err) => setStatus(String(err?.message || err))));
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type !== "template_preview_show") return;
-  if (message.templateId) {
-    templateId = message.templateId;
-    templateSelectEl.value = templateId;
+  if (message?.type === "template_preview_show") {
+    if (message.templateId) {
+      templateId = message.templateId;
+      templateSelectEl.value = templateId;
+    }
+    if (message.source === "draft" || message.source === "last" || message.source === "sample") {
+      source = message.source;
+    }
+    renderPreview().catch(() => {});
+    return;
   }
-  renderPreview().catch(() => {});
+  if (message?.type === "one_off_draft_updated") {
+    loadDraftResume()
+      .then((data) => {
+        hasDraft = Boolean(data);
+        if (hasDraft) {
+          source = "draft";
+          if (draftTemplateId) {
+            templateId = draftTemplateId;
+            templateSelectEl.value = templateId;
+          }
+        }
+        return renderPreview();
+      })
+      .catch(() => {});
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[ONE_OFF_DRAFT_KEY]) return;
+  const draft = changes[ONE_OFF_DRAFT_KEY].newValue;
+  hasDraft = isResumePreviewable(draft?.resumeData);
+  draftTemplateId = String(draft?.templateId || draft?.jobMeta?.templateId || "").trim();
+  if (source === "draft" || params.get("source") === "draft") {
+    if (hasDraft) {
+      source = "draft";
+      if (draftTemplateId) {
+        templateId = draftTemplateId;
+        templateSelectEl.value = templateId;
+      }
+      renderPreview().catch(() => {});
+    } else {
+      source = "sample";
+      syncSourceButtons();
+      setStatus("Draft cleared.", "warn");
+    }
+  } else {
+    syncSourceButtons();
+  }
 });
 
 window.addEventListener("keydown", (event) => {
@@ -168,5 +269,8 @@ mountThemeSwatches(document.getElementById("themeSwatches"), {
 
 populateTemplates();
 initSource()
-  .then(renderPreview)
+  .then(() => {
+    templateSelectEl.value = templateId;
+    return renderPreview();
+  })
   .catch((err) => setStatus(`Preview failed: ${String(err?.message || err)}`, "err"));

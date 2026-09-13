@@ -155,6 +155,7 @@ const JOB_CHANNEL_FILTER_KEY = "job_channel_filter";
 const REMOVED_JOB_IDENTITIES_KEY = "removed_job_identities";
 const LAST_ONE_OFF_ATS_KEY = "last_one_off_ats";
 const LAST_ONE_OFF_RESULT_KEY = "last_one_off_result";
+const ONE_OFF_DRAFT_KEY = "one_off_draft";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const AUTOFILL_ENABLED_KEY = "autofill_enabled";
 
@@ -1136,7 +1137,6 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
       companyName: jobMeta.companyName || jobMeta.company || "",
       jdLink,
       salary: jobMeta.salary || "",
-      jdText: jobMeta.jdText || "",
       ...(statusText ? { status: statusText } : {})
     });
     if (jobMeta.csvRow != null && jobMeta.csvRow !== "" && !statusText) {
@@ -6211,8 +6211,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
           jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || "",
-          jdText: jobMeta.jdText || ""
+          salary: jobMeta.salary || ""
         });
         const label = sheetResult.status || formatAppliedStatus();
         status = `${status} Sheet: ${label}.`;
@@ -6225,8 +6224,7 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
           jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || "",
-          jdText: jobMeta.jdText || ""
+          salary: jobMeta.salary || ""
         });
         status = sheetResult.duplicate
           ? `${status} (already on Google Sheet — not re-appended)`
@@ -6299,6 +6297,7 @@ async function persistOneOffResult(payload = {}) {
       : null,
     atsGrade: String(payload.atsGrade || ""),
     atsEvaluation: payload.atsEvaluation || null,
+    draft: Boolean(payload.draft),
     updatedAt: Date.now()
   };
   await chrome.storage.local.set({
@@ -6306,6 +6305,47 @@ async function persistOneOffResult(payload = {}) {
     [LAST_ONE_OFF_RESULT_KEY]: record
   });
   return record;
+}
+
+async function persistOneOffDraft({
+  resumeData,
+  jobMeta,
+  atsEvaluation,
+  templateId,
+  aiTabId,
+  aiChatId,
+  aiProvider
+} = {}) {
+  const draft = {
+    resumeData,
+    jobMeta: jobMeta || {},
+    atsEvaluation: atsEvaluation || null,
+    templateId: String(templateId || jobMeta?.templateId || DEFAULT_TEMPLATE_ID),
+    aiTabId: typeof aiTabId === "number" ? aiTabId : null,
+    aiChatId: String(aiChatId || ""),
+    aiProvider: String(aiProvider || ""),
+    updatedAt: Date.now()
+  };
+  await chrome.storage.local.set({ [ONE_OFF_DRAFT_KEY]: draft });
+  await persistActiveResumeJson(resumeData).catch(() => {});
+  try {
+    chrome.runtime.sendMessage({ type: "one_off_draft_updated" }).catch(() => {});
+  } catch {
+    /* no preview listeners */
+  }
+  return draft;
+}
+
+async function clearOneOffDraft() {
+  await chrome.storage.local.remove(ONE_OFF_DRAFT_KEY);
+}
+
+async function getOneOffDraft() {
+  const data = await chrome.storage.local.get(ONE_OFF_DRAFT_KEY);
+  const draft = data[ONE_OFF_DRAFT_KEY];
+  if (!draft || typeof draft !== "object") return null;
+  if (!draft.resumeData || typeof draft.resumeData !== "object") return null;
+  return draft;
 }
 
 /**
@@ -6445,9 +6485,11 @@ async function pickTemplateId(jobMeta = {}, person = {}) {
 
 /**
  * Fully automatic — ONE new ChatGPT chat per position:
- * resume (with JD) → save files → cover letter in the same chat → save CL.
+ * resume (with JD) → [optional draft stop] → save files → cover letter in the same chat → save CL.
+ * @param {object} jobMeta
+ * @param {{ draftOnly?: boolean }} [opts] When draftOnly, harvest + ATS only — no PDFs/sheet.
  */
-async function runAutoJob(jobMeta) {
+async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   // Duplicate / coverage first — never spend ChatGPT time on a job link we already bid.
   const preSkipReason = await getPreGenerateSkipReason(jobMeta);
   if (preSkipReason) {
@@ -6554,7 +6596,9 @@ async function runAutoJob(jobMeta) {
         resumeData = already;
         rawOutput = JSON.stringify(already);
         await setStatus(
-          `Row ${rowLabel}${jobMeta.companyName}: JSON ready (${already.experience?.length || 0} jobs). Saving files…`
+          `Row ${rowLabel}${jobMeta.companyName}: JSON ready (${already.experience?.length || 0} jobs). ${
+            draftOnly ? "Preparing draft…" : "Saving files…"
+          }`
         );
         break;
       }
@@ -6818,17 +6862,15 @@ async function runAutoJob(jobMeta) {
     }
   }
   if (jobMeta.csvRow != null) {
-    await updateQueueJob(jobMeta.csvRow, {
+    const atsPatch = {
       atsScore: atsEvaluation.score,
       atsGrade: atsEvaluation.grade,
       atsEvaluation
-    });
+    };
+    if (draftOnly) atsPatch.status = "draft";
+    await updateQueueJob(jobMeta.csvRow, atsPatch);
   }
-  await setStatus(
-    `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
-  );
 
-  // Save JD + resume immediately (before cover letter), same chat continues after.
   const resumeFilePrefix = normalizeResumeFilePrefix(
     jobMeta.resumeFilePrefix || person.resumeFilePrefix,
     person.name || person.label || resumeData?.name || ""
@@ -6844,6 +6886,62 @@ async function runAutoJob(jobMeta) {
     sessionRoleTrack
   };
 
+  if (!jobAiChatId) {
+    jobAiChatId = await rememberAiChatFromTab(tab.id, provider);
+  }
+  const aiChatId = jobAiChatId;
+
+  if (draftOnly) {
+    await persistOneOffDraft({
+      resumeData,
+      jobMeta: enrichedMeta,
+      atsEvaluation,
+      templateId: enrichedMeta.templateId,
+      aiTabId: tab.id,
+      aiChatId,
+      aiProvider: provider
+    });
+    await persistOneOffResult({
+      ok: true,
+      draft: true,
+      jdLink: enrichedMeta.jdLink,
+      csvRow: enrichedMeta.csvRow,
+      atsScore: atsEvaluation.score,
+      atsGrade: atsEvaluation.grade,
+      atsEvaluation
+    });
+    await setStatus(
+      `Draft ready (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Review preview, then Confirm & save.`
+    );
+    try {
+      const jobKey = buildCustomQaJobKey(profileId || person?.id || "", {
+        jdLink: jobMeta.jdLink || "",
+        jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+        companyName: jobMeta.companyName || jobMeta.company || ""
+      });
+      if (jobKey && jobAiChatId) {
+        await markCustomQaAgentSession(jobKey, { seeded: true });
+      }
+    } catch {
+      /* ignore */
+    }
+    return {
+      draft: true,
+      resumeData,
+      atsEvaluation,
+      enrichedMeta,
+      aiTabId: tab.id,
+      aiChatId,
+      aiProvider: provider,
+      status: `Draft ready · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade})`
+    };
+  }
+
+  await setStatus(
+    `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
+  );
+
+  // Save JD + resume immediately (before cover letter), same chat continues after.
   const result = await saveResumeAndCoverLetter(
     tab.id,
     JSON.stringify(resumeData, null, 2),
@@ -6868,11 +6966,6 @@ async function runAutoJob(jobMeta) {
     // ignore
   }
 
-  // Capture conversation id now; chat is deleted later during inter-job cooldown.
-  if (!jobAiChatId) {
-    jobAiChatId = await rememberAiChatFromTab(tab.id, provider);
-  }
-  const aiChatId = jobAiChatId;
   try {
     const jobKey = buildCustomQaJobKey(profileId || person?.id || "", {
       jdLink: jobMeta.jdLink || "",
@@ -9436,7 +9529,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (type === "run_one_off") {
+  if (type === "draft_one_off" || type === "run_one_off") {
     if (isRunning) {
       safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
       return false;
@@ -9444,19 +9537,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     isRunning = true;
     startKeepAlive();
     chrome.storage.local.set({ generation_running: true });
-    safeSendResponse(sendResponse, { ok: true, started: true });
+    safeSendResponse(sendResponse, { ok: true, started: true, draft: true });
     (async () => {
-      const forceRebuild = Boolean(message.forceRebuild || message.jobMeta?.forceRebuild);
+      const forceRebuild = Boolean(
+        message.forceRebuild || message.regenerate || message.jobMeta?.forceRebuild
+      );
       let meta = {
         ...(message.jobMeta || {}),
         bidSource: "one-off",
         forceRebuild
       };
       try {
+        const existingDraft = await getOneOffDraft();
+        const sameLinkDraft =
+          existingDraft &&
+          normalizeJobLink(existingDraft.jobMeta?.jdLink || "") ===
+            normalizeJobLink(meta.jdLink || "") &&
+          normalizeJobLink(meta.jdLink || "");
+        // Regenerating the same link skips sheet dedupe; a brand-new Draft still checks.
+        const skipSheetDedupe = forceRebuild || Boolean(sameLinkDraft && message.regenerate);
+
         const csvRow = await ensureOneOffQueueJob(meta);
         meta = { ...meta, csvRow };
 
-        if (!forceRebuild) {
+        if (!skipSheetDedupe) {
           const preSkipReason = await getPreGenerateSkipReason(meta);
           if (preSkipReason) {
             await markJobSkippedAsDuplicate(csvRow, preSkipReason);
@@ -9509,42 +9613,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             } catch (dupErr) {
               await setStatus(
-                `Sheet duplicate check failed (${String(dupErr?.message || dupErr)}); continuing one-off…`
+                `Sheet duplicate check failed (${String(dupErr?.message || dupErr)}); continuing draft…`
               );
             }
           }
         }
 
-        const result = await runAutoJob(meta);
+        // Clear prior draft when starting a different JD link.
+        if (
+          existingDraft &&
+          normalizeJobLink(existingDraft.jobMeta?.jdLink || "") !==
+            normalizeJobLink(meta.jdLink || "")
+        ) {
+          await clearOneOffDraft();
+        }
+
+        const result = await runAutoJob(meta, { draftOnly: true });
         await updateQueueJob(csvRow, {
-          status: "done",
-          jobDir: result.savedDir,
+          status: "draft",
           profileId: meta.profileId || "",
           atsScore: result.atsEvaluation?.score ?? null,
           atsGrade: result.atsEvaluation?.grade || "",
           atsEvaluation: result.atsEvaluation || null,
           bidSource: "one-off",
-          error: result.coverLetterSaved
-            ? ""
-            : "Cover letter not created — auto-apply deferred until cover PDF exists"
-        });
-        await rememberApplyHistory(csvRow, {
-          jobDir: result.savedDir,
-          jdLink: meta.jdLink || "",
-          status: "done",
-          title: meta.jobTitle,
-          company: meta.companyName
+          error: ""
         }).catch(() => {});
-        await persistOneOffResult({
-          ok: true,
-          jdLink: meta.jdLink,
-          csvRow,
-          atsScore: result.atsEvaluation?.score ?? null,
-          atsGrade: result.atsEvaluation?.grade || "",
-          atsEvaluation: result.atsEvaluation || null
-        });
         await chrome.storage.local.set({ generation_running: false });
-        await setStatus(result.status);
+        await setStatus(result.status || "Draft ready — review preview, then Confirm & save.");
       } catch (err) {
         await chrome.storage.local.set({ generation_running: false });
         const msg = String(err?.message || err);
@@ -9605,7 +9700,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           jdLink: meta.jdLink,
           csvRow: meta.csvRow
         });
-        await setStatus(`Generation failed: ${msg}`);
+        await setStatus(`Draft failed: ${msg}`);
         await trySlackJobStatus({
           outcome: "failed",
           company: meta.companyName,
@@ -9619,6 +9714,133 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return false;
+  }
+
+  if (type === "confirm_one_off") {
+    if (isRunning) {
+      safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
+      return false;
+    }
+    isRunning = true;
+    startKeepAlive();
+    chrome.storage.local.set({ generation_running: true });
+    safeSendResponse(sendResponse, { ok: true, started: true, confirm: true });
+    (async () => {
+      let meta = {};
+      try {
+        const draft = await getOneOffDraft();
+        if (!draft?.resumeData) {
+          throw new Error("No draft to confirm. Click Draft first.");
+        }
+        meta = { ...(draft.jobMeta || {}), bidSource: "one-off" };
+        if (message.jobMeta && typeof message.jobMeta === "object") {
+          // Allow popup to refresh outputDir / template / additional fields without wiping JD.
+          meta = {
+            ...meta,
+            ...message.jobMeta,
+            jdText: meta.jdText || message.jobMeta.jdText || "",
+            jdLink: meta.jdLink || message.jobMeta.jdLink || "",
+            jobTitle: meta.jobTitle || message.jobMeta.jobTitle || "",
+            companyName: meta.companyName || message.jobMeta.companyName || "",
+            bidSource: "one-off"
+          };
+        }
+        const csvRow =
+          meta.csvRow != null && meta.csvRow !== ""
+            ? meta.csvRow
+            : await ensureOneOffQueueJob(meta);
+        meta = { ...meta, csvRow };
+
+        const provider = await getStoredAiProvider();
+        let tabId = typeof draft.aiTabId === "number" ? draft.aiTabId : null;
+        if (tabId != null) {
+          try {
+            await chrome.tabs.get(tabId);
+          } catch {
+            tabId = null;
+          }
+        }
+        if (tabId == null) {
+          const tab = await ensureAiTab(provider);
+          tabId = tab?.id;
+        }
+        if (typeof tabId !== "number") {
+          throw new Error(`Open ${aiProviderLabel(provider)} in a browser tab first.`);
+        }
+
+        await setStatus("Confirming draft — saving jd.txt + resume + cover letter…");
+        const result = await saveResumeAndCoverLetter(
+          tabId,
+          JSON.stringify(draft.resumeData, null, 2),
+          draft.resumeData,
+          meta,
+          { runCoverLetter: true }
+        );
+
+        await updateQueueJob(csvRow, {
+          status: "done",
+          jobDir: result.savedDir,
+          profileId: meta.profileId || "",
+          atsScore: draft.atsEvaluation?.score ?? null,
+          atsGrade: draft.atsEvaluation?.grade || "",
+          atsEvaluation: draft.atsEvaluation || null,
+          bidSource: "one-off",
+          error: result.coverLetterSaved
+            ? ""
+            : "Cover letter not created — auto-apply deferred until cover PDF exists"
+        });
+        await rememberApplyHistory(csvRow, {
+          jobDir: result.savedDir,
+          jdLink: meta.jdLink || "",
+          status: "done",
+          title: meta.jobTitle,
+          company: meta.companyName
+        }).catch(() => {});
+        await persistOneOffResult({
+          ok: true,
+          draft: false,
+          jdLink: meta.jdLink,
+          csvRow,
+          atsScore: draft.atsEvaluation?.score ?? null,
+          atsGrade: draft.atsEvaluation?.grade || "",
+          atsEvaluation: draft.atsEvaluation || null
+        });
+        await clearOneOffDraft();
+        await chrome.storage.local.set({ generation_running: false });
+        await setStatus(result.status);
+      } catch (err) {
+        await chrome.storage.local.set({ generation_running: false });
+        const msg = String(err?.message || err);
+        if (meta.csvRow != null && meta.csvRow !== "") {
+          await updateQueueJob(meta.csvRow, { status: "error", error: msg }).catch(() => {});
+        }
+        await persistOneOffResult({
+          ok: false,
+          error: msg,
+          jdLink: meta.jdLink || "",
+          csvRow: meta.csvRow
+        });
+        await setStatus(`Confirm failed: ${msg}`);
+      } finally {
+        isRunning = false;
+        stopKeepAlive();
+      }
+    })();
+    return false;
+  }
+
+  if (type === "clear_one_off_draft") {
+    clearOneOffDraft()
+      .then(() => safeSendResponse(sendResponse, { ok: true }))
+      .catch((err) => safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+
+  if (type === "get_one_off_draft") {
+    getOneOffDraft()
+      .then((draft) => safeSendResponse(sendResponse, { ok: true, draft }))
+      .catch((err) => safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) }));
+    return true;
   }
 
   if (type === "save_from_json") {

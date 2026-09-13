@@ -624,7 +624,7 @@
                 <span>JD link</span>
                 <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
               </label>
-              <button type="button" id="copySheetRow" class="ghost compact" title="Copy No | Date | Title | Company | Link | Salary | JD | Status">
+              <button type="button" id="copySheetRow" class="ghost compact" title="Copy No | Date | Title | Company | Link | Salary | Status">
                 Copy row
               </button>
             </div>
@@ -646,10 +646,23 @@
               </button>
               <button type="button" id="pasteJd" class="ghost">Paste JD</button>
             </div>
+            <div class="row row-3">
+              <button type="button" id="runOneOff" class="primary" title="Run AI and open a rendered preview — no files yet">
+                Draft
+              </button>
+              <button type="button" id="regenerateOneOff" class="ghost" disabled title="Re-run AI with the current additional prompt">
+                Regenerate
+              </button>
+              <button type="button" id="confirmOneOff" class="ghost" disabled title="Save PDFs and write the Google Sheet row">
+                Confirm &amp; save
+              </button>
+            </div>
             <div class="row row-2">
-              <button type="button" id="runOneOff" class="primary">Generate (auto)</button>
-              <button type="button" id="rebuildOneOff" class="ghost" disabled title="Force regenerate even if this link is already on the sheet">
-                Rebuild
+              <button type="button" id="rebuildOneOff" class="ghost" disabled title="Force a new draft even if this link is already on the sheet">
+                Rebuild draft
+              </button>
+              <button type="button" id="openOneOffPreview" class="ghost" disabled title="Open the rendered draft preview">
+                Open preview
               </button>
             </div>
             <div id="oneOffAtsBlock" class="one-off-ats" hidden>

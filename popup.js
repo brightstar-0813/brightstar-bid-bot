@@ -262,14 +262,19 @@ const previewTemplateBtn = document.getElementById("previewTemplate");
 const pasteJdBtn = document.getElementById("pasteJd");
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
+const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
+const confirmOneOffBtn = document.getElementById("confirmOneOff");
 const rebuildOneOffBtn = document.getElementById("rebuildOneOff");
+const openOneOffPreviewBtn = document.getElementById("openOneOffPreview");
 const oneOffExtraPromptEl = document.getElementById("oneOffExtraPrompt");
 const oneOffAtsBlock = document.getElementById("oneOffAtsBlock");
 const oneOffAtsScoreEl = document.getElementById("oneOffAtsScore");
 const oneOffViewGapsBtn = document.getElementById("oneOffViewGaps");
 const oneOffAtsGapsEl = document.getElementById("oneOffAtsGaps");
 const LAST_ONE_OFF_ATS_KEY = "last_one_off_ats";
+const ONE_OFF_DRAFT_KEY = "one_off_draft";
 let lastOneOffAtsCache = null;
+let oneOffDraftCache = null;
 const autofillPageBtn = document.getElementById("autofillPage");
 const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const customQaPageBtn = document.getElementById("customQaPage");
@@ -901,6 +906,7 @@ async function loadSettings() {
     "last_jd_text",
     "last_one_off_extra_prompt",
     LAST_ONE_OFF_ATS_KEY,
+    ONE_OFF_DRAFT_KEY,
     "output_dir",
     "spreadsheet_url",
     "sheets_web_app_url",
@@ -937,6 +943,7 @@ async function loadSettings() {
     oneOffExtraPromptEl.value = data.last_one_off_extra_prompt || "";
   }
   renderOneOffAts(data[LAST_ONE_OFF_ATS_KEY] || null);
+  renderOneOffDraft(data[ONE_OFF_DRAFT_KEY] || null);
   // Output folder + Google Sheet follow the active person (synced in loadActivePersonIntoForm).
   if (!String(outputDirEl.value || "").trim()) {
     outputDirEl.value = data.output_dir || DEFAULT_OUTPUT_DIR;
@@ -1336,16 +1343,35 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function hasUsableOneOffDraft(draft = oneOffDraftCache) {
+  return Boolean(draft?.resumeData && typeof draft.resumeData === "object");
+}
+
 function canRebuildOneOff() {
+  if (hasUsableOneOffDraft()) return true;
   if (lastOneOffAtsCache?.ok && lastOneOffAtsCache.atsScore != null) return true;
   if (String(jdLinkEl?.value || "").trim()) return true;
   return Boolean(lastOneOffAtsCache?.jdLink);
 }
 
+function syncOneOffActionButtons({ busy = document.body.classList.contains("is-busy") } = {}) {
+  const draftReady = hasUsableOneOffDraft();
+  if (runOneOffBtn) runOneOffBtn.disabled = busy;
+  if (regenerateOneOffBtn) regenerateOneOffBtn.disabled = busy || !draftReady;
+  if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
+  if (openOneOffPreviewBtn) openOneOffPreviewBtn.disabled = busy || !draftReady;
+  if (rebuildOneOffBtn) rebuildOneOffBtn.disabled = busy || !canRebuildOneOff();
+}
+
+function renderOneOffDraft(draft) {
+  oneOffDraftCache = draft && typeof draft === "object" ? draft : null;
+  syncOneOffActionButtons();
+}
+
 function renderOneOffAts(payload) {
   lastOneOffAtsCache = payload && typeof payload === "object" ? payload : null;
   if (!oneOffAtsBlock || !oneOffAtsScoreEl) {
-    if (rebuildOneOffBtn) rebuildOneOffBtn.disabled = !canRebuildOneOff();
+    syncOneOffActionButtons();
     return;
   }
   const scoreRaw = payload?.atsScore;
@@ -1357,9 +1383,7 @@ function renderOneOffAts(payload) {
       oneOffAtsGapsEl.innerHTML = "";
     }
     if (oneOffViewGapsBtn) oneOffViewGapsBtn.setAttribute("aria-expanded", "false");
-    if (rebuildOneOffBtn && !document.body.classList.contains("is-busy")) {
-      rebuildOneOffBtn.disabled = !canRebuildOneOff();
-    }
+    syncOneOffActionButtons();
     return;
   }
   const score = Math.max(0, Math.min(100, Math.round(Number(scoreRaw))));
@@ -1393,9 +1417,7 @@ function renderOneOffAts(payload) {
     oneOffViewGapsBtn.setAttribute("aria-expanded", "false");
     oneOffViewGapsBtn.textContent = "View gaps";
   }
-  if (rebuildOneOffBtn && !document.body.classList.contains("is-busy")) {
-    rebuildOneOffBtn.disabled = false;
-  }
+  syncOneOffActionButtons();
 }
 
 /** CSV row the batch is actively generating or Dice-applying (status line or running badge). */
@@ -2356,12 +2378,11 @@ async function copySheetRow() {
     jobTitle,
     companyName,
     jdLink,
-    jdText: (jdTextEl?.value || "").trim(),
     includeDate: true
   });
   try {
     await navigator.clipboard.writeText(tsv);
-    setStatus("Sheet row copied (No | Date | Title | Company | Link | Salary | JD | Status).");
+    setStatus("Sheet row copied (No | Date | Title | Company | Link | Salary | Status).");
   } catch {
     setStatus("Clipboard write failed.");
   }
@@ -2572,12 +2593,9 @@ async function setBidMarket(market) {
 
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
-  runOneOffBtn.disabled = busy;
   if (fillFromOpenTabBtn) fillFromOpenTabBtn.disabled = busy;
-  if (rebuildOneOffBtn) {
-    rebuildOneOffBtn.disabled = busy || !canRebuildOneOff();
-  }
   document.body.classList.toggle("is-busy", Boolean(busy));
+  syncOneOffActionButtons({ busy: Boolean(busy) });
   syncBatchPill();
 }
 
@@ -2596,19 +2614,66 @@ async function fillFromOpenTab() {
     await persistJobFields();
     setManualPanelOpen(true);
     const site = res.site ? ` (${res.site})` : "";
-    setStatus(`Filled from open tab${site}. Review fields, then Generate.`);
-    if (rebuildOneOffBtn) rebuildOneOffBtn.disabled = !canRebuildOneOff();
+    setStatus(`Filled from open tab${site}. Review fields, then Draft.`);
+    syncOneOffActionButtons();
   } catch (err) {
     setStatus(`Scrape failed: ${String(err?.message || err)}`);
   }
 }
 
-async function runOneOff({ forceRebuild = false } = {}) {
+function buildOneOffJobMeta(person, outputDir, { forceRebuild = false } = {}) {
+  return {
+    jobTitle: (jobTitleEl.value || "").trim(),
+    companyName: (companyNameEl.value || "").trim(),
+    jdLink: (jdLinkEl.value || "").trim(),
+    jdText: (jdTextEl.value || "").trim(),
+    additionalPrompt: (oneOffExtraPromptEl?.value || "").trim(),
+    forceRebuild: Boolean(forceRebuild),
+    outputDir,
+    spreadsheetUrl: spreadsheetUrlEl.value.trim(),
+    sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
+    templateId: templateSelectEl.value || person.templateId || DEFAULT_TEMPLATE_ID,
+    resumeFilePrefix: person.resumeFilePrefix || resumeFilePrefixFromName(person.name || person.label),
+    profileId: person.id,
+    bidSource: "one-off"
+  };
+}
+
+async function openOneOffDraftPreview(templateId = "") {
+  const draft = oneOffDraftCache || (await chrome.storage.local.get(ONE_OFF_DRAFT_KEY))[ONE_OFF_DRAFT_KEY];
+  const tid =
+    String(templateId || draft?.templateId || draft?.jobMeta?.templateId || templateSelectEl.value || DEFAULT_TEMPLATE_ID).trim() ||
+    DEFAULT_TEMPLATE_ID;
+  const url = chrome.runtime.getURL(
+    `preview.html?source=draft&template=${encodeURIComponent(tid)}`
+  );
+  const stored = (await chrome.storage.local.get(PREVIEW_WINDOW_KEY))[PREVIEW_WINDOW_KEY];
+  if (stored != null) {
+    try {
+      await chrome.windows.update(stored, { focused: true, drawAttention: true });
+      await chrome.runtime
+        .sendMessage({ type: "template_preview_show", templateId: tid, source: "draft" })
+        .catch(() => {});
+      setStatus("Draft preview focused — Confirm & save when ready.");
+      return;
+    } catch {
+      // Window was closed.
+    }
+  }
+  const created = await chrome.windows.create({
+    url,
+    type: "popup",
+    width: 980,
+    height: 1040
+  });
+  await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
+  setStatus("Opened draft resume preview — Confirm & save when ready.");
+}
+
+async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {}) {
   const jobTitle = (jobTitleEl.value || "").trim();
   const companyName = (companyNameEl.value || "").trim();
   const jd = (jdTextEl.value || "").trim();
-  const jdLink = (jdLinkEl.value || "").trim();
-  const additionalPrompt = (oneOffExtraPromptEl?.value || "").trim();
   const { outputDir, person } = await resolveUiOutputDir();
 
   if (!jobTitle) {
@@ -2629,7 +2694,7 @@ async function runOneOff({ forceRebuild = false } = {}) {
     return;
   }
   if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
-    setStatus("Upload or paste a master resume (text/PDF/DOCX) â€” not JSON.");
+    setStatus("Upload or paste a master resume (text/PDF/DOCX) — not JSON.");
     return;
   }
 
@@ -2637,33 +2702,49 @@ async function runOneOff({ forceRebuild = false } = {}) {
   setBusy(true);
   setManualPanelOpen(true);
   setStatus(
-    forceRebuild
-      ? "Starting rebuild (force regenerate)â€¦"
-      : "Starting one-off generation (auto â€” no JSON paste)â€¦"
+    regenerate
+      ? "Regenerating draft with current additional prompt…"
+      : forceRebuild
+        ? "Starting rebuild draft (force)…"
+        : "Drafting resume (no files yet)…"
   );
 
   const res = await chrome.runtime.sendMessage({
-    type: "run_one_off",
+    type: "draft_one_off",
     forceRebuild: Boolean(forceRebuild),
+    regenerate: Boolean(regenerate),
+    jobMeta: buildOneOffJobMeta(person, outputDir, { forceRebuild: forceRebuild || regenerate })
+  });
+
+  if (!res?.ok) {
+    setStatus(res?.error || "Draft failed to start.");
+    setBusy(false);
+  }
+}
+
+async function confirmOneOffSave() {
+  if (!hasUsableOneOffDraft()) {
+    setStatus("No draft to confirm. Click Draft first.");
+    return;
+  }
+  const { outputDir, person } = await resolveUiOutputDir();
+  await persistJobFields();
+  setBusy(true);
+  setManualPanelOpen(true);
+  setStatus("Confirming draft — saving PDFs…");
+
+  const res = await chrome.runtime.sendMessage({
+    type: "confirm_one_off",
     jobMeta: {
-      jobTitle,
-      companyName,
-      jdLink,
-      jdText: jd,
-      additionalPrompt,
-      forceRebuild: Boolean(forceRebuild),
       outputDir,
+      templateId: templateSelectEl.value || person?.templateId || DEFAULT_TEMPLATE_ID,
       spreadsheetUrl: spreadsheetUrlEl.value.trim(),
-      sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
-      templateId: templateSelectEl.value || person.templateId || DEFAULT_TEMPLATE_ID,
-      resumeFilePrefix: person.resumeFilePrefix || resumeFilePrefixFromName(person.name || person.label),
-      profileId: person.id,
-      bidSource: "one-off"
+      sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim()
     }
   });
 
   if (!res?.ok) {
-    setStatus(res?.error || "One-off failed to start.");
+    setStatus(res?.error || "Confirm failed to start.");
     setBusy(false);
   }
 }
@@ -3236,10 +3317,19 @@ previewTemplateBtn?.addEventListener("click", () => {
 });
 testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", () => {
-  runOneOff().catch((e) => setStatus(String(e.message || e)));
+  runOneOffDraft().catch((e) => setStatus(String(e.message || e)));
+});
+regenerateOneOffBtn?.addEventListener("click", () => {
+  runOneOffDraft({ regenerate: true, forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
+});
+confirmOneOffBtn?.addEventListener("click", () => {
+  confirmOneOffSave().catch((e) => setStatus(String(e.message || e)));
 });
 rebuildOneOffBtn?.addEventListener("click", () => {
-  runOneOff({ forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
+  runOneOffDraft({ forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
+});
+openOneOffPreviewBtn?.addEventListener("click", () => {
+  openOneOffDraftPreview().catch((e) => setStatus(String(e.message || e)));
 });
 oneOffViewGapsBtn?.addEventListener("click", () => {
   if (!oneOffAtsGapsEl) return;
@@ -3440,6 +3530,26 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderOneOffAts(changes[LAST_ONE_OFF_ATS_KEY].newValue || null);
     if (changes[LAST_ONE_OFF_ATS_KEY].newValue?.ok && changes[LAST_ONE_OFF_ATS_KEY].newValue?.atsScore != null) {
       setManualPanelOpen(true);
+    }
+  }
+  if (changes[ONE_OFF_DRAFT_KEY]) {
+    const draft = changes[ONE_OFF_DRAFT_KEY].newValue || null;
+    renderOneOffDraft(draft);
+    if (hasUsableOneOffDraft(draft)) {
+      setManualPanelOpen(true);
+      openOneOffDraftPreview(draft.templateId || draft.jobMeta?.templateId || "").catch(() => {});
+    }
+  }
+  if (changes.active_person_id || changes.selected_profile_id) {
+    const nextId = String(
+      changes.active_person_id?.newValue || changes.selected_profile_id?.newValue || ""
+    ).trim();
+    const prevId = String(
+      changes.active_person_id?.oldValue || changes.selected_profile_id?.oldValue || ""
+    ).trim();
+    if (nextId && prevId && nextId !== prevId) {
+      chrome.runtime.sendMessage({ type: "clear_one_off_draft" }).catch(() => {});
+      renderOneOffDraft(null);
     }
   }
 });
