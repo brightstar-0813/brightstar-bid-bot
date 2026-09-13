@@ -619,58 +619,63 @@
                 <input id="companyName" type="text" placeholder="Acme Inc." autocomplete="off" />
               </label>
             </div>
-            <div class="row-split">
-              <label class="field grow">
-                <span>JD link</span>
-                <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
-              </label>
+            <label class="field">
+              <span>JD link</span>
+              <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Job description</span>
+              <textarea id="jdText" placeholder="Paste JD or fill from the open tab…" rows="3"></textarea>
+            </label>
+            <label class="field">
+              <span>Extra notes</span>
+              <textarea
+                id="oneOffExtraPrompt"
+                placeholder="Optional tweak for this draft only…"
+                rows="2"
+              ></textarea>
+            </label>
+
+            <div class="manual-tools" role="group" aria-label="Job helpers">
+              <button type="button" id="fillFromOpenTab" class="ghost compact" title="Scrape title, company, link, and JD from the active tab">
+                From tab
+              </button>
+              <button type="button" id="pasteJd" class="ghost compact">Paste JD</button>
               <button type="button" id="copySheetRow" class="ghost compact" title="Copy No | Date | Title | Company | Link | Salary | Status">
                 Copy row
               </button>
             </div>
-            <label class="field">
-              <span>Job description (JD)</span>
-              <textarea id="jdText" placeholder="Paste the job description here..." rows="3"></textarea>
-            </label>
-            <label class="field">
-              <span>Additional prompt (this run only)</span>
-              <textarea
-                id="oneOffExtraPrompt"
-                placeholder="Optional: extra instructions appended to the resume tailor prompt for this generate only…"
-                rows="2"
-              ></textarea>
-            </label>
-            <div class="row row-2">
-              <button type="button" id="fillFromOpenTab" class="ghost" title="Scrape title, company, link, and JD from the active browser tab">
-                Fill from open tab
-              </button>
-              <button type="button" id="pasteJd" class="ghost">Paste JD</button>
-            </div>
-            <div class="row row-3">
-              <button type="button" id="runOneOff" class="primary" title="Run AI and open a rendered preview — no files yet">
+
+            <div id="oneOffIdleActions" class="manual-primary">
+              <button type="button" id="runOneOff" class="primary" title="Run AI and open preview — no files yet">
                 Draft
               </button>
-              <button type="button" id="regenerateOneOff" class="ghost" disabled title="Re-run AI with the current additional prompt">
-                Regenerate
-              </button>
-              <button type="button" id="confirmOneOff" class="ghost" disabled title="Save PDFs and write the Google Sheet row">
-                Confirm &amp; save
-              </button>
             </div>
-            <div class="row row-2">
-              <button type="button" id="rebuildOneOff" class="ghost" disabled title="Force a new draft even if this link is already on the sheet">
-                Rebuild draft
-              </button>
-              <button type="button" id="openOneOffPreview" class="ghost" disabled title="Open the rendered draft preview">
-                Open preview
-              </button>
-            </div>
-            <div id="oneOffAtsBlock" class="one-off-ats" hidden>
-              <div class="row-split one-off-ats-header">
-                <span id="oneOffAtsScore" class="ats-score" aria-label="ATS score"></span>
-                <button type="button" id="oneOffViewGaps" class="ghost compact">View gaps</button>
+
+            <div id="oneOffDraftActions" class="one-off-review" hidden>
+              <div id="oneOffAtsBlock" class="one-off-ats" hidden>
+                <div class="row-split one-off-ats-header">
+                  <span id="oneOffAtsScore" class="ats-score" aria-label="ATS score"></span>
+                  <div class="one-off-ats-actions">
+                    <button type="button" id="openOneOffPreview" class="ghost compact" title="Open rendered draft">
+                      Preview
+                    </button>
+                    <button type="button" id="oneOffViewGaps" class="ghost compact">Gaps</button>
+                  </div>
+                </div>
+                <div id="oneOffAtsGaps" class="one-off-ats-gaps" hidden></div>
               </div>
-              <div id="oneOffAtsGaps" class="one-off-ats-gaps" hidden></div>
+              <div class="manual-primary manual-primary-split">
+                <button type="button" id="regenerateOneOff" class="ghost" title="Re-run AI with current fields and notes">
+                  Regenerate
+                </button>
+                <button type="button" id="confirmOneOff" class="primary" title="Save PDFs and update Google Sheet">
+                  Confirm
+                </button>
+              </div>
+              <button type="button" id="discardOneOff" class="ghost compact manual-discard" title="Clear draft and return to Draft">
+                Discard
+              </button>
             </div>
           </div>
         </section>

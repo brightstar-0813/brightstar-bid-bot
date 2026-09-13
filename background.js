@@ -6337,7 +6337,7 @@ async function persistOneOffDraft({
 }
 
 async function clearOneOffDraft() {
-  await chrome.storage.local.remove(ONE_OFF_DRAFT_KEY);
+  await chrome.storage.local.remove([ONE_OFF_DRAFT_KEY, LAST_ONE_OFF_ATS_KEY, LAST_ONE_OFF_RESULT_KEY]);
 }
 
 async function getOneOffDraft() {
@@ -6911,7 +6911,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       atsEvaluation
     });
     await setStatus(
-      `Draft ready (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Review preview, then Confirm & save.`
+      `Draft ready (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Review preview, then Confirm.`
     );
     try {
       const jobKey = buildCustomQaJobKey(profileId || person?.id || "", {
@@ -9639,7 +9639,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           error: ""
         }).catch(() => {});
         await chrome.storage.local.set({ generation_running: false });
-        await setStatus(result.status || "Draft ready — review preview, then Confirm & save.");
+        await setStatus(result.status || "Draft ready — review preview, then Confirm.");
       } catch (err) {
         await chrome.storage.local.set({ generation_running: false });
         const msg = String(err?.message || err);

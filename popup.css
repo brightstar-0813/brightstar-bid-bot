@@ -1249,7 +1249,7 @@ input[type="file"]::file-selector-button {
 }
 
 .one-off-ats {
-  margin-top: 10px;
+  margin: 0 0 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1259,6 +1259,13 @@ input[type="file"]::file-selector-button {
 .one-off-ats-header {
   align-items: center;
   gap: 10px;
+}
+
+.one-off-ats-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
 }
 
 .one-off-ats-gaps {
@@ -1279,6 +1286,46 @@ input[type="file"]::file-selector-button {
 
 .one-off-ats-gap-empty {
   margin: 0;
+  opacity: 0.85;
+}
+
+.manual-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+
+.manual-primary {
+  margin: 0 0 4px;
+}
+
+.manual-primary > .primary,
+.manual-primary > .ghost {
+  width: 100%;
+}
+
+.manual-primary-split {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 8px;
+}
+
+.manual-primary-split > .primary,
+.manual-primary-split > .ghost {
+  width: 100%;
+}
+
+.one-off-review {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.manual-discard {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
   opacity: 0.85;
 }
 

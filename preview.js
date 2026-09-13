@@ -117,7 +117,7 @@ async function renderPreview() {
     else ledeEl.textContent = `Sample · ${template.label}`;
   }
   if (kind === "draft") {
-    setStatus("Draft resume — Confirm & save in the bot when ready.", "ok");
+    setStatus("Draft resume — Confirm in the bot when ready.", "ok");
   }
 }
 

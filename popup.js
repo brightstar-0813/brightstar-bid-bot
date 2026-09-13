@@ -264,8 +264,10 @@ const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
 const confirmOneOffBtn = document.getElementById("confirmOneOff");
-const rebuildOneOffBtn = document.getElementById("rebuildOneOff");
+const discardOneOffBtn = document.getElementById("discardOneOff");
 const openOneOffPreviewBtn = document.getElementById("openOneOffPreview");
+const oneOffIdleActionsEl = document.getElementById("oneOffIdleActions");
+const oneOffDraftActionsEl = document.getElementById("oneOffDraftActions");
 const oneOffExtraPromptEl = document.getElementById("oneOffExtraPrompt");
 const oneOffAtsBlock = document.getElementById("oneOffAtsBlock");
 const oneOffAtsScoreEl = document.getElementById("oneOffAtsScore");
@@ -1347,20 +1349,31 @@ function hasUsableOneOffDraft(draft = oneOffDraftCache) {
   return Boolean(draft?.resumeData && typeof draft.resumeData === "object");
 }
 
-function canRebuildOneOff() {
-  if (hasUsableOneOffDraft()) return true;
-  if (lastOneOffAtsCache?.ok && lastOneOffAtsCache.atsScore != null) return true;
-  if (String(jdLinkEl?.value || "").trim()) return true;
-  return Boolean(lastOneOffAtsCache?.jdLink);
+/** Sheet/link duplicate blocked the last draft — next Draft should force. */
+function oneOffNeedsForceDraft() {
+  if (hasUsableOneOffDraft()) return false;
+  if (lastOneOffAtsCache?.ok) return false;
+  const err = String(lastOneOffAtsCache?.error || "").toLowerCase();
+  return /sheet|duplicate|already on|already applied/.test(err);
 }
 
 function syncOneOffActionButtons({ busy = document.body.classList.contains("is-busy") } = {}) {
   const draftReady = hasUsableOneOffDraft();
-  if (runOneOffBtn) runOneOffBtn.disabled = busy;
+  if (oneOffIdleActionsEl) oneOffIdleActionsEl.hidden = draftReady;
+  if (oneOffDraftActionsEl) oneOffDraftActionsEl.hidden = !draftReady;
+
+  if (runOneOffBtn) {
+    runOneOffBtn.disabled = busy;
+    const force = oneOffNeedsForceDraft();
+    runOneOffBtn.textContent = force ? "Force draft" : "Draft";
+    runOneOffBtn.title = force
+      ? "Link may already be on the sheet — draft anyway"
+      : "Run AI and open preview — no files yet";
+  }
   if (regenerateOneOffBtn) regenerateOneOffBtn.disabled = busy || !draftReady;
   if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
+  if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
   if (openOneOffPreviewBtn) openOneOffPreviewBtn.disabled = busy || !draftReady;
-  if (rebuildOneOffBtn) rebuildOneOffBtn.disabled = busy || !canRebuildOneOff();
 }
 
 function renderOneOffDraft(draft) {
@@ -1415,7 +1428,7 @@ function renderOneOffAts(payload) {
   }
   if (oneOffViewGapsBtn) {
     oneOffViewGapsBtn.setAttribute("aria-expanded", "false");
-    oneOffViewGapsBtn.textContent = "View gaps";
+    oneOffViewGapsBtn.textContent = "Gaps";
   }
   syncOneOffActionButtons();
 }
@@ -2654,7 +2667,7 @@ async function openOneOffDraftPreview(templateId = "") {
       await chrome.runtime
         .sendMessage({ type: "template_preview_show", templateId: tid, source: "draft" })
         .catch(() => {});
-      setStatus("Draft preview focused — Confirm & save when ready.");
+      setStatus("Draft preview focused — Confirm when ready.");
       return;
     } catch {
       // Window was closed.
@@ -2667,7 +2680,7 @@ async function openOneOffDraftPreview(templateId = "") {
     height: 1040
   });
   await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
-  setStatus("Opened draft resume preview — Confirm & save when ready.");
+  setStatus("Opened draft preview — Confirm when ready.");
 }
 
 async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {}) {
@@ -2703,9 +2716,9 @@ async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {})
   setManualPanelOpen(true);
   setStatus(
     regenerate
-      ? "Regenerating draft with current additional prompt…"
+      ? "Regenerating draft…"
       : forceRebuild
-        ? "Starting rebuild draft (force)…"
+        ? "Force drafting…"
         : "Drafting resume (no files yet)…"
   );
 
@@ -3317,7 +3330,8 @@ previewTemplateBtn?.addEventListener("click", () => {
 });
 testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", () => {
-  runOneOffDraft().catch((e) => setStatus(String(e.message || e)));
+  const force = oneOffNeedsForceDraft();
+  runOneOffDraft({ forceRebuild: force }).catch((e) => setStatus(String(e.message || e)));
 });
 regenerateOneOffBtn?.addEventListener("click", () => {
   runOneOffDraft({ regenerate: true, forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
@@ -3325,8 +3339,15 @@ regenerateOneOffBtn?.addEventListener("click", () => {
 confirmOneOffBtn?.addEventListener("click", () => {
   confirmOneOffSave().catch((e) => setStatus(String(e.message || e)));
 });
-rebuildOneOffBtn?.addEventListener("click", () => {
-  runOneOffDraft({ forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
+discardOneOffBtn?.addEventListener("click", () => {
+  chrome.runtime
+    .sendMessage({ type: "clear_one_off_draft" })
+    .then(() => {
+      renderOneOffDraft(null);
+      renderOneOffAts(null);
+      setStatus("Draft discarded.");
+    })
+    .catch((e) => setStatus(String(e.message || e)));
 });
 openOneOffPreviewBtn?.addEventListener("click", () => {
   openOneOffDraftPreview().catch((e) => setStatus(String(e.message || e)));
@@ -3336,7 +3357,7 @@ oneOffViewGapsBtn?.addEventListener("click", () => {
   const open = oneOffAtsGapsEl.hidden;
   oneOffAtsGapsEl.hidden = !open;
   oneOffViewGapsBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  oneOffViewGapsBtn.textContent = open ? "Hide gaps" : "View gaps";
+  oneOffViewGapsBtn.textContent = open ? "Hide" : "Gaps";
 });
 autofillPageBtn.addEventListener("click", autofillThisPage);
 autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
