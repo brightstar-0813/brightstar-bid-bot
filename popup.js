@@ -38,7 +38,6 @@ import {
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import {
   extractSpreadsheetId,
-  buildSheetRowTsv,
   formatApplicationDate,
   formatApplicationDateTime
 } from "./sheets.js";
@@ -255,11 +254,9 @@ const humanizeOnBtn = document.getElementById("humanizeOn");
 let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
-const copySheetRowBtn = document.getElementById("copySheetRow");
 const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
 const previewTemplateBtn = document.getElementById("previewTemplate");
-const pasteJdBtn = document.getElementById("pasteJd");
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
@@ -2347,25 +2344,6 @@ async function onProfileChange() {
   });
 }
 
-async function readClipboardText() {
-  return (await navigator.clipboard.readText()).trim();
-}
-
-async function pasteJdFromClipboard() {
-  try {
-    const jd = await readClipboardText();
-    if (!jd) {
-      setStatus("Clipboard is empty.");
-      return;
-    }
-    jdTextEl.value = jd;
-    await persistJobFields();
-    setStatus("JD pasted from clipboard.");
-  } catch {
-    setStatus("Clipboard read failed. Paste JD into the text field manually.");
-  }
-}
-
 async function copyAppsScript() {
   try {
     const res = await fetch(chrome.runtime.getURL("apps-script/Code.gs"));
@@ -2375,29 +2353,6 @@ async function copyAppsScript() {
     setStatus("Apps Script copied. Paste into the spreadsheet, then Deploy → New deployment (Web app).");
   } catch {
     setStatus("Could not copy. Open apps-script/Code.gs instead.");
-  }
-}
-
-async function copySheetRow() {
-  const jobTitle = (jobTitleEl.value || "").trim();
-  const companyName = (companyNameEl.value || "").trim();
-  const jdLink = (jdLinkEl.value || "").trim();
-  if (!jobTitle && !companyName && !jdLink) {
-    setStatus("Fill job title, company, and/or JD link before copying.");
-    return;
-  }
-  const tsv = buildSheetRowTsv({
-    jobNo: "",
-    jobTitle,
-    companyName,
-    jdLink,
-    includeDate: true
-  });
-  try {
-    await navigator.clipboard.writeText(tsv);
-    setStatus("Sheet row copied (No | Date | Title | Company | Link | Salary | Status).");
-  } catch {
-    setStatus("Clipboard write failed.");
   }
 }
 
@@ -2744,7 +2699,7 @@ async function confirmOneOffSave() {
   await persistJobFields();
   setBusy(true);
   setManualPanelOpen(true);
-  setStatus("Confirming draft — saving PDFs…");
+  setStatus("Confirming draft — saving resume…");
 
   const res = await chrome.runtime.sendMessage({
     type: "confirm_one_off",
@@ -3307,12 +3262,10 @@ forceSaveChatgptBtn.addEventListener("click", async () => {
   }
 });
 
-pasteJdBtn.addEventListener("click", pasteJdFromClipboard);
 fillFromOpenTabBtn?.addEventListener("click", () => {
   fillFromOpenTab().catch((e) => setStatus(String(e.message || e)));
 });
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
-copySheetRowBtn.addEventListener("click", copySheetRow);
 keepOpenBtn?.addEventListener("click", dockOutOfPopup);
 openAsWindowBtn?.addEventListener("click", () => {
   openAsWindowApp().catch((e) => setStatus(String(e.message || e)));

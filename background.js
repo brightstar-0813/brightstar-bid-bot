@@ -6059,9 +6059,13 @@ async function automateChatGpt(tabId, prompt, options = {}) {
  * One ChatGPT chat per job:
  *  1) new chat → resume prompt (JD inside)
  *  2) save jd.txt + [Name]_Resume.pdf
- *  3) same chat → cover letter prompt
+ *  3) same chat → cover letter prompt (batch only — skipped for Manual one-off)
  *  4) save [Name]_Cover Letter.pdf
  */
+function isManualOneOffJob(jobMeta = {}) {
+  return jobMeta?.bidSource === "one-off" || jobMeta?.oneOff === true;
+}
+
 async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { runCoverLetter = true } = {}) {
   resumeData = await finalizeResumeData(resumeData);
   await setStatus("Saving jd.txt + resume PDF…");
@@ -6079,8 +6083,10 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
     status += ` — ${saved.pdfError}`;
   }
 
+  const manualBid = isManualOneOffJob(jobMeta);
+  const shouldRunCover = Boolean(runCoverLetter) && !manualBid;
   let coverLetterSaved = false;
-  if (runCoverLetter && typeof tabId === "number") {
+  if (shouldRunCover && typeof tabId === "number") {
     try {
       // Brief pause so the AI finishes any post-JSON UI before the CL prompt.
       await sleep(COVER_LETTER_GAP_MS);
@@ -6185,6 +6191,15 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
         jdLink: jobMeta.jdLink || ""
       }).catch(() => {});
     }
+  } else if (manualBid) {
+    // Manual one-off: resume only — clear any stale cover letter from a prior job.
+    await setLastGeneratedDocs({
+      coverLetter: null,
+      folderName: savedDir,
+      jobDir: savedDir,
+      csvRow: jobMeta.csvRow,
+      jdLink: jobMeta.jdLink || ""
+    }).catch(() => {});
   } else if (runCoverLetter) {
     status = `${status}. Cover letter skipped: open a ChatGPT or Claude tab.`;
   }
@@ -6199,10 +6214,10 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
     if (!sheetTabName) sheetTabName = String(sheetCfg.sheetTabName || "").trim();
   }
   if (spreadsheetUrl && sheetsWebAppUrl) {
-    const manualBid = jobMeta.bidSource === "one-off" || jobMeta.oneOff === true;
-    await setStatus(manualBid ? "Recording Applied on Google Sheet..." : "Appending row to Google Sheet...");
+    const sheetManualBid = isManualOneOffJob(jobMeta);
+    await setStatus(sheetManualBid ? "Recording Applied on Google Sheet..." : "Appending row to Google Sheet...");
     try {
-      if (manualBid) {
+      if (sheetManualBid) {
         const sheetResult = await markJobAppliedOnSpreadsheet({
           spreadsheetUrl,
           webAppUrl: sheetsWebAppUrl,
@@ -6262,7 +6277,7 @@ async function runGenerationPipeline({ jobMeta, jsonText }) {
     outputDir: await resolveOutputDir(jobMeta?.outputDir || "")
   };
   return saveResumeAndCoverLetter(tab?.id, rawText, data, enrichedMeta, {
-    runCoverLetter: true
+    runCoverLetter: !isManualOneOffJob(enrichedMeta)
   });
 }
 
@@ -6485,7 +6500,7 @@ async function pickTemplateId(jobMeta = {}, person = {}) {
 
 /**
  * Fully automatic — ONE new ChatGPT chat per position:
- * resume (with JD) → [optional draft stop] → save files → cover letter in the same chat → save CL.
+ * resume (with JD) → [optional draft stop] → save files → (batch) cover letter in the same chat.
  * @param {object} jobMeta
  * @param {{ draftOnly?: boolean }} [opts] When draftOnly, harvest + ATS only — no PDFs/sheet.
  */
@@ -6941,13 +6956,13 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
   );
 
-  // Save JD + resume immediately (before cover letter), same chat continues after.
+  // Save JD + resume; cover letter only for CSV/batch (not Manual one-off).
   const result = await saveResumeAndCoverLetter(
     tab.id,
     JSON.stringify(resumeData, null, 2),
     resumeData,
     enrichedMeta,
-    { runCoverLetter: true }
+    { runCoverLetter: !isManualOneOffJob(enrichedMeta) }
   );
 
   // Confirm at least jd.txt landed in Downloads.
@@ -9768,13 +9783,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error(`Open ${aiProviderLabel(provider)} in a browser tab first.`);
         }
 
-        await setStatus("Confirming draft — saving jd.txt + resume + cover letter…");
+        await setStatus("Confirming draft — saving jd.txt + resume…");
         const result = await saveResumeAndCoverLetter(
           tabId,
           JSON.stringify(draft.resumeData, null, 2),
           draft.resumeData,
           meta,
-          { runCoverLetter: true }
+          { runCoverLetter: false }
         );
 
         await updateQueueJob(csvRow, {
@@ -9785,9 +9800,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           atsGrade: draft.atsEvaluation?.grade || "",
           atsEvaluation: draft.atsEvaluation || null,
           bidSource: "one-off",
-          error: result.coverLetterSaved
-            ? ""
-            : "Cover letter not created — auto-apply deferred until cover PDF exists"
+          error: ""
         });
         await rememberApplyHistory(csvRow, {
           jobDir: result.savedDir,
