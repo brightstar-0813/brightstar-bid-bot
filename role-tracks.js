@@ -287,6 +287,7 @@ export function jdRequiredSkills(jdText, roleTrack = "sf") {
 export function resolveRoleTrackForPerson(person) {
   if (person?.roleTrack) return normalizeRoleTrackId(person.roleTrack);
   const id = String(person?.id || "");
+  if (id === "david-oliveira-de") return "de";
   if (
     id === "dmario-lewis" ||
     id === "edrwin-revolorio" ||

@@ -16,6 +16,8 @@ import {
 } from "../profiles.js";
 import { PROMPT as dmarioPrompt } from "../prompts/dmario-lewis.js";
 import { PROMPT as deSeniorPrompt } from "../prompts/de-senior.js";
+import { PROMPT as davidDePrompt } from "../prompts/david-oliveira-de.js";
+import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
   assert.equal(normalizeRoleTrackId(""), "sf");
@@ -45,6 +47,10 @@ test("resolveEffectiveRoleTrack prefers session override", () => {
 test("resolveRoleTrackForPerson infers sf for built-in Salesforce profiles", () => {
   assert.equal(resolveRoleTrackForPerson({ id: "dmario-lewis" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ roleTrack: "de" }), "de");
+});
+
+test("resolveRoleTrackForPerson infers de for built-in David DE profile", () => {
+  assert.equal(resolveRoleTrackForPerson({ id: "david-oliveira-de" }), "de");
 });
 
 test("enforceJdSkills adds DE tools to skills rows", () => {
@@ -86,6 +92,16 @@ test("resolvePromptTemplateForTrack keeps built-in SF prompt on SF track", () =>
 test("resolvePromptTemplateForTrack uses DE template for built-in when track is DE", () => {
   const person = { id: "edrwin-revolorio", promptTemplate: dmarioPrompt, roleTrack: "sf" };
   assert.equal(resolvePromptTemplateForTrack(person, "de"), deSeniorPrompt);
+});
+
+test("resolvePromptTemplateForTrack keeps built-in DE prompt on DE track", () => {
+  const person = {
+    id: "david-oliveira-de",
+    promptTemplate: davidDePrompt,
+    roleTrack: "de"
+  };
+  assert.equal(resolvePromptTemplateForTrack(person, "de"), davidDePrompt);
+  assert.equal(resolvePromptTemplateForTrack(person, "sf"), sfSeniorPrompt);
 });
 
 test("resolvePromptTemplateForTrack keeps custom non-default prompt on matching track", () => {

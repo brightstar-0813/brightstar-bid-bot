@@ -3,8 +3,10 @@ import { PROMPT as edrwinRevolorioPrompt } from "./prompts/edrwin-revolorio.js";
 import { PROMPT as michaelIbeaPrompt } from "./prompts/michael-ibea.js";
 import { PROMPT as carlosCapulongPrompt } from "./prompts/carlos-capulong.js";
 import { PROMPT as davidOliveiraPrompt } from "./prompts/david-oliveira.js";
+import { PROMPT as davidOliveiraDePrompt } from "./prompts/david-oliveira-de.js";
 import { PROMPT as victorHolandaPrompt } from "./prompts/victor-holanda.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
+import { PROMPT as coverLetterDePrompt } from "./prompts/cover-letter-de.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
   getTrackAtsAppendix,
@@ -250,6 +252,68 @@ export const BUILTIN_PROFILES = [
       "AI/R Everymind",
       "Pismo",
       "Concrete Solutions"
+    ]
+  },
+  {
+    id: "david-oliveira-de",
+    label: "David Oliveira (Data Engineering)",
+    roleTrack: "de",
+    promptTemplate: davidOliveiraDePrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Oliveira_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "David Leandro de Oliveira",
+    email: "davidoliveira2308l@gmail.com",
+    phone: "+55 61 8212 1297",
+    linkedin: "https://www.linkedin.com/in/davidleandrodeoliveria0823/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Paulista, Pernambuco, Brazil",
+    address: "",
+    zip: "",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Analytics Engineer / Senior Data Engineer",
+    masterResume: `David Leandro de Oliveira
+Senior Data Engineer / Senior Analytics Engineer
+Paulista, Pernambuco, Brazil | +55 61 8212 1297 | davidoliveira2308l@gmail.com
+https://www.linkedin.com/in/davidleandrodeoliveria0823/
+
+SUMMARY
+Senior Data Engineer with 9+ years designing and optimizing scalable data platforms, backend services, and analytics workflows for SaaS, fintech, cybersecurity, retail, and enterprise environments. Strong in reliable pipelines, cloud data architecture, API-driven systems, and production analytics layers for reporting and operational visibility.
+
+SKILLS
+Python, SQL, Java, JavaScript, TypeScript, Bash; Apache Airflow, dbt, ELT/ETL, data modeling, data warehousing, incremental loads, data quality testing, data lineage; AWS, S3, Lambda, Redshift, Docker, Terraform, GitHub Actions, CI/CD, Linux; Snowflake, PostgreSQL, MySQL, SQL Server, MongoDB; REST APIs, Spring Boot, FastAPI, Flask, microservices; dimensional modeling, BI layers, reporting pipelines; pytest, JUnit, dbt tests. Also familiar with Kafka, Flink, Hadoop, NiFi, SSIS/SSRS, Azure Data Factory, BigQuery, GCP, Azure.
+
+EXPERIENCE
+Clevertech — Analytics Engineer | New York, United States | Remote | Jan 2024 - Present
+dbt, Snowflake, Python, SQL analytics for US SaaS clients; dimensional models for subscriptions, accounts, billing, product usage; ELT from databases/APIs/cloud storage; dbt tests, freshness, GitHub Actions CI; warehouse optimization; Python API extraction utilities; Airflow observability; AWS/S3 and Terraform-supported environments.
+
+Softbinator Technologies — Senior Data Engineer | Bucharest, Romania | Remote | Mar 2021 - Nov 2023
+Python, SQL, Airflow, Snowflake, AWS S3, dbt, Redshift, Docker for fintech, SaaS, e-commerce, logistics clients; warehouse models and ELT; Airflow DAGs with retries/alerts/backfills; API/file/DB ingestion; warehouse optimization; Terraform and GitHub Actions; dbt tests and CI.
+
+Concrete Solutions — Backend Engineer / Data Engineer | São Paulo, Brazil | On-site | Aug 2018 - Feb 2021
+Java, Spring Boot, Python, SQL, PostgreSQL, AWS S3, Redshift, Airflow for retail and financial services; REST microservices; ELT to AWS analytics; query tuning; incremental processing; Docker and CI/CD collaboration.
+
+Tempest Security Intelligence — Software Engineer Intern / Backend Developer | Recife, Pernambuco, Brazil | On-site | Jan 2017 - Jun 2018
+Java, Python, SQL, Linux, REST APIs for cybersecurity platforms; security log normalization; SQL reporting; backend utilities and small Python automation.
+
+EDUCATION
+Federal University of Pernambuco — Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017 | GPA 8.7 / 10`,
+    coverLetterPrompt: coverLetterDePrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Clevertech",
+      "Softbinator Technologies",
+      "Concrete Solutions",
+      "Tempest Security Intelligence"
     ]
   },
   {
@@ -725,8 +789,14 @@ const BUILTIN_SF_PROFILE_IDS = new Set([
   "victor-holanda"
 ]);
 
+const BUILTIN_DE_PROFILE_IDS = new Set(["david-oliveira-de"]);
+
 function isBuiltinSfProfile(person) {
   return BUILTIN_SF_PROFILE_IDS.has(String(person?.id || ""));
+}
+
+function isBuiltinDeProfile(person) {
+  return BUILTIN_DE_PROFILE_IDS.has(String(person?.id || ""));
 }
 
 /** Resume prompt for the active engineering track (session or saved default). */
@@ -739,8 +809,19 @@ export function resolvePromptTemplateForTrack(person, roleTrack) {
     (promptHasFixedCompanyHistory(prompt) || !isTrackDefaultPrompt(prompt));
 
   // Built-ins and Save-as-mine copies with FIXED COMPANY HISTORY / custom rich prompts
-  // keep their template when the session track matches SF / their saved track.
-  if (track === "sf" && (isBuiltinSfProfile(person) || promptHasFixedCompanyHistory(prompt))) {
+  // keep their template when the session track matches that person's engineering track.
+  if (
+    track === "sf" &&
+    (isBuiltinSfProfile(person) ||
+      (promptHasFixedCompanyHistory(prompt) && resolveRoleTrackForPerson(person) === "sf"))
+  ) {
+    return prompt ? rawPrompt : getTrackPromptTemplate(track);
+  }
+  if (
+    track === "de" &&
+    (isBuiltinDeProfile(person) ||
+      (promptHasFixedCompanyHistory(prompt) && resolveRoleTrackForPerson(person) === "de"))
+  ) {
     return prompt ? rawPrompt : getTrackPromptTemplate(track);
   }
 
