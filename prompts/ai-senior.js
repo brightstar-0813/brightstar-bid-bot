@@ -85,7 +85,14 @@ JSON SCHEMA
 
 JSON RULES
 - Include EVERY employer from master resume. profile: 3–5 sentences, technically credible, no clichés.
+- technicalSummary: full-sentence highlights that naturally include supportable JD terms — not a one-word tool list.
+- skills: use real categories only (AI & Evaluation, Programming & Data, Data & Experimentation, Backend & APIs, Cloud & Infrastructure, etc.).
 - Return valid JSON only. No double quotes inside string values.
+
+HARD FORBIDDEN
+- Never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump row.
+- Never append a comma-separated JD word salad to skills, profile, or bullets.
+- Prove JD terms inside real skills categories, profile sentences, and project bullets only. Never invent AI experience to satisfy keywords.
 
 JOB TITLE
 {JOB_TITLE}

@@ -119,3 +119,14 @@ test("resolveCoverLetterTemplateForTrack switches when session track differs", (
   const fsCover = resolveCoverLetterTemplateForTrack(person, "fs");
   assert.equal(fsCover, getRoleTrack("fs").coverLetterPrompt);
 });
+
+test("ATS appendices use evidence match and forbid keyword-dump sections", () => {
+  for (const id of ["sf", "de", "fs", "ai"]) {
+    const appendix = getRoleTrack(id).atsAppendix || "";
+    assert.match(appendix, /ATS EVIDENCE MATCH/i);
+    assert.doesNotMatch(appendix, /KEYWORD DENSITY/i);
+    assert.match(appendix, /JD Keywords/i);
+    assert.match(appendix, /HARD FORBIDDEN/i);
+    assert.match(appendix, /full-sentence/i);
+  }
+});

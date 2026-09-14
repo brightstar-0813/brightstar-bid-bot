@@ -160,12 +160,17 @@ JSON SCHEMA — REQUIRED
 JSON RULES
 - Include EVERY employer from the master resume, most recent first.
 - profile: 4–6 sentences — Salesforce identity, major target clouds, development/architecture/integration depth, domain when supported; ~4–7 high-value JD themes — not a tech inventory.
-- technicalSummary: 6–10 bullets of real highlights.
+- technicalSummary: 6–10 bullets of real highlights (full sentences that naturally include JD tools — not a one-word tool list).
 - skills: FIRST row is "Salesforce Clouds" listing EVERY Salesforce cloud/product the JD names. Also use rows as needed: Salesforce Development, Salesforce Automation, Salesforce Architecture, Salesforce Security, Integrations and APIs, Data Architecture, DevOps and Release Management, Testing and Quality, Enterprise Systems, Industry / Domain.
 - experience.project: short internal workstream label adapted to the employer (never a third-party case-study title).
 - Most recent role: 10–12 coherent enterprise bullets; second most recent: 9–11 hands-on; middle: 7–9; earlier: 5–7. Last two companies carry ~60–70% of strongest JD evidence when historically appropriate.
 - Older roles show progression/foundations — do not force every current JD product into Classic-era roles.
 - Return valid JSON only. No double quotes inside string values.
+
+HARD FORBIDDEN
+- Never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump row.
+- Never append a comma-separated JD word salad to skills, profile, or bullets.
+- Prove JD terms inside real skills categories, profile sentences, and project bullets only.
 
 ==================================================
 PRIORITY ORDER (WHEN RULES COMPETE)

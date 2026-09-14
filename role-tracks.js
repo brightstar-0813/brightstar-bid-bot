@@ -99,44 +99,49 @@ const AI_SKILL_CATALOG = [
 
 const SF_ATS_APPENDIX = `
 ==================================================
-ATS KEYWORD DENSITY (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
-Mirror the job description's exact terminology throughout the JSON — do not paraphrase away keywords.
+Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put the target job title (or its key words) in "headline".
-- Every Tier 0 / must-have technology and every Salesforce product named in the JD must appear in: skills items, profile, AND at least two bullets across the two most recent roles.
+- Every Tier 0 / must-have technology and every Salesforce product named in the JD must appear in: real skills categories (Salesforce Clouds, Salesforce Development, Integrations and APIs, etc.), profile sentences, AND at least two bullets across the two most recent roles.
 - Prefer JD spellings: "Lightning Web Components", "Service Cloud", "SOQL", "Apex", "MuleSoft", "integration", "architecture", etc.
-- technicalSummary should list the JD's top tools verbatim.
-A resume that covers fewer than ~90% of the JD's distinctive tokens will be boosted and may be re-prompted until it clears 90.`.trim();
+- technicalSummary: 6–10 full-sentence highlights that naturally include the JD's top tools — not a one-word tool list.
+HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.
+A resume that covers fewer than ~90% of the JD's distinctive tokens will be cleaned and may be re-prompted with project evidence until it clears 90.`.trim();
 
 const DE_ATS_APPENDIX = `
 ==================================================
-ATS KEYWORD DENSITY (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
-Mirror the job description's exact terminology throughout the JSON.
+Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put the target job title (or its key words) in "headline".
-- Every Tier 0 / must-have data tool (Snowflake, dbt, Airflow, Kafka, Spark, etc.) must appear in skills, profile, AND at least two bullets across the two most recent roles.
+- Every Tier 0 / must-have data tool (Snowflake, dbt, Airflow, Kafka, Spark, etc.) must appear in real skills categories (ETL & Data Pipeline Development, Database, Data Lake & Warehouse, Big Data & Cloud, etc.), profile sentences, AND at least two bullets across the two most recent roles.
 - Prefer JD spellings for warehouses, orchestrators, and cloud platforms.
-- technicalSummary should list the JD's top data stack verbatim.`.trim();
+- technicalSummary: full-sentence highlights that naturally include the JD's top data stack — not a one-word tool list.
+HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.`.trim();
 
 const FS_ATS_APPENDIX = `
 ==================================================
-ATS KEYWORD DENSITY (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
-Mirror the job description's exact terminology throughout the JSON.
+Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put the target job title (or its key words) in "headline".
-- Every Tier 0 / must-have framework, language, or cloud service must appear in skills, profile, AND at least two bullets across the two most recent roles.
+- Every Tier 0 / must-have framework, language, or cloud service must appear in real skills categories (Programming Languages, Frontend, Backend & APIs, Cloud & DevOps, Databases), profile sentences, AND at least two bullets across the two most recent roles.
 - Prefer JD spellings: "React", "TypeScript", "Node.js", "Kubernetes", "CI/CD", etc.
-- technicalSummary should list the JD's top stack verbatim.`.trim();
+- technicalSummary: full-sentence highlights that naturally include the JD's top stack — not a one-word tool list.
+HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.`.trim();
 
 const AI_ATS_APPENDIX = `
 ==================================================
-ATS KEYWORD DENSITY (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
-Mirror the job description's exact terminology throughout the JSON.
+Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put the target job title (or its key words) in "headline".
-- Every Tier 0 / must-have evaluation, ML, or AI tool must appear in skills, profile, AND at least two bullets where honestly supportable.
+- Every Tier 0 / must-have evaluation, ML, or AI tool must appear in real skills categories (AI & Evaluation, Programming & Data, Data & Experimentation, etc.), profile sentences, AND at least two bullets where honestly supportable.
 - Prefer JD spellings: "LLM evaluation", "RAG", "Python", "experimentation", "regression testing", etc.
-- Never invent AI experience to satisfy keywords — use adjacent engineering language when needed.`.trim();
+- technicalSummary: full-sentence highlights that naturally include supportable JD terms — not a one-word tool list.
+- Never invent AI experience to satisfy keywords — use adjacent engineering language when needed.
+HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.`.trim();
 
 /** @type {Record<string, object>} */
 export const ROLE_TRACKS = {

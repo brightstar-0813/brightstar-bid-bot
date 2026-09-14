@@ -220,6 +220,31 @@ export function buildAtsScoreRetryPrompt(
     trackId === "sf"
       ? selectProjectBankExcerpts({ jdText, missingProducts, bank })
       : "";
+  const primaryCategory = track.primarySkillsCategory || "Technical Skills";
+  const domainLabel = track.domainProductLabel || "domain products";
+  const internalsHint =
+    track.bulletInternalsHint ||
+    "name the concrete feature or capability, what was personally built, and the outcome";
+  const workstreamLabel =
+    trackId === "sf"
+      ? "ONE enterprise Salesforce workstream"
+      : trackId === "de"
+        ? "ONE coherent data-platform / pipeline workstream"
+        : trackId === "fs"
+          ? "ONE coherent product / platform workstream"
+          : trackId === "ai"
+            ? "ONE coherent evaluation / ML engineering workstream"
+            : "ONE coherent enterprise workstream";
+  const stackPhrase =
+    trackId === "sf"
+      ? "Salesforce/stack used"
+      : trackId === "de"
+        ? "data stack used"
+        : trackId === "fs"
+          ? "application stack used"
+          : trackId === "ai"
+            ? "evaluation/ML stack used"
+            : "stack used";
 
   const recentCompanies = (Array.isArray(resumeData?.experience) ? resumeData.experience : [])
     .slice(0, 2)
@@ -236,16 +261,18 @@ export function buildAtsScoreRetryPrompt(
       ? `KEEP THESE EMPLOYERS (rewrite bullets only): ${recentCompanies.join(" · ")}`
       : "",
     missingProducts.length
-      ? `MUST-PROVE ${track.domainProductLabel.toUpperCase()} (name each inside real project bullets for the two most recent roles, and list them under real skills categories such as "${track.primarySkillsCategory}"): ${missingProducts.join(", ")}`
+      ? `MUST-PROVE ${domainLabel.toUpperCase()} (name each inside real project bullets for the two most recent roles, and list them under real skills categories such as "${primaryCategory}"): ${missingProducts.join(", ")}`
       : "",
     missingKw.length
       ? `MIRROR THESE JD TERMS naturally inside project bullets / profile / skills items (never as a keyword list section): ${missingKw.join(", ")}`
       : "",
     "",
     "HOW TO RAISE ATS (in priority order):",
-    "1. Rewrite the TWO most recent roles so each reads as ONE enterprise workstream: business problem → Salesforce/stack used → what YOU built → integration/security/scale → outcome.",
-    "2. Pull architecture patterns from the PROJECT BANK excerpts below (SF track). Treat them as pattern reference only — never invent new employers, never paste project titles as company names, never claim the verified vendor case studies as your employment.",
-    "3. Put missing products into real skills categories (Salesforce Clouds, Development, Integrations, Data, etc.).",
+    `1. Rewrite the TWO most recent roles so each reads as ${workstreamLabel}: business problem → ${stackPhrase} → what YOU built → integration/security/scale → outcome. Show internals: ${internalsHint}`,
+    trackId === "sf"
+      ? "2. Pull architecture patterns from the PROJECT BANK excerpts below (SF track). Treat them as pattern reference only — never invent new employers, never paste project titles as company names, never claim the verified vendor case studies as your employment."
+      : `2. Expand bullets with track-credible ${domainLabel} evidence already implied by the master history — never invent employers, dates, clearances, degrees, or certifications.`,
+    `3. Put missing products into real skills categories (e.g. "${primaryCategory}" and sibling catalog rows). Never invent a keyword-dump category.`,
     "4. Align headline to the target title; keep technicalSummary as full-sentence highlights (no one-word stubs).",
     "",
     "HARD FORBIDDEN:",

@@ -132,6 +132,84 @@ test("buildAtsScoreRetryPrompt uses project bank and forbids JD Keywords", () =>
   assert.ok(!/MISSING JD KEYWORD TOKENS/i.test(prompt));
 });
 
+test("JD Keywords dump does not prop up ATS after boost", () => {
+  const base = {
+    name: "Candidate",
+    email: "candidate@example.com",
+    headline: "Engineer",
+    profile: "Experienced technology professional.",
+    skills: [{ category: "Development", items: "Apex" }],
+    experience: [{ company: "Acme", title: "Engineer", bullets: ["Worked with business teams."] }],
+    education: [{ school: "University" }]
+  };
+  const withDump = {
+    ...base,
+    skills: [
+      ...base.skills,
+      {
+        category: "JD Keywords",
+        items:
+          "salesforce, technical, architect, service, cloud, apex, lightning, components, soql, mulesoft, integrations, data, migration, security, enterprise, architecture, design, solutions"
+      }
+    ]
+  };
+  const beforeStrip = evaluateAtsScore(withDump, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect",
+    roleTrack: "sf"
+  });
+  const { data, evaluation } = boostResumeForAts(withDump, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect",
+    roleTrack: "sf"
+  });
+  assert.ok(!(data.skills || []).some((r) => /keyword/i.test(String(r.category || ""))));
+  assert.ok(
+    evaluation.score < beforeStrip.score,
+    `expected dump strip to lower score (${beforeStrip.score} → ${evaluation.score})`
+  );
+  assert.ok(evaluation.score < 80, `dump-only coverage must not clear 80 after strip, got ${evaluation.score}`);
+});
+
+test("DE and FS ATS retry prompts forbid JD Keywords without PROJECT BANK", () => {
+  const deEval = evaluateAtsScore(
+    {
+      name: "Candidate",
+      email: "c@x.com",
+      skills: [{ category: "General", items: "SQL" }],
+      experience: [{ company: "Acme", bullets: ["Pipelines."] }]
+    },
+    {
+      jdText: "Snowflake dbt Airflow Kafka Senior Data Engineer",
+      jobTitle: "Senior Data Engineer",
+      roleTrack: "de"
+    }
+  );
+  const dePrompt = buildAtsScoreRetryPrompt(
+    { experience: [{ company: "Acme" }, { company: "Beta" }] },
+    deEval,
+    { jdText: "Snowflake dbt Airflow", jobTitle: "Senior Data Engineer", roleTrack: "de" }
+  );
+  assert.ok(/HARD FORBIDDEN/i.test(dePrompt));
+  assert.ok(/JD Keywords/i.test(dePrompt));
+  assert.ok(!/PROJECT BANK/i.test(dePrompt));
+  assert.ok(/data-platform|pipeline workstream|data stack/i.test(dePrompt));
+
+  const fsPrompt = buildAtsScoreRetryPrompt(
+    { experience: [{ company: "Acme" }] },
+    {
+      score: 40,
+      missingProducts: ["React"],
+      missingKeywords: ["typescript", "kubernetes"]
+    },
+    { jdText: "React TypeScript Node.js", jobTitle: "Senior Full Stack Engineer", roleTrack: "fs" }
+  );
+  assert.ok(/HARD FORBIDDEN/i.test(fsPrompt));
+  assert.ok(/JD Keywords/i.test(fsPrompt));
+  assert.ok(!/PROJECT BANK/i.test(fsPrompt));
+  assert.ok(/product \/ platform workstream|application stack/i.test(fsPrompt));
+});
+
 test("DE track scores Snowflake and dbt from JD", () => {
   const deJd = `
 Senior Data Engineer

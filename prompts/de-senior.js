@@ -79,8 +79,15 @@ JSON SCHEMA
 
 JSON RULES
 - Include EVERY employer from master resume. profile: 3–5 sentences on cloud-scale platforms, modeling, pipeline reliability.
+- technicalSummary: full-sentence highlights that naturally include the JD's top data stack — not a one-word tool list.
+- skills: use real categories only (ETL & Data Pipeline Development, Database, Data Lake & Warehouse, Big Data & Cloud, Data Orchestration, Data Modeling & Transformation, etc.).
 - Only claim technologies supported by the master resume. Map adjacent tools honestly when JD asks for unsupported tech.
 - Return valid JSON only. No double quotes inside string values.
+
+HARD FORBIDDEN
+- Never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump row.
+- Never append a comma-separated JD word salad to skills, profile, or bullets.
+- Prove JD terms inside real skills categories, profile sentences, and project bullets only.
 
 JOB TITLE
 {JOB_TITLE}
