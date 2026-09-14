@@ -54,7 +54,7 @@ export const US_RESUME_STYLE_RULES = `US RESUME STYLE (required for this run):
 - Prefer concrete US workplace phrasing over generic global corporate speak.
 - Keep bullets scannable for US ATS parsers (Greenhouse / Ashby / Lever friendly).
 - No photo, no objective essay, no "References available upon request".
-- Do not add clearance, citizenship, visa, or immigration language.`;
+- Do not add clearance, citizenship, visa, or immigration language — including in the headline.`;
 
 export function normalizeStrongHumanizeMode(value) {
   const v = String(value || "")

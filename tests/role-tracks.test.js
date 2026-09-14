@@ -46,6 +46,7 @@ test("resolveEffectiveRoleTrack prefers session override", () => {
 
 test("resolveRoleTrackForPerson infers sf for built-in Salesforce profiles", () => {
   assert.equal(resolveRoleTrackForPerson({ id: "dmario-lewis" }), "sf");
+  assert.equal(resolveRoleTrackForPerson({ id: "sandeep-mahankali" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ roleTrack: "de" }), "de");
 });
 

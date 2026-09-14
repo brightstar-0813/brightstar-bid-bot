@@ -22,7 +22,7 @@ SEVEN GATES
 GATE 1 — Every JD Required / Must have / Primary Skill appears in skills, two+ experience bullets, and profile.
 GATE 1A — Two most recent roles each have 3+ bullets proving must-have data tools in real pipelines.
 GATE 1B — Every major data platform/tool named in the JD (Snowflake, dbt, Airflow, Kafka, Spark, etc.) appears in skills AND experience.
-GATE 2 — Never mention clearance.
+GATE 2 — Never mention clearance — including in the headline. Never append Public Trust, Secret, or TS/SCI notes to the role title.
 GATE 3 — Never mention citizenship, visa, or immigration.
 GATE 4 — Certifications in certifications array only — never as bullet subjects.
 GATE 5 — Name real technologies (dbt incremental models, Airflow DAGs, Kafka consumer groups) not "data engineering concepts".
@@ -40,7 +40,7 @@ ROLE POSITIONING
 ==================================================
 Choose ONE headline fitting the JD and master resume:
 Senior Data Engineer | Senior Analytics Engineer | Data Platform Engineer | AI Data Engineer | Cloud Data Engineer
-Put exact string in JSON "headline".
+Put that identity in JSON "headline" — do NOT paste the JD job title verbatim.
 
 ==================================================
 SKILLS FORMAT

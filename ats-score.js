@@ -1,5 +1,6 @@
 import { getRoleTrack, jdRequiredSkills, normalizeRoleTrackId } from "./role-tracks.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
+import { stripClearanceFromTitle } from "./resume-json.js";
 
 const STOP_WORDS = new Set(
   [
@@ -114,9 +115,9 @@ function cloneResume(data) {
 }
 
 /**
- * Deterministic cleanup only: strip forbidden keyword-dump skill rows and lightly
- * align headline to the target title. Product / ATS coverage is improved via
- * project-bank AI re-prompts (buildAtsScoreRetryPrompt), not by dumping tokens.
+ * Deterministic cleanup only: strip forbidden keyword-dump skill rows and
+ * clearance notes from the headline. Never paste the JD job title into headline —
+ * ATS title coverage comes from AI-chosen resume identities + profile/bullets.
  */
 export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "", roleTrack = "sf" } = {}) {
   if (!resumeData || typeof resumeData !== "object") {
@@ -131,21 +132,10 @@ export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "", role
   let changed =
     JSON.stringify(cleaned?.skills || []) !== JSON.stringify(resumeData?.skills || []);
 
-  const title = String(jobTitle || "").trim();
-  if (title) {
-    const headline = String(cleaned.headline || "").trim();
-    const titleWords = topKeywords(title, 8);
-    const titleHit = coverage(
-      titleWords,
-      [headline, cleaned.profile, ...(cleaned.technicalSummary || [])].join(" ")
-    );
-    if (titleHit.ratio < 0.75) {
-      cleaned.headline =
-        headline && !normalizeText(headline).includes(normalizeText(title).slice(0, 24))
-          ? `${title} | ${headline}`
-          : title;
-      changed = true;
-    }
+  const headline = stripClearanceFromTitle(String(cleaned.headline || "").trim());
+  if (headline !== String(cleaned.headline || "").trim()) {
+    cleaned.headline = headline;
+    changed = true;
   }
 
   const evaluation = evaluateAtsScore(cleaned, { jdText, jobTitle, roleTrack });
@@ -256,7 +246,7 @@ export function buildAtsScoreRetryPrompt(
     "Return the COMPLETE corrected resume JSON (same schema, every role, every field).",
     "Improve match by rewriting Professional Experience as coherent enterprise PROJECT narratives — not by dumping JD words into a skills row.",
     "",
-    jobTitle ? `TARGET TITLE: ${jobTitle}` : "",
+    jobTitle ? `TARGET TITLE: ${stripClearanceFromTitle(jobTitle)}` : "",
     recentCompanies.length
       ? `KEEP THESE EMPLOYERS (rewrite bullets only): ${recentCompanies.join(" · ")}`
       : "",
@@ -273,12 +263,14 @@ export function buildAtsScoreRetryPrompt(
       ? "2. Pull architecture patterns from the PROJECT BANK excerpts below (SF track). Treat them as pattern reference only — never invent new employers, never paste project titles as company names, never claim the verified vendor case studies as your employment."
       : `2. Expand bullets with track-credible ${domainLabel} evidence already implied by the master history — never invent employers, dates, clearances, degrees, or certifications.`,
     `3. Put missing products into real skills categories (e.g. "${primaryCategory}" and sibling catalog rows). Never invent a keyword-dump category.`,
-    "4. Align headline to the target title; keep technicalSummary as full-sentence highlights (no one-word stubs).",
+    "4. Choose a short resume-identity headline that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never append clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording. Keep technicalSummary as full-sentence highlights (no one-word stubs).",
     "",
     "HARD FORBIDDEN:",
     '- Never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump row.',
     "- Never append a comma-separated JD word salad to skills, profile, or bullets.",
     "- Never invent employers, dates, clearances, degrees, or certifications.",
+    "- Never put clearance language in headline or experience titles.",
+    "- Never set headline to the exact JD job title string.",
     "- Keep every employer, date, location, title, education, and certification exactly as they already are.",
     "",
     "Return ONLY the JSON object, starting with { and ending with }.",
@@ -447,7 +439,9 @@ export function describeAtsGaps(evaluation = {}) {
 
   const titleComp = components.titleAlignment;
   if (titleComp && Number(titleComp.max) > 0 && titleComp.score / titleComp.max < 0.75) {
-    tips.push("Put the target job title (or its key words) in the headline and reinforce them in the profile.");
+    tips.push(
+      "Use a short resume-identity headline that reflects JD seniority and key words — do not paste the JD job title verbatim — and reinforce those words in the profile."
+    );
   }
 
   const expComp = components.experienceEvidence;

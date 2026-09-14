@@ -62,7 +62,7 @@ COVERAGE LADDER (Tier 1–3 only)
 ROLE POSITIONING
 ==================================================
 
-Choose ONE headline from the JD and put that exact string in JSON "headline":
+Choose ONE headline from the list below that best fits the JD — do NOT paste the JD job title verbatim:
 Senior Data Engineer | Senior Analytics Engineer | Data Platform Engineer | Cloud Data Engineer | Analytics Engineer
 Do not mix competing identities. Prefer Analytics Engineer when the JD is clearly AE/dbt/Snowflake modeling; prefer Senior Data Engineer when the JD centers pipelines, platforms, streaming, or cloud data infrastructure.
 

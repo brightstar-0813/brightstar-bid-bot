@@ -1,5 +1,6 @@
 import { PROMPT as dmarioLewisPrompt } from "./prompts/dmario-lewis.js";
 import { PROMPT as edrwinRevolorioPrompt } from "./prompts/edrwin-revolorio.js";
+import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
 import { PROMPT as michaelIbeaPrompt } from "./prompts/michael-ibea.js";
 import { PROMPT as carlosCapulongPrompt } from "./prompts/carlos-capulong.js";
 import { PROMPT as davidOliveiraPrompt } from "./prompts/david-oliveira.js";
@@ -105,14 +106,14 @@ export const BUILTIN_PROFILES = [
   },
   {
     id: "edrwin-revolorio",
-    label: "Edrwin Revolorio",
+    label: "Edrwin Steven Revolorio Zavala",
     roleTrack: "sf",
     promptTemplate: edrwinRevolorioPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Revolorio_Resume",
     builtin: true,
     kind: "resume",
-    name: "Edrwin Revolorio",
+    name: "Edrwin Steven Revolorio Zavala",
     email: "edrwin.revolorio1996@outlook.com",
     phone: "+1 (317) 563-1795",
     linkedin: "https://www.linkedin.com/in/edwin-revolorio/",
@@ -139,6 +140,48 @@ export const BUILTIN_PROFILES = [
       "Appirio",
       "Innoit",
       "Indiana University Serve IT Clinic"
+    ]
+  },
+  {
+    id: "sandeep-mahankali",
+    label: "Sandeep Mahankali",
+    roleTrack: "sf",
+    promptTemplate: sandeepMahankaliPrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Mahankali_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "Sandeep Mahankali",
+    email: "msandeep129@outlook.com",
+    phone: "+1 (669) 223-1191",
+    linkedin: "https://www.linkedin.com/in/sandeep-mahankali-7b8652129/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Round Rock, Texas, United States",
+    address: "1462 Sawmill Xing",
+    zip: "78665",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Technical Architect | Senior Salesforce Engineer",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Taproot Solutions Inc",
+      "Deloitte",
+      "Salesforce",
+      "Altice USA",
+      "Suddenlink Communications",
+      "Allstate",
+      "Visions Healthcare",
+      "NovoTech Solutions",
+      "Sejal Technologies"
     ]
   },
   {
@@ -783,6 +826,7 @@ export async function getCoverLetterProfile() {
 const BUILTIN_SF_PROFILE_IDS = new Set([
   "dmario-lewis",
   "edrwin-revolorio",
+  "sandeep-mahankali",
   "michael-ibea",
   "carlos-capulong",
   "david-oliveira",

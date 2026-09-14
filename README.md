@@ -17,14 +17,14 @@ Each person has a default **engineering track** that selects the resume engine, 
 
 | Track | Roles |
 |-------|--------|
-| **SF** | Salesforce (built-in D'mario / Edrwin presets + generic SF template) |
+| **SF** | Salesforce (built-in D'mario / Edrwin / Sandeep presets + generic SF template) |
 | **DE** | Data Engineering — Snowflake, dbt, Airflow, Kafka, etc. |
 | **FS** | Full Stack — React, Node.js, TypeScript, cloud, CI/CD |
 | **AI** | AI / ML Evaluation — LLM quality, eval pipelines, Python/SQL |
 
 - Set **Engineering track** under **Active person** (top of Section 1). It applies immediately to **CSV batch** and **manual one-off** runs — prompts and ATS engine switch for the session.
 - Click **Save person** to persist the track and prompts as that person’s default. Changing track without saving is session-only (safe for experiments).
-- Built-in Salesforce presets (D'mario / Edrwin) keep their embedded SF prompts when track is SF; other tracks use the matching track template at runtime.
+- Built-in Salesforce presets (D'mario / Edrwin / Sandeep) keep their embedded SF prompts when track is SF; other tracks use the matching track template at runtime.
 
 After each resume build, calculate a local **ATS match score (0–100)** from JD keywords, title alignment, domain products (Salesforce, data tools, stack, or AI tools depending on track), experience evidence, and resume structure; hover its queue badge for the breakdown
 - Saves under `Downloads / Applications-{Person} / [N] - [Company] - [Title] /` (only these three files):

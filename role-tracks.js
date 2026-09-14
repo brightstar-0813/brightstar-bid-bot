@@ -102,7 +102,7 @@ const SF_ATS_APPENDIX = `
 ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
-- Put the target job title (or its key words) in "headline".
+- Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
 - Every Tier 0 / must-have technology and every Salesforce product named in the JD must appear in: real skills categories (Salesforce Clouds, Salesforce Development, Integrations and APIs, etc.), profile sentences, AND at least two bullets across the two most recent roles.
 - Prefer JD spellings: "Lightning Web Components", "Service Cloud", "SOQL", "Apex", "MuleSoft", "integration", "architecture", etc.
 - technicalSummary: 6–10 full-sentence highlights that naturally include the JD's top tools — not a one-word tool list.
@@ -114,7 +114,7 @@ const DE_ATS_APPENDIX = `
 ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
-- Put the target job title (or its key words) in "headline".
+- Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
 - Every Tier 0 / must-have data tool (Snowflake, dbt, Airflow, Kafka, Spark, etc.) must appear in real skills categories (ETL & Data Pipeline Development, Database, Data Lake & Warehouse, Big Data & Cloud, etc.), profile sentences, AND at least two bullets across the two most recent roles.
 - Prefer JD spellings for warehouses, orchestrators, and cloud platforms.
 - technicalSummary: full-sentence highlights that naturally include the JD's top data stack — not a one-word tool list.
@@ -125,7 +125,7 @@ const FS_ATS_APPENDIX = `
 ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
-- Put the target job title (or its key words) in "headline".
+- Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
 - Every Tier 0 / must-have framework, language, or cloud service must appear in real skills categories (Programming Languages, Frontend, Backend & APIs, Cloud & DevOps, Databases), profile sentences, AND at least two bullets across the two most recent roles.
 - Prefer JD spellings: "React", "TypeScript", "Node.js", "Kubernetes", "CI/CD", etc.
 - technicalSummary: full-sentence highlights that naturally include the JD's top stack — not a one-word tool list.
@@ -136,7 +136,7 @@ const AI_ATS_APPENDIX = `
 ATS EVIDENCE MATCH (local match target ≥ 90/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
-- Put the target job title (or its key words) in "headline".
+- Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
 - Every Tier 0 / must-have evaluation, ML, or AI tool must appear in real skills categories (AI & Evaluation, Programming & Data, Data & Experimentation, etc.), profile sentences, AND at least two bullets where honestly supportable.
 - Prefer JD spellings: "LLM evaluation", "RAG", "Python", "experimentation", "regression testing", etc.
 - technicalSummary: full-sentence highlights that naturally include supportable JD terms — not a one-word tool list.
@@ -296,6 +296,7 @@ export function resolveRoleTrackForPerson(person) {
   if (
     id === "dmario-lewis" ||
     id === "edrwin-revolorio" ||
+    id === "sandeep-mahankali" ||
     id === "michael-ibea" ||
     id === "carlos-capulong" ||
     id === "david-oliveira" ||

@@ -25,7 +25,7 @@ Where a product postdates a role, put it in Intrado Life & Safety Inc rather tha
 GATE 1B — EVERY SALESFORCE CLOUD OR PRODUCT NAMED IN THE JD GOES ON THE RESUME. This is absolute and has no exceptions. Sweep the JD for every Salesforce cloud and product — Service Cloud, Sales Cloud, Data Cloud, Agentforce, Experience Cloud, Public Sector Solutions, Health Cloud, Financial Services Cloud, Marketing Cloud, Revenue Cloud, CPQ, Field Service, Commerce Cloud, Nonprofit Cloud, Education Cloud, OmniStudio, Document Generation, MuleSoft, Tableau, Slack, Einstein, Salesforce Shield, or anything else Salesforce sells. Every one of them belongs in the FIRST skills row and in the experience section, tied to a real business process. A JD naming Service Cloud and Data Cloud whose resume ships a "Salesforce Clouds" row reading only "Sales Cloud, Service Cloud" is the exact failure this rule exists to stop.
 Do not decide a cloud is unsupported and drop it. Do not replace it with a generic phrase such as "Salesforce platform" or "CRM solutions". Name the product.
 
-GATE 2 — NEVER MENTION CLEARANCE. Do not claim a clearance. Do not deny one. Do not discuss it, reference it, or explain its absence. A line such as "the verified career history does not list an active Secret clearance" hands the recruiter a rejection and is the single worst thing you can write. The word clearance must not appear anywhere in the JSON.
+GATE 2 — NEVER MENTION CLEARANCE. Do not claim a clearance. Do not deny one. Do not discuss it, reference it, or explain its absence. A line such as "the verified career history does not list an active Secret clearance" hands the recruiter a rejection and is the single worst thing you can write. The word clearance must not appear anywhere in the JSON — including the headline. Never write titles like "Senior Salesforce Developer (Public Trust Clearance)" or append Secret / TS/SCI / Public Trust notes to the role title.
 
 GATE 3 — NEVER MENTION CITIZENSHIP, VISA, OR IMMIGRATION. No "U.S. citizen", no "citizen since", no work-authorization narrative, no nationality. Not in the profile, not in a bullet, not anywhere. Only the city/state/country line is allowed.
 
@@ -180,7 +180,9 @@ Tier 0 lines are written to clear the screen and are exempt from this test by de
 ROLE POSITIONING
 ==================================================
 
-Choose ONE Salesforce resume identity from the JD and put that exact title string in the JSON "headline" field.
+Choose ONE Salesforce resume identity from the list below that best fits the JD, and put that identity in the JSON "headline" field.
+Do NOT copy the JD job title verbatim. Use the posting only as guidance for seniority and focus, then write a short resume headline from the identity list (or the candidate base identity) — never paste the posting title character-for-character.
+Strip clearance, Public Trust, Secret, TS/SCI, citizenship, and visa wording (e.g. "Senior Salesforce Developer", never "Senior Salesforce Developer (Public Trust Clearance)").
 Never write a placeholder such as "JD-aligned" or "from the role list above".
 
 Salesforce Technical Architect — Apex, LWC, APIs, async Apex, integrations, CI/CD, security, governor limits, data architecture, hands-on technical design.

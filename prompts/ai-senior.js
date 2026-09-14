@@ -22,7 +22,7 @@ SEVEN GATES
 GATE 1 — Every JD Required / Must have / Primary Skill appears in skills, two+ experience bullets, and profile.
 GATE 1A — Two most recent roles each have 3+ bullets proving must-have evaluation/AI/ML tools where honestly supported.
 GATE 1B — Every major AI/evaluation concept named in the JD appears in skills AND experience when supportable; use adjacent-match language for transferable QA/testing/data work — never invent LLM or ML ownership.
-GATE 2 — Never mention clearance.
+GATE 2 — Never mention clearance — including in the headline. Never append Public Trust, Secret, or TS/SCI notes to the role title.
 GATE 3 — Never mention citizenship, visa, or immigration.
 GATE 4 — Certifications in certifications array only.
 GATE 5 — Name real technologies (Python eval harnesses, SQL validation, API regression suites) not "AI concepts".
@@ -47,7 +47,7 @@ ROLE POSITIONING
 ==================================================
 Choose ONE headline fitting the JD and master resume:
 Senior AI Evaluation Engineer | AI Quality Engineer | LLM Evaluation Engineer | Applied AI Engineer | ML Engineer
-Put exact string in JSON "headline". Senior IC — no fake management.
+Put that identity in JSON "headline" — do NOT paste the JD job title verbatim. Senior IC — no fake management.
 
 ==================================================
 SKILLS FORMAT

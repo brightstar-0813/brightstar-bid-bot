@@ -22,7 +22,7 @@ SEVEN GATES
 GATE 1 — Every JD Required / Must have / Primary Skill appears in skills, two+ experience bullets, and profile.
 GATE 1A — Two most recent roles each have 3+ bullets proving must-have stack items in production systems.
 GATE 1B — Every major framework/platform named in the JD (React, Node.js, TypeScript, AWS, Kubernetes, etc.) appears in skills AND experience.
-GATE 2 — Never mention clearance.
+GATE 2 — Never mention clearance — including in the headline. Never append Public Trust, Secret, or TS/SCI notes to the role title.
 GATE 3 — Never mention citizenship, visa, or immigration.
 GATE 4 — Certifications in certifications array only.
 GATE 5 — Name real technologies and patterns (REST APIs, event-driven, CI/CD pipelines) not "software development concepts".
@@ -40,7 +40,7 @@ ROLE POSITIONING
 ==================================================
 Choose ONE headline fitting the JD and master resume:
 Senior Full Stack Engineer | Senior Software Engineer | Backend Engineer | Frontend Engineer | Platform Engineer
-Put exact string in JSON "headline".
+Put that identity in JSON "headline" — do NOT paste the JD job title verbatim.
 
 ==================================================
 SKILLS FORMAT

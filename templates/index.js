@@ -8,6 +8,7 @@ import { cambriaCorporateTemplate } from "./cambria-corporate.js";
 import { skillsFirstTemplate } from "./skills-first.js";
 import { modernSansTemplate } from "./modern-sans.js";
 import { executiveNavyTemplate } from "./executive-navy.js";
+import { stripClearanceFromTitle } from "../resume-json.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
 export const BUILTIN_TEMPLATES = [
@@ -56,13 +57,15 @@ export function getTemplateById(templateId) {
  */
 function sanitizeResumeData(raw) {
   const data = { ...(raw || {}) };
-  const headline = String(data.headline || "").trim();
+  const headline = stripClearanceFromTitle(String(data.headline || "").trim());
   if (
     !headline ||
     /JD-aligned|role list above|from the (job|role)|placeholder|TODO|TBD|\{JOB/i.test(headline) ||
     headline.length > 90
   ) {
     data.headline = "";
+  } else {
+    data.headline = headline;
   }
 
   if (Array.isArray(data.skills)) {
@@ -76,6 +79,7 @@ function sanitizeResumeData(raw) {
   if (Array.isArray(data.experience)) {
     data.experience = data.experience.map((job) => {
       const next = { ...(job || {}) };
+      next.title = stripClearanceFromTitle(next.title);
       const bullets = Array.isArray(next.bullets) ? next.bullets : [];
       next.bullets = bullets
         .map((b) => String(b || "").replace(/\s+/g, " ").trim())

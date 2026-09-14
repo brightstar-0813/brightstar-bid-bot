@@ -35,7 +35,7 @@ GATE 1A — THE TWO MOST RECENT ROLES MUST PROVE THE MUST-HAVES with at least 3 
 
 GATE 1B — EVERY SALESFORCE CLOUD OR PRODUCT NAMED IN THE JD GOES ON THE RESUME in the first skills row and in experience.
 
-GATE 2 — NEVER MENTION CLEARANCE anywhere in the JSON.
+GATE 2 — NEVER MENTION CLEARANCE anywhere in the JSON — including the headline. Never append Public Trust, Secret, TS/SCI, or other clearance notes to the role title.
 
 GATE 3 — NEVER MENTION CITIZENSHIP, VISA, OR IMMIGRATION.
 
@@ -135,7 +135,7 @@ ROLE POSITIONING
 ==================================================
 Choose ONE headline that fits the JD and master resume:
 Salesforce Technical Architect | Salesforce Solution Architect | Senior Salesforce Engineer | Senior Salesforce Developer | Salesforce Consultant | Salesforce Architect
-Put that exact string in JSON "headline". Stay senior and hands-on. Do not create competing identities.
+Put a short resume-identity headline from that list — do NOT paste the JD job title verbatim. Strip clearance, Public Trust, Secret, TS/SCI, citizenship, and visa wording. Stay senior and hands-on. Do not create competing identities.
 
 ==================================================
 JSON SCHEMA — REQUIRED

@@ -8,6 +8,7 @@ import {
   selectProjectBankExcerpts,
   describeAtsGaps
 } from "../ats-score.js";
+import { stripClearanceFromTitle } from "../resume-json.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "../prompts/sf-enterprise-projects.js";
 
 const jd = `
@@ -95,10 +96,42 @@ test("boostResumeForAts cleans JD Keywords and aligns headline without token dum
     jobTitle: "Salesforce Technical Architect"
   });
   assert.equal(changed, true);
-  assert.ok(String(data.headline || "").includes("Salesforce"));
+  assert.equal(data.headline, "Engineer", "must not paste the JD title into headline");
   assert.ok(!(data.skills || []).some((r) => /keyword/i.test(String(r.category || ""))));
   assert.ok((data.skills || []).some((r) => r.category === "Development"));
   assert.ok(!/Hands-on with/i.test(String(data.profile || "")), "must not append product dump to profile");
+});
+
+test("stripClearanceFromTitle removes Public Trust and Secret notes", () => {
+  assert.equal(
+    stripClearanceFromTitle("Senior Salesforce Developer (Public Trust Clearance)"),
+    "Senior Salesforce Developer"
+  );
+  assert.equal(
+    stripClearanceFromTitle("Salesforce Architect - Secret Clearance Required"),
+    "Salesforce Architect"
+  );
+  assert.equal(stripClearanceFromTitle("Senior Salesforce Engineer | TS/SCI"), "Senior Salesforce Engineer");
+});
+
+test("boostResumeForAts never copies clearance wording or exact JD title into headline", () => {
+  const weak = {
+    name: "Candidate",
+    email: "candidate@example.com",
+    headline: "Senior Salesforce Engineer (Public Trust Clearance)",
+    profile: "Experienced technology professional.",
+    skills: [{ category: "Development", items: "Apex" }],
+    experience: [{ company: "Acme", title: "Engineer", bullets: ["Built Salesforce flows."] }],
+    education: [{ school: "University" }]
+  };
+  const jdTitle = "Senior Salesforce Developer (Public Trust Clearance)";
+  const { data } = boostResumeForAts(weak, {
+    jdText: `${jdTitle} required.`,
+    jobTitle: jdTitle
+  });
+  assert.equal(data.headline, "Senior Salesforce Engineer");
+  assert.ok(!/clearance|public trust/i.test(String(data.headline || "")));
+  assert.notEqual(String(data.headline || "").toLowerCase(), "senior salesforce developer");
 });
 
 test("selectProjectBankExcerpts prefers JD-aligned SF projects", () => {

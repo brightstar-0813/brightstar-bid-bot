@@ -27,7 +27,17 @@ const EXPECTED_BULLET_COUNTS = [
   { match: /capgemini/i, count: 9 },
   { match: /appirio/i, count: 8 },
   { match: /innoit|innodit/i, count: 4 },
-  { match: /serve\s*it/i, count: 2 }
+  { match: /serve\s*it/i, count: 2 },
+  // Sandeep Mahankali
+  { match: /taproot/i, count: 10 },
+  { match: /deloitte/i, count: 10 },
+  { match: /^salesforce$/i, count: 3 },
+  { match: /altice/i, count: 6 },
+  { match: /suddenlink/i, count: 3 },
+  { match: /allstate/i, count: 5 },
+  { match: /visions\s*healthcare/i, count: 3 },
+  { match: /novotech/i, count: 2 },
+  { match: /sejal/i, count: 2 }
 ];
 
 /** Active per-person experience rules (set by background for the current job). */
@@ -532,7 +542,7 @@ export function sanitizeResumeData(data) {
 
   out.phone = String(out.phone || "").trim();
   out.name = String(out.name || "").trim();
-  out.headline = String(out.headline || "").trim();
+  out.headline = stripClearanceFromTitle(String(out.headline || "").trim());
   out.location = String(out.location || "").trim();
 
   out.profile = stripDisqualifyingClaims(out.profile);
@@ -565,7 +575,7 @@ export function sanitizeResumeData(data) {
       const next = {
         ...job,
         location: stripEmploymentType(job.location),
-        title: stripEmploymentType(job.title)
+        title: stripClearanceFromTitle(stripEmploymentType(job.title))
       };
       if (Array.isArray(job.bullets)) {
         next.bullets = job.bullets.map((b) => stripDisqualifyingClaims(b)).filter(Boolean);
@@ -611,7 +621,48 @@ function enforceKnownInternTitle(job) {
   if (/wolverine world wide/.test(company)) {
     return { ...job, title: "IT Project Management Intern" };
   }
+  if (/sejal\s*technologies/.test(company)) {
+    return { ...job, title: "Intern" };
+  }
   return job;
+}
+
+/**
+ * Drop clearance / eligibility notes from headlines and job titles.
+ * Models and ATS boost copy phrases like "(Public Trust Clearance)" from the JD
+ * into the resume title line — never ship those.
+ */
+export function stripClearanceFromTitle(text) {
+  let s = String(text || "").trim();
+  if (!s) return "";
+
+  // Parenthetical notes: (Public Trust Clearance), [Secret], {TS/SCI eligible}
+  s = s.replace(
+    /\s*[\(\[\{]\s*(?:active\s+|interim\s+)?(?:public\s+trust|secret|top\s*secret|ts\s*\/?\s*sci|sci|confidential)(?:\s+clearance|\s+eligibility)?[^)\]\}]*[\)\]\}]/gi,
+    ""
+  );
+  s = s.replace(/\s*[\(\[\{][^)\]\}]*\bclearance\b[^)\]\}]*[\)\]\}]/gi, "");
+
+  // Trailing separators: "… - Public Trust Clearance", "… | Secret Clearance Required"
+  s = s.replace(
+    /\s*[-–—|:]\s*(?:active\s+|interim\s+)?(?:public\s+trust|secret|top\s*secret|ts\s*\/?\s*sci)(?:\s+clearance)?(?:\s+(?:required|preferred|eligible|eligibility))?\s*$/i,
+    ""
+  );
+  s = s.replace(/\s*[-–—|:]\s*[^|]*\bclearance\b[^|]*$/i, "");
+
+  // Inline leftovers
+  s = s.replace(
+    /\b(?:active\s+|interim\s+)?(?:public\s+trust|secret|top\s*secret|ts\s*\/?\s*sci)\s+clearance\b/gi,
+    ""
+  );
+  s = s.replace(/\b(?:security\s+)?clearance(?:\s+(?:required|preferred|eligible|eligibility))?\b/gi, "");
+  s = s.replace(/\bpublic\s+trust\b/gi, "");
+
+  return s
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*([|,/])\s*$/g, "")
+    .replace(/^[\s|,/–—-]+|[\s|,/–—-]+$/g, "")
+    .trim();
 }
 
 /**
