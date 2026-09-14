@@ -271,6 +271,9 @@ export function ensureSfProjectBankInTemplate(template, roleTrack) {
 
 const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman"]);
 const REMOVED_PERSON_NAME = /matthew\s+dale\s+hoffman/i;
+/** Legacy Edrwin Houston number — always rewrite to Indianapolis. */
+const EDRWIN_LEGACY_PHONE_RE = /(?:\+?1[\s\-.]*)?\(?713\)?[\s\-.]*(?:659)[\s\-.]*(?:9480)/;
+const EDRWIN_CURRENT_PHONE = "+1 (317) 563-1795";
 
 function isRemovedPerson(p) {
   const id = String(p?.id || "");
@@ -282,13 +285,34 @@ function isRemovedPerson(p) {
   );
 }
 
+function looksLikeEdrwinPerson(p) {
+  const id = String(p?.id || "").toLowerCase();
+  const name = String(p?.name || p?.label || "").toLowerCase();
+  return id.includes("edrwin") || id.includes("revolorio") || /edrwin|revolorio/.test(name);
+}
+
+function normalizeEdrwinPhone(phone) {
+  const raw = String(phone || "").trim();
+  if (!raw) return raw;
+  if (EDRWIN_LEGACY_PHONE_RE.test(raw)) return EDRWIN_CURRENT_PHONE;
+  return raw;
+}
+
 /** Drop retired built-in people (and saved copies) from this Chrome profile. */
 async function purgeRemovedPeopleFromStorage() {
   const data = await chrome.storage.local.get([CUSTOM_PROFILES_KEY, ACTIVE_PERSON_ID_KEY, "selected_profile_id"]);
   const list = Array.isArray(data[CUSTOM_PROFILES_KEY]) ? data[CUSTOM_PROFILES_KEY] : [];
   const kept = list.filter((p) => !isRemovedPerson(p));
+  let phoneFixed = false;
+  const withPhones = kept.map((p) => {
+    if (!looksLikeEdrwinPerson(p)) return p;
+    const nextPhone = normalizeEdrwinPhone(p.phone) || EDRWIN_CURRENT_PHONE;
+    if (nextPhone === p.phone) return p;
+    phoneFixed = true;
+    return { ...p, phone: nextPhone };
+  });
   const patch = {};
-  if (kept.length !== list.length) patch[CUSTOM_PROFILES_KEY] = kept;
+  if (kept.length !== list.length || phoneFixed) patch[CUSTOM_PROFILES_KEY] = withPhones;
   const activeId = String(data[ACTIVE_PERSON_ID_KEY] || "");
   const selectedId = String(data.selected_profile_id || "");
   if (REMOVED_PERSON_IDS.has(activeId) || activeId.startsWith("matthew-dale-hoffman")) {

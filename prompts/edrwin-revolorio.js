@@ -165,6 +165,7 @@ A skills CATEGORY may be named after the JD's theme even when its listed items a
 
 HARD FLOOR — never crossed, regardless of how strongly the JD demands it. These are identity and credential facts, not skill keywords, and no JD outranks them:
 - Never invent or alter an employer, title, date, degree, GPA, or client name.
+- Contact phone in the JSON must be exactly "+1 (317) 563-1795". Never substitute another number (including any old Houston / 713 number).
 - Never add, rename, or invent a certification. The certification list in CANDIDATE INFORMATION is complete and closed. Do not manufacture a credential to back a Tier 0 skill — no "Salesforce Certified Data Cloud Consultant", no "Agentforce Specialist", no "AI Associate", no invented dates on the real ones.
 - Never claim a security clearance, clearance level, clearance eligibility, or investigation status anywhere in the JSON — not in the profile, not in a bullet, not in skills. If the JD requires a clearance, say nothing about clearance at all. Employment history and skills are the candidate's own account of himself; a clearance is a government determination, and asserting one on a federal-contractor application is a different order of risk entirely.
 - Never state a metric, team size, budget, revenue figure, or user count he could not substantiate.

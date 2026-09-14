@@ -2507,6 +2507,7 @@ async function finalizeResumeData(resumeData) {
   if (!data || typeof data !== "object") return data;
   try {
     const contact = await getAutofillContact();
+    // Always prefer saved person contact when present — AI often invents stale phones.
     data = {
       ...data,
       name: contact.name || data.name,
@@ -2515,6 +2516,10 @@ async function finalizeResumeData(resumeData) {
       linkedin: contact.linkedin || data.linkedin,
       location: contact.location || data.location
     };
+    // Hard rewrite known legacy Edrwin Houston number if it slipped into JSON.
+    if (/(?:\+?1[\s\-.]*)?\(?713\)?[\s\-.]*(?:659)[\s\-.]*(?:9480)/.test(String(data.phone || ""))) {
+      data.phone = contact.phone || "+1 (317) 563-1795";
+    }
   } catch {
     // keep sanitized data
   }
