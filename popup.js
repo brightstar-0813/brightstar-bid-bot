@@ -34,6 +34,7 @@ import {
 import {
   requiredExperienceToText
 } from "./experience-rules.js";
+import { describeAtsGaps } from "./ats-score.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import {
   extractSpreadsheetId,
@@ -1277,52 +1278,80 @@ function setIconButton(button, icon, label) {
 }
 
 function atsScoreTitle(job) {
-  const evaluation = job?.atsEvaluation || {};
-  const components = evaluation.components || {};
-  const lines = [`ATS match: ${job.atsScore}/100${job.atsGrade ? ` Â· ${job.atsGrade}` : ""}`];
-  const labels = {
-    keywordMatch: "Keywords",
-    titleAlignment: "Title",
-    salesforceProducts: "Salesforce products",
-    experienceEvidence: "Experience",
-    atsStructure: "Structure"
-  };
-  for (const [key, label] of Object.entries(labels)) {
-    const item = components[key];
-    if (item && Number(item.max) > 0) lines.push(`${label}: ${item.score}/${item.max}`);
+  const detail = describeAtsGaps(job?.atsEvaluation || {});
+  const lines = [`ATS match: ${job.atsScore}/100${job.atsGrade ? ` · ${job.atsGrade}` : ""}`];
+  for (const row of detail.breakdown) {
+    lines.push(`${row.label}: ${row.score}/${row.max}`);
   }
-  if (evaluation.missingProducts?.length) {
-    lines.push(`Missing products: ${evaluation.missingProducts.join(", ")}`);
+  if (detail.missingProducts.length) {
+    lines.push(`Missing products: ${detail.missingProducts.join(", ")}`);
   }
-  if (evaluation.missingKeywords?.length) {
-    lines.push(`Missing keywords: ${evaluation.missingKeywords.slice(0, 8).join(", ")}`);
+  if (detail.missingKeywords.length) {
+    lines.push(`Missing keywords: ${detail.missingKeywords.slice(0, 8).join(", ")}`);
+  }
+  if (detail.tips.length) {
+    lines.push(`Improve: ${detail.tips[0]}`);
   }
   return lines.join("\n");
 }
 
-function oneOffGapsHtml(evaluation = {}) {
-  const products = Array.isArray(evaluation.missingProducts) ? evaluation.missingProducts : [];
-  const keywords = Array.isArray(evaluation.missingKeywords) ? evaluation.missingKeywords : [];
+function atsGapsHtml(evaluation = {}) {
+  const detail = describeAtsGaps(evaluation);
   const parts = [];
-  if (products.length) {
+
+  if (detail.breakdown.length) {
     parts.push(
-      `<div class="one-off-ats-gap-group"><strong>Missing products</strong><ul>${products
+      `<div class="one-off-ats-gap-group"><strong>Score breakdown</strong><ul>${detail.breakdown
+        .map((row) => {
+          const weak = row.weak ? ' class="is-weak"' : "";
+          const match =
+            row.total != null && row.matched != null
+              ? ` <span class="ats-gap-meta">(${row.matched}/${row.total})</span>`
+              : "";
+          return `<li${weak}><span>${escapeHtml(row.label)}</span> <strong>${row.score}/${row.max}</strong>${match}</li>`;
+        })
+        .join("")}</ul></div>`
+    );
+  }
+
+  if (detail.missingProducts.length) {
+    parts.push(
+      `<div class="one-off-ats-gap-group"><strong>Missing products</strong><ul>${detail.missingProducts
         .map((p) => `<li>${escapeHtml(String(p))}</li>`)
         .join("")}</ul></div>`
     );
   }
-  if (keywords.length) {
+
+  if (detail.missingKeywords.length) {
     parts.push(
-      `<div class="one-off-ats-gap-group"><strong>Missing keywords</strong><ul>${keywords
-        .slice(0, 16)
+      `<div class="one-off-ats-gap-group"><strong>Missing keywords</strong><ul>${detail.missingKeywords
         .map((k) => `<li>${escapeHtml(String(k))}</li>`)
         .join("")}</ul></div>`
     );
   }
+
+  if (detail.tips.length) {
+    parts.push(
+      `<div class="one-off-ats-gap-group one-off-ats-improve"><strong>How to improve</strong><ul>${detail.tips
+        .map((tip) => `<li>${escapeHtml(tip)}</li>`)
+        .join("")}</ul></div>`
+    );
+  }
+
   if (!parts.length) {
-    return `<p class="one-off-ats-gap-empty">No keyword/product gaps recorded.</p>`;
+    return `<p class="one-off-ats-gap-empty">No ATS gap details recorded yet.</p>`;
   }
   return parts.join("");
+}
+
+function wireAtsGapsToggle(button, panel) {
+  if (!button || !panel) return;
+  button.addEventListener("click", () => {
+    const open = panel.hidden;
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.textContent = open ? "Hide" : "Gaps";
+  });
 }
 
 function escapeHtml(s) {
@@ -1411,7 +1440,7 @@ function renderOneOffAts(payload) {
       : `<span class="ats-score-grade ats-score-grade-empty"></span>`) +
     `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
   if (oneOffAtsGapsEl) {
-    oneOffAtsGapsEl.innerHTML = oneOffGapsHtml(payload.atsEvaluation || {});
+    oneOffAtsGapsEl.innerHTML = atsGapsHtml(payload.atsEvaluation || {});
     oneOffAtsGapsEl.hidden = true;
   }
   if (oneOffViewGapsBtn) {
@@ -1629,24 +1658,46 @@ function renderQueue() {
     badge.textContent = job.status || "pending";
     badges.appendChild(badge);
     let atsScoreEl = null;
+    let atsGapsWrap = null;
     if (job.atsScore != null && Number.isFinite(Number(job.atsScore))) {
       const score = Math.max(0, Math.min(100, Math.round(Number(job.atsScore))));
       const grade = String(job.atsGrade || "").trim();
       const tier =
         score >= 85 ? "is-excellent" : score >= 70 ? "is-good" : score >= 55 ? "is-fair" : "is-low";
       atsScoreEl = document.createElement("div");
-      atsScoreEl.className = `ats-score ${tier}`;
-      atsScoreEl.style.setProperty("--ats", String(score));
-      atsScoreEl.title = atsScoreTitle(job);
-      atsScoreEl.setAttribute(
+      atsScoreEl.className = "queue-ats-block";
+      const scoreBadge = document.createElement("div");
+      scoreBadge.className = `ats-score ${tier}`;
+      scoreBadge.style.setProperty("--ats", String(score));
+      scoreBadge.title = atsScoreTitle(job);
+      scoreBadge.setAttribute(
         "aria-label",
         `ATS match ${score} out of 100${grade ? `, ${grade}` : ""}`
       );
-      atsScoreEl.innerHTML =
+      scoreBadge.innerHTML =
         `<span class="ats-score-kicker">ATS</span>` +
         `<span class="ats-score-value">${score}</span>` +
-        (grade ? `<span class="ats-score-grade">${grade}</span>` : `<span class="ats-score-grade ats-score-grade-empty"></span>`) +
+        (grade
+          ? `<span class="ats-score-grade">${escapeHtml(grade)}</span>`
+          : `<span class="ats-score-grade ats-score-grade-empty"></span>`) +
         `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
+      atsScoreEl.appendChild(scoreBadge);
+
+      if (job.atsEvaluation) {
+        const gapsBtn = document.createElement("button");
+        gapsBtn.type = "button";
+        gapsBtn.className = "ghost compact ats-gaps-toggle";
+        gapsBtn.textContent = "Gaps";
+        gapsBtn.setAttribute("aria-expanded", "false");
+        gapsBtn.title = "Show missing products, keywords, and how to improve";
+        const gapsPanel = document.createElement("div");
+        gapsPanel.className = "one-off-ats-gaps queue-ats-gaps";
+        gapsPanel.hidden = true;
+        gapsPanel.innerHTML = atsGapsHtml(job.atsEvaluation);
+        wireAtsGapsToggle(gapsBtn, gapsPanel);
+        atsScoreEl.appendChild(gapsBtn);
+        atsGapsWrap = gapsPanel;
+      }
     }
     if (isLinkedInJob(job)) {
       const liBadge = document.createElement("span");
@@ -1713,6 +1764,7 @@ function renderQueue() {
     meta.appendChild(sub);
     meta.appendChild(badges);
     if (atsScoreEl) meta.appendChild(atsScoreEl);
+    if (atsGapsWrap) meta.appendChild(atsGapsWrap);
     if (job.error) {
       const err = document.createElement("div");
       err.className = "sub";

@@ -5,7 +5,8 @@ import {
   evaluateAtsScore,
   boostResumeForAts,
   buildAtsScoreRetryPrompt,
-  selectProjectBankExcerpts
+  selectProjectBankExcerpts,
+  describeAtsGaps
 } from "../ats-score.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "../prompts/sf-enterprise-projects.js";
 
@@ -281,4 +282,33 @@ React, TypeScript, Node.js, AWS, Docker, Kubernetes, PostgreSQL.
   });
   assert.ok(result.score >= 70, `expected strong FS score, received ${result.score}`);
   assert.ok(result.components.domainProducts.matched >= 3);
+});
+
+test("describeAtsGaps lists missing items and how-to-improve tips", () => {
+  const weak = evaluateAtsScore(
+    {
+      name: "Candidate",
+      email: "c@x.com",
+      headline: "Engineer",
+      profile: "Technology professional.",
+      skills: [{ category: "General", items: "Communication" }],
+      experience: [{ company: "Acme", bullets: ["Supported teams."] }]
+    },
+    { jdText: jd, jobTitle: "Salesforce Technical Architect", roleTrack: "sf" }
+  );
+  const detail = describeAtsGaps(weak);
+  assert.ok(detail.breakdown.length >= 3);
+  assert.ok(detail.missingProducts.includes("Service Cloud"));
+  assert.ok(detail.tips.some((t) => /Service Cloud|skills categories|bullets/i.test(t)));
+  assert.ok(detail.tips.some((t) => /JD Keywords|Mirror these JD terms/i.test(t)));
+
+  const strongDetail = describeAtsGaps(
+    evaluateAtsScore(strongResume, {
+      jdText: jd,
+      jobTitle: "Salesforce Technical Architect",
+      roleTrack: "sf"
+    })
+  );
+  assert.equal(strongDetail.missingProducts.length, 0);
+  assert.ok(strongDetail.tips.length >= 1);
 });

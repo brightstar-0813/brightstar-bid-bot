@@ -381,3 +381,107 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
     evaluatedAt: Date.now()
   };
 }
+
+/**
+ * Human-readable ATS gap report for the popup Gaps panel.
+ * Lists score breakdown, missing products/keywords, and concrete improve tips
+ * (real skills categories + experience evidence — never keyword-dump rows).
+ */
+export function describeAtsGaps(evaluation = {}) {
+  const components = evaluation?.components && typeof evaluation.components === "object"
+    ? evaluation.components
+    : {};
+  const trackId = normalizeRoleTrackId(evaluation?.roleTrack);
+  const track = getRoleTrack(trackId);
+  const missingProducts = Array.isArray(evaluation?.missingProducts)
+    ? evaluation.missingProducts.map((p) => String(p || "").trim()).filter(Boolean)
+    : [];
+  const missingKeywords = Array.isArray(evaluation?.missingKeywords)
+    ? evaluation.missingKeywords.map((k) => String(k || "").trim()).filter(Boolean).slice(0, 16)
+    : [];
+
+  const domainKey = components.domainProducts?.max > 0 ? "domainProducts" : "salesforceProducts";
+  const breakdownDefs = [
+    { key: "keywordMatch", label: "JD keywords" },
+    { key: "titleAlignment", label: "Title alignment" },
+    { key: domainKey, label: track.domainProductLabel || "Domain products" },
+    { key: "experienceEvidence", label: "Experience evidence" },
+    { key: "atsStructure", label: "Resume structure" }
+  ];
+
+  const seen = new Set();
+  const breakdown = [];
+  for (const def of breakdownDefs) {
+    if (seen.has(def.key)) continue;
+    seen.add(def.key);
+    const item = components[def.key];
+    if (!item || !(Number(item.max) > 0)) continue;
+    const score = Number(item.score) || 0;
+    const max = Number(item.max) || 0;
+    const ratio = max ? score / max : 1;
+    breakdown.push({
+      key: def.key,
+      label: def.label,
+      score,
+      max,
+      matched: item.matched,
+      total: item.total,
+      weak: ratio < 0.75
+    });
+  }
+
+  const tips = [];
+  const primaryCategory = track.primarySkillsCategory || "Technical Skills";
+
+  if (missingProducts.length) {
+    tips.push(
+      `Add missing ${track.domainProductLabel || "products"} under real skills categories (e.g. "${primaryCategory}") and name each in bullets for the two most recent roles: ${missingProducts.join(", ")}.`
+    );
+  }
+
+  if (missingKeywords.length) {
+    tips.push(
+      `Mirror these JD terms naturally in profile, full-sentence technicalSummary, and experience bullets — never a "JD Keywords" skills row: ${missingKeywords.slice(0, 10).join(", ")}.`
+    );
+  }
+
+  const titleComp = components.titleAlignment;
+  if (titleComp && Number(titleComp.max) > 0 && titleComp.score / titleComp.max < 0.75) {
+    tips.push("Put the target job title (or its key words) in the headline and reinforce them in the profile.");
+  }
+
+  const expComp = components.experienceEvidence;
+  if (
+    expComp &&
+    Number(expComp.max) > 0 &&
+    expComp.score / expComp.max < 0.75 &&
+    !missingProducts.length
+  ) {
+    tips.push(
+      `Rewrite the two most recent roles as coherent workstreams that prove JD tools in real bullets (${track.bulletInternalsHint || "name the feature, what you built, and the outcome"}).`
+    );
+  }
+
+  const structComp = components.atsStructure;
+  if (structComp && Number(structComp.max) > 0 && structComp.score < structComp.max) {
+    tips.push("Fill every standard section: contact, profile, skills, experience, plus education or certifications.");
+  }
+
+  if (!tips.length && Number(evaluation?.score) >= ATS_TARGET_SCORE) {
+    tips.push("Match looks strong — no critical gaps. Keep proving Tier 0 tools inside recent-role bullets on the next regenerate if the JD shifts.");
+  } else if (!tips.length) {
+    tips.push(
+      "Regenerate with stronger project evidence in the two most recent roles, or open Gaps after the next ATS pass once missing products/keywords are recorded."
+    );
+  }
+
+  return {
+    score: evaluation?.score ?? null,
+    grade: evaluation?.grade || "",
+    roleTrack: trackId,
+    breakdown,
+    missingProducts,
+    missingKeywords,
+    tips
+  };
+}

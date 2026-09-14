@@ -1314,9 +1314,43 @@ input[type="file"]::file-selector-button {
   padding-left: 1.2em;
 }
 
+.one-off-ats-gaps li.is-weak {
+  color: color-mix(in srgb, var(--danger, #c44) 72%, var(--muted));
+}
+
+.one-off-ats-gaps .ats-gap-meta {
+  opacity: 0.75;
+  font-weight: 400;
+}
+
+.one-off-ats-improve strong {
+  color: var(--text);
+}
+
 .one-off-ats-gap-empty {
   margin: 0;
   opacity: 0.85;
+}
+
+.queue-ats-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.queue-ats-gaps {
+  flex: 1 1 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.ats-gaps-toggle {
+  flex: 0 0 auto;
 }
 
 .manual-tools {
