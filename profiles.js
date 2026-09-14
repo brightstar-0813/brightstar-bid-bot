@@ -90,7 +90,7 @@ export const BUILTIN_PROFILES = [
     workAuthorized: "Yes",
     sponsorship: "No",
     hispanicLatino: "",
-    signatureTitle: "Senior Salesforce Engineer",
+    signatureTitle: "Senior Salesforce Engineer / Salesforce Architect",
     masterResume: "",
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},

@@ -233,7 +233,7 @@ Return exactly this shape (field names must match):
     {
       "company": "Culligan International",
       "location": "Rosemont, Illinois, United States | Remote",
-      "title": "Senior Salesforce Developer",
+      "title": "Senior Salesforce Engineer / Salesforce Architect",
       "dates": "Apr 2024 - Present",
       "project": "Water Services CRM and Field Service Platform",
       "bullets": [
@@ -533,7 +533,7 @@ FIXED COMPANY HISTORY — DO NOT MODIFY COMPANY NAMES, LOCATIONS, MODES, OR DATE
 (Employment type is deliberately absent. Never add it back.)
 ==================================================
 
-Culligan International (Rosemont, Illinois, United States | Remote) — default title: Senior Salesforce Developer | Apr 2024 - Present
+Culligan International (Rosemont, Illinois, United States | Remote) — default title: Senior Salesforce Engineer / Salesforce Architect | Apr 2024 - Present
 
 Fusion Academy (Grand Rapids, Michigan, United States | Hybrid) — default title: Salesforce Architect | Sep 2021 - Apr 2024
 
