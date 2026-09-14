@@ -27,7 +27,7 @@ GATE 3 — Never mention citizenship, visa, or immigration.
 GATE 4 — Certifications in certifications array only.
 GATE 5 — Name real technologies (Python eval harnesses, SQL validation, API regression suites) not "AI concepts".
 GATE 6 — Tailor for THIS JD without copying JD phrasing.
-GATE 7 — Never alter employers, dates, education, or certifications.
+GATE 7 — Never alter employers, dates, education, or certifications. Education stays minimal: school, degree, year, and location only — never honors, coursework, thesis, or final-year projects.
 
 ==================================================
 ADJACENT MATCH (when AI-specific experience is not direct)
@@ -85,6 +85,7 @@ JSON SCHEMA
 
 JSON RULES
 - Include EVERY employer from master resume. profile: 3–5 sentences, technically credible, no clichés.
+- education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
 - technicalSummary: full-sentence highlights that naturally include supportable JD terms — not a one-word tool list.
 - skills: use real categories only (AI & Evaluation, Programming & Data, Data & Experimentation, Backend & APIs, Cloud & Infrastructure, etc.).
 - Return valid JSON only. No double quotes inside string values.

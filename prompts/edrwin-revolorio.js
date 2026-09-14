@@ -273,7 +273,7 @@ WHAT MUST STAY FIXED
 ==================================================
 
 - Name, location, phone, email, LinkedIn
-- Education entries exactly as listed in CANDIDATE INFORMATION
+- Education entries exactly as listed in CANDIDATE INFORMATION — school, degree, year, and location only. education.details is the school location line alone. Never add honors, coursework, thesis, final-year projects, or any other academic narrative.
 - Company names, company locations, work modes, and employment dates from FIXED COMPANY HISTORY (employment type is never shown)
 - Certification list exactly as provided (do not add, remove, rename, reorder into invented credentials, or invent dates)
 

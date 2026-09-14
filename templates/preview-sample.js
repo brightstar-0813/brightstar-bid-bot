@@ -64,8 +64,8 @@ export function sampleResumeForPerson(person = {}) {
       {
         school: "University of Texas at Austin",
         degree: "B.S. Computer Science",
-        year: "2014",
-        details: "Focus on software engineering and databases"
+        year: "2014 - 2018",
+        details: "Austin, Texas, United States"
       }
     ],
     certifications: [

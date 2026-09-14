@@ -27,7 +27,7 @@ GATE 3 — Never mention citizenship, visa, or immigration.
 GATE 4 — Certifications in certifications array only — never as bullet subjects.
 GATE 5 — Name real technologies (dbt incremental models, Airflow DAGs, Kafka consumer groups) not "data engineering concepts".
 GATE 6 — Tailor visibly for THIS JD.
-GATE 7 — Never alter employers, dates, education, or certifications.
+GATE 7 — Never alter employers, dates, education, or certifications. Education stays minimal: school, degree, year, and location only — never honors, coursework, thesis, or final-year projects.
 
 ==================================================
 SILENT JD ANALYSIS
@@ -79,6 +79,7 @@ JSON SCHEMA
 
 JSON RULES
 - Include EVERY employer from master resume. profile: 3–5 sentences on cloud-scale platforms, modeling, pipeline reliability.
+- education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
 - technicalSummary: full-sentence highlights that naturally include the JD's top data stack — not a one-word tool list.
 - skills: use real categories only (ETL & Data Pipeline Development, Database, Data Lake & Warehouse, Big Data & Cloud, Data Orchestration, Data Modeling & Transformation, etc.).
 - Only claim technologies supported by the master resume. Map adjacent tools honestly when JD asks for unsupported tech.

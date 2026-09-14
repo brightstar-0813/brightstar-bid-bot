@@ -382,14 +382,54 @@ export function educationList(education) {
   );
 }
 
+/**
+ * Education "details" is location only (city / region / country).
+ * Drop honors, coursework, thesis, and other academic narrative the model sometimes invents.
+ */
+export function educationLocationLine(edu) {
+  const explicit = String(edu?.location || "").trim();
+  if (explicit) return explicit;
+
+  const raw = String(edu?.details || edu?.gpa || "").trim();
+  if (!raw) return "";
+
+  const fluffRe =
+    /coursework|relevant courses|final[\s-]?year|honou?rs|dean'?s list|thesis|dissertation|capstone|degree classification|conferred|gpa\b|grade\b|focus on |project:/i;
+  if (fluffRe.test(raw)) {
+    const firstLine = raw.split(/\n/)[0].trim();
+    // Keep a short place-like first line when fluff was appended after it.
+    if (
+      firstLine &&
+      firstLine.length <= 80 &&
+      !fluffRe.test(firstLine) &&
+      !/[.]{2,}|;/.test(firstLine)
+    ) {
+      return firstLine;
+    }
+    return "";
+  }
+
+  // Prefer a single short location line over multi-paragraph essays.
+  const firstLine = raw.split(/\n/)[0].trim();
+  if (firstLine.length > 100) return "";
+  return firstLine;
+}
+
+/** Strip invented conferral notes from education year ranges. */
+export function educationYearLine(edu) {
+  return String(edu?.year || "")
+    .replace(/,?\s*degree conferred\b.*$/i, "")
+    .trim();
+}
+
 /** Degree + school on the left, year on the right. */
 export function renderEducationRows(education) {
   return educationList(education)
     .map((edu) => {
       const school = escapeHtml(edu.school || "");
       const degree = escapeHtml(edu.degree || "");
-      const year = escapeHtml(edu.year || "");
-      const details = escapeHtml(edu.details || edu.gpa || "");
+      const year = escapeHtml(educationYearLine(edu));
+      const details = escapeHtml(educationLocationLine(edu));
       return `<div class="edu-row">
   <div class="edu-main">
     ${degree ? `<div class="edu-degree">${degree}</div>` : ""}
@@ -497,8 +537,8 @@ export function renderEducationDatedColumn(education) {
     .map((edu) => {
       const school = escapeHtml(edu.school || "");
       const degree = escapeHtml(edu.degree || "");
-      const year = escapeHtml(edu.year || "");
-      const details = escapeHtml(edu.details || edu.gpa || "");
+      const year = escapeHtml(educationYearLine(edu));
+      const details = escapeHtml(educationLocationLine(edu));
       return `<article class="edu-col">
   <div class="job-dates">${year}</div>
   <div class="job-body">

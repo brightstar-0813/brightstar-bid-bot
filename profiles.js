@@ -306,7 +306,7 @@ Tempest Security Intelligence — Software Engineer Intern / Backend Developer |
 Java, Python, SQL, Linux, REST APIs for cybersecurity platforms; security log normalization; SQL reporting; backend utilities and small Python automation.
 
 EDUCATION
-Federal University of Pernambuco — Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017 | GPA 8.7 / 10`,
+Federal University of Pernambuco — Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017 | Recife, Brazil`,
     coverLetterPrompt: coverLetterDePrompt,
     autofillExtras: {},
     requiredExperience: [

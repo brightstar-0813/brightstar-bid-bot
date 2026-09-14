@@ -1134,7 +1134,7 @@ export function buildJdSkillsRetryPrompt(data, jdText, { roles = 2, minBullets =
     "2. Spread the skills across those bullets rather than stuffing them all into one line.",
     `3. Each such bullet names the business process, the exact feature or capability used, what was personally built or configured, and the outcome. Show internals, not product names alone: ${track.bulletInternalsHint}`,
     "4. If a technology was released after a role ended, place it in the most recent role instead of that older one.",
-    "5. Keep every employer, date, location, title, education entry and certification exactly as they already are. Do not mention clearance, citizenship, visa status, or employment type anywhere.",
+    "5. Keep every employer, date, location, title, education entry and certification exactly as they already are. Education stays minimal: school, degree, year, and location only — never add honors, coursework, thesis, or final-year projects. Do not mention clearance, citizenship, visa status, or employment type anywhere.",
     "6. Do not explain what is missing or unsupported. Never write that the resume does not establish something.",
     "",
     "Return ONLY the JSON object, starting with { and ending with }. Do not put double quotes inside string values."

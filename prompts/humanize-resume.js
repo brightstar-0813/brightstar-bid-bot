@@ -115,6 +115,7 @@ CRITICAL OUTPUT CONSTRAINT
 Still return ONLY one complete valid resume JSON object matching the schema from the main prompt.
 Humanize the wording inside the JSON fields — do not add Markdown, commentary, coverage tables, or detector notes before or after the JSON.
 Do not invent employers, titles, dates, degrees, certifications, clearances, or contact details.
+Do not expand education beyond school, degree, year, and location — never add honors, coursework, thesis, or final-year projects.
 `.trim();
 }
 

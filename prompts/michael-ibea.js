@@ -263,7 +263,7 @@ WHAT MUST STAY FIXED
 ==================================================
 
 - Name, location, phone, email, LinkedIn
-- Education entries exactly as listed in CANDIDATE INFORMATION
+- Education entries exactly as listed in CANDIDATE INFORMATION — school, degree, year, and location only. education.details is the school location line alone. Never add honors, coursework, thesis, final-year projects, or any other academic narrative.
 - Company names, company locations, work modes, and employment dates from FIXED COMPANY HISTORY (employment type is never shown)
 - Certification list exactly as provided (do not add, remove, rename, reorder into invented credentials, or invent dates)
 
@@ -510,7 +510,6 @@ Experience framing: 10+ years of overall technology experience, including 8+ yea
 
 Education:
 University of Hong Kong | Bachelor of Science in Computer Science | Pok Fu Lam, Hong Kong | Sep 2014 - Jun 2018
-Degree classification: Second Class Honours, Upper Division (2:1). Dean's List 2017-2018. Final year project: Scalable Cloud-Based Parking Management System.
 
 Verified Certifications (this list is complete and closed):
 (none — leave the certifications array empty; never invent Salesforce credentials)

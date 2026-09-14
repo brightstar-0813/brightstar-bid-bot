@@ -83,7 +83,7 @@ JSON SCHEMA — REQUIRED
       "school": "Federal University of Pernambuco",
       "degree": "Bachelor's Degree in Mathematics and Computer Science",
       "year": "Sep 2013 - Dec 2017",
-      "details": "Recife, Brazil | GPA 8.7 / 10"
+      "details": "Recife, Brazil"
     }
   ],
   "certifications": [],
@@ -124,7 +124,7 @@ WHAT MUST STAY FIXED
 ==================================================
 
 - Name, location, phone, email, LinkedIn
-- Education exactly as listed
+- Education exactly as listed — school, degree, year, and location only. education.details is the school location line alone. Never add honors, coursework, thesis, final-year projects, or any other academic narrative.
 - Company names, locations, modes, and dates from FIXED COMPANY HISTORY
 - Empty certifications list
 
@@ -227,7 +227,7 @@ Base identity: Senior Analytics Engineer / Senior Data Engineer
 Experience framing: 9+ years of overall technology experience, including 7+ years delivering data engineering and analytics platforms across SaaS, fintech, e-commerce, retail, cybersecurity, and enterprise digital transformation.
 
 Education:
-Federal University of Pernambuco | Bachelor's Degree in Mathematics and Computer Science | Recife, Brazil | Sep 2013 - Dec 2017 | GPA 8.7 / 10
+Federal University of Pernambuco | Bachelor's Degree in Mathematics and Computer Science | Recife, Brazil | Sep 2013 - Dec 2017
 
 Verified Certifications (this list is complete and closed):
 (none — leave the certifications array empty; never invent credentials)

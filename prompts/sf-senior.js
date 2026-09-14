@@ -45,7 +45,7 @@ GATE 5 — NAME REAL TECHNOLOGY (Apex, LWC, SOQL, Flow, Named Credentials, Platf
 
 GATE 6 — TAILOR visibly for THIS JD; output must not look identical for a different Salesforce JD.
 
-GATE 7 — HOLD THE FIXED FACTS. Never alter employers, dates, education, or certification list.
+GATE 7 — HOLD THE FIXED FACTS. Never alter employers, dates, education, or certification list. Education stays minimal: school, degree, year, and location only — never honors, coursework, thesis, or final-year projects.
 
 ==================================================
 STEP 1 — SILENT JD + PROJECT ANALYSIS (NEVER OUTPUT)
@@ -159,6 +159,7 @@ JSON SCHEMA — REQUIRED
 
 JSON RULES
 - Include EVERY employer from the master resume, most recent first.
+- education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
 - profile: 4–6 sentences — Salesforce identity, major target clouds, development/architecture/integration depth, domain when supported; ~4–7 high-value JD themes — not a tech inventory.
 - technicalSummary: 6–10 bullets of real highlights (full sentences that naturally include JD tools — not a one-word tool list).
 - skills: FIRST row is "Salesforce Clouds" listing EVERY Salesforce cloud/product the JD names. Also use rows as needed: Salesforce Development, Salesforce Automation, Salesforce Architecture, Salesforce Security, Integrations and APIs, Data Architecture, DevOps and Release Management, Testing and Quality, Enterprise Systems, Industry / Domain.

@@ -1,5 +1,7 @@
 import {
   escapeHtml,
+  educationLocationLine,
+  educationYearLine,
   renderCertBadges,
   renderCerts,
   renderContactBlock,
@@ -233,8 +235,8 @@ export const timesClassicTemplate = {
       .map((edu) => {
         const school = escapeHtml(edu?.school || "");
         const degree = escapeHtml(edu?.degree || "");
-        const year = escapeHtml(edu?.year || "");
-        const details = escapeHtml(edu?.details || "");
+        const year = escapeHtml(educationYearLine(edu));
+        const details = escapeHtml(educationLocationLine(edu));
         if (!school && !degree) return "";
         // Keep this on one line: p uses white-space: pre-wrap, so any source
         // indentation would render as leading blank space.
