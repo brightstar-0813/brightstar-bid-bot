@@ -207,7 +207,7 @@ Chrome cannot write from the spreadsheet share link alone:
 3. Deploy → New deployment → Web app → Execute as: **Me**, Who has access: **Anyone**
 4. Paste the spreadsheet link and Web App URL into the extension’s **Google Sheet** section
 5. Reload the extension if you just changed code; values persist in `storage.local`
-6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listLinks` / `markApplied` are live
+6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listRows` / `listLinks` / `markApplied` are live. WorkSphere **Sync from sheet** needs `listRows` — without it, older scripts treated sync as append and wrote blank **Ready** rows.
 
 If sheet append fails, file generation still succeeds — the status line will note the sheet error.
 

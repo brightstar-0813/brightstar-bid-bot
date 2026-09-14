@@ -7,17 +7,20 @@
  * 4. Deploy → New deployment → Type: Web app
  *    - Execute as: Me
  *    - Who has access: Anyone
- * 5. Copy the Web App URL into the extension's "Web App URL" field
- *    (redeploy after updates so listLinks / markApplied / sheetName are live)
+ * 5. Copy the Web App URL into the extension / WorkSphere "Web App URL" field
+ *    (redeploy after updates so listRows / listLinks / markApplied / sheetName are live)
  *
  * POST body (text/plain JSON):
- *   action: "append" (default) | "listLinks" | "markApplied"
+ *   action: "append" (default) | "listRows" | "listLinks" | "markApplied"
  *   spreadsheetId, optional sheetName (tab per profile; created if missing)
  *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
  *
  * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
  * Dedup: same job link (normalized) is treated as duplicate within that tab.
+ *
+ * WorkSphere "Sync from sheet" calls listRows. Older scripts without listRows treated
+ * that request as append and wrote blank Ready rows — do not fall through unknown actions.
  */
 function doPost(e) {
   try {
@@ -28,9 +31,10 @@ function doPost(e) {
 
     const ss = SpreadsheetApp.openById(String(data.spreadsheetId));
     const sheet = resolveSheet_(ss, data.sheetName);
-    const action = String(data.action || "append").toLowerCase();
+    const action = String(data.action || "append").toLowerCase().replace(/_/g, "");
 
-    if (action === "listlinks" || action === "list_links") {
+    if (action === "listlinks") {
+      ensureSheetLayout_(sheet);
       const links = collectJobLinks_(sheet);
       const companies = collectCompanies_(sheet);
       const companyRows = collectCompanyLinkPairs_(sheet);
@@ -56,12 +60,24 @@ function doPost(e) {
       });
     }
 
+    if (action === "listrows") {
+      const pruned = ensureSheetLayout_(sheet);
+      const rows = collectJobRows_(sheet);
+      return json_({
+        ok: true,
+        sheetName: sheet.getName(),
+        rows: rows,
+        count: rows.length,
+        prunedBlankRows: pruned
+      });
+    }
+
     const jobLink = String(data.jobLink || "").trim();
     const companyName = String(data.companyName || "").trim();
+    const jobTitle = String(data.jobTitle || "").trim();
 
-    if (action === "markapplied" || action === "mark_applied" || action === "applied") {
-      ensureStatusHeader_(sheet);
-      dropJdColumnIfPresent_(sheet);
+    if (action === "markapplied" || action === "applied") {
+      ensureSheetLayout_(sheet);
       const appliedOn = String(data.applicationDate || "").trim();
       const status =
         String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
@@ -76,6 +92,9 @@ function doPost(e) {
           sheetName: sheet.getName()
         });
       }
+      if (!rowHasJobIdentity_(jobTitle, companyName, jobLink)) {
+        throw new Error("Cannot mark Applied: job not on sheet and title/company/link missing.");
+      }
       sheet.appendRow(buildDataRow_(data, status));
       return json_({
         ok: true,
@@ -85,12 +104,23 @@ function doPost(e) {
       });
     }
 
+    if (action && action !== "append") {
+      throw new Error(
+        'Unknown action "' +
+          String(data.action || "") +
+          '". Supported: append, listRows, listLinks, markApplied.'
+      );
+    }
+
+    if (!rowHasJobIdentity_(jobTitle, companyName, jobLink)) {
+      throw new Error("Refusing to append an empty row (need title, company, or link).");
+    }
+
     if (jobLink && linkExists_(sheet, jobLink)) {
       return json_({ ok: true, duplicate: true, reason: "link", sheetName: sheet.getName() });
     }
 
-    ensureStatusHeader_(sheet);
-    dropJdColumnIfPresent_(sheet);
+    ensureSheetLayout_(sheet);
     sheet.appendRow(buildDataRow_(data, data.status || "Ready"));
 
     return json_({ ok: true, duplicate: false, sheetName: sheet.getName() });
@@ -239,6 +269,69 @@ function findNamedColumnIndex_(headerRow, names) {
   return -1;
 }
 
+function titleColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["title", "job title", "role", "position"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return 2; // column C
+}
+
+function salaryColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["salary", "comp", "compensation", "pay"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return 5; // column F
+}
+
+function dateColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["date", "created date", "application date", "created"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return 1; // column B
+}
+
+function jobNoColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["no", "job no", "jobno", "#", "number"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  return 0; // column A
+}
+
+function rowHasJobIdentity_(title, company, link) {
+  if (String(link || "").trim()) return true;
+  if (String(title || "").trim()) return true;
+  if (String(company || "").trim()) return true;
+  return false;
+}
+
 function ensureStatusHeader_(sheet) {
   var headers = headerRow_(sheet);
   if (!rowLooksLikeHeader_(headers)) return;
@@ -256,16 +349,74 @@ function dropJdColumnIfPresent_(sheet) {
   if (jdIdx >= 0) sheet.deleteColumn(jdIdx + 1);
 }
 
+/** Drop columns past Status (orphaned Ready cells after JD removal / bad writes). */
+function trimColumnsPastStatus_(sheet) {
+  var headers = headerRow_(sheet);
+  var statusCol = rowLooksLikeHeader_(headers) ? statusColumnIndex_(headers) + 1 : 7;
+  var lastCol = sheet.getLastColumn();
+  if (lastCol > statusCol) {
+    sheet.deleteColumns(statusCol + 1, lastCol - statusCol);
+  }
+}
+
+/**
+ * Delete rows that only have Status (e.g. lone "Ready") with no title/company/link.
+ * Walk bottom-up so deletes do not shift unvisited indices.
+ * @return {number} rows removed
+ */
+function pruneBlankReadyRows_(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || values.length < 2) return 0;
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var header = hasHeader ? values[0] : [];
+  var titleCol = hasHeader ? titleColumnIndex_(header) : 2;
+  var companyCol = hasHeader ? companyColumnIndex_(header) : 3;
+  var linkCol = hasHeader ? linkColumnIndex_(header) : 4;
+  var removed = 0;
+  for (var r = values.length - 1; r >= start; r--) {
+    var row = values[r] || [];
+    var title = String(row[titleCol] || "").trim();
+    var company = String(row[companyCol] || "").trim();
+    var link = String(row[linkCol] || "").trim();
+    if (!link) {
+      for (var c = 0; c < row.length; c++) {
+        var cell = String(row[c] || "").trim();
+        if (cellLooksLikeUrl_(cell)) {
+          link = cell;
+          break;
+        }
+      }
+    }
+    if (rowHasJobIdentity_(title, company, link)) continue;
+    // Entirely empty rows also count — clear the Ready-only placeholders.
+    var any = false;
+    for (var i = 0; i < row.length; i++) {
+      if (String(row[i] || "").trim()) {
+        any = true;
+        break;
+      }
+    }
+    if (!any) continue;
+    sheet.deleteRow(r + 1);
+    removed += 1;
+  }
+  return removed;
+}
+
+/** Normalize layout before read/write. Returns blank rows pruned. */
+function ensureSheetLayout_(sheet) {
+  ensureStatusHeader_(sheet);
+  dropJdColumnIfPresent_(sheet);
+  trimColumnsPastStatus_(sheet);
+  return pruneBlankReadyRows_(sheet);
+}
+
+/** Always write Status to the Status column (G), never "after last filled cell". */
 function statusColumnForRow_(sheet, row) {
   var headers = headerRow_(sheet);
   if (rowLooksLikeHeader_(headers)) return statusColumnIndex_(headers) + 1;
-  var width = Math.max(sheet.getLastColumn(), 7);
-  var values = sheet.getRange(row, 1, 1, width).getValues()[0] || [];
-  var last = 0;
-  for (var i = 0; i < values.length; i++) {
-    if (String(values[i] || "").trim()) last = i + 1;
-  }
-  return Math.max(7, last + 1);
+  return 7;
 }
 
 function companyColumnIndex_(headerRow) {
@@ -281,6 +432,51 @@ function companyColumnIndex_(headerRow) {
     if (idx >= 0) return idx;
   }
   return 3; // column D
+}
+
+/** Full job rows for WorkSphere Sync from sheet (skips blank Ready placeholders). */
+function collectJobRows_(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return [];
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var header = hasHeader ? values[0] : [];
+  var jobNoCol = hasHeader ? jobNoColumnIndex_(header) : 0;
+  var dateCol = hasHeader ? dateColumnIndex_(header) : 1;
+  var titleCol = hasHeader ? titleColumnIndex_(header) : 2;
+  var companyCol = hasHeader ? companyColumnIndex_(header) : 3;
+  var linkCol = hasHeader ? linkColumnIndex_(header) : 4;
+  var salaryCol = hasHeader ? salaryColumnIndex_(header) : 5;
+  var statusCol = hasHeader ? statusColumnIndex_(header) : 6;
+  var out = [];
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    var title = String(row[titleCol] || "").trim();
+    var company = String(row[companyCol] || "").trim();
+    var link = String(row[linkCol] || "").trim();
+    if (!link) {
+      for (var c = 0; c < row.length; c++) {
+        var cell = String(row[c] || "").trim();
+        if (cellLooksLikeUrl_(cell)) {
+          link = cell;
+          break;
+        }
+      }
+    }
+    if (!rowHasJobIdentity_(title, company, link)) continue;
+    if (!company && /^(ready|saved|new|applied)$/i.test(title)) continue;
+    out.push({
+      row: r + 1,
+      jobNo: String(row[jobNoCol] || "").trim(),
+      date: String(row[dateCol] || "").trim(),
+      title: title,
+      company: company,
+      link: link,
+      salary: String(row[salaryCol] || "").trim(),
+      status: String(row[statusCol] || "").trim()
+    });
+  }
+  return out;
 }
 
 function normalizeCompanyName_(name) {
