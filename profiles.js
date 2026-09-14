@@ -1,5 +1,9 @@
 import { PROMPT as dmarioLewisPrompt } from "./prompts/dmario-lewis.js";
 import { PROMPT as edrwinRevolorioPrompt } from "./prompts/edrwin-revolorio.js";
+import { PROMPT as michaelIbeaPrompt } from "./prompts/michael-ibea.js";
+import { PROMPT as carlosCapulongPrompt } from "./prompts/carlos-capulong.js";
+import { PROMPT as davidOliveiraPrompt } from "./prompts/david-oliveira.js";
+import { PROMPT as victorHolandaPrompt } from "./prompts/victor-holanda.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
@@ -134,6 +138,151 @@ export const BUILTIN_PROFILES = [
       "Innoit",
       "Indiana University Serve IT Clinic"
     ]
+  },
+  {
+    id: "michael-ibea",
+    label: "Michael Ibea (Salesforce)",
+    roleTrack: "sf",
+    promptTemplate: michaelIbeaPrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Ibea_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "Michael Haries Namuco Ibea",
+    email: "michaelhariesibea3@gmail.com",
+    phone: "+63 948 803 6855",
+    linkedin: "https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Trece Martires, Calabarzon, Cavite, Philippines",
+    address: "",
+    zip: "",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Application Systems Analyst / Salesforce Developer",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Intrado Life & Safety Inc",
+      "Smart Park Inc",
+      "Clibase Technology Inc",
+      "App It"
+    ]
+  },
+  {
+    id: "carlos-capulong",
+    label: "Carlos Capulong (Salesforce)",
+    roleTrack: "sf",
+    promptTemplate: carlosCapulongPrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Capulong_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "Carlos Padonan Capulong",
+    email: "carlos.capulong.ex@gmail.com",
+    phone: "+63 924 519 4392",
+    linkedin: "https://www.linkedin.com/in/carlos-capulong/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Malabon, National Capital Region, Philippines",
+    address: "14 Luis St., Panghulo, City of Malabon",
+    zip: "1470",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Engineer",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Intrado Life & Safety Inc",
+      "Simplus",
+      "Third Pillar",
+      "Pointwest Squad Inc",
+      "Deloitte"
+    ]
+  },
+  {
+    id: "david-oliveira",
+    label: "David Oliveira (Salesforce)",
+    roleTrack: "sf",
+    promptTemplate: davidOliveiraPrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Oliveira_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "David Leandro de Oliveira",
+    email: "davidoliveira2308l@gmail.com",
+    phone: "+55 61 8212 1297",
+    linkedin: "https://www.linkedin.com/in/davidleandro",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Paulista, Pernambuco, Brazil",
+    address: "",
+    zip: "",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Engineer",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Intrado",
+      "S&P Global",
+      "AI/R Everymind",
+      "Pismo",
+      "Concrete Solutions"
+    ]
+  },
+  {
+    id: "victor-holanda",
+    label: "Victor Holanda (Salesforce)",
+    roleTrack: "sf",
+    promptTemplate: victorHolandaPrompt,
+    templateId: "ats-modern",
+    resumeFilePrefix: "Holanda_Resume",
+    builtin: true,
+    kind: "resume",
+    name: "Victor Barros de Holanda",
+    email: "victor.holanda201@gmail.com",
+    phone: "+55 81 9573 5610",
+    linkedin: "https://www.linkedin.com/in/victorstardev1996",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Paulista, Pernambuco, Brazil",
+    address: "",
+    zip: "",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Engineer",
+    masterResume: "",
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: ["EPAM Systems", "Endava", "BairesDev", "Accenture"]
   },
   {
     id: COVER_LETTER_PROFILE_ID,
@@ -567,9 +716,17 @@ export async function getCoverLetterProfile() {
   );
 }
 
+const BUILTIN_SF_PROFILE_IDS = new Set([
+  "dmario-lewis",
+  "edrwin-revolorio",
+  "michael-ibea",
+  "carlos-capulong",
+  "david-oliveira",
+  "victor-holanda"
+]);
+
 function isBuiltinSfProfile(person) {
-  const id = String(person?.id || "");
-  return id === "dmario-lewis" || id === "edrwin-revolorio";
+  return BUILTIN_SF_PROFILE_IDS.has(String(person?.id || ""));
 }
 
 /** Resume prompt for the active engineering track (session or saved default). */
