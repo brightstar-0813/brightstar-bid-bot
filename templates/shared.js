@@ -7,6 +7,20 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+/** Never render ATS keyword-dump skill rows on the PDF. */
+function isKeywordDumpSkillsCategory(category) {
+  const c = String(category || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  if (!c) return false;
+  if (/^(jd\s*)?keywords?$/.test(c)) return true;
+  if (/^ats\s*keywords?$/.test(c)) return true;
+  if (/^keyword\s*(dump|list|bank|match|coverage)?$/.test(c)) return true;
+  if (/jd\s*keyword/.test(c)) return true;
+  return false;
+}
+
 /**
  * Certifications may arrive as strings or as objects ({ name, title, ... }).
  * Always return a displayable label — never "[object Object]".
@@ -102,6 +116,7 @@ export function renderSkills(skills) {
       const category = String(row?.category || "").trim();
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
+      if (isKeywordDumpSkillsCategory(category)) return "";
       return `<tr>
   <td class="skill-cat">${escapeHtml(category)}</td>
   <td class="skill-items">${escapeHtml(items)}</td>
@@ -394,6 +409,7 @@ export function renderSkillsStacked(skills) {
       const category = String(row?.category || "").trim();
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
+      if (isKeywordDumpSkillsCategory(category)) return "";
       return `<div class="skill-row"><span class="skill-cat">${escapeHtml(
         category
       )}</span><span class="skill-items">${escapeHtml(items)}</span></div>`;
@@ -410,6 +426,7 @@ export function renderSkillsInline(skills) {
       const category = String(row?.category || "").trim();
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
+      if (isKeywordDumpSkillsCategory(category)) return "";
       if (!category) return `<div class="skill-inline">${escapeHtml(items)}</div>`;
       return `<div class="skill-inline"><span class="skill-cat">${escapeHtml(
         category

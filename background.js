@@ -6813,25 +6813,19 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     }
   }
 
-  // Local ATS badge: deterministic keyword weave, then up to 2 ChatGPT retries until ≥90.
+  // Local ATS cleanup (strip keyword-dump rows / light headline), then project-bank AI retries.
   const atsJd = jobMeta.jdText || "";
   const atsTitle = jobMeta.jobTitle || jobMeta.title || "";
   let atsEvaluation = evaluateAtsScore(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
   {
-    let boostPass = 0;
-    while (atsEvaluation.score < ATS_TARGET_SCORE && boostPass < 2) {
-      const boosted = boostResumeForAts(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
-      if (!boosted.changed || boosted.evaluation.score < atsEvaluation.score) break;
+    const boosted = boostResumeForAts(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
+    if (boosted.changed) {
       resumeData = boosted.data;
       atsEvaluation = boosted.evaluation;
-      boostPass += 1;
-      await setStatus(
-        `ATS boost applied → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
-      );
-      if (atsEvaluation.score >= ATS_TARGET_SCORE) break;
+      await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
     }
   }
-  const maxAtsRetries = 2;
+  const maxAtsRetries = roleTrack === "sf" ? 3 : 2;
   for (
     let atsAttempt = 1;
     atsAttempt <= maxAtsRetries &&
@@ -6842,16 +6836,20 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   ) {
     if (!atsEvaluation.missingKeywords?.length && !atsEvaluation.missingProducts?.length) break;
     await setStatus(
-      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — re-prompt ${atsAttempt}/${maxAtsRetries} for ${ATS_TARGET_SCORE}+…`
+      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — project re-prompt ${atsAttempt}/${maxAtsRetries} for ${ATS_TARGET_SCORE}+…`
     );
     try {
       const atsRaw = await automateChatGpt(
         tab.id,
-        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, { jdText: atsJd, jobTitle: atsTitle, roleTrack }),
+        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, {
+          jdText: atsJd,
+          jobTitle: atsTitle,
+          roleTrack
+        }),
         {
           newChat: false,
           expectResumeJson: true,
-          statusLabel: `Same chat · ATS keyword boost (${jobMeta.companyName || "job"})…`
+          statusLabel: `Same chat · ATS project boost (${jobMeta.companyName || "job"})…`
         }
       );
       let improved = enforceJdSkills(extractResumeJson(atsRaw), atsJd, roleTrack);
@@ -6865,7 +6863,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
         resumeData = improved;
         atsEvaluation = improvedEval;
         await setStatus(
-          `ATS re-prompt ${atsAttempt} → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
+          `ATS project re-prompt ${atsAttempt} → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
         );
       } else {
         await setStatus(`ATS re-prompt ${atsAttempt} did not improve score — keeping prior resume.`);

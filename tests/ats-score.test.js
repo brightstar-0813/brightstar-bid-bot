@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { evaluateAtsScore, boostResumeForAts, ATS_TARGET_SCORE } from "../ats-score.js";
+import {
+  evaluateAtsScore,
+  boostResumeForAts,
+  buildAtsScoreRetryPrompt,
+  selectProjectBankExcerpts
+} from "../ats-score.js";
+import { SF_ENTERPRISE_PROJECT_BANK } from "../prompts/sf-enterprise-projects.js";
 
 const jd = `
 Salesforce Technical Architect
@@ -70,31 +76,60 @@ test("ATS scoring is deterministic for identical inputs", () => {
   assert.deepEqual(first.missingKeywords, second.missingKeywords);
 });
 
-test("boostResumeForAts lifts a weak resume toward the 90+ target", () => {
+test("boostResumeForAts cleans JD Keywords and aligns headline without token dumps", () => {
   const weak = {
     name: "Candidate",
     email: "candidate@example.com",
     headline: "Engineer",
     profile: "Experienced technology professional.",
-    skills: [{ category: "General", items: "Communication" }],
+    skills: [
+      { category: "JD Keywords", items: "herndon, sponsorship, candidates" },
+      { category: "Development", items: "Apex" }
+    ],
     experience: [{ company: "Acme", title: "Engineer", bullets: ["Worked with business teams."] }],
     education: [{ school: "University" }]
   };
-  const before = evaluateAtsScore(weak, {
-    jdText: jd,
-    jobTitle: "Salesforce Technical Architect"
-  });
-  const { data, evaluation, changed } = boostResumeForAts(weak, {
+  const { data, changed } = boostResumeForAts(weak, {
     jdText: jd,
     jobTitle: "Salesforce Technical Architect"
   });
   assert.equal(changed, true);
-  assert.ok(evaluation.score > before.score, `expected lift ${before.score} → ${evaluation.score}`);
-  assert.ok(
-    evaluation.score >= ATS_TARGET_SCORE,
-    `expected ≥${ATS_TARGET_SCORE}, got ${evaluation.score}; missing=${evaluation.missingKeywords}`
-  );
   assert.ok(String(data.headline || "").includes("Salesforce"));
+  assert.ok(!(data.skills || []).some((r) => /keyword/i.test(String(r.category || ""))));
+  assert.ok((data.skills || []).some((r) => r.category === "Development"));
+  assert.ok(!/Hands-on with/i.test(String(data.profile || "")), "must not append product dump to profile");
+});
+
+test("selectProjectBankExcerpts prefers JD-aligned SF projects", () => {
+  const excerpt = selectProjectBankExcerpts({
+    jdText: "Health Cloud Epic FHIR MuleSoft patient integration",
+    missingProducts: ["Health Cloud", "MuleSoft"],
+    bank: SF_ENTERPRISE_PROJECT_BANK,
+    maxProjects: 2
+  });
+  assert.ok(/Health Cloud|FHIR|Epic/i.test(excerpt));
+  assert.ok(excerpt.length > 200);
+});
+
+test("buildAtsScoreRetryPrompt uses project bank and forbids JD Keywords", () => {
+  const evaluation = evaluateAtsScore(
+    {
+      name: "Candidate",
+      email: "c@x.com",
+      skills: [{ category: "General", items: "Communication" }],
+      experience: [{ company: "Acme", bullets: ["Did work."] }]
+    },
+    { jdText: jd, jobTitle: "Salesforce Technical Architect", roleTrack: "sf" }
+  );
+  const prompt = buildAtsScoreRetryPrompt(
+    { experience: [{ company: "Acme" }, { company: "Beta" }] },
+    evaluation,
+    { jdText: jd, jobTitle: "Salesforce Technical Architect", roleTrack: "sf" }
+  );
+  assert.ok(/PROJECT BANK/i.test(prompt));
+  assert.ok(/HARD FORBIDDEN/i.test(prompt));
+  assert.ok(/JD Keywords/i.test(prompt));
+  assert.ok(!/MISSING JD KEYWORD TOKENS/i.test(prompt));
 });
 
 test("DE track scores Snowflake and dbt from JD", () => {

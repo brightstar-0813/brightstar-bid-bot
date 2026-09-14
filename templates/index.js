@@ -65,6 +65,14 @@ function sanitizeResumeData(raw) {
     data.headline = "";
   }
 
+  if (Array.isArray(data.skills)) {
+    data.skills = data.skills.filter((row) => {
+      const category = String(row?.category || "").trim();
+      if (!category) return Boolean(String(row?.items || "").trim());
+      return !/^(jd\s*)?keywords?$/i.test(category) && !/jd\s*keyword/i.test(category);
+    });
+  }
+
   if (Array.isArray(data.experience)) {
     data.experience = data.experience.map((job) => {
       const next = { ...(job || {}) };

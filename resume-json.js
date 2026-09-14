@@ -574,7 +574,32 @@ export function sanitizeResumeData(data) {
     });
   }
 
+  // Never render ATS keyword-dump rows (e.g. "JD Keywords") on the PDF.
+  if (Array.isArray(out.skills)) {
+    out.skills = out.skills
+      .filter((r) => r && typeof r === "object")
+      .map((r) => ({
+        category: String(r.category || "").trim(),
+        items: String(r.items || "").trim()
+      }))
+      .filter((r) => r.category && r.items && !isKeywordDumpSkillsCategoryLabel(r.category));
+  }
+
   return out;
+}
+
+/** Mirror ats-score rule — keep resume-json free of that import cycle. */
+function isKeywordDumpSkillsCategoryLabel(category) {
+  const c = String(category || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  if (!c) return false;
+  if (/^(jd\s*)?keywords?$/.test(c)) return true;
+  if (/^ats\s*keywords?$/.test(c)) return true;
+  if (/^keyword\s*(dump|list|bank|match|coverage)?$/.test(c)) return true;
+  if (/jd\s*keyword/.test(c)) return true;
+  return false;
 }
 
 /** Force early internship employers to their canonical Intern titles. */
