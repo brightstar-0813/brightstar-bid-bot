@@ -66,14 +66,14 @@ export const DEFAULT_ATS_PASSWORD = "Brightstar@0813";
 export const BUILTIN_PROFILES = [
   {
     id: "dmario-lewis",
-    label: "D'mario Lewis (Salesforce)",
+    label: "D'Mario Lewis",
     roleTrack: "sf",
     promptTemplate: dmarioLewisPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Lewis_Resume",
     builtin: true,
     kind: "resume",
-    name: "D'mario Lewis",
+    name: "D'Mario Lewis",
     email: "dmario.lewis1992@outlook.com",
     phone: "+1 (248) 340-3582",
     linkedin: "https://www.linkedin.com/in/dmario-lewis/",
@@ -105,7 +105,7 @@ export const BUILTIN_PROFILES = [
   },
   {
     id: "edrwin-revolorio",
-    label: "Edrwin Revolorio (Salesforce)",
+    label: "Edrwin Revolorio",
     roleTrack: "sf",
     promptTemplate: edrwinRevolorioPrompt,
     templateId: "ats-modern",
@@ -143,7 +143,7 @@ export const BUILTIN_PROFILES = [
   },
   {
     id: "michael-ibea",
-    label: "Michael Ibea (Salesforce)",
+    label: "Michael Haries Namuco Ibea",
     roleTrack: "sf",
     promptTemplate: michaelIbeaPrompt,
     templateId: "ats-modern",
@@ -180,7 +180,7 @@ export const BUILTIN_PROFILES = [
   },
   {
     id: "carlos-capulong",
-    label: "Carlos Capulong (Salesforce)",
+    label: "Carlos Padonan Capulong",
     roleTrack: "sf",
     promptTemplate: carlosCapulongPrompt,
     templateId: "ats-modern",
@@ -218,7 +218,7 @@ export const BUILTIN_PROFILES = [
   },
   {
     id: "david-oliveira",
-    label: "David Oliveira (Salesforce)",
+    label: "David Leandro de Oliveira (Salesforce)",
     roleTrack: "sf",
     promptTemplate: davidOliveiraPrompt,
     templateId: "ats-modern",
@@ -256,7 +256,7 @@ export const BUILTIN_PROFILES = [
   },
   {
     id: "david-oliveira-de",
-    label: "David Oliveira (Data Engineering)",
+    label: "David Leandro de Oliveira (Data Engineering)",
     roleTrack: "de",
     promptTemplate: davidOliveiraDePrompt,
     templateId: "ats-modern",
@@ -318,7 +318,7 @@ Federal University of Pernambuco — Bachelor's Degree in Mathematics and Comput
   },
   {
     id: "victor-holanda",
-    label: "Victor Holanda (Salesforce)",
+    label: "Victor Barros de Holanda",
     roleTrack: "sf",
     promptTemplate: victorHolandaPrompt,
     templateId: "ats-modern",
