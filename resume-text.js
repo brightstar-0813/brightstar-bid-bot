@@ -187,9 +187,35 @@ function paragraphsFrom(lines) {
   return blocks;
 }
 
+function splitTsvCells(line) {
+  const raw = String(line || "");
+  if (/\t/.test(raw)) {
+    return raw
+      .split(/\t+/)
+      .map((c) => stripMarkdownDecor(c).trim())
+      .filter(Boolean);
+  }
+  // Two-or-more spaces as a soft column break (Word/Docs paste).
+  const spaced = raw.match(/^(.{2,60}?)\s{2,}(.+)$/);
+  if (spaced) {
+    return [stripMarkdownDecor(spaced[1]).trim(), stripMarkdownDecor(spaced[2]).trim()].filter(Boolean);
+  }
+  return [];
+}
+
+function isSkillsHeaderRow(category, items) {
+  return (
+    /^category$/i.test(category) ||
+    (/^technologies?/i.test(category) && /skills?/i.test(items)) ||
+    (/^category$/i.test(category) && /technologies?|skills?/i.test(items)) ||
+    (/^technologies?\s*\/?\s*skills?$/i.test(items) && /^category$/i.test(category))
+  );
+}
+
 function parseSkills(lines) {
   const out = [];
-  let sawTable = false;
+  let sawStructured = false;
+
   for (const line of lines || []) {
     const t = String(line).trim();
     if (!t || isMarkdownTableSep(t)) continue;
@@ -199,44 +225,54 @@ function parseSkills(lines) {
       if (cells.length < 2) continue;
       const category = cells[0];
       const items = cells.slice(1).join(", ").replace(/\s+/g, " ").trim();
-      // Skip header row
-      if (/^category$/i.test(category) || /^technologies?/i.test(items)) continue;
+      if (isSkillsHeaderRow(category, items)) continue;
       if (!category && !items) continue;
-      sawTable = true;
+      sawStructured = true;
       out.push({ category: category.slice(0, 80), items: items.slice(0, 500) });
       continue;
     }
 
-    if (sawTable) continue; // ignore trailing noise after a skills table
+    const tsv = splitTsvCells(t);
+    if (tsv.length >= 2) {
+      const category = tsv[0].slice(0, 80);
+      const items = tsv.slice(1).join(", ").replace(/\s+/g, " ").trim().slice(0, 500);
+      if (isSkillsHeaderRow(category, items)) continue;
+      // Reject rows where "category" looks like a duty sentence.
+      if (category.length > 48 || /[.]$/.test(category)) {
+        // fall through
+      } else {
+        sawStructured = true;
+        out.push({ category, items });
+        continue;
+      }
+    }
+
+    if (sawStructured) continue;
 
     const cleaned = stripBullet(t);
     if (!cleaned) continue;
     const colon = cleaned.match(/^([^:]{2,48}):\s*(.+)$/);
     if (colon) {
-      out.push({ category: colon[1].trim(), items: colon[2].trim() });
+      out.push({ category: colon[1].trim().slice(0, 80), items: colon[2].trim().slice(0, 500) });
       continue;
     }
     const pipe = cleaned.match(/^([^|]{2,48})\|\s*(.+)$/);
     if (pipe) {
-      out.push({ category: pipe[1].trim(), items: pipe[2].trim() });
+      out.push({ category: pipe[1].trim().slice(0, 80), items: pipe[2].trim().slice(0, 500) });
       continue;
     }
-    out.push({ category: out.length ? `Skills ${out.length + 1}` : "Skills", items: cleaned });
+    // Single-line leftovers: keep as one generic row only when nothing structured yet.
+    out.push({ category: "Skills", items: cleaned.slice(0, 500) });
   }
 
-  if (out.length > 8 && out.every((r) => /^Skills(\s+\d+)?$/i.test(r.category))) {
+  // Merge only anonymous single-line leftovers — never collapse real category rows.
+  if (out.length > 1 && out.every((r) => /^Skills$/i.test(r.category))) {
     return [{ category: "Skills", items: out.map((r) => r.items).join(", ") }];
   }
-  return out.slice(0, 16);
+  return out.filter((r) => r.category || r.items).slice(0, 20);
 }
 
 function parseEducation(lines) {
-  const cleaned = (lines || [])
-    .map((l) => stripMarkdownDecor(l))
-    .filter((l) => l.trim());
-  if (!cleaned.length) return [];
-
-  // Group into blocks separated by blank lines from original.
   const blocks = [];
   let buf = [];
   for (const line of lines || []) {
@@ -250,11 +286,14 @@ function parseEducation(lines) {
     buf.push(stripMarkdownDecor(line));
   }
   if (buf.length) blocks.push(buf);
+  if (!blocks.length) return [];
 
   return blocks.slice(0, 6).map((parts) => {
     const joined = parts.join(" | ");
     const year =
-      (joined.match(/(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}\s*[-–—]\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:(?:19|20)\d{2}|present)/i) ||
+      (joined.match(
+        /(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}\s*[-–—]\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:(?:19|20)\d{2}|present)/i
+      ) ||
         joined.match(/\b((?:19|20)\d{2})\b/) ||
         [])[0] || "";
     const degree =
@@ -263,6 +302,17 @@ function parseEducation(lines) {
       ) || "";
     const school =
       parts.find((p) => /university|college|school|institute|academy/i.test(p)) ||
+      // Degree-first blocks: school is usually the next non-degree, non-date, non-city line
+      parts.find(
+        (p) =>
+          p !== degree &&
+          p !== year &&
+          !DATE_RANGE_RE.test(p) &&
+          !/^(remote|hybrid|on-?site)$/i.test(p) &&
+          p.length < 80 &&
+          !/[.]$/.test(p) &&
+          !/\b(bachelor|master|diploma|computer science)\b/i.test(p)
+      ) ||
       parts[0] ||
       "";
     const details =
@@ -271,7 +321,10 @@ function parseEducation(lines) {
           p !== school &&
           p !== degree &&
           p !== year &&
-          /,\s*[A-Z]{2}\b|united states|usa|michigan|california|texas|illinois/i.test(p)
+          (/,\s*[A-Z]{2}\b|united states|usa|brazil|michigan|california|texas|illinois|pernambuco|recife|colorado|new york/i.test(
+            p
+          ) ||
+            (/^[A-Z][A-Za-z .'-]+(?:,\s*[A-Z][A-Za-z .'-]+)+$/.test(p) && p.length < 60))
       ) || "";
     return {
       school: String(school).slice(0, 120),
@@ -292,7 +345,6 @@ function parseCerts(lines) {
       .join(" — ")
       .replace(/\s+/g, " ")
       .trim();
-    // Skip fluff LinkedIn micro-certs when a real Salesforce cert list is present
     if (label) out.push(label);
     buf = [];
   };
@@ -307,7 +359,6 @@ function parseCerts(lines) {
   flush();
 
   const filtered = out.filter((c) => {
-    // Prefer real credentials; drop long soft-skill LinkedIn course titles when many exist
     if (/salesforce\s+certified/i.test(c)) return true;
     if (/linkedin/i.test(c) && out.some((x) => /salesforce\s+certified/i.test(x))) return false;
     return c.length <= 120;
@@ -315,21 +366,87 @@ function parseCerts(lines) {
   return (filtered.length ? filtered : out).slice(0, 16);
 }
 
-function looksLikeRoleHeader(line) {
-  const raw = String(line || "").trim();
-  if (!raw || isBulletLine(raw) || isMarkdownTableRow(raw)) return false;
-  // ### Company — Title  or  Company — Title
-  if (/^#{1,3}\s+\S/.test(raw)) return true;
-  const t = stripMarkdownDecor(raw);
-  if (t.length > 140 || /[.]$/.test(t)) return false;
-  if (DATE_RANGE_RE.test(t) && t.length < 120) return true;
-  if (/\s[-–—]\s/.test(t) && t.length < 120) return true;
-  if (/[|·•]/.test(t) && t.length < 100) return true;
+const TITLE_WORD_RE =
+  /\b(engineer|developer|architect|specialist|administrator|consultant|manager|analyst|lead|director|intern|principal|staff|owner)\b/i;
+
+function looksLikeJobTitle(line) {
+  const t = stripMarkdownDecor(line);
+  if (!t || t.length > 90 || t.length < 4) return false;
+  if (DATE_RANGE_RE.test(t)) return false;
+  if (/[.]$/.test(t) && t.length > 40) return false;
+  // Require a role keyword — bare company names like "Intrado" must not count as titles.
+  if (!TITLE_WORD_RE.test(t)) return false;
+  const words = t.split(/\s+/);
+  return words.length <= 10;
+}
+
+function looksLikeCompanyLine(line) {
+  const t = stripMarkdownDecor(line);
+  if (!t || t.length > 80 || t.length < 2) return false;
+  if (DATE_RANGE_RE.test(t)) return false;
+  if (looksLikeJobTitle(t)) return false;
+  if (/[.]$/.test(t)) return false;
+  if (/^(remote|hybrid|on-?site)$/i.test(t)) return false;
+  if (isLocationLine(t)) return false;
+  return t.split(/\s+/).length <= 8;
+}
+
+function isLocationLine(line) {
+  const t = stripMarkdownDecor(line);
+  if (!t || t.length > 100) return false;
+  if (DATE_RANGE_RE.test(t) && !/\|/.test(t)) return false;
+  if (/^(remote|hybrid|on-?site)$/i.test(t)) return true;
+  if (/\b(remote|hybrid|on-?site)\b/i.test(t) && (/\|/.test(t) || /,/.test(t))) return true;
+  if (/united states|united kingdom|brazil|canada|india|germany|australia/i.test(t) && t.length < 90) {
+    return true;
+  }
+  // City, State / City, Country
+  if (/^[A-Za-z .'-]+,\s*[A-Za-z .'-]+/.test(t) && t.length < 80 && !TITLE_WORD_RE.test(t)) {
+    return true;
+  }
   return false;
 }
 
+function looksLikeProjectLine(line) {
+  const t = stripMarkdownDecor(line);
+  if (!t || t.length > 90 || t.length < 8) return false;
+  if (DATE_RANGE_RE.test(t) || isLocationLine(t) || TITLE_WORD_RE.test(t)) return false;
+  if (/[.]$/.test(t)) return false;
+  if (t.split(/\s+/).length > 12) return false;
+  // Title Case / Capitalized phrase
+  return /^[A-Z]/.test(t) && !/^(and|the|with|for)\b/i.test(t);
+}
+
+function looksLikeDateMetaLine(line) {
+  const plain = stripMarkdownDecor(line);
+  const datePrefix = plain.match(DATE_RANGE_RE);
+  if (!datePrefix || plain.length > 120) return false;
+  return (
+    new RegExp(`^${DATE_RANGE_RE.source}\\s*$`, "i").test(plain) ||
+    new RegExp(`^${DATE_RANGE_RE.source}\\s*[|·•,]`, "i").test(plain) ||
+    new RegExp(`^${DATE_RANGE_RE.source}$`, "i").test(plain)
+  );
+}
+
+function looksLikeCombinedRoleHeader(line) {
+  const raw = String(line || "").trim();
+  if (!raw || isBulletLine(raw) || isMarkdownTableRow(raw)) return false;
+  if (/^#{1,3}\s+\S/.test(raw)) return true;
+  const t = stripMarkdownDecor(raw);
+  if (t.length > 140 || /[.]$/.test(t)) return false;
+  if (/\s[-–—]\s/.test(t) && t.length < 120) return true;
+  if (/[|·•]/.test(t) && TITLE_WORD_RE.test(t) && t.length < 100) return true;
+  return false;
+}
+
+function emptyJob() {
+  return { company: "", title: "", dates: "", location: "", project: "", bullets: [] };
+}
+
 /**
- * Split an experience section into role blocks using markdown/role headers + date lines.
+ * Split an experience section into role blocks.
+ * Supports stacked plain text (Company / Title / Dates / Location / Project / prose)
+ * and Markdown `### Company — Title` headers.
  */
 function parseExperience(lines) {
   const jobs = [];
@@ -337,24 +454,63 @@ function parseExperience(lines) {
 
   const push = () => {
     if (!cur) return;
-    if (!cur.company && !cur.title && !(cur.bullets || []).length) return;
+    if (!cur.company && !cur.title && !(cur.bullets || []).length) {
+      cur = null;
+      return;
+    }
     if (!cur.company && cur.title) {
       cur.company = cur.title;
       cur.title = "";
     }
     if (!cur.company) cur.company = "Experience";
+    // Strip metadata that accidentally landed in bullets; recover into fields when empty
+    const kept = [];
+    for (const b of cur.bullets || []) {
+      const t = String(b || "").trim();
+      if (!t) continue;
+      if (t === cur.company || t === cur.title || t === cur.dates || t === cur.location || t === cur.project) {
+        continue;
+      }
+      if (!cur.dates && looksLikeDateMetaLine(t)) {
+        const datePrefix = t.match(DATE_RANGE_RE);
+        if (datePrefix) cur.dates = datePrefix[0].trim().slice(0, 60);
+        continue;
+      }
+      if (!cur.location && isLocationLine(t)) {
+        cur.location = t.slice(0, 80);
+        continue;
+      }
+      if (!cur.title && looksLikeJobTitle(t)) {
+        cur.title = t.slice(0, 120);
+        continue;
+      }
+      if (!cur.project && looksLikeProjectLine(t) && kept.length === 0) {
+        cur.project = t.slice(0, 120);
+        continue;
+      }
+      if (looksLikeDateMetaLine(t) || isLocationLine(t)) continue;
+      kept.push(t);
+    }
+    cur.bullets = kept;
     jobs.push(cur);
     cur = null;
   };
 
-  const startJobFromHeader = (rawLine) => {
+  const ensureJob = () => {
+    if (!cur) cur = emptyJob();
+    return cur;
+  };
+
+  const roleCompleteEnoughToClose = (job) =>
+    Boolean(job && (job.bullets || []).length > 0 && (job.company || job.title));
+
+  const startFromCombinedHeader = (rawLine) => {
     const trimmed = stripMarkdownDecor(rawLine);
     const dateMatch = trimmed.match(DATE_RANGE_RE);
     const dates = dateMatch ? dateMatch[0].trim() : "";
     let rest = dates ? trimmed.replace(dateMatch[0], " ").replace(/\s{2,}/g, " ").trim() : trimmed;
     rest = rest.replace(/^[\s|·•,–—-]+|[\s|·•,–—-]+$/g, "").trim();
 
-    // Prefer "Company — Title"
     const em = rest.match(/^(.+?)\s+[—–-]\s+(.+)$/);
     let company = "";
     let title = "";
@@ -374,10 +530,7 @@ function parseExperience(lines) {
       if (at) {
         title = at[1].trim();
         company = at[2].trim();
-      } else if (
-        bits.length >= 2 &&
-        /engineer|developer|manager|consultant|analyst|architect|lead|director|intern/i.test(bits[0])
-      ) {
+      } else if (bits.length >= 2 && TITLE_WORD_RE.test(bits[0])) {
         title = bits[0];
         company = bits[1];
         location = bits[2] || "";
@@ -389,6 +542,7 @@ function parseExperience(lines) {
       title: title.slice(0, 120),
       dates: dates.slice(0, 60),
       location: location.slice(0, 80),
+      project: "",
       bullets: []
     };
   };
@@ -399,39 +553,111 @@ function parseExperience(lines) {
     if (isMarkdownTableRow(trimmed) || isMarkdownTableSep(trimmed)) continue;
 
     if (isBulletLine(trimmed)) {
-      if (!cur) cur = { company: "Experience", title: "", dates: "", location: "", bullets: [] };
       const b = stripBullet(trimmed);
-      if (b) cur.bullets.push(b);
+      if (!b) continue;
+      ensureJob().bullets.push(b);
       continue;
     }
 
     const plain = stripMarkdownDecor(trimmed);
-    // Date / location meta line under a role header (with optional "| location | work mode").
-    const datePrefix = plain.match(DATE_RANGE_RE);
-    const looksLikeDateMeta =
-      Boolean(datePrefix) &&
-      plain.length < 120 &&
-      (new RegExp(`^${DATE_RANGE_RE.source}\\s*$`, "i").test(plain) ||
-        new RegExp(`^${DATE_RANGE_RE.source}\\s*[|·•,]`, "i").test(plain));
 
-    if (looksLikeDateMeta && cur && !(cur.bullets || []).length) {
-      cur.dates = datePrefix[0].trim().slice(0, 60);
-      const rest = plain
-        .replace(datePrefix[0], "")
-        .replace(/^[\s|·•,]+/, "")
-        .trim();
-      if (rest && !cur.location) cur.location = rest.slice(0, 80);
+    // Combined Markdown / "Company — Title" header
+    if (looksLikeCombinedRoleHeader(trimmed) && !looksLikeDateMetaLine(trimmed)) {
+      if (cur && (cur.company || cur.title || (cur.bullets || []).length)) push();
+      startFromCombinedHeader(trimmed);
       continue;
     }
 
-    if (looksLikeRoleHeader(trimmed) && !looksLikeDateMeta) {
-      if (cur && ((cur.bullets || []).length > 0 || cur.company || cur.title)) push();
-      startJobFromHeader(trimmed);
+    // Dates
+    if (looksLikeDateMetaLine(trimmed)) {
+      const job = ensureJob();
+      if ((job.bullets || []).length > 0 && job.dates) {
+        // Date after duties → new role starting with dates is rare; treat as duty skip
+      } else {
+        const datePrefix = plain.match(DATE_RANGE_RE);
+        job.dates = datePrefix[0].trim().slice(0, 60);
+        const rest = plain
+          .replace(datePrefix[0], "")
+          .replace(/^[\s|·•,]+/, "")
+          .trim();
+        if (rest && !job.location) job.location = rest.slice(0, 80);
+      }
       continue;
     }
 
-    if (!cur) cur = { company: "Experience", title: "", dates: "", location: "", bullets: [] };
-    cur.bullets.push(plain);
+    // Location (before duties)
+    if (isLocationLine(plain) && cur && !(cur.bullets || []).length) {
+      const loc = plain.slice(0, 80);
+      if (!cur.location) cur.location = loc;
+      else if (cur.location && !cur.location.includes(plain) && /^(remote|hybrid|on-?site)$/i.test(plain)) {
+        cur.location = `${cur.location} | ${plain}`.slice(0, 80);
+      }
+      continue;
+    }
+
+    // Title fills open job missing title
+    if (looksLikeJobTitle(plain) && cur && cur.company && !cur.title && !(cur.bullets || []).length) {
+      cur.title = plain.slice(0, 120);
+      continue;
+    }
+
+    // Project line before duties
+    if (
+      looksLikeProjectLine(plain) &&
+      cur &&
+      (cur.company || cur.title) &&
+      !cur.project &&
+      !(cur.bullets || []).length &&
+      (cur.dates || cur.location || cur.title)
+    ) {
+      cur.project = plain.slice(0, 120);
+      continue;
+    }
+
+    // New company line — close previous role when it already has duties or a full header
+    if (looksLikeCompanyLine(plain) && !looksLikeJobTitle(plain)) {
+      if (roleCompleteEnoughToClose(cur) || (cur && cur.company && cur.title && cur.dates)) {
+        push();
+      }
+      if (cur && cur.company && !cur.title && !(cur.bullets || []).length && !cur.dates) {
+        // Replace incomplete company-only stub
+        cur.company = plain.slice(0, 120);
+      } else if (!cur) {
+        cur = emptyJob();
+        cur.company = plain.slice(0, 120);
+      } else if (cur.company && !cur.title && looksLikeJobTitle(plain)) {
+        cur.title = plain.slice(0, 120);
+      } else if (!cur.company) {
+        cur.company = plain.slice(0, 120);
+      } else if ((cur.bullets || []).length || cur.dates) {
+        push();
+        cur = emptyJob();
+        cur.company = plain.slice(0, 120);
+      } else {
+        // Open job with company only — if this looks like another company, replace
+        cur.company = plain.slice(0, 120);
+      }
+      continue;
+    }
+
+    // Title without company yet (rare) or title after company handled above
+    if (looksLikeJobTitle(plain) && !(cur && cur.bullets && cur.bullets.length)) {
+      const job = ensureJob();
+      if (!job.title) {
+        job.title = plain.slice(0, 120);
+        continue;
+      }
+      if (job.title && job.company && (job.dates || job.location)) {
+        // Title for a new role
+        push();
+        cur = emptyJob();
+        cur.title = plain.slice(0, 120);
+        continue;
+      }
+    }
+
+    // Duty / prose
+    ensureJob().bullets.push(plain);
   }
   push();
 
@@ -443,12 +669,18 @@ function parseExperience(lines) {
         title: "",
         dates: "",
         location: "",
+        project: "",
         bullets
       });
     }
   }
+
   return jobs.slice(0, 12).map((j) => ({
-    ...j,
+    company: j.company || "",
+    title: j.title || "",
+    dates: j.dates || "",
+    location: j.location || "",
+    project: j.project || "",
     bullets: (j.bullets || []).slice(0, 16)
   }));
 }
