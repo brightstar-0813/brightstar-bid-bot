@@ -1,4 +1,4 @@
-import { mountThemeSwatches } from "./theme.js";
+import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import {
   getResumeProfiles,
@@ -17,11 +17,11 @@ import {
   fillPersonForm,
   readPersonFromForm,
   savePersonFromForm,
-  applyCompleteness,
   isEditingBuiltin,
   mergeExtractedProfileIntoPerson,
   requiredExperienceToText
 } from "./person-profile-form.js";
+import { defaultSheetTabNameForPerson, resolveSheetTabNameForPerson } from "./sheets.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
 import {
   namesLikelyDifferent,
@@ -31,7 +31,8 @@ import {
 import {
   normalizeRoleTrackId,
   resolveRoleTrackForPerson,
-  getTrackPromptTemplate
+  getTrackPromptTemplate,
+  applyRoleTrackSelectState
 } from "./role-tracks.js";
 import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
 import { getQaCount } from "./qa-store.js";
@@ -52,12 +53,9 @@ const profilePickerLabel = document.getElementById("profilePickerLabel");
 const profilePickerMenu = document.getElementById("profilePickerMenu");
 const deleteProfileBtn = document.getElementById("deleteProfile");
 const statusEl = document.getElementById("status");
-const completenessBannerEl = document.getElementById("completenessBanner");
 const savePersonTopBtn = document.getElementById("savePersonTop");
-const savePersonAsNewBtn = document.getElementById("savePersonAsNew");
 const personSaveStatusEl = document.getElementById("personSaveStatus");
 const qaBankNoteEl = document.getElementById("qaBankNote");
-const profileKindNoteEl = document.getElementById("profileKindNote");
 const openQaEditorBtn = document.getElementById("openQaEditorBtn");
 const templateSelectEl = document.getElementById("templateSelect");
 const personResumeFileEl = document.getElementById("personResumeFile");
@@ -65,7 +63,7 @@ const replaceResumeFromFileBtn = document.getElementById("replaceResumeFromFile"
 const clearMasterResumeBtn = document.getElementById("clearMasterResume");
 const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
 const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
-const roleTrackBtns = Array.from(document.querySelectorAll(".role-track-btn"));
+const roleTrackSelectEl = document.getElementById("roleTrackSelect");
 
 function profileTabsNav() {
   return document.getElementById("profileTabs") || document.querySelector("nav.profile-tabs");
@@ -123,13 +121,17 @@ function readActiveRoleTrack() {
   return normalizeRoleTrackId(activeRoleTrack);
 }
 
-function setActiveRoleTrackUi(track) {
+function setActiveRoleTrackUi(track, { locked = false } = {}) {
   activeRoleTrack = normalizeRoleTrackId(track);
-  for (const btn of roleTrackBtns) {
-    const isActive = btn.dataset.track === activeRoleTrack;
-    btn.classList.toggle("is-active", isActive);
-    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-  }
+  applyRoleTrackSelectState(roleTrackSelectEl, {
+    track: activeRoleTrack,
+    locked
+  });
+}
+
+function syncTrackLockForPerson(_person) {
+  const isNew = !editingPersonId || profileSelectEl?.value === NEW_PROFILE_ID;
+  setActiveRoleTrackUi(activeRoleTrack, { locked: !isNew });
 }
 
 function updateEditorUrl(tab, profileId) {
@@ -275,7 +277,6 @@ function populateProfileSelect(selectedId) {
   const selected =
     nextId === NEW_PROFILE_ID ? null : profilesCache.find((p) => p.id === nextId);
   if (deleteProfileBtn) deleteProfileBtn.hidden = !(selected && !selected.builtin);
-  updateProfileKindNote(selected);
 }
 
 function onProfilePickerSelect(profileId) {
@@ -328,49 +329,6 @@ function populateTemplateSelect(selectedId) {
   templateSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_TEMPLATE_ID;
 }
 
-function updateProfileKindNote(profile) {
-  if (!profileKindNoteEl) return;
-  if (profileSelectEl?.value === NEW_PROFILE_ID) {
-    profileKindNoteEl.hidden = false;
-    profileKindNoteEl.className = "toolbar-hint is-warn";
-    profileKindNoteEl.textContent = "New profile.";
-    return;
-  }
-  const selected = profile || profilesCache.find((p) => p.id === (profileSelectEl?.value || editingPersonId));
-  if (!selected) {
-    profileKindNoteEl.hidden = true;
-    return;
-  }
-  if (selected.builtin) {
-    profileKindNoteEl.hidden = false;
-    profileKindNoteEl.className = "toolbar-hint is-warn";
-    profileKindNoteEl.textContent = "Built-in — Duplicate to keep edits.";
-    return;
-  }
-  profileKindNoteEl.hidden = false;
-  profileKindNoteEl.className = "toolbar-hint";
-  profileKindNoteEl.textContent = "";
-  profileKindNoteEl.hidden = true;
-}
-
-function renderCompleteness(person) {
-  if (!completenessBannerEl) return;
-  const { complete, missing } = applyCompleteness(person || {});
-  if (complete) {
-    completenessBannerEl.hidden = false;
-    completenessBannerEl.className = "profile-completeness-bar";
-    completenessBannerEl.innerHTML =
-      '<p class="completeness-label">Autofill readiness</p><span class="completeness-chip ok">All required fields filled</span>';
-    return;
-  }
-  completenessBannerEl.hidden = false;
-  completenessBannerEl.className = "profile-completeness-bar is-warn";
-  completenessBannerEl.innerHTML = [
-    '<p class="completeness-label">Still needed for autofill</p>',
-    ...missing.map((m) => `<span class="completeness-chip">${m}</span>`)
-  ].join("");
-}
-
 async function refreshQaBankNote(profileId) {
   if (!qaBankNoteEl) return;
   try {
@@ -385,6 +343,7 @@ async function loadPersonIntoForm(person) {
   editingPersonId = person?.id || null;
   const track = person?.roleTrack || resolveRoleTrackForPerson(person);
   setActiveRoleTrackUi(track);
+  syncTrackLockForPerson(person);
   populateTemplateSelect(person?.templateId || DEFAULT_TEMPLATE_ID);
   fillPersonForm(formRoot, person, { roleTrack: track });
   fillResumeWizard(formRoot, person);
@@ -394,8 +353,6 @@ async function loadPersonIntoForm(person) {
   // after loading a real person (built-in or custom).
   populateProfileSelect(pickerId);
   syncSaveButtonLabels();
-  renderCompleteness(person);
-  updateProfileKindNote(person);
   await refreshQaBankNote(person?.id);
   setSaveStatus("");
 }
@@ -443,7 +400,10 @@ async function loadProfileById(profileId) {
   const config = await getPersonSheetConfig(resolvedId);
   const withSheet = {
     ...full,
-    sheetTabName: config?.sheetTabName || full.sheetTabName || full.label || full.name || "",
+    sheetTabName: resolveSheetTabNameForPerson({
+      ...full,
+      sheetTabName: config?.sheetTabName || full.sheetTabName || ""
+    }),
     outputDir: config?.outputDir || full.outputDir || ""
   };
   populateProfileSelect(resolvedId);
@@ -469,11 +429,18 @@ function applyTrackTemplatesToForm(nextTrack, person, previousTrack) {
   const coverEl = formRoot.querySelector("#personCoverPrompt");
   if (resumeEl) resumeEl.value = resolvePromptTemplateForTrack(base, nextTrack);
   if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(base, nextTrack);
+  const tabEl = formRoot.querySelector("#sheetTabName");
+  if (tabEl) {
+    const prevDefault = defaultSheetTabNameForPerson({ ...base, roleTrack: previousTrack });
+    const currentTab = String(tabEl.value || "").trim();
+    if (!currentTab || currentTab === prevDefault) {
+      tabEl.value = defaultSheetTabNameForPerson({ ...base, roleTrack: nextTrack });
+    }
+  }
 }
 
 async function saveProfile({ asNew = false } = {}) {
   if (savePersonTopBtn) savePersonTopBtn.disabled = true;
-  if (savePersonAsNewBtn) savePersonAsNewBtn.disabled = true;
   setSaveStatus("Saving…");
   try {
     const wizardData = readResumeWizard(formRoot);
@@ -515,7 +482,6 @@ async function saveProfile({ asNew = false } = {}) {
     return null;
   } finally {
     if (savePersonTopBtn) savePersonTopBtn.disabled = false;
-    if (savePersonAsNewBtn) savePersonAsNewBtn.disabled = false;
   }
 }
 
@@ -537,7 +503,6 @@ async function importFromResumeText(text, { sourceLabel = "resume" } = {}) {
   fillResumeWizard(formRoot, merged);
   applyTrackTemplatesToForm(readActiveRoleTrack(), merged);
   setActiveTab("resume");
-  renderCompleteness(merged);
   if (parsed.name) {
     await saveProfile({ asNew });
   } else {
@@ -577,24 +542,26 @@ deleteProfileBtn?.addEventListener("click", async () => {
   setStatus(`Deleted ${selected.label}`, "ok");
 });
 
-roleTrackBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const track = normalizeRoleTrackId(btn.dataset.track);
-    const previousTrack = readActiveRoleTrack();
-    if (track === previousTrack) return;
-    const person = profilesCache.find((p) => p.id === editingPersonId);
-    setActiveRoleTrackUi(track);
-    applyTrackTemplatesToForm(track, person, previousTrack);
-  });
+roleTrackSelectEl?.addEventListener("change", () => {
+  const isNew = !editingPersonId || profileSelectEl?.value === NEW_PROFILE_ID;
+  if (!isNew || roleTrackSelectEl.disabled) {
+    applyRoleTrackSelectState(roleTrackSelectEl, {
+      track: activeRoleTrack,
+      locked: true
+    });
+    return;
+  }
+  const track = normalizeRoleTrackId(roleTrackSelectEl.value);
+  const previousTrack = readActiveRoleTrack();
+  if (track === previousTrack) return;
+  const person = profilesCache.find((p) => p.id === editingPersonId);
+  setActiveRoleTrackUi(track, { locked: false });
+  applyTrackTemplatesToForm(track, person, previousTrack);
 });
 
 formRoot?.addEventListener("submit", (e) => {
   e.preventDefault();
   saveProfile({ asNew: false }).catch(() => {});
-});
-
-savePersonAsNewBtn?.addEventListener("click", () => {
-  saveProfile({ asNew: true }).catch(() => {});
 });
 
 openQaEditorBtn?.addEventListener("click", () => {
@@ -640,15 +607,6 @@ detectRequiredExperienceBtn?.addEventListener("click", () => {
   setSaveStatus(`Detected ${detected.length} employer(s).`, { ok: true });
 });
 
-formRoot?.addEventListener("input", () => {
-  const person = readPersonFromForm(formRoot, {
-    editingPersonId,
-    roleTrack: readActiveRoleTrack(),
-    templateId: templateSelectEl?.value
-  });
-  renderCompleteness(person);
-});
-
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || editorInitializing) return;
   if (changes.custom_profiles) {
@@ -681,9 +639,8 @@ async function init() {
   try {
     wireProfileTabs();
     wireProfilePicker();
-    mountThemeSwatches(document.getElementById("themeSwatches"), {
-      onSelect: (theme) => setStatus(`Theme: ${theme.label}`, "ok")
-    });
+    await loadAndApplyTheme();
+    watchThemeChanges();
     initResumeWizard(formRoot);
     setActiveTab(normalizeTab(initialTab));
     populateTemplateSelect(DEFAULT_TEMPLATE_ID);
