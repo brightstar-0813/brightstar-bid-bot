@@ -150,16 +150,45 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Local scrollport so tabs/actions stay put (do not stick to .app-body). */
+  max-height: min(62vh, 560px);
+  min-height: 240px;
+  overflow: hidden;
 }
 
-.profile-editor-panel .inline-profile-toolbar {
+.profile-editor-panel .inline-profile-toolbar,
+.profile-editor-panel .profile-completeness-bar {
+  flex-shrink: 0;
   margin: 0;
+}
+
+/* Pin Apply / Resume / Bid setup to the top of the editor shell */
+.profile-editor-panel .profile-tabs {
+  flex-shrink: 0;
+  position: relative;
+  top: auto;
+  z-index: 4;
+  background: color-mix(in srgb, var(--subblock-bg) 96%, var(--section-bg));
 }
 
 .profile-editor-panel .inline-profile-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Only the active tab body scrolls */
+.profile-editor-panel .inline-profile-form > .profile-tab-panel.is-active:not([hidden]) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 
 .profile-editor-panel .profile-acc-body .grid-2 {
@@ -168,18 +197,16 @@ h1 {
   gap: 8px;
 }
 
+/* Pin Save / Duplicate / Full editor / Delete to the bottom of the editor shell */
 .inline-profile-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
+  flex-shrink: 0;
+  position: relative;
+  bottom: auto;
+  z-index: 4;
   margin-top: 4px;
   padding: 10px 0 2px;
   border-top: 1px solid var(--line);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--section-bg) 0%, transparent) 0%,
-    var(--section-bg) 28%
-  );
+  background: var(--section-bg);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1390,8 +1417,78 @@ input[type="file"]::file-selector-button {
   font-weight: 400;
 }
 
-.one-off-ats-improve strong {
+.ats-gap-summary {
+  margin: 0 0 8px;
   color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ats-gap-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ats-gap-finding {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.ats-gap-finding h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ats-gap-finding p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.ats-gap-finding[data-kind="score"] {
+  border-color: color-mix(in srgb, var(--gold, #c9a227) 35%, var(--border));
+}
+
+.ats-gap-score-details {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ats-gap-score-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ats-gap-score-details ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.ats-gap-rebuild {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ats-gap-rebuild .ats-rebuild-btn {
+  width: 100%;
+}
+
+.ats-gap-rebuild-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .one-off-ats-gap-empty {

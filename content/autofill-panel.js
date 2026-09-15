@@ -385,7 +385,7 @@
               <div class="title" id="jobTitle"></div>
             </div>
             <button type="button" class="profile-link" id="profileLink">
-              <span>Your autofill information</span>
+              <span>Profile</span>
               <span class="dot" id="profileDot"></span>
             </button>
             <div class="step-label" id="stepLabel"></div>

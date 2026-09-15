@@ -572,33 +572,72 @@ export function describeAtsGaps(evaluation = {}) {
   }
 
   const tips = [];
+  const findings = [];
   const primaryCategory = track.primarySkillsCategory || "Technical Skills";
   const skillsOnly = Array.isArray(evaluation?.skillsOnlyProducts)
     ? evaluation.skillsOnlyProducts
     : Array.isArray(components.productBulletProof?.skillsOnly)
       ? components.productBulletProof.skillsOnly
       : [];
+  const score = Number(evaluation?.score);
+  const grade = String(evaluation?.grade || "").trim();
+
+  if (Number.isFinite(score)) {
+    findings.push({
+      kind: "score",
+      title: `Match score: ${Math.round(score)}/100${grade ? ` (${grade})` : ""}`,
+      body:
+        score >= ATS_TARGET_SCORE
+          ? "Looks solid for a local match. Still skim the bullets — recruiters care about proof, not the number."
+          : score >= 75
+            ? "Close, but a recruiter may still doubt you did this work. Fix the weak spots below before you send."
+            : "This resume would not convince a careful recruiter yet. The gaps below are what failed the check."
+    });
+  }
 
   if (missingProducts.length) {
+    const list = missingProducts.join(", ");
+    findings.push({
+      kind: "missing-products",
+      title: "Missing must-have tools",
+      body: `The JD needs these, and they barely show up (or not at all): ${list}. Put each under a real skills row (like “${primaryCategory}”) and name them in at least two bullets across your two most recent jobs.`
+    });
     tips.push(
-      `Prove missing ${track.domainProductLabel || "products"} in real skills categories (e.g. "${primaryCategory}") AND in at least two experience bullets across the two most recent roles — never skills-only: ${missingProducts.join(", ")}.`
+      `Prove missing ${track.domainProductLabel || "products"} in real skills categories (e.g. "${primaryCategory}") AND in at least two experience bullets across the two most recent roles — never skills-only: ${list}.`
     );
   }
 
   if (skillsOnly.length) {
+    const list = skillsOnly.join(", ");
+    findings.push({
+      kind: "skills-only",
+      title: "Listed in skills, not proved in work",
+      body: `These sit in the skills table but almost never appear in experience bullets: ${list}. Recruiters ignore skills-only claims. Rewrite the last two roles so each tool shows up in a real story (what you built, for whom, what changed).`
+    });
     tips.push(
-      `These appear in skills but not enough experience bullets — name each in concrete bullets for the two most recent roles: ${skillsOnly.join(", ")}.`
+      `These appear in skills but not enough experience bullets — name each in concrete bullets for the two most recent roles: ${list}.`
     );
   }
 
   if (missingKeywords.length) {
+    const list = missingKeywords.slice(0, 10).join(", ");
+    findings.push({
+      kind: "missing-keywords",
+      title: "JD language not reflected",
+      body: `These words from the posting barely appear in the resume: ${list}. Weave them into the profile, full-sentence highlights, and bullets — never dump them into a “JD Keywords” skills row.`
+    });
     tips.push(
-      `Mirror these JD terms naturally in profile, full-sentence technicalSummary, and experience bullets — never a "JD Keywords" skills row: ${missingKeywords.slice(0, 10).join(", ")}.`
+      `Mirror these JD terms naturally in profile, full-sentence technicalSummary, and experience bullets — never a "JD Keywords" skills row: ${list}.`
     );
   }
 
   const titleComp = components.titleAlignment;
   if (titleComp && Number(titleComp.max) > 0 && titleComp.score / titleComp.max < 0.75) {
+    findings.push({
+      kind: "headline",
+      title: "Headline feels off for this JD",
+      body: "Pick a short resume identity that matches seniority and focus. Do not paste the JD title, and never add clearance or citizenship wording."
+    });
     tips.push(
       "Use a short resume-identity headline that reflects JD seniority and key words — do not paste the JD job title verbatim — and reinforce those words in the profile."
     );
@@ -607,6 +646,25 @@ export function describeAtsGaps(evaluation = {}) {
   const expComp = components.experienceEvidence;
   if (expComp && Number(expComp.max) > 0 && expComp.score / expComp.max < 0.75) {
     const need = Number(expComp.needPerRole) || 3;
+    const roleBits = Array.isArray(expComp.roleHits)
+      ? expComp.roleHits
+          .map((r) => {
+            const co = String(r?.company || "Recent role").trim() || "Recent role";
+            return `${co}: ${Number(r?.hitCount) || 0}/${need} tools named`;
+          })
+          .join("; ")
+      : "";
+    findings.push({
+      kind: "recent-roles",
+      title: "Recent roles do not prove the JD",
+      body: `Each of the two most recent jobs should name about ${need} required tools in separate bullets${
+        roleBits ? ` (${roleBits})` : ""
+      }. Skills table coverage alone does not count. ${
+        track.bulletInternalsHint
+          ? `Show internals: ${track.bulletInternalsHint}`
+          : "Name the feature, what you built, and the outcome."
+      }`
+    });
     tips.push(
       `Rewrite the two most recent roles so each names at least ${need} JD-required tools in real bullets (${track.bulletInternalsHint || "name the feature, what you built, and the outcome"}). Skills-table coverage alone does not raise this score.`
     );
@@ -620,6 +678,11 @@ export function describeAtsGaps(evaluation = {}) {
     !skillsOnly.length &&
     !missingProducts.length
   ) {
+    findings.push({
+      kind: "proof",
+      title: "Product proof is thin",
+      body: `Must-haves should show up both under “${primaryCategory}” (or sibling rows) and in two or more experience bullets.`
+    });
     tips.push(
       `Strengthen product proof: each must-have should appear under "${primaryCategory}" (or sibling rows) and in two or more experience bullets.`
     );
@@ -627,18 +690,55 @@ export function describeAtsGaps(evaluation = {}) {
 
   const structComp = components.atsStructure;
   if (structComp && Number(structComp.max) > 0 && structComp.score < structComp.max) {
+    findings.push({
+      kind: "structure",
+      title: "Resume sections incomplete",
+      body: "Fill contact, profile, skills, experience, plus education or certifications."
+    });
     tips.push("Fill every standard section: contact, profile, skills, experience, plus education or certifications.");
   }
 
-  if (!tips.length && Number(evaluation?.score) >= ATS_TARGET_SCORE) {
-    tips.push(
-      "Match looks strong — Tier 0 tools are proved in recent-role bullets. Keep that evidence on the next regenerate if the JD shifts."
-    );
-  } else if (!tips.length) {
-    tips.push(
-      "Regenerate with stronger project evidence in the two most recent roles, or open Gaps after the next ATS pass once missing products/keywords are recorded."
-    );
+  const weakBreakdown = breakdown.filter((b) => b.weak);
+  if (weakBreakdown.length && findings.length < 2) {
+    findings.push({
+      kind: "weak-areas",
+      title: "Weak score areas",
+      body: weakBreakdown.map((b) => `${b.label} ${b.score}/${b.max}`).join(" · ")
+    });
   }
+
+  if (!tips.length && Number(evaluation?.score) >= ATS_TARGET_SCORE) {
+    const ok =
+      "Match looks strong — Tier 0 tools are proved in recent-role bullets. Keep that evidence on the next regenerate if the JD shifts.";
+    tips.push(ok);
+    if (!findings.some((f) => f.kind === "score")) {
+      findings.push({ kind: "ok", title: "Looking good", body: ok });
+    }
+  } else if (!tips.length) {
+    const fallback =
+      "Rebuild with stronger project evidence in the two most recent roles, then re-check Gaps.";
+    tips.push(fallback);
+    findings.push({ kind: "fallback", title: "Needs a stronger rebuild", body: fallback });
+  }
+
+  const rebuildPrompt = buildGapsRebuildPrompt({
+    findings,
+    tips,
+    missingProducts,
+    missingKeywords,
+    skillsOnlyProducts: skillsOnly,
+    primaryCategory,
+    track
+  });
+
+  const summary =
+    Number.isFinite(score) && score >= ATS_TARGET_SCORE
+      ? "Local match is strong. Skim findings if you want polish."
+      : findings.filter((f) => f.kind !== "score").length
+        ? `Here’s what a recruiter would still doubt (${findings.filter((f) => f.kind !== "score").length} issue${
+            findings.filter((f) => f.kind !== "score").length === 1 ? "" : "s"
+          }).`
+        : "Gaps recorded — rebuild to raise evidence.";
 
   return {
     score: evaluation?.score ?? null,
@@ -648,6 +748,48 @@ export function describeAtsGaps(evaluation = {}) {
     missingProducts,
     missingKeywords,
     skillsOnlyProducts: skillsOnly,
-    tips
+    tips,
+    findings,
+    summary,
+    rebuildPrompt
   };
+}
+
+/**
+ * Additional prompt block injected on Rebuild — targets Gaps without inventing employers.
+ */
+export function buildGapsRebuildPrompt({
+  findings = [],
+  tips = [],
+  missingProducts = [],
+  missingKeywords = [],
+  skillsOnlyProducts = [],
+  primaryCategory = "Technical Skills",
+  track = {}
+} = {}) {
+  const lines = [
+    "REBUILD FOR ATS GAPS (local evidence score) — follow in addition to all HARD FLOOR / GATE rules:",
+    "- Keep every employer, date, title, education, and certification exactly as they already are. Never invent employers.",
+    "- Never create a JD Keywords / keyword-dump skills row. Never paste the JD title into headline. No clearance or citizenship language.",
+    `- Put must-have tools in real skills categories (e.g. "${primaryCategory}") with EXACT JD spellings.`,
+    "- Prove tools in the TWO most recent roles with concrete bullets (feature → what you built → outcome).",
+    track?.bulletInternalsHint ? `- Internals hint: ${track.bulletInternalsHint}` : "",
+    missingProducts.length ? `- Missing products to prove: ${missingProducts.join(", ")}` : "",
+    skillsOnlyProducts.length
+      ? `- Skills-only today (must appear in bullets): ${skillsOnlyProducts.join(", ")}`
+      : "",
+    missingKeywords.length
+      ? `- Weave naturally (not as a list): ${missingKeywords.slice(0, 12).join(", ")}`
+      : "",
+    findings.filter((f) => f.kind !== "score" && f.kind !== "ok").length
+      ? "- Focus areas:\n" +
+        findings
+          .filter((f) => f.kind !== "score" && f.kind !== "ok")
+          .map((f) => `  • ${f.title}: ${f.body}`)
+          .join("\n")
+      : "",
+    tips.length ? `- Checklist: ${tips.slice(0, 4).join(" | ")}` : "",
+    "Return ONLY the complete resume JSON object."
+  ].filter(Boolean);
+  return lines.join("\n");
 }

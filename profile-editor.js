@@ -333,7 +333,7 @@ function updateProfileKindNote(profile) {
   if (profileSelectEl?.value === NEW_PROFILE_ID) {
     profileKindNoteEl.hidden = false;
     profileKindNoteEl.className = "toolbar-hint is-warn";
-    profileKindNoteEl.textContent = "New profile — fill in details, then Save or Save as new.";
+    profileKindNoteEl.textContent = "New profile.";
     return;
   }
   const selected = profile || profilesCache.find((p) => p.id === (profileSelectEl?.value || editingPersonId));
@@ -344,13 +344,13 @@ function updateProfileKindNote(profile) {
   if (selected.builtin) {
     profileKindNoteEl.hidden = false;
     profileKindNoteEl.className = "toolbar-hint is-warn";
-    profileKindNoteEl.textContent =
-      "Starter template — use Save or Save as new to keep your changes.";
+    profileKindNoteEl.textContent = "Built-in — Duplicate to keep edits.";
     return;
   }
   profileKindNoteEl.hidden = false;
   profileKindNoteEl.className = "toolbar-hint";
-  profileKindNoteEl.textContent = "Your profile — changes apply after Save.";
+  profileKindNoteEl.textContent = "";
+  profileKindNoteEl.hidden = true;
 }
 
 function renderCompleteness(person) {

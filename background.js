@@ -7188,7 +7188,8 @@ async function runBatchLoop(outputDir) {
         csvRow: next.csvRow,
         companyName: next.company,
         company: next.company,
-        jdLink: next.jdLink || ""
+        jdLink: next.jdLink || "",
+        forceRebuild: Boolean(next.forceRebuild)
       });
       if (preSkipReason) {
         await markJobSkippedAsDuplicate(next.csvRow, preSkipReason);
@@ -7243,6 +7244,8 @@ async function runBatchLoop(outputDir) {
         jdLink: next.jdLink || "",
         jdText: next.jdText || "",
         salary: next.salary || "",
+        additionalPrompt: next.additionalPrompt || "",
+        forceRebuild: Boolean(next.forceRebuild),
         outputDir: outputDir || (await resolveOutputDir())
       };
 
@@ -7268,6 +7271,7 @@ async function runBatchLoop(outputDir) {
           atsScore: result.atsEvaluation?.score ?? null,
           atsGrade: result.atsEvaluation?.grade || "",
           atsEvaluation: result.atsEvaluation || null,
+          forceRebuild: false,
           error: result.coverLetterSaved
             ? ""
             : "Cover letter not created — auto-apply deferred until cover PDF exists"
@@ -9461,7 +9465,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           status: "pending",
           attempts: 0,
           error: "",
-          jobDir: job.jobDir || ""
+          jobDir: job.jobDir || "",
+          ...(typeof message.additionalPrompt === "string"
+            ? { additionalPrompt: message.additionalPrompt }
+            : {}),
+          ...(message.forceRebuild ? { forceRebuild: true } : {})
         });
         const outputDir = await resolveOutputDir(message.outputDir);
         if (isRunning) {

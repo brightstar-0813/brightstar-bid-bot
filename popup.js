@@ -304,6 +304,8 @@ const themeSwatchesEl = document.getElementById("themeSwatches");
 let profilesCache = [];
 let templatesCache = [];
 let queueCache = [];
+/** csvRow keys with Gaps panel open — survive queue re-renders. */
+const openAtsGapsRows = new Set();
 let lastStatusText = "";
 let lastQueueFollowRow = null;
 let queueListScrollTop = 0;
@@ -353,7 +355,7 @@ function syncActivePersonChip() {
   chip.hidden = false;
   chip.textContent = selected.label;
   chip.classList.toggle("is-builtin", Boolean(selected.builtin));
-  chip.title = selected.builtin ? `${selected.label} (built-in preset)` : selected.label;
+  chip.title = selected.label;
 }
 
 function syncBatchPill() {
@@ -576,9 +578,7 @@ function populateTemplateSelect(selectedId) {
     const option = document.createElement("option");
     option.value = template.id;
     option.textContent = template.label;
-    option.title = template.description
-      ? `${template.label} — ${template.description}`
-      : template.label;
+    option.title = template.label;
     templateSelectEl.appendChild(option);
   }
   const validIds = new Set(templatesCache.map((t) => t.id));
@@ -684,9 +684,8 @@ function updatePersonSheetSectionLabels(person) {
     personSheetSectionTitleEl.textContent = label ? `This profile · ${label}` : "This profile";
   }
   if (personSheetSectionHintEl) {
-    personSheetSectionHintEl.textContent = label
-      ? `Sheet tab for ${label} is also the Downloads folder. Switch profiles to edit someone else.`
-      : "Sheet tab name is also the save folder under Downloads.";
+    personSheetSectionHintEl.textContent = "";
+    personSheetSectionHintEl.hidden = true;
   }
 }
 
@@ -882,7 +881,7 @@ async function runIndeedGrab({ autoApply = true } = {}) {
   }
   renderIndeedGrabState({
     status: "running",
-    message: "Started — watch the status bar for progress."
+    message: "Started."
   });
   jobsSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
   await applyChannelFilter("indeed").catch(() => {});
@@ -1175,22 +1174,22 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   renderQueue();
   setStatus(
     channelFilter === "dice"
-      ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
+      ? `Dice · ${queueCache.length}`
       : channelFilter === "linkedin"
-        ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
+        ? `LinkedIn · ${queueCache.length}`
         : channelFilter === "jobright"
-          ? `Showing Jobright jobs — ${queueCache.length} in queue.`
+          ? `Jobright · ${queueCache.length}`
         : channelFilter === "workday"
-          ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Workday · ${queueCache.length}`
         : channelFilter === "greenhouse"
-          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Greenhouse · ${queueCache.length}`
         : channelFilter === "ashby"
-          ? `Showing Ashby jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Ashby · ${queueCache.length}`
         : channelFilter === "lever"
-          ? `Showing Lever jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Lever · ${queueCache.length}`
         : channelFilter === "etc"
-          ? `Showing other boards — ${queueCache.length} in queue.`
-          : `Showing all US jobs — ${queueCache.length} in queue. Start builds files only (no auto-apply).`
+          ? `Other · ${queueCache.length}`
+          : `All · ${queueCache.length}`
   );
 }
 
@@ -1281,62 +1280,75 @@ function setIconButton(button, icon, label) {
 
 function atsScoreTitle(job) {
   const detail = describeAtsGaps(job?.atsEvaluation || {});
-  const lines = [`ATS match: ${job.atsScore}/100${job.atsGrade ? ` · ${job.atsGrade}` : ""}`];
-  for (const row of detail.breakdown) {
-    lines.push(`${row.label}: ${row.score}/${row.max}`);
-  }
-  if (detail.missingProducts.length) {
-    lines.push(`Missing products: ${detail.missingProducts.join(", ")}`);
-  }
-  if (detail.missingKeywords.length) {
-    lines.push(`Missing keywords: ${detail.missingKeywords.slice(0, 8).join(", ")}`);
-  }
-  if (detail.tips.length) {
-    lines.push(`Improve: ${detail.tips[0]}`);
+  const lines = [`ATS ${job.atsScore}/100${job.atsGrade ? ` · ${job.atsGrade}` : ""}`];
+  if (detail.summary) lines.push(detail.summary);
+  for (const f of (detail.findings || []).slice(0, 3)) {
+    if (f.kind === "score") continue;
+    lines.push(`${f.title}: ${f.body}`);
   }
   return lines.join("\n");
 }
 
-function atsGapsHtml(evaluation = {}) {
+function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
   const detail = describeAtsGaps(evaluation);
   const parts = [];
 
-  if (detail.breakdown.length) {
+  if (detail.summary) {
+    parts.push(`<p class="ats-gap-summary">${escapeHtml(detail.summary)}</p>`);
+  }
+
+  const findings = Array.isArray(detail.findings) ? detail.findings : [];
+  if (findings.length) {
     parts.push(
-      `<div class="one-off-ats-gap-group"><strong>Score breakdown</strong><ul>${detail.breakdown
+      `<div class="ats-gap-findings">${findings
+        .map(
+          (f) =>
+            `<article class="ats-gap-finding" data-kind="${escapeHtml(f.kind || "")}">` +
+            `<h4>${escapeHtml(f.title || "Finding")}</h4>` +
+            `<p>${escapeHtml(f.body || "")}</p>` +
+            `</article>`
+        )
+        .join("")}</div>`
+    );
+  } else if (detail.tips.length) {
+    parts.push(
+      `<div class="one-off-ats-gap-group one-off-ats-improve"><strong>What to fix</strong><ul>${detail.tips
+        .map((tip) => `<li>${escapeHtml(tip)}</li>`)
+        .join("")}</ul></div>`
+    );
+  }
+
+  const weak = (detail.breakdown || []).filter((b) => b.weak);
+  if (weak.length) {
+    parts.push(
+      `<details class="ats-gap-score-details"><summary>Score detail</summary><ul>${weak
         .map((row) => {
-          const weak = row.weak ? ' class="is-weak"' : "";
           const match =
             row.total != null && row.matched != null
               ? ` <span class="ats-gap-meta">(${row.matched}/${row.total})</span>`
               : "";
-          return `<li${weak}><span>${escapeHtml(row.label)}</span> <strong>${row.score}/${row.max}</strong>${match}</li>`;
+          return `<li class="is-weak"><span>${escapeHtml(row.label)}</span> <strong>${row.score}/${row.max}</strong>${match}</li>`;
         })
-        .join("")}</ul></div>`
+        .join("")}</ul></details>`
     );
   }
 
-  if (detail.missingProducts.length) {
-    parts.push(
-      `<div class="one-off-ats-gap-group"><strong>Missing products</strong><ul>${detail.missingProducts
-        .map((p) => `<li>${escapeHtml(String(p))}</li>`)
-        .join("")}</ul></div>`
-    );
-  }
+  const needsRebuild =
+    rebuild &&
+    detail.rebuildPrompt &&
+    (!(Number.isFinite(Number(detail.score)) && Number(detail.score) >= 90) ||
+      (detail.findings || []).some((f) => f.kind !== "score" && f.kind !== "ok"));
 
-  if (detail.missingKeywords.length) {
+  if (needsRebuild) {
+    const rowAttr =
+      csvRow != null && Number.isFinite(Number(csvRow))
+        ? ` data-csv-row="${Number(csvRow)}"`
+        : ' data-one-off="1"';
     parts.push(
-      `<div class="one-off-ats-gap-group"><strong>Missing keywords</strong><ul>${detail.missingKeywords
-        .map((k) => `<li>${escapeHtml(String(k))}</li>`)
-        .join("")}</ul></div>`
-    );
-  }
-
-  if (detail.tips.length) {
-    parts.push(
-      `<div class="one-off-ats-gap-group one-off-ats-improve"><strong>How to improve</strong><ul>${detail.tips
-        .map((tip) => `<li>${escapeHtml(tip)}</li>`)
-        .join("")}</ul></div>`
+      `<div class="ats-gap-rebuild">` +
+        `<button type="button" class="primary compact ats-rebuild-btn"${rowAttr}>Rebuild for gaps</button>` +
+        `<p class="ats-gap-rebuild-note">Uses Gaps as an extra prompt (plus Extra notes if filled).</p>` +
+        `</div>`
     );
   }
 
@@ -1346,14 +1358,121 @@ function atsGapsHtml(evaluation = {}) {
   return parts.join("");
 }
 
-function wireAtsGapsToggle(button, panel) {
+function mergeAdditionalPrompt(existing, gapsBlock) {
+  const base = String(existing || "").trim();
+  const gaps = String(gapsBlock || "").trim();
+  if (!gaps) return base;
+  if (!base) return gaps;
+  if (base.includes("REBUILD FOR ATS GAPS")) {
+    return `${base.replace(/REBUILD FOR ATS GAPS[\s\S]*?(?=\n---|$)/, "").trim()}\n\n${gaps}`.trim();
+  }
+  return `${base}\n\n${gaps}`.trim();
+}
+
+async function rebuildFromGaps({ evaluation, csvRow = null, oneOff = false } = {}) {
+  const detail = describeAtsGaps(evaluation || {});
+  const gapsPrompt = String(detail.rebuildPrompt || "").trim();
+  if (!gapsPrompt) {
+    setStatus("No Gaps rebuild prompt available.");
+    return;
+  }
+
+  if (oneOff) {
+    const merged = mergeAdditionalPrompt(oneOffExtraPromptEl?.value || "", gapsPrompt);
+    if (oneOffExtraPromptEl) oneOffExtraPromptEl.value = merged;
+    await persistJobFields().catch(() => {});
+    setStatus("Rebuilding draft from Gaps…");
+    await runOneOffDraft({ regenerate: true, forceRebuild: true });
+    return;
+  }
+
+  if (csvRow == null || !Number.isFinite(Number(csvRow))) {
+    setStatus("Missing queue row for rebuild.");
+    return;
+  }
+  const row = Number(csvRow);
+  const job = queueCache.find((j) => Number(j.csvRow) === row);
+  if (!job) {
+    setStatus(`Row ${row} not in queue.`);
+    return;
+  }
+  const merged = mergeAdditionalPrompt(job.additionalPrompt || "", gapsPrompt);
+  const { outputDir } = await resolveUiOutputDir();
+  setStatus(`Rebuilding row ${row} from Gaps…`);
+  openAtsGapsRows.add(row);
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: "retry_job",
+      csvRow: row,
+      outputDir,
+      additionalPrompt: merged,
+      forceRebuild: true
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || `Rebuild row ${row} failed.`);
+      return;
+    }
+    queueCache = queueCache.map((j) =>
+      Number(j.csvRow) === row
+        ? { ...j, status: "pending", attempts: 0, error: "", additionalPrompt: merged }
+        : j
+    );
+    renderQueue();
+    updateCsvSummaryFromQueue();
+    setStatus(res.status || `Row ${row} rebuilding…`);
+    await loadSettings().catch(() => {});
+  } catch (err) {
+    setStatus(`Rebuild failed: ${String(err?.message || err)}`);
+  }
+}
+
+function wireAtsGapsActions(panel, { csvRow = null, oneOff = false, evaluation = null } = {}) {
+  if (!panel) return;
+  const btn = panel.querySelector(".ats-rebuild-btn");
+  if (!btn) return;
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    rebuildFromGaps({
+      evaluation,
+      csvRow: csvRow != null ? Number(csvRow) : Number(btn.dataset.csvRow),
+      oneOff: oneOff || btn.dataset.oneOff === "1"
+    }).catch((err) => setStatus(String(err?.message || err)));
+  });
+}
+
+function wireAtsGapsToggle(button, panel, csvRow) {
   if (!button || !panel) return;
-  button.addEventListener("click", () => {
+  button.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     const open = panel.hidden;
     panel.hidden = !open;
     button.setAttribute("aria-expanded", open ? "true" : "false");
     button.textContent = open ? "Hide" : "Gaps";
+    const key = Number(csvRow);
+    if (!Number.isFinite(key)) return;
+    if (open) openAtsGapsRows.add(key);
+    else openAtsGapsRows.delete(key);
   });
+}
+
+function queueRenderSignature(jobs) {
+  return (Array.isArray(jobs) ? jobs : [])
+    .map((j) =>
+      [
+        j?.csvRow,
+        j?.status,
+        j?.applied ? 1 : 0,
+        j?.atsScore ?? "",
+        j?.atsGrade || "",
+        j?.jobDir || "",
+        j?.error || "",
+        j?.inactive ? 1 : 0,
+        j?.atsEvaluation ? 1 : 0
+      ].join(":")
+    )
+    .join("|");
 }
 
 function escapeHtml(s) {
@@ -1385,9 +1504,7 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
     runOneOffBtn.disabled = busy;
     const force = oneOffNeedsForceDraft();
     runOneOffBtn.textContent = force ? "Force draft" : "Draft";
-    runOneOffBtn.title = force
-      ? "Link may already be on the sheet — draft anyway"
-      : "Run AI and open preview — no files yet";
+    runOneOffBtn.removeAttribute("title");
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
@@ -1395,9 +1512,7 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
     const needsGaps =
       draftReady && Number.isFinite(score) && score < 90;
     regenerateOneOffBtn.textContent = needsGaps ? "Regenerate for gaps" : "Regenerate";
-    regenerateOneOffBtn.title = needsGaps
-      ? "Re-run AI targeting Gaps tips (score under 90)"
-      : "Re-run AI with current fields and notes";
+    regenerateOneOffBtn.removeAttribute("title");
   }
   if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
   if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
@@ -1451,9 +1566,13 @@ function renderOneOffAts(payload) {
       : `<span class="ats-score-grade ats-score-grade-empty"></span>`) +
     `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
   if (oneOffAtsGapsEl) {
-    oneOffAtsGapsEl.innerHTML = atsGapsHtml(payload.atsEvaluation || {});
+    oneOffAtsGapsEl.innerHTML = atsGapsHtml(payload.atsEvaluation || {}, { rebuild: true });
     const openGaps = score < 90;
     oneOffAtsGapsEl.hidden = !openGaps;
+    wireAtsGapsActions(oneOffAtsGapsEl, {
+      oneOff: true,
+      evaluation: payload.atsEvaluation || {}
+    });
   }
   if (oneOffViewGapsBtn) {
     const openGaps = score < 90;
@@ -1510,7 +1629,7 @@ function renderCurrentWorkIndicator() {
   queueNowWorkingEl.hidden = false;
   queueNowWorkingEl.dataset.csvRow = String(row);
   queueNowWorkingEl.tabIndex = 0;
-  queueNowWorkingEl.title = "Click to jump to this row in the list";
+  queueNowWorkingEl.removeAttribute("title");
   queueNowWorkingEl.replaceChildren();
 
   const kicker = document.createElement("span");
@@ -1663,7 +1782,7 @@ function renderQueue() {
       const nowBadge = document.createElement("span");
       nowBadge.className = "badge badge-now";
       nowBadge.textContent = "Now";
-      nowBadge.title = "Currently processing this job";
+      nowBadge.removeAttribute("title");
       badges.appendChild(nowBadge);
     }
     const badge = document.createElement("span");
@@ -1697,17 +1816,25 @@ function renderQueue() {
       atsScoreEl.appendChild(scoreBadge);
 
       if (job.atsEvaluation) {
+        const gapsOpen = openAtsGapsRows.has(Number(job.csvRow));
         const gapsBtn = document.createElement("button");
         gapsBtn.type = "button";
         gapsBtn.className = "ghost compact ats-gaps-toggle";
-        gapsBtn.textContent = "Gaps";
-        gapsBtn.setAttribute("aria-expanded", "false");
-        gapsBtn.title = "Show missing products, keywords, and how to improve";
+        gapsBtn.textContent = gapsOpen ? "Hide" : "Gaps";
+        gapsBtn.setAttribute("aria-expanded", gapsOpen ? "true" : "false");
+        gapsBtn.removeAttribute("title");
         const gapsPanel = document.createElement("div");
         gapsPanel.className = "one-off-ats-gaps queue-ats-gaps";
-        gapsPanel.hidden = true;
-        gapsPanel.innerHTML = atsGapsHtml(job.atsEvaluation);
-        wireAtsGapsToggle(gapsBtn, gapsPanel);
+        gapsPanel.hidden = !gapsOpen;
+        gapsPanel.innerHTML = atsGapsHtml(job.atsEvaluation, {
+          rebuild: true,
+          csvRow: job.csvRow
+        });
+        wireAtsGapsToggle(gapsBtn, gapsPanel, job.csvRow);
+        wireAtsGapsActions(gapsPanel, {
+          csvRow: job.csvRow,
+          evaluation: job.atsEvaluation
+        });
         atsScoreEl.appendChild(gapsBtn);
         atsGapsWrap = gapsPanel;
       }
@@ -1770,7 +1897,7 @@ function renderQueue() {
       const inactiveBadge = document.createElement("span");
       inactiveBadge.className = "badge badge-inactive";
       inactiveBadge.textContent = "Inactive";
-      inactiveBadge.title = "Job no longer available on Dice";
+      inactiveBadge.title = "Inactive";
       badges.appendChild(inactiveBadge);
     }
     meta.appendChild(title);
@@ -1810,8 +1937,8 @@ function renderQueue() {
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "secondary danger";
-    setIconButton(removeBtn, "remove", "Remove unsuitable job");
-    removeBtn.title = "Remove this unsuitable job from the batch and future CSV refreshes";
+    setIconButton(removeBtn, "remove", "Remove");
+    removeBtn.removeAttribute("title");
     removeBtn.disabled =
       batchState === "running" || job.status === "running" || job.status === "done" || job.applied;
     removeBtn.addEventListener("click", () => removeJobFromBatch(job));
@@ -1824,7 +1951,7 @@ function renderQueue() {
       retryBtn.type = "button";
       retryBtn.className = "secondary";
       setIconButton(retryBtn, "retry", "Retry job");
-      retryBtn.title = "Reset this job and run it again";
+      retryBtn.removeAttribute("title");
       retryBtn.addEventListener("click", () => retryOneJob(job));
       actions.appendChild(retryBtn);
     }
@@ -1854,18 +1981,18 @@ function renderQueue() {
           : job.applied
             ? "Apply again"
             : sheetReadyContinue && !filesReady
-              ? "Continue apply (open + Autofill panel)"
+              ? "Continue apply"
               : "Apply to job"
     );
     applyBtn.title = inactiveJob
-      ? "This job posting is no longer available."
+      ? "Inactive"
       : !canApply
-        ? "Resume and cover letter are not ready yet — wait until status is Done, or run Start to build files."
+        ? "Files not ready"
         : job.applied
-          ? `${appliedDocsTitle(job)}\nClick to apply again.`
+          ? appliedDocsTitle(job)
           : sheetReadyContinue && !filesReady
-            ? "Sheet shows Ready (not Applied). Opens the job and Autofill panel (Dice still runs full auto-apply)."
-            : "Open this job and Autofill panel (Dice: auto-apply+submit). Mark Applied on the Google Sheet.";
+            ? "Continue apply"
+            : "Apply";
     if (canApply) {
       applyBtn.addEventListener("click", () => applyAssist(job));
     }
@@ -1920,7 +2047,7 @@ async function loadCsvSourceForm() {
   }
   if (csvExtensionIdHintEl) {
     const id = res?.extensionId || chrome.runtime.id;
-    csvExtensionIdHintEl.textContent = `Extension ID (for native-host install): ${id}`;
+    csvExtensionIdHintEl.textContent = id ? `Ext ID: ${id}` : "";
   }
 }
 
@@ -1947,8 +2074,8 @@ async function saveCsvSourceForm() {
   await loadCsvSourceForm();
   setStatus(
     res.alarm?.scheduled
-      ? `CSV auto-source saved — polling every ${res.alarm.minutes} min.`
-      : "CSV auto-source saved (polling off)."
+      ? `Auto-source · every ${res.alarm.minutes}m`
+      : "Auto-source saved."
   );
 }
 
@@ -1995,7 +2122,7 @@ async function pinLocalCsvFile() {
   setStatus(
     ingest.unchangedFile
       ? `Pinned ${file.name} (unchanged).`
-      : `Pinned ${file.name} — +${ingest.added || 0} new · ${ingest.pending || 0} pending. Review jobs, then click Start.`
+      : `Pinned ${file.name} · +${ingest.added || 0} · ${ingest.pending || 0} pending`
   );
 }
 
@@ -2048,7 +2175,7 @@ async function refreshCsvFromSources() {
         setStatus(
           ingest.unchangedFile
             ? "Pinned CSV unchanged."
-            : `Refreshed pinned CSV — +${ingest.added || 0} new · ${ingest.pending || 0} pending. Review jobs, then click Start.`
+            : `Refreshed · +${ingest.added || 0} · ${ingest.pending || 0} pending`
         );
         return;
       }
@@ -2069,7 +2196,7 @@ async function refreshCsvFromSources() {
     setStatus(
       r.unchangedFile
         ? `CSV unchanged (${res.via || "source"}).`
-        : `Refreshed via ${res.via || "source"} — +${r.added || 0} new · ${r.pending || 0} pending. Review jobs, then click Start.`
+        : `Refreshed (${res.via || "source"}) · +${r.added || 0} · ${r.pending || 0} pending`
     );
     return;
   }
@@ -2081,7 +2208,7 @@ async function refreshCsvFromSources() {
     setStatus(`Refresh: ${res.errors.join(" · ")}. Pin a file, set a URL, or Choose File.`);
     return;
   }
-  setStatus("Refresh finished. Configure Auto-source settings if nothing changed.");
+  setStatus("Refresh done.");
 }
 
 async function onCsvSelected(file) {
@@ -2138,11 +2265,9 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Ashby ${result.ashbyCount || 0} / Lever ${result.leverCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}).` +
-        (result.droppedNonUs
-          ? ` Dropped ${result.droppedNonUs} non-US.`
-          : "") +
-        ` Filters use the job URL (Dice / Greenhouse / …). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
+      `Loaded ${result.totalRows} → ${allUsJobsCache.length} US` +
+        (result.droppedNonUs ? ` · dropped ${result.droppedNonUs} non-US` : "") +
+        `${dedupeNote}`
     );
 
     try {
@@ -2257,14 +2382,14 @@ async function applyAssist(job) {
   }
   if (res?.hostedAutoApply) {
     await loadSettings().catch(() => {});
-    setStatus(res.status || "Auto apply running — watch the status bar.");
+    setStatus(res.status || "Auto apply running.");
     return;
   }
   if (res?.autofillSkipped || res?.openedOnly) {
     setStatus(res.status || "Marked Applied and opened job link.");
     return;
   }
-  setStatus(res.status || "Apply started — sheet marked, filling the form in the job tab.");
+  setStatus(res.status || "Apply started.");
 }
 
 async function sendBatch(type) {
@@ -2276,9 +2401,7 @@ async function sendBatch(type) {
     return;
   }
   if (type === "batch_start" || type === "batch_resume") {
-    setStatus(
-      `${res.status || "Batch started."} Tip: leave ${aiProviderLabel(aiProviderCache)} visible/focused — closing this popup helps auto-Send.`
-    );
+    setStatus(res.status || "Batch started.");
     return;
   }
   setStatus(res.status || `Batch ${type} ok.`);
@@ -2379,7 +2502,7 @@ async function copyAppsScript() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     await navigator.clipboard.writeText(text);
-    setStatus("Apps Script copied. Paste into the spreadsheet, then Deploy → New deployment (Web app).");
+    setStatus("Apps Script copied.");
   } catch {
     setStatus("Could not copy. Open apps-script/Code.gs instead.");
   }
@@ -2582,9 +2705,9 @@ async function setBidMarket(market) {
   renderBidMarket(next, { expandManual: next === BID_MARKETS.NON_US });
   await chrome.storage.local.set({ [BID_MARKET_KEY]: next });
   if (next === BID_MARKETS.NON_US && prev !== BID_MARKETS.NON_US) {
-    setStatus("Non-US market — batch queue hidden. Use Manual bid for each job.");
+    setStatus("Non-US.");
   } else if (next === BID_MARKETS.US && prev !== BID_MARKETS.US) {
-    setStatus("US market — CSV queue and batch controls available.");
+    setStatus("US.");
   }
 }
 
@@ -2611,7 +2734,7 @@ async function fillFromOpenTab() {
     await persistJobFields();
     setManualPanelOpen(true);
     const site = res.site ? ` (${res.site})` : "";
-    setStatus(`Filled from open tab${site}. Review fields, then Draft.`);
+    setStatus(`Filled from tab${site}.`);
     syncOneOffActionButtons();
   } catch (err) {
     setStatus(`Scrape failed: ${String(err?.message || err)}`);
@@ -2651,7 +2774,7 @@ async function openOneOffDraftPreview(templateId = "") {
       await chrome.runtime
         .sendMessage({ type: "template_preview_show", templateId: tid, source: "draft" })
         .catch(() => {});
-      setStatus("Draft preview focused — Confirm when ready.");
+      setStatus("Draft preview focused.");
       return;
     } catch {
       // Window was closed.
@@ -2664,7 +2787,7 @@ async function openOneOffDraftPreview(templateId = "") {
     height: 1040
   });
   await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
-  setStatus("Opened draft preview — Confirm when ready.");
+  setStatus("Draft preview opened.");
 }
 
 async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {}) {
@@ -2687,11 +2810,11 @@ async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {})
   }
 
   if (!person?.promptTemplate?.includes("{JD}")) {
-    setStatus("Active person needs a tailor prompt with {JD} (auto-filled from each CSV job). Open the person editor.");
+    setStatus("Prompt needs {JD}.");
     return;
   }
   if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
-    setStatus("Upload or paste a master resume (text/PDF/DOCX) — not JSON.");
+    setStatus("Master resume required.");
     return;
   }
 
@@ -2833,20 +2956,20 @@ async function importBundledQaBank() {
 
 async function autofillThisPage() {
   if (!autofillEnabledCache) {
-    setStatus("Autofill is off. Turn it on in Apply assist.");
+    setStatus("Autofill is off.");
     return;
   }
   autofillPageBtn.disabled = true;
   autoApplyPageBtn.disabled = true;
   if (customQaPageBtn) customQaPageBtn.disabled = true;
   try {
-    setStatus("Opening panel and autofilling the application tab…");
+    setStatus("Autofilling…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
     if (!res?.ok) {
-      setStatus(res?.error || "Autofill failed. Click the application tab, then try again.");
+      setStatus(res?.error || "Autofill failed.");
       return;
     }
-    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete — check the panel on the application page.");
+    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete.");
   } finally {
     syncAutofillUi();
   }
@@ -2854,7 +2977,7 @@ async function autofillThisPage() {
 
 async function autoApplyThisPage() {
   if (!autofillEnabledCache) {
-    setStatus("Autofill is off. Turn it on in Apply assist.");
+    setStatus("Autofill is off.");
     return;
   }
   const allowSubmit = Boolean(allowSubmitToggleEl?.checked);
@@ -2862,17 +2985,13 @@ async function autoApplyThisPage() {
   autoApplyPageBtn.disabled = true;
   if (customQaPageBtn) customQaPageBtn.disabled = true;
   try {
-    setStatus(
-      allowSubmit
-        ? "Auto Apply: filling and advancing (Submit enabled on supported ATS)…"
-        : "Auto Apply: filling and advancing — stops before Submit…"
-    );
+    setStatus(allowSubmit ? "Auto Apply…" : "Auto Apply (no submit)…");
     const res = await chrome.runtime.sendMessage({
       type: "autofill_multi_step",
       allowSubmitOnAssist: allowSubmit
     });
     if (!res?.ok) {
-      setStatus(res?.error || "Auto Apply failed. Focus the application tab first.");
+      setStatus(res?.error || "Auto Apply failed.");
       return;
     }
     setStatus(res.status || res.detail || res.statusText || formatAutofillSummary(res) || "Auto Apply finished.");
@@ -2883,11 +3002,11 @@ async function autoApplyThisPage() {
 
 async function customQaThisPage() {
   if (!autofillEnabledCache) {
-    setStatus("Autofill is off. Turn it on in Apply assist.");
+    setStatus("Autofill is off.");
     return;
   }
   if (openaiQaToggleEl && !openaiQaToggleEl.checked) {
-    setStatus("OpenAI Custom Q&A is off. Enable the toggle to scan leftovers on the page.");
+    setStatus("OpenAI Custom Q&A is off.");
     return;
   }
   autofillPageBtn.disabled = true;
@@ -2895,10 +3014,10 @@ async function customQaThisPage() {
   if (customQaPageBtn) customQaPageBtn.disabled = true;
   if (customQaScanPageBtn) customQaScanPageBtn.disabled = true;
   try {
-    setStatus("Custom Q&A: answering special questions with OpenAI…");
+    setStatus("Custom Q&A…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_openai_qa" });
     if (!res?.ok) {
-      setStatus(res?.error || "Custom Q&A failed. Focus the application tab, then try again.");
+      setStatus(res?.error || "Custom Q&A failed.");
       return;
     }
     setStatus(res.statusText || formatAutofillSummary(res) || "Custom Q&A complete.");
@@ -2957,13 +3076,13 @@ function toggleCustomQaAskPanel({ focus = true } = {}) {
         /* ignore */
       }
     }
-    setStatus("Custom Q&A: paste a question, pick OpenAI or AI tab, then Generate.");
+    setStatus("Enter a question.");
   }
 }
 
 async function generateCustomQaAsk() {
   if (!autofillEnabledCache) {
-    setStatus("Autofill is off. Turn it on in Apply assist.");
+    setStatus("Autofill is off.");
     return;
   }
   const question = String(customQaQuestionEl?.value || "").trim();
@@ -2985,10 +3104,10 @@ async function generateCustomQaAsk() {
   try {
     setStatus(
       engine === "chatgpt"
-        ? "Custom Q&A: asking ChatGPT/Claude tab (uses subscription)…"
+        ? "Custom Q&A · AI tab…"
         : strongModel
-          ? "Custom Q&A: generating with stronger OpenAI model…"
-          : "Custom Q&A: generating with OpenAI…"
+          ? "Custom Q&A · strong…"
+          : "Custom Q&A…"
     );
     const res = await chrome.runtime.sendMessage({
       type: "custom_qa_ask",
@@ -3013,7 +3132,7 @@ async function generateCustomQaAsk() {
               ? `Claude tab${res.reusedChat ? " · same job chat" : ""}${who}`
               : `ChatGPT tab${res.reusedChat ? " · same job chat" : ""}${who}`;
     setCustomQaMeta(src);
-    setStatus(`Custom Q&A ready (${src}). Copy or Save to bank.`);
+    setStatus(`Custom Q&A ready (${src}).`);
   } finally {
     if (customQaGenerateBtn) customQaGenerateBtn.dataset.busy = "0";
     syncCustomQaAskControls();
@@ -3027,7 +3146,7 @@ async function copyCustomQaAnswer() {
     await navigator.clipboard.writeText(text);
     setStatus("Answer copied.");
   } catch {
-    setStatus("Could not copy — select the answer and copy manually.");
+    setStatus("Copy failed.");
   }
 }
 
@@ -3080,6 +3199,7 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
 
   queueCache = [];
   allUsJobsCache = [];
+  openAtsGapsRows.clear();
   batchState = "idle";
   if (csvFileEl) csvFileEl.value = "";
 
@@ -3098,7 +3218,7 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
   renderQueue();
   updateCsvSummaryFromQueue();
   setBusy(false);
-  setStatus("Job list cleared. Upload a CSV to start again.");
+  setStatus("Queue cleared.");
   return true;
 }
 
@@ -3118,7 +3238,7 @@ async function resetWorkflow() {
     if (!res?.ok) throw new Error(res?.error || "Failed to reset.");
     batchState = "idle";
     await clearJobsList({ confirmPrompt: false });
-    setStatus("Reset complete. Job list cleared — ready for a new CSV.");
+    setStatus("Reset complete.");
     setBusy(false);
   } catch (err) {
     setStatus(`Reset failed: ${String(err.message || err)}`);
@@ -3164,7 +3284,7 @@ function setManualPanelOpen(open, { persist = true } = {}) {
   const isOpen = Boolean(open);
   manualPanelBody.hidden = !isOpen;
   toggleManualPanelBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
-  toggleManualPanelBtn.textContent = isOpen ? "Hide one-off job form" : "Expand one-off job form";
+  toggleManualPanelBtn.textContent = isOpen ? "Collapse" : "Expand";
   if (persist) {
     chrome.storage.local.set({ [MANUAL_PANEL_OPEN_KEY]: isOpen }).catch(() => {});
   }
@@ -3186,7 +3306,7 @@ addProfileBtn?.addEventListener("click", () => {
   }
   inlineProfileEditor
     .startNew()
-    .then(() => setStatus("New profile — fill details and Save."))
+    .then(() => setStatus("New profile."))
     .catch((err) => setStatus(String(err?.message || err)));
 });
 
@@ -3314,6 +3434,15 @@ runOneOffBtn.addEventListener("click", () => {
   runOneOffDraft({ forceRebuild: force }).catch((e) => setStatus(String(e.message || e)));
 });
 regenerateOneOffBtn?.addEventListener("click", () => {
+  const score = Number(lastOneOffAtsCache?.atsScore);
+  const needsGaps = Number.isFinite(score) && score < 90 && lastOneOffAtsCache?.atsEvaluation;
+  if (needsGaps) {
+    rebuildFromGaps({
+      evaluation: lastOneOffAtsCache.atsEvaluation,
+      oneOff: true
+    }).catch((e) => setStatus(String(e.message || e)));
+    return;
+  }
   runOneOffDraft({ regenerate: true, forceRebuild: true }).catch((e) => setStatus(String(e.message || e)));
 });
 confirmOneOffBtn?.addEventListener("click", () => {
@@ -3390,15 +3519,15 @@ openaiQaToggleEl?.addEventListener("change", () => {
   syncAutofillUi();
   setStatus(
     openaiQaToggleEl.checked
-      ? "OpenAI Custom Q&A on — Autofill leftovers and Scan page use the API key."
-      : "OpenAI Custom Q&A off — Autofill uses profile + bank; Ask can still use AI tab."
+      ? "OpenAI Custom Q&A on."
+      : "OpenAI Custom Q&A off."
   );
 });
 autofillEnabledToggleEl?.addEventListener("change", () => {
   const enabled = Boolean(autofillEnabledToggleEl.checked);
   syncAutofillUi(enabled);
   chrome.storage.local.set({ [AUTOFILL_ENABLED_KEY]: enabled }).catch(() => {});
-  setStatus(enabled ? "Autofill enabled." : "Autofill disabled — manual apply off; Dice batch auto-apply still runs.");
+  setStatus(enabled ? "Autofill on." : "Autofill off.");
 });
 aiProviderChatgptBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));
@@ -3583,7 +3712,7 @@ setInterval(async () => {
   }
   if (Array.isArray(data[QUEUE_KEY])) {
     const prevByRow = new Map(queueCache.map((j) => [Number(j.csvRow), j]));
-    queueCache = data[QUEUE_KEY].map((j) => {
+    const nextQueue = data[QUEUE_KEY].map((j) => {
       const prev = prevByRow.get(Number(j.csvRow));
       return {
         ...j,
@@ -3596,8 +3725,14 @@ setInterval(async () => {
         atsEvaluation: j.atsEvaluation || prev?.atsEvaluation || null
       };
     });
-    renderQueue();
-    updateCsvSummaryFromQueue();
+    const changed = queueRenderSignature(nextQueue) !== queueRenderSignature(queueCache);
+    queueCache = nextQueue;
+    if (changed) {
+      renderQueue();
+      updateCsvSummaryFromQueue();
+    } else {
+      followQueueToCurrentWork();
+    }
   } else {
     followQueueToCurrentWork();
   }

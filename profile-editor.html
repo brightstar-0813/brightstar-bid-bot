@@ -53,11 +53,10 @@
               type="button"
               id="savePersonAsNew"
               class="ghost compact"
-              title="Create a separate copy under a new name"
             >
-              Save as new
+              Duplicate
             </button>
-            <button type="button" id="deleteProfile" class="ghost danger compact" hidden title="Delete this profile">
+            <button type="button" id="deleteProfile" class="ghost danger compact" hidden>
               Delete
             </button>
           </div>
@@ -76,7 +75,6 @@
       <p id="status" class="editor-status status-bar is-ok" role="status" hidden></p>
 
       <form id="profileForm" autocomplete="off">
-        <!-- Autofill — Jobright-style accordion categories -->
         <div class="profile-tab-panel is-active" data-panel="apply" id="profilePanelApply" role="tabpanel">
           <p class="tab-intro">Contact and screener fields filled on job application forms.</p>
           <div class="profile-acc">
@@ -88,11 +86,11 @@
                   <div class="grid-2">
                     <label class="field">
                       <span>Display name</span>
-                      <input id="personLabel" type="text" autocomplete="off" placeholder="How you appear in the app" />
+                            <input id="personLabel" type="text" autocomplete="off" />
                     </label>
                     <label class="field">
                       <span>Legal name</span>
-                      <input id="personName" type="text" autocomplete="off" placeholder="Full name on applications" />
+                      <input id="personName" type="text" autocomplete="off" />
                     </label>
                   </div>
                 </div>
@@ -278,7 +276,6 @@
           </div>
         </div>
 
-        <!-- Resume -->
         <div class="profile-tab-panel" data-panel="resume" id="profilePanelResume" role="tabpanel" hidden aria-hidden="true">
           <p class="tab-intro">Import your resume, then step through work experience and education — like Jobright.</p>
           <div class="resume-wizard" id="resumeWizard">
@@ -344,7 +341,6 @@
           </div>
         </div>
 
-        <!-- Batch (Brightstar CSV / prompts — not autofill) -->
         <div class="profile-tab-panel" data-panel="batch" id="profilePanelBatch" role="tabpanel" hidden aria-hidden="true">
           <p class="tab-intro">Engineering track, AI prompts, and this person's Google Sheet tab.</p>
           <div class="profile-acc">
@@ -388,10 +384,6 @@
                   <span>Sheet tab / save folder</span>
                   <input id="sheetTabName" type="text" autocomplete="off" placeholder="Lewis-SF" />
                 </label>
-                <p class="hint">
-                  One shared workbook in Integrations. This name is the Google Sheet tab and the Downloads folder
-                  (created if missing).
-                </p>
               </div>
             </details>
           </div>

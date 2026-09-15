@@ -415,6 +415,9 @@ test("describeAtsGaps lists missing items and how-to-improve tips", () => {
   assert.ok(detail.missingProducts.includes("Service Cloud"));
   assert.ok(detail.tips.some((t) => /Prove missing|Service Cloud|bullets/i.test(t)));
   assert.ok(detail.tips.some((t) => /JD Keywords|Mirror these JD terms/i.test(t)));
+  assert.ok(Array.isArray(detail.findings) && detail.findings.length >= 1);
+  assert.ok(detail.summary);
+  assert.match(detail.rebuildPrompt || "", /REBUILD FOR ATS GAPS/i);
 
   const strongDetail = describeAtsGaps(
     evaluateAtsScore(strongResume, {
