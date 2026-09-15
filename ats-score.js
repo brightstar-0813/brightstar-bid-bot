@@ -87,7 +87,7 @@ function keywordFrequency(text) {
   return counts;
 }
 
-function topKeywords(text, limit = 35) {
+export function topKeywords(text, limit = 35) {
   return [...keywordFrequency(text).entries()]
     .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length || a[0].localeCompare(b[0]))
     .slice(0, limit)
@@ -112,6 +112,100 @@ function round(value) {
 function cloneResume(data) {
   if (!data || typeof data !== "object") return data;
   return JSON.parse(JSON.stringify(data));
+}
+
+function skillsHaystack(resumeData) {
+  return (Array.isArray(resumeData?.skills) ? resumeData.skills : [])
+    .map((row) => `${row?.category || ""} ${row?.items || ""}`)
+    .join(" ");
+}
+
+function experienceJobs(resumeData) {
+  return Array.isArray(resumeData?.experience) ? resumeData.experience : [];
+}
+
+function jobBulletsText(job) {
+  const bullets = Array.isArray(job?.bullets) ? job.bullets : [];
+  return bullets.map((b) => String(b || "")).join(" ");
+}
+
+/**
+ * Products that appear in skills AND in at least `minBullets` experience bullets.
+ * Skills-only listings score 0 for that product.
+ */
+export function scoreProductBulletProof(resumeData, requiredProducts, { minBullets = 2 } = {}) {
+  const products = Array.isArray(requiredProducts) ? requiredProducts : [];
+  if (!products.length) {
+    return { score: 0, max: 0, matched: 0, total: 0, skillsOnly: [], proved: [] };
+  }
+  const skillsText = skillsHaystack(resumeData);
+  const jobs = experienceJobs(resumeData);
+  const proved = [];
+  const skillsOnly = [];
+
+  for (const product of products) {
+    const inSkills = product.re.test(skillsText);
+    let bulletHits = 0;
+    for (const job of jobs) {
+      const bullets = Array.isArray(job?.bullets) ? job.bullets : [];
+      for (const b of bullets) {
+        if (product.re.test(String(b || ""))) bulletHits += 1;
+      }
+    }
+    if (inSkills && bulletHits >= minBullets) {
+      proved.push(product.name);
+    } else if (inSkills && bulletHits < minBullets) {
+      skillsOnly.push(product.name);
+    } else if (bulletHits >= minBullets) {
+      // Named in bullets but missing from skills — still partial credit via proved-adjacent
+      proved.push(product.name);
+    }
+  }
+
+  const matched = proved.length;
+  const max = 15;
+  return {
+    score: round((matched / products.length) * max),
+    max,
+    matched,
+    total: products.length,
+    skillsOnly,
+    proved
+  };
+}
+
+/**
+ * GATE 1A mirror: each of the two most recent roles should name ≥3 JD-required
+ * products/skills in its bullets (or all required products when fewer than 3).
+ */
+export function scoreRecentRoleProof(resumeData, requiredProducts, { minPerRole = 3 } = {}) {
+  const products = Array.isArray(requiredProducts) ? requiredProducts : [];
+  const jobs = experienceJobs(resumeData).slice(0, 2);
+  if (!products.length || !jobs.length) {
+    return { score: 0, max: 0, matched: 0, total: 0, roleHits: [] };
+  }
+  const need = Math.min(minPerRole, products.length);
+  const roleHits = jobs.map((job) => {
+    const text = jobBulletsText(job);
+    const hitNames = products.filter((p) => p.re.test(text)).map((p) => p.name);
+    return {
+      company: String(job?.company || "").trim(),
+      hitCount: hitNames.length,
+      hits: hitNames,
+      met: hitNames.length >= need
+    };
+  });
+  const rolesMet = roleHits.filter((r) => r.met).length;
+  // Always score against two recent roles so a single-role resume cannot max out.
+  const max = 12;
+  return {
+    score: round((rolesMet / 2) * max),
+    max,
+    matched: rolesMet,
+    total: 2,
+    roleHits,
+    needPerRole: need
+  };
 }
 
 /**
@@ -187,6 +281,31 @@ export function selectProjectBankExcerpts({
     out += (out ? "\n\n" : "") + next;
   }
   return out || chunks[0].slice(0, maxChars);
+}
+
+/**
+ * Short first-pass block so the model targets evidence before any ATS retry.
+ * Products use catalog spellings; keywords are distinctive JD tokens.
+ */
+export function buildMustProveBlock(jdText = "", roleTrack = "sf") {
+  const trackId = normalizeRoleTrackId(roleTrack);
+  const track = getRoleTrack(trackId);
+  const required = jdRequiredSkills(jdText, trackId);
+  const products = required.map((p) => p.name).slice(0, 12);
+  const keywords = topKeywords(jdText, 10);
+  if (!products.length && !keywords.length) return "";
+  const lines = [
+    "==================================================",
+    "MUST PROVE (first-pass evidence — before writing JSON)",
+    "==================================================",
+    "Prove these in real skills categories (exact JD spellings), profile sentences, AND ≥2 bullets across the TWO most recent roles. Never a keyword-dump skills row. Never invent employers.",
+    products.length
+      ? `${track.domainProductLabel || "Must-have products"}: ${products.join(", ")}`
+      : "",
+    keywords.length ? `Distinctive JD terms to weave naturally: ${keywords.join(", ")}` : "",
+    "Adapt project patterns into EXISTING employers only — never paste bank titles as companies."
+  ].filter(Boolean);
+  return lines.join("\n");
 }
 
 /**
@@ -308,40 +427,60 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
   const productMatches = requiredProducts.filter((product) => product.re.test(resumeText));
   const missingProducts = requiredProducts.filter((product) => !product.re.test(resumeText));
 
+  const productProof = scoreProductBulletProof(resumeData, requiredProducts, { minBullets: 2 });
+  const recentProof = scoreRecentRoleProof(resumeData, requiredProducts, { minPerRole: 3 });
+
+  // Lexical catalog presence — lower weight; proof components carry recruiter fit.
   const domainProductsScore = requiredProducts.length
-    ? round((productMatches.length / requiredProducts.length) * 20)
+    ? round((productMatches.length / requiredProducts.length) * 12)
     : 0;
+
+  const keywordExpScore = round(experienceCoverage.ratio * 8);
+  const recentRoleScore = recentProof.max ? recentProof.score : 0;
+  const experienceEvidenceScore = Math.min(20, keywordExpScore + recentRoleScore);
+  const experienceEvidenceMax = requiredProducts.length || keywords.length ? 20 : 8;
 
   const components = {
     keywordMatch: {
-      score: round(keywordCoverage.ratio * 45),
-      max: 45,
+      score: round(keywordCoverage.ratio * 35),
+      max: 35,
       matched: keywordCoverage.matched.length,
       total: keywords.length
     },
     titleAlignment: {
-      score: round(titleCoverage.ratio * 15),
-      max: titleKeywords.length ? 15 : 0,
+      score: round(titleCoverage.ratio * 10),
+      max: titleKeywords.length ? 10 : 0,
       matched: titleCoverage.matched.length,
       total: titleKeywords.length
     },
     domainProducts: {
       score: domainProductsScore,
-      max: requiredProducts.length ? 20 : 0,
+      max: requiredProducts.length ? 12 : 0,
       matched: productMatches.length,
       total: requiredProducts.length
     },
+    // Alias for older Gaps UI — excluded from score sum below.
     salesforceProducts: {
       score: domainProductsScore,
-      max: requiredProducts.length ? 20 : 0,
+      max: requiredProducts.length ? 12 : 0,
       matched: productMatches.length,
       total: requiredProducts.length
     },
+    productBulletProof: {
+      score: productProof.score,
+      max: productProof.max,
+      matched: productProof.matched,
+      total: productProof.total,
+      skillsOnly: productProof.skillsOnly,
+      proved: productProof.proved
+    },
     experienceEvidence: {
-      score: round(experienceCoverage.ratio * 15),
-      max: 15,
-      matched: experienceCoverage.matched.length,
-      total: keywords.length
+      score: experienceEvidenceScore,
+      max: experienceEvidenceMax,
+      matched: recentProof.matched || experienceCoverage.matched.length,
+      total: recentProof.total || keywords.length,
+      roleHits: recentProof.roleHits || [],
+      needPerRole: recentProof.needPerRole || 0
     },
     atsStructure: {
       score: [
@@ -356,8 +495,16 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
     }
   };
 
-  const raw = Object.values(components).reduce((sum, item) => sum + item.score, 0);
-  const possible = Object.values(components).reduce((sum, item) => sum + item.max, 0) || 1;
+  const scoreKeys = [
+    "keywordMatch",
+    "titleAlignment",
+    "domainProducts",
+    "productBulletProof",
+    "experienceEvidence",
+    "atsStructure"
+  ];
+  const raw = scoreKeys.reduce((sum, key) => sum + (Number(components[key]?.score) || 0), 0);
+  const possible = scoreKeys.reduce((sum, key) => sum + (Number(components[key]?.max) || 0), 0) || 1;
   const score = Math.min(100, round((raw / possible) * 100));
   const grade = score >= 90 ? "Excellent" : score >= 75 ? "Good" : score >= 55 ? "Fair" : "Low";
 
@@ -369,6 +516,7 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
     missingKeywords: keywordCoverage.missing.slice(0, 15),
     requiredProducts: requiredProducts.map((product) => product.name),
     missingProducts: missingProducts.map((product) => product.name),
+    skillsOnlyProducts: productProof.skillsOnly || [],
     roleTrack: trackId,
     evaluatedAt: Date.now()
   };
@@ -397,7 +545,8 @@ export function describeAtsGaps(evaluation = {}) {
     { key: "keywordMatch", label: "JD keywords" },
     { key: "titleAlignment", label: "Title alignment" },
     { key: domainKey, label: track.domainProductLabel || "Domain products" },
-    { key: "experienceEvidence", label: "Experience evidence" },
+    { key: "productBulletProof", label: "Skills + bullet proof" },
+    { key: "experienceEvidence", label: "Recent-role evidence" },
     { key: "atsStructure", label: "Resume structure" }
   ];
 
@@ -424,10 +573,21 @@ export function describeAtsGaps(evaluation = {}) {
 
   const tips = [];
   const primaryCategory = track.primarySkillsCategory || "Technical Skills";
+  const skillsOnly = Array.isArray(evaluation?.skillsOnlyProducts)
+    ? evaluation.skillsOnlyProducts
+    : Array.isArray(components.productBulletProof?.skillsOnly)
+      ? components.productBulletProof.skillsOnly
+      : [];
 
   if (missingProducts.length) {
     tips.push(
-      `Add missing ${track.domainProductLabel || "products"} under real skills categories (e.g. "${primaryCategory}") and name each in bullets for the two most recent roles: ${missingProducts.join(", ")}.`
+      `Prove missing ${track.domainProductLabel || "products"} in real skills categories (e.g. "${primaryCategory}") AND in at least two experience bullets across the two most recent roles — never skills-only: ${missingProducts.join(", ")}.`
+    );
+  }
+
+  if (skillsOnly.length) {
+    tips.push(
+      `These appear in skills but not enough experience bullets — name each in concrete bullets for the two most recent roles: ${skillsOnly.join(", ")}.`
     );
   }
 
@@ -445,14 +605,23 @@ export function describeAtsGaps(evaluation = {}) {
   }
 
   const expComp = components.experienceEvidence;
+  if (expComp && Number(expComp.max) > 0 && expComp.score / expComp.max < 0.75) {
+    const need = Number(expComp.needPerRole) || 3;
+    tips.push(
+      `Rewrite the two most recent roles so each names at least ${need} JD-required tools in real bullets (${track.bulletInternalsHint || "name the feature, what you built, and the outcome"}). Skills-table coverage alone does not raise this score.`
+    );
+  }
+
+  const proofComp = components.productBulletProof;
   if (
-    expComp &&
-    Number(expComp.max) > 0 &&
-    expComp.score / expComp.max < 0.75 &&
+    proofComp &&
+    Number(proofComp.max) > 0 &&
+    proofComp.score / proofComp.max < 0.75 &&
+    !skillsOnly.length &&
     !missingProducts.length
   ) {
     tips.push(
-      `Rewrite the two most recent roles as coherent workstreams that prove JD tools in real bullets (${track.bulletInternalsHint || "name the feature, what you built, and the outcome"}).`
+      `Strengthen product proof: each must-have should appear under "${primaryCategory}" (or sibling rows) and in two or more experience bullets.`
     );
   }
 
@@ -462,7 +631,9 @@ export function describeAtsGaps(evaluation = {}) {
   }
 
   if (!tips.length && Number(evaluation?.score) >= ATS_TARGET_SCORE) {
-    tips.push("Match looks strong — no critical gaps. Keep proving Tier 0 tools inside recent-role bullets on the next regenerate if the JD shifts.");
+    tips.push(
+      "Match looks strong — Tier 0 tools are proved in recent-role bullets. Keep that evidence on the next regenerate if the JD shifts."
+    );
   } else if (!tips.length) {
     tips.push(
       "Regenerate with stronger project evidence in the two most recent roles, or open Gaps after the next ATS pass once missing products/keywords are recorded."
@@ -476,6 +647,7 @@ export function describeAtsGaps(evaluation = {}) {
     breakdown,
     missingProducts,
     missingKeywords,
+    skillsOnlyProducts: skillsOnly,
     tips
   };
 }

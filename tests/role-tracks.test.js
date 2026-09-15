@@ -129,5 +129,6 @@ test("ATS appendices use evidence match and forbid keyword-dump sections", () =>
     assert.match(appendix, /JD Keywords/i);
     assert.match(appendix, /HARD FORBIDDEN/i);
     assert.match(appendix, /full-sentence/i);
+    assert.match(appendix, /EXACT JD spellings/i);
   }
 });

@@ -153,6 +153,8 @@ if (inlineProfileEditorEl && profileEditorPanelBody) {
     setStatus,
     setPanelOpen: (open) => {
       chrome.storage.local.set({ [PROFILE_EDITOR_PANEL_OPEN_KEY]: open }).catch(() => {});
+      const setup = document.getElementById("setupPanel");
+      if (setup && open) setup.open = true;
     },
     onSaved: async (saved) => {
       if (!saved?.id) return;
@@ -378,7 +380,7 @@ async function syncActiveTrackUi({ savedTrack } = {}) {
 }
 
 function applyTrackTemplatesToForm(_roleTrack, _person) {
-  /* Prompts live in profile editor â€” session track only in popup. */
+  /* Prompts live in profile editor — session track only in popup. */
 }
 
 async function applyActiveRoleTrackChange({ track: nextTrack } = {}) {
@@ -436,7 +438,7 @@ function ensurePromptsOnPerson(person, { resetEeo = false, resetPrompts = false 
     prompt.includes("{JD}") &&
     (promptHasFixedCompanyHistory(prompt) || !isTrackDefaultPrompt(prompt));
 
-  // Save-as-mine uses resetEeo only â€” keep FIXED COMPANY HISTORY / custom rich prompts.
+  // Save-as-mine uses resetEeo only — keep FIXED COMPANY HISTORY / custom rich prompts.
   if (resetPrompts || !hasRichPrompt) {
     if (resetPrompts || !prompt || !prompt.includes("{JD}") || isTrackDefaultPrompt(prompt)) {
       next.promptTemplate = getTrackPromptTemplate(track, next);
@@ -471,7 +473,7 @@ function ensurePromptsOnPerson(person, { resetEeo = false, resetPrompts = false 
 }
 
 async function persistImportedPerson(merged, { asNew = false } = {}) {
-  // asNew from builtin/name-mismatch: reset EEO only â€” keep rich prompts when present.
+  // asNew from builtin/name-mismatch: reset EEO only — keep rich prompts when present.
   const person = ensurePromptsOnPerson(merged, { resetEeo: asNew, resetPrompts: false });
   if (asNew) {
     const saved = await addCustomProfile({
@@ -531,13 +533,13 @@ async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {})
   if (!parsed.name) {
     const notice = `Imported ${sourceLabel} text. Expand Edit or add profile to add a display name and save.`;
     setPersonImportNotice(notice, { ok: true });
-    setStatus(`Resume imported â€” name not found. Detected: ${filled}.`);
+    setStatus(`Resume imported — name not found. Detected: ${filled}.`);
     await openProfileEditorFromPopup({ tab: "resume" });
     return parsed;
   }
 
-  setPersonImportNotice(`Saving ${parsed.name} from ${sourceLabel}â€¦`, { ok: true });
-  setStatus(`Imported ${parsed.name} from ${sourceLabel}. Savingâ€¦`);
+  setPersonImportNotice(`Saving ${parsed.name} from ${sourceLabel}…`, { ok: true });
+  setStatus(`Imported ${parsed.name} from ${sourceLabel}. Saving…`);
   try {
     const saved = await persistImportedPerson({ ...merged, id: asNew ? null : current?.id }, { asNew });
     await refreshProfiles(saved.id);
@@ -575,7 +577,7 @@ function populateTemplateSelect(selectedId) {
     option.value = template.id;
     option.textContent = template.label;
     option.title = template.description
-      ? `${template.label} â€” ${template.description}`
+      ? `${template.label} — ${template.description}`
       : template.label;
     templateSelectEl.appendChild(option);
   }
@@ -862,13 +864,13 @@ async function runIndeedGrab({ autoApply = true } = {}) {
   renderIndeedGrabState({
     status: "running",
     message: autoApply
-      ? "Grabbing selected job â†’ resume â†’ auto-applyâ€¦"
-      : "Grabbing selected job into the queueâ€¦"
+      ? "Grabbing selected job → resume → auto-apply…"
+      : "Grabbing selected job into the queue…"
   });
   setStatus(
     autoApply
-      ? "Indeed: grab & auto-apply startedâ€¦"
-      : "Indeed: grabbing selected job into the queueâ€¦"
+      ? "Indeed: grab & auto-apply started…"
+      : "Indeed: grabbing selected job into the queue…"
   );
   const result = await chrome.runtime.sendMessage({
     type: autoApply ? "indeed_grab_and_apply" : "indeed_grab_only"
@@ -880,7 +882,7 @@ async function runIndeedGrab({ autoApply = true } = {}) {
   }
   renderIndeedGrabState({
     status: "running",
-    message: "Started â€” watch the status bar for progress."
+    message: "Started — watch the status bar for progress."
   });
   jobsSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
   await applyChannelFilter("indeed").catch(() => {});
@@ -1099,7 +1101,7 @@ function updateCsvSummaryFromQueue() {
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>
     </div>
-    <p class="summary-meta">Showing ${queueCache.length} of ${allUsJobsCache.length} US jobs (${filterLabel}) Â· Dice ${diceTotal} Â· LI ${liTotal} Â· Jobright ${jobrightTotal} Â· Workday ${workdayTotal} Â· GH ${greenhouseTotal} Â· Ashby ${ashbyTotal} Â· Lever ${leverTotal} Â· Etc ${etcTotal} Â· batch ${batchState}</p>
+    <p class="summary-meta">Showing ${queueCache.length} of ${allUsJobsCache.length} US jobs (${filterLabel}) · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · GH ${greenhouseTotal} · Ashby ${ashbyTotal} · Lever ${leverTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
   syncBatchPill();
 }
@@ -1155,7 +1157,7 @@ function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
 
 async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   let mode = normalizeChannelFilter(nextFilter || DEFAULT_CHANNEL_FILTER);
-  // Indeed filter is hidden in the UI â€” migrate any saved selection.
+  // Indeed filter is hidden in the UI — migrate any saved selection.
   if (mode === "indeed") mode = DEFAULT_CHANNEL_FILTER;
   channelFilter = mode;
   syncChannelFilterButtons();
@@ -1173,22 +1175,22 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   renderQueue();
   setStatus(
     channelFilter === "dice"
-      ? `Showing Dice jobs â€” ${queueCache.length} in queue. Start builds then auto-applies each job.`
+      ? `Showing Dice jobs — ${queueCache.length} in queue. Start builds then auto-applies each job.`
       : channelFilter === "linkedin"
-        ? `Showing LinkedIn jobs â€” ${queueCache.length} in queue.`
+        ? `Showing LinkedIn jobs — ${queueCache.length} in queue.`
         : channelFilter === "jobright"
-          ? `Showing Jobright jobs â€” ${queueCache.length} in queue.`
+          ? `Showing Jobright jobs — ${queueCache.length} in queue.`
         : channelFilter === "workday"
-          ? `Showing Workday jobs â€” ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Showing Workday jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "greenhouse"
-          ? `Showing Greenhouse jobs â€” ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Showing Greenhouse jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "ashby"
-          ? `Showing Ashby jobs â€” ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Showing Ashby jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "lever"
-          ? `Showing Lever jobs â€” ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
+          ? `Showing Lever jobs — ${queueCache.length} in queue. Start builds files only (use Autofill panel to apply).`
         : channelFilter === "etc"
-          ? `Showing other boards â€” ${queueCache.length} in queue.`
-          : `Showing all US jobs â€” ${queueCache.length} in queue. Start builds files only (no auto-apply).`
+          ? `Showing other boards — ${queueCache.length} in queue.`
+          : `Showing all US jobs — ${queueCache.length} in queue. Start builds files only (no auto-apply).`
   );
 }
 
@@ -1226,7 +1228,7 @@ function badgeClass(status) {
   return "badge badge-pending";
 }
 
-/** Display order for batch stream: done â†’ pending (running first) â†’ error â†’ skipped. */
+/** Display order for batch stream: done → pending (running first) → error → skipped. */
 function queueStatusSortKey(job) {
   const s = String(job?.status || "pending").toLowerCase();
   if (s === "done") return [0, Number(job.csvRow || 0)];
@@ -1387,7 +1389,16 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
       ? "Link may already be on the sheet — draft anyway"
       : "Run AI and open preview — no files yet";
   }
-  if (regenerateOneOffBtn) regenerateOneOffBtn.disabled = busy || !draftReady;
+  if (regenerateOneOffBtn) {
+    regenerateOneOffBtn.disabled = busy || !draftReady;
+    const score = Number(lastOneOffAtsCache?.atsScore);
+    const needsGaps =
+      draftReady && Number.isFinite(score) && score < 90;
+    regenerateOneOffBtn.textContent = needsGaps ? "Regenerate for gaps" : "Regenerate";
+    regenerateOneOffBtn.title = needsGaps
+      ? "Re-run AI targeting Gaps tips (score under 90)"
+      : "Re-run AI with current fields and notes";
+  }
   if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
   if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
   if (openOneOffPreviewBtn) openOneOffPreviewBtn.disabled = busy || !draftReady;
@@ -1441,11 +1452,13 @@ function renderOneOffAts(payload) {
     `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
   if (oneOffAtsGapsEl) {
     oneOffAtsGapsEl.innerHTML = atsGapsHtml(payload.atsEvaluation || {});
-    oneOffAtsGapsEl.hidden = true;
+    const openGaps = score < 90;
+    oneOffAtsGapsEl.hidden = !openGaps;
   }
   if (oneOffViewGapsBtn) {
-    oneOffViewGapsBtn.setAttribute("aria-expanded", "false");
-    oneOffViewGapsBtn.textContent = "Gaps";
+    const openGaps = score < 90;
+    oneOffViewGapsBtn.setAttribute("aria-expanded", openGaps ? "true" : "false");
+    oneOffViewGapsBtn.textContent = openGaps ? "Hide" : "Gaps";
   }
   syncOneOffActionButtons();
 }
@@ -1464,7 +1477,7 @@ function resolveCurrentWorkJob() {
   return queueCache.find((j) => Number(j.csvRow) === row) || { csvRow: row };
 }
 
-/** Sticky strip above the list â€” always shows the active row while batch runs (no auto-scroll). */
+/** Sticky strip above the list — always shows the active row while batch runs (no auto-scroll). */
 function renderCurrentWorkIndicator() {
   if (!queueNowWorkingEl) return;
   const busy =
@@ -1483,7 +1496,7 @@ function renderCurrentWorkIndicator() {
   }
 
   const row = Number(job.csvRow);
-  const title = String(job.title || "").trim() || "Workingâ€¦";
+  const title = String(job.title || "").trim() || "Working…";
   const company = String(job.company || "").trim();
   const phase =
     job.status === "running"
@@ -1513,7 +1526,7 @@ function renderCurrentWorkIndicator() {
   rowEl.className = "now-row";
   rowEl.textContent = `row ${row}`;
   titleEl.appendChild(rowEl);
-  titleEl.append(` Â· ${title}`);
+  titleEl.append(` · ${title}`);
   const subEl = document.createElement("div");
   subEl.className = "now-sub";
   subEl.textContent = company || lastStatusText || "Batch in progress";
@@ -1534,7 +1547,7 @@ function jumpQueueToCurrentWork() {
   el.classList.add("is-current");
 }
 
-/** Batch is actively generating/applying â€” queue list scroll stays user-controlled. */
+/** Batch is actively generating/applying — queue list scroll stays user-controlled. */
 function isBatchQueueScrollingLocked() {
   return (
     batchState === "running" ||
@@ -1553,7 +1566,7 @@ function restoreQueueListScroll() {
   });
 }
 
-/** Scroll only inside the queue list â€” never move the outer app-body scroll. */
+/** Scroll only inside the queue list — never move the outer app-body scroll. */
 function scrollQueueItemIntoView(container, item, { smooth = false, padding = 4 } = {}) {
   if (!container || !item) return;
   const containerRect = container.getBoundingClientRect();
@@ -1643,7 +1656,7 @@ function renderQueue() {
     title.title = job.title || "";
     const sub = document.createElement("div");
     sub.className = "sub";
-    sub.textContent = `${job.company || ""}${job.location ? " Â· " + job.location : ""}`;
+    sub.textContent = `${job.company || ""}${job.location ? " · " + job.location : ""}`;
     const badges = document.createElement("div");
     badges.className = "queue-badges";
     if (currentRow != null && Number(job.csvRow) === currentRow) {
@@ -1823,7 +1836,7 @@ function renderQueue() {
     const inactiveJob = Boolean(job.inactive) || /^inactive job$/i.test(String(job.error || "").trim());
     const filesReady = Boolean(job.jobDir || job.hasFiles) || job.status === "done";
     // Sheet status Ready (built, not Applied) often lands as skipped-duplicate with no local
-    // jobDir on this CSV row â€” still allow Apply so missed apps can be finished.
+    // jobDir on this CSV row — still allow Apply so missed apps can be finished.
     const sheetReadyContinue =
       !job.applied &&
       job.status === "skipped" &&
@@ -1847,7 +1860,7 @@ function renderQueue() {
     applyBtn.title = inactiveJob
       ? "This job posting is no longer available."
       : !canApply
-        ? "Resume and cover letter are not ready yet â€” wait until status is Done, or run Start to build files."
+        ? "Resume and cover letter are not ready yet — wait until status is Done, or run Start to build files."
         : job.applied
           ? `${appliedDocsTitle(job)}\nClick to apply again.`
           : sheetReadyContinue && !filesReady
@@ -1902,7 +1915,7 @@ async function loadCsvSourceForm() {
       ? new Date(settings.lastIngestAt).toLocaleString()
       : "";
     csvSourceStatusEl.textContent = settings.lastStatus
-      ? `${settings.lastStatus}${when ? ` Â· ${when}` : ""}`
+      ? `${settings.lastStatus}${when ? ` · ${when}` : ""}`
       : "Auto-source idle.";
   }
   if (csvExtensionIdHintEl) {
@@ -1934,7 +1947,7 @@ async function saveCsvSourceForm() {
   await loadCsvSourceForm();
   setStatus(
     res.alarm?.scheduled
-      ? `CSV auto-source saved â€” polling every ${res.alarm.minutes} min.`
+      ? `CSV auto-source saved — polling every ${res.alarm.minutes} min.`
       : "CSV auto-source saved (polling off)."
   );
 }
@@ -1982,7 +1995,7 @@ async function pinLocalCsvFile() {
   setStatus(
     ingest.unchangedFile
       ? `Pinned ${file.name} (unchanged).`
-      : `Pinned ${file.name} â€” +${ingest.added || 0} new Â· ${ingest.pending || 0} pending. Review jobs, then click Start.`
+      : `Pinned ${file.name} — +${ingest.added || 0} new · ${ingest.pending || 0} pending. Review jobs, then click Start.`
   );
 }
 
@@ -2015,7 +2028,7 @@ async function reloadQueueFromStorage() {
 }
 
 async function refreshCsvFromSources() {
-  setStatus("Refreshing CSV from configured sourcesâ€¦");
+  setStatus("Refreshing CSV from configured sources…");
 
   // Prefer interactive pin read in the UI (can re-prompt permission).
   try {
@@ -2035,7 +2048,7 @@ async function refreshCsvFromSources() {
         setStatus(
           ingest.unchangedFile
             ? "Pinned CSV unchanged."
-            : `Refreshed pinned CSV â€” +${ingest.added || 0} new Â· ${ingest.pending || 0} pending. Review jobs, then click Start.`
+            : `Refreshed pinned CSV — +${ingest.added || 0} new · ${ingest.pending || 0} pending. Review jobs, then click Start.`
         );
         return;
       }
@@ -2056,7 +2069,7 @@ async function refreshCsvFromSources() {
     setStatus(
       r.unchangedFile
         ? `CSV unchanged (${res.via || "source"}).`
-        : `Refreshed via ${res.via || "source"} â€” +${r.added || 0} new Â· ${r.pending || 0} pending. Review jobs, then click Start.`
+        : `Refreshed via ${res.via || "source"} — +${r.added || 0} new · ${r.pending || 0} pending. Review jobs, then click Start.`
     );
     return;
   }
@@ -2065,7 +2078,7 @@ async function refreshCsvFromSources() {
     return;
   }
   if (res?.errors?.length) {
-    setStatus(`Refresh: ${res.errors.join(" Â· ")}. Pin a file, set a URL, or Choose File.`);
+    setStatus(`Refresh: ${res.errors.join(" · ")}. Pin a file, set a URL, or Choose File.`);
     return;
   }
   setStatus("Refresh finished. Configure Auto-source settings if nothing changed.");
@@ -2073,7 +2086,7 @@ async function refreshCsvFromSources() {
 
 async function onCsvSelected(file) {
   if (!file) return;
-  setStatus("Parsing CSVâ€¦");
+  setStatus("Parsing CSV…");
   try {
     const text = await file.text();
     const result = parseJobsCsv(text);
@@ -2103,7 +2116,7 @@ async function onCsvSelected(file) {
     let dedupeNote = "";
     try {
       await persistJobFields();
-      setStatus("Checking Google Sheet for jobs already bidâ€¦");
+      setStatus("Checking Google Sheet for jobs already bid…");
       const dedupe = await chrome.runtime.sendMessage({
         type: "dedupe_queue_against_sheet",
         notifySlack: true
@@ -2125,11 +2138,11 @@ async function onCsvSelected(file) {
     }
 
     setStatus(
-      `Loaded ${result.totalRows} rows â†’ ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Ashby ${result.ashbyCount || 0} / Lever ${result.leverCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}).` +
+      `Loaded ${result.totalRows} rows → ${allUsJobsCache.length} reviewable US jobs (Dice ${result.diceCount || 0} / LI ${result.linkedInCount} / Jobright ${result.jobrightCount || 0} / Workday ${result.workdayCount || 0} / GH ${result.greenhouseCount || 0} / Ashby ${result.ashbyCount || 0} / Lever ${result.leverCount || 0} / Etc ${result.etcCount ?? result.generalCount ?? 0}).` +
         (result.droppedNonUs
           ? ` Dropped ${result.droppedNonUs} non-US.`
           : "") +
-        ` Filters use the job URL (Dice / Greenhouse / â€¦). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
+        ` Filters use the job URL (Dice / Greenhouse / …). Review and remove unsuitable jobs, then click Start.${dedupeNote}`
     );
 
     try {
@@ -2150,7 +2163,7 @@ async function onCsvSelected(file) {
 }
 
 async function removeJobFromBatch(job) {
-  const label = `${job?.company || "Unknown company"} â€” ${job?.title || "Untitled"}`;
+  const label = `${job?.company || "Unknown company"} — ${job?.title || "Untitled"}`;
   if (
     !(await confirmDialog({
       title: "Remove job?",
@@ -2195,7 +2208,7 @@ async function applyAssist(job) {
     return;
   }
 
-  setStatus("Starting applyâ€¦");
+  setStatus("Starting apply…");
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
@@ -2244,14 +2257,14 @@ async function applyAssist(job) {
   }
   if (res?.hostedAutoApply) {
     await loadSettings().catch(() => {});
-    setStatus(res.status || "Auto apply running â€” watch the status bar.");
+    setStatus(res.status || "Auto apply running — watch the status bar.");
     return;
   }
   if (res?.autofillSkipped || res?.openedOnly) {
     setStatus(res.status || "Marked Applied and opened job link.");
     return;
   }
-  setStatus(res.status || "Apply started â€” sheet marked, filling the form in the job tab.");
+  setStatus(res.status || "Apply started — sheet marked, filling the form in the job tab.");
 }
 
 async function sendBatch(type) {
@@ -2264,7 +2277,7 @@ async function sendBatch(type) {
   }
   if (type === "batch_start" || type === "batch_resume") {
     setStatus(
-      `${res.status || "Batch started."} Tip: leave ${aiProviderLabel(aiProviderCache)} visible/focused â€” closing this popup helps auto-Send.`
+      `${res.status || "Batch started."} Tip: leave ${aiProviderLabel(aiProviderCache)} visible/focused — closing this popup helps auto-Send.`
     );
     return;
   }
@@ -2274,7 +2287,7 @@ async function sendBatch(type) {
 async function retryOneJob(job) {
   if (!job || job.csvRow == null) return;
   const { outputDir } = await resolveUiOutputDir();
-  setStatus(`Retrying row ${job.csvRow}â€¦`);
+  setStatus(`Retrying row ${job.csvRow}…`);
   try {
     const res = await chrome.runtime.sendMessage({
       type: "retry_job",
@@ -2307,7 +2320,7 @@ async function retryErrorJobs() {
     return;
   }
   const { outputDir } = await resolveUiOutputDir();
-  setStatus(`Retrying ${errors.length} error job(s)â€¦`);
+  setStatus(`Retrying ${errors.length} error job(s)…`);
   try {
     const res = await chrome.runtime.sendMessage({
       type: "retry_error_jobs",
@@ -2333,7 +2346,7 @@ async function retryErrorJobs() {
 
 async function onMasterResumeFile(file) {
   if (!file) return;
-  setPersonImportNotice(`Reading ${file.name}â€¦`);
+  setPersonImportNotice(`Reading ${file.name}…`);
   try {
     const { text, fileName } = await extractMasterResumeFromFile(file);
     await importPersonFromResumeText(text, { sourceLabel: fileName });
@@ -2383,7 +2396,7 @@ async function testSlackWebhook() {
     return;
   }
   await persistJobFields();
-  setStatus("Sending Slack testâ€¦");
+  setStatus("Sending Slack test…");
   try {
     const person = await getActivePerson();
     await notifySlackBatchComplete({
@@ -2396,7 +2409,7 @@ async function testSlackWebhook() {
       outputDir: outputDirEl.value.trim() || DEFAULT_OUTPUT_DIR,
       isTest: true
     });
-    setStatus("Slack test sent â€” check your channel.");
+    setStatus("Slack test sent — check your channel.");
   } catch (err) {
     setStatus(`Slack test failed: ${String(err?.message || err)}`);
   }
@@ -2411,7 +2424,7 @@ async function openTemplatePreview() {
       await chrome.windows.update(stored, { focused: true, drawAttention: true });
       await chrome.runtime.sendMessage({ type: "template_preview_show", templateId }).catch(() => {});
       const template = templatesCache.find((t) => t.id === templateId);
-      setStatus(`Previewing ${template?.label || "resume style"}â€¦`);
+      setStatus(`Previewing ${template?.label || "resume style"}…`);
       return;
     } catch {
       // Window was closed.
@@ -2569,9 +2582,9 @@ async function setBidMarket(market) {
   renderBidMarket(next, { expandManual: next === BID_MARKETS.NON_US });
   await chrome.storage.local.set({ [BID_MARKET_KEY]: next });
   if (next === BID_MARKETS.NON_US && prev !== BID_MARKETS.NON_US) {
-    setStatus("Non-US market â€” batch queue hidden. Use Manual bid for each job.");
+    setStatus("Non-US market — batch queue hidden. Use Manual bid for each job.");
   } else if (next === BID_MARKETS.US && prev !== BID_MARKETS.US) {
-    setStatus("US market â€” CSV queue and batch controls available.");
+    setStatus("US market — CSV queue and batch controls available.");
   }
 }
 
@@ -2584,7 +2597,7 @@ function setBusy(busy) {
 }
 
 async function fillFromOpenTab() {
-  setStatus("Scraping active tabâ€¦");
+  setStatus("Scraping active tab…");
   try {
     const res = await chrome.runtime.sendMessage({ type: "scrape_active_job_tab" });
     if (!res?.ok) {
@@ -2744,7 +2757,7 @@ async function refreshQaBank() {
     const parts = [];
     if (profileCount) parts.push(`${profileCount} this person`);
     if (sharedCount) parts.push(`${sharedCount} shared`);
-    qaBankNoteEl.textContent = parts.length ? parts.join(" Â· ") : "0 saved";
+    qaBankNoteEl.textContent = parts.length ? parts.join(" · ") : "0 saved";
   } catch {
     qaBankNoteEl.textContent = "Q&A";
   }
@@ -2827,13 +2840,13 @@ async function autofillThisPage() {
   autoApplyPageBtn.disabled = true;
   if (customQaPageBtn) customQaPageBtn.disabled = true;
   try {
-    setStatus("Opening panel and autofilling the application tabâ€¦");
+    setStatus("Opening panel and autofilling the application tab…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_active_tab" });
     if (!res?.ok) {
       setStatus(res?.error || "Autofill failed. Click the application tab, then try again.");
       return;
     }
-    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete â€” check the panel on the application page.");
+    setStatus(res.statusText || formatAutofillSummary(res) || "Autofill complete — check the panel on the application page.");
   } finally {
     syncAutofillUi();
   }
@@ -2851,8 +2864,8 @@ async function autoApplyThisPage() {
   try {
     setStatus(
       allowSubmit
-        ? "Auto Apply: filling and advancing (Submit enabled on supported ATS)â€¦"
-        : "Auto Apply: filling and advancing â€” stops before Submitâ€¦"
+        ? "Auto Apply: filling and advancing (Submit enabled on supported ATS)…"
+        : "Auto Apply: filling and advancing — stops before Submit…"
     );
     const res = await chrome.runtime.sendMessage({
       type: "autofill_multi_step",
@@ -2882,7 +2895,7 @@ async function customQaThisPage() {
   if (customQaPageBtn) customQaPageBtn.disabled = true;
   if (customQaScanPageBtn) customQaScanPageBtn.disabled = true;
   try {
-    setStatus("Custom Q&A: answering special questions with OpenAIâ€¦");
+    setStatus("Custom Q&A: answering special questions with OpenAI…");
     const res = await chrome.runtime.sendMessage({ type: "autofill_openai_qa" });
     if (!res?.ok) {
       setStatus(res?.error || "Custom Q&A failed. Focus the application tab, then try again.");
@@ -2972,10 +2985,10 @@ async function generateCustomQaAsk() {
   try {
     setStatus(
       engine === "chatgpt"
-        ? "Custom Q&A: asking ChatGPT/Claude tab (uses subscription)â€¦"
+        ? "Custom Q&A: asking ChatGPT/Claude tab (uses subscription)…"
         : strongModel
-          ? "Custom Q&A: generating with stronger OpenAI modelâ€¦"
-          : "Custom Q&A: generating with OpenAIâ€¦"
+          ? "Custom Q&A: generating with stronger OpenAI model…"
+          : "Custom Q&A: generating with OpenAI…"
     );
     const res = await chrome.runtime.sendMessage({
       type: "custom_qa_ask",
@@ -2988,17 +3001,17 @@ async function generateCustomQaAsk() {
       return;
     }
     if (customQaAnswerEl) customQaAnswerEl.value = String(res.answer || "").trim();
-    const who = res.personLabel ? ` Â· ${res.personLabel}` : "";
+    const who = res.personLabel ? ` · ${res.personLabel}` : "";
     const src =
       res.source === "bank"
         ? `Q&A bank${who}`
         : res.source === "profile"
           ? `profile facts${who}`
           : res.source === "openai"
-            ? `OpenAI${res.model ? ` Â· ${res.model}` : ""}${res.reusedThread ? " Â· same job thread" : ""}${who}`
+            ? `OpenAI${res.model ? ` · ${res.model}` : ""}${res.reusedThread ? " · same job thread" : ""}${who}`
             : res.source === "claude"
-              ? `Claude tab${res.reusedChat ? " Â· same job chat" : ""}${who}`
-              : `ChatGPT tab${res.reusedChat ? " Â· same job chat" : ""}${who}`;
+              ? `Claude tab${res.reusedChat ? " · same job chat" : ""}${who}`
+              : `ChatGPT tab${res.reusedChat ? " · same job chat" : ""}${who}`;
     setCustomQaMeta(src);
     setStatus(`Custom Q&A ready (${src}). Copy or Save to bank.`);
   } finally {
@@ -3014,7 +3027,7 @@ async function copyCustomQaAnswer() {
     await navigator.clipboard.writeText(text);
     setStatus("Answer copied.");
   } catch {
-    setStatus("Could not copy â€” select the answer and copy manually.");
+    setStatus("Could not copy — select the answer and copy manually.");
   }
 }
 
@@ -3105,7 +3118,7 @@ async function resetWorkflow() {
     if (!res?.ok) throw new Error(res?.error || "Failed to reset.");
     batchState = "idle";
     await clearJobsList({ confirmPrompt: false });
-    setStatus("Reset complete. Job list cleared â€” ready for a new CSV.");
+    setStatus("Reset complete. Job list cleared — ready for a new CSV.");
     setBusy(false);
   } catch (err) {
     setStatus(`Reset failed: ${String(err.message || err)}`);
@@ -3262,7 +3275,7 @@ retryErrorsBtn?.addEventListener("click", () => {
   retryErrorJobs().catch((e) => setStatus(String(e.message || e)));
 });
 forceSaveChatgptBtn.addEventListener("click", async () => {
-  setStatus("Reading resume JSON from ChatGPTâ€¦");
+  setStatus("Reading resume JSON from ChatGPT…");
   try {
     const res = await chrome.runtime.sendMessage({ type: "force_save_chatgpt_resume" });
     if (!res?.ok) {
@@ -3377,15 +3390,15 @@ openaiQaToggleEl?.addEventListener("change", () => {
   syncAutofillUi();
   setStatus(
     openaiQaToggleEl.checked
-      ? "OpenAI Custom Q&A on â€” Autofill leftovers and Scan page use the API key."
-      : "OpenAI Custom Q&A off â€” Autofill uses profile + bank; Ask can still use AI tab."
+      ? "OpenAI Custom Q&A on — Autofill leftovers and Scan page use the API key."
+      : "OpenAI Custom Q&A off — Autofill uses profile + bank; Ask can still use AI tab."
   );
 });
 autofillEnabledToggleEl?.addEventListener("change", () => {
   const enabled = Boolean(autofillEnabledToggleEl.checked);
   syncAutofillUi(enabled);
   chrome.storage.local.set({ [AUTOFILL_ENABLED_KEY]: enabled }).catch(() => {});
-  setStatus(enabled ? "Autofill enabled." : "Autofill disabled â€” manual apply off; Dice batch auto-apply still runs.");
+  setStatus(enabled ? "Autofill enabled." : "Autofill disabled — manual apply off; Dice batch auto-apply still runs.");
 });
 aiProviderChatgptBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CHATGPT).catch((e) => setStatus(String(e.message || e)));
@@ -3461,10 +3474,17 @@ if (keepOpenBtn) {
   setIconButton(keepOpenBtn, "panel", panelLabel);
 }
 
-if (batchStartBtn) setIconButton(batchStartBtn, "start", "Start");
-if (batchPauseBtn) setIconButton(batchPauseBtn, "pause", "Pause");
-if (batchSkipBtn) setIconButton(batchSkipBtn, "skip", "Skip");
-if (batchStopBtn) setIconButton(batchStopBtn, "stop", "Stop");
+function setLabeledRunButton(button, label) {
+  if (!button) return;
+  button.classList.remove("icon-button");
+  button.textContent = label;
+  button.setAttribute("aria-label", label);
+}
+
+if (batchStartBtn) setLabeledRunButton(batchStartBtn, "Start");
+if (batchPauseBtn) setLabeledRunButton(batchPauseBtn, "Pause");
+if (batchSkipBtn) setLabeledRunButton(batchSkipBtn, "Skip");
+if (batchStopBtn) setLabeledRunButton(batchStopBtn, "Stop");
 if (forceSaveChatgptBtn) setIconButton(forceSaveChatgptBtn, "save", "Save JSON");
 if (retryErrorsBtn) setIconButton(retryErrorsBtn, "retry", "Retry errors");
 if (clearJobsBtn) setIconButton(clearJobsBtn, "remove", "Clear queue");
@@ -3585,7 +3605,7 @@ setInterval(async () => {
     const s = data.csv_source_settings;
     const when = s.lastIngestAt ? new Date(s.lastIngestAt).toLocaleString() : "";
     if (s.lastStatus) {
-      csvSourceStatusEl.textContent = `${s.lastStatus}${when ? ` Â· ${when}` : ""}`;
+      csvSourceStatusEl.textContent = `${s.lastStatus}${when ? ` · ${when}` : ""}`;
     }
   }
 }, 1200);

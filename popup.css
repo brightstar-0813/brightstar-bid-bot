@@ -283,6 +283,73 @@ h1 {
   box-shadow: none;
 }
 
+.run-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.setup-panel {
+  margin: 10px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-bg, transparent);
+  overflow: hidden;
+}
+
+.setup-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 12px 14px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.setup-summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-summary-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.setup-summary-hint {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.setup-body {
+  padding: 0 10px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.setup-body > .section {
+  margin-top: 10px;
+}
+
+.batch-run-labels {
+  gap: 6px !important;
+}
+
+.batch-run-labels button {
+  min-width: 58px;
+  padding: 7px 12px;
+  font-weight: 700;
+}
+
+.section-run-person .role-track-toggle {
+  flex-wrap: wrap;
+}
+
 .section-title {
   margin: 0;
   font-size: 12px;

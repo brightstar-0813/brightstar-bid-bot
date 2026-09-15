@@ -105,7 +105,11 @@ export function buildStrongHumanizeAppendix(roleTrack = "sf") {
 ==================================================
 STRONG HUMANIZE + US RESUME VOICE (ANTI-AI / FAKER DETECTORS)
 ==================================================
-This job board screens for AI-generated / fake resumes. Apply the rules below to ALL prose inside the JSON (profile, experience bullets, projects, skills phrasing where natural).
+This job board screens for AI-generated / fake resumes. Apply the rules below to prose inside the JSON only: profile, experience bullets, projects, and technicalSummary sentences.
+
+Do NOT "humanize" away exact skill spellings — skills category items must keep JD/product spellings (e.g. "Lightning Web Components", "Service Cloud", "Snowflake", "React").
+Never add clearance, citizenship, visa, or immigration language — including in the headline.
+Never paste the JD job title verbatim into headline.
 
 ${US_RESUME_STYLE_RULES}
 

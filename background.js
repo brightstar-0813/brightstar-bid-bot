@@ -6085,6 +6085,10 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
   if (saved?.pdf) parts.push(resumePdfName || saved.resumePdfName || "Resume.pdf");
   let status = `Saved to Downloads / ${savedDir} (${parts.join(" + ") || "partial"})`;
   if (saved?.pdfError && !saved?.pdf) {
+    status = saved?.jd
+      ? `jd.txt saved to Downloads / ${savedDir}; resume PDF failed (${saved.pdfError}). Sheet can still mark Ready — retry PDF or regenerate.`
+      : `${status} — ${saved.pdfError}`;
+  } else if (saved?.pdfError) {
     status += ` — ${saved.pdfError}`;
   }
 
@@ -6831,6 +6835,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     }
   }
   const maxAtsRetries = roleTrack === "sf" ? 3 : 2;
+  let lastAtsScore = Number(atsEvaluation.score) || 0;
   for (
     let atsAttempt = 1;
     atsAttempt <= maxAtsRetries &&
@@ -6839,7 +6844,15 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     !batchControl.stop;
     atsAttempt += 1
   ) {
-    if (!atsEvaluation.missingKeywords?.length && !atsEvaluation.missingProducts?.length) break;
+    const needsEvidenceRetry =
+      atsEvaluation.missingKeywords?.length ||
+      atsEvaluation.missingProducts?.length ||
+      atsEvaluation.skillsOnlyProducts?.length ||
+      (Number(atsEvaluation.components?.productBulletProof?.score) || 0) <
+        (Number(atsEvaluation.components?.productBulletProof?.max) || 0) * 0.75 ||
+      (Number(atsEvaluation.components?.experienceEvidence?.score) || 0) <
+        (Number(atsEvaluation.components?.experienceEvidence?.max) || 0) * 0.75;
+    if (!needsEvidenceRetry) break;
     await setStatus(
       `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — project re-prompt ${atsAttempt}/${maxAtsRetries} for ${ATS_TARGET_SCORE}+…`
     );
@@ -6861,17 +6874,21 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       const improvedBoost = boostResumeForAts(improved, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
       if (improvedBoost.changed) improved = improvedBoost.data;
       const improvedEval = improvedBoost.evaluation;
+      const nextScore = Number(improvedEval.score) || 0;
       if (
         (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) &&
-        improvedEval.score >= atsEvaluation.score
+        nextScore > lastAtsScore
       ) {
         resumeData = improved;
         atsEvaluation = improvedEval;
+        lastAtsScore = nextScore;
         await setStatus(
           `ATS project re-prompt ${atsAttempt} → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
         );
       } else {
-        await setStatus(`ATS re-prompt ${atsAttempt} did not improve score — keeping prior resume.`);
+        await setStatus(
+          `ATS re-prompt ${atsAttempt} did not raise score (${lastAtsScore} → ${nextScore}) — stopping retries.`
+        );
         break;
       }
     } catch (err) {

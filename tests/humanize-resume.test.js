@@ -47,6 +47,8 @@ test("humanize appendix keeps JSON-only constraint and US style", () => {
   assert.match(appendix, /Salesforce Developer/);
   assert.match(appendix, /ONLY one complete valid resume JSON/);
   assert.match(appendix, /US RESUME STYLE/);
+  assert.match(appendix, /exact skill spellings/i);
+  assert.match(appendix, /Never paste the JD job title/i);
   assert.ok(US_RESUME_STYLE_RULES.includes("US senior resume"));
 });
 

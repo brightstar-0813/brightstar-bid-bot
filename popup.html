@@ -66,12 +66,13 @@
       </header>
 
       <div class="app-body">
-        <!-- Active person -->
-        <section class="section" id="personSection">
+      <div class="run-zone" id="runZone">
+<!-- Active person -->
+        <section class="section section-run-person" id="personSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">1</span>
+            <span class="step" aria-hidden="true">●</span>
             <div class="section-copy">
-              <p class="section-title">Person</p>
+              <p class="section-title">Today</p>
             </div>
           </header>
           <div class="row-split">
@@ -118,6 +119,351 @@
               </button>
             </div>
           </div>
+        </section>
+
+<!-- Jobs queue (CSV + shared batch) — US bid only -->
+        <section class="section section-hero" id="jobsSection">
+          <header class="section-header">
+            <span class="step" id="jobsStepNum" aria-hidden="true">1</span>
+            <div class="section-copy">
+              <p class="section-title">Queue</p>
+            </div>
+            <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
+          </header>
+          <label class="field file-field">
+            <span>Upload jobs CSV (optional)</span>
+            <input id="csvFile" type="file" accept=".csv,text/csv" />
+          </label>
+          <div class="row row-2">
+            <button type="button" id="csvRefresh" class="ghost" title="Re-read pinned file, URL, or native watcher">
+              Refresh CSV
+            </button>
+            <button type="button" id="csvPinFile" class="ghost" title="Remember a local CSV for auto-poll (File System Access)">
+              Pin local CSV…
+            </button>
+          </div>
+          <button type="button" class="panel-toggle" id="toggleCsvSourcePanel" aria-expanded="false">
+            Auto-source settings
+          </button>
+          <div class="panel-body" id="csvSourcePanelBody" hidden>
+            <div class="grid-2">
+              <label class="field">
+                <span>Poll every (minutes)</span>
+                <input id="csvPollMinutes" type="number" min="5" max="720" step="5" value="30" />
+              </label>
+              <label class="field checkbox-field">
+                <span>Enable URL poll</span>
+                <input id="csvUrlEnabled" type="checkbox" />
+              </label>
+            </div>
+            <label class="field">
+              <span>CSV URL (http/https — cron publishes here)</span>
+              <input id="csvUrl" type="url" placeholder="https://example.com/jobs_latest.csv" autocomplete="off" />
+            </label>
+            <div class="grid-2">
+              <label class="field checkbox-field">
+                <span>Poll pinned local file</span>
+                <input id="csvPinEnabled" type="checkbox" />
+              </label>
+              <label class="field checkbox-field">
+                <span>Native OS watcher</span>
+                <input id="csvNativeEnabled" type="checkbox" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Native watch path (optional)</span>
+              <input
+                id="csvNativePath"
+                type="text"
+                placeholder="D:\Jobs\jobs_latest.csv"
+                autocomplete="off"
+              />
+            </label>
+            <p class="hint" id="csvPinHint">No local CSV pinned.</p>
+            <p class="hint" id="csvSourceStatus">Auto-source idle.</p>
+            <p class="hint" id="csvExtensionIdHint"></p>
+            <div class="row row-2">
+              <button type="button" id="csvSourceSave" class="primary">Save source settings</button>
+              <button type="button" id="csvClearPin" class="ghost danger">Clear pin</button>
+            </div>
+          </div>
+          <div class="channel-toggle" role="group" aria-label="Job source filter">
+            <span class="channel-label">Source filter</span>
+            <div class="channel-grid">
+              <button type="button" class="channel-btn active" id="filterDice" data-filter="dice" title="Dice only — generate then auto-apply+submit">
+                Dice
+              </button>
+              <button type="button" class="channel-btn" id="filterLinkedIn" data-filter="linkedin" title="LinkedIn-hosted jobs">
+                LinkedIn
+              </button>
+              <button type="button" class="channel-btn" id="filterJobright" data-filter="jobright" title="Jobright.ai jobs">
+                Jobright
+              </button>
+              <button type="button" class="channel-btn" id="filterWorkday" data-filter="workday" title="MyWorkday jobs — build files; apply via Autofill panel">
+                Workday
+              </button>
+              <button type="button" class="channel-btn" id="filterGreenhouse" data-filter="greenhouse" title="Greenhouse jobs — build files; apply via Autofill panel">
+                Greenhouse
+              </button>
+              <button type="button" class="channel-btn" id="filterAshby" data-filter="ashby" title="Ashby jobs — build files; apply via Autofill panel">
+                Ashby
+              </button>
+              <button type="button" class="channel-btn" id="filterLever" data-filter="lever" title="Lever jobs — build files; apply via Autofill panel">
+                Lever
+              </button>
+              <!-- Indeed filter kept in DOM but hidden — auto-apply not supported right now -->
+              <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed / Apply-on-Indeed" hidden>
+                Indeed
+              </button>
+              <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards (not Dice, LinkedIn, Jobright, Workday, Greenhouse, Ashby, or Lever)">
+                Other
+              </button>
+              <button type="button" class="channel-btn" id="filterAll" data-filter="all" title="All US jobs — build resume and cover letter only (no auto-apply)">
+                All
+              </button>
+            </div>
+          </div>
+          <div id="csvSummary" class="csv-summary is-idle">
+            <span class="summary-idle">No jobs loaded</span>
+          </div>
+          <label class="field">
+            <span>Output folder (under Downloads)</span>
+            <input id="outputDir" type="text" placeholder="Lewis-SF" autocomplete="off" />
+          </label>
+          <p class="hint" id="outputDirHint">Matches this profile’s sheet tab name. Chrome saves under Downloads only.</p>
+          <div class="batch-toolbar" role="toolbar" aria-label="Batch and queue controls">
+            <div class="batch-toolbar-cluster" role="group" aria-label="Run controls">
+              <div class="btn-group batch-run-labels">
+                <button type="button" id="batchStart" class="primary" title="Start batch">Start</button>
+                <button type="button" id="batchPause" class="ghost" title="Pause batch">Pause</button>
+                <button type="button" id="batchSkip" class="ghost" title="Skip current job">Skip</button>
+                <button type="button" id="batchStop" class="ghost danger" title="Stop batch">Stop</button>
+              </div>
+            </div>
+            <div class="batch-toolbar-cluster batch-toolbar-secondary" role="group" aria-label="Queue tools">
+              <div class="btn-group">
+                <button type="button" id="forceSaveChatgpt" class="ghost icon-button" title="Save JSON" aria-label="Save JSON"></button>
+                <button type="button" id="retryErrors" class="ghost icon-button" title="Retry errors" aria-label="Retry errors"></button>
+              </div>
+              <span class="btn-group-sep" aria-hidden="true"></span>
+              <div class="btn-group">
+                <button type="button" id="clearJobs" class="ghost danger icon-button" title="Clear queue" aria-label="Clear queue"></button>
+                <button type="button" id="reset" class="ghost icon-button" title="Reset" aria-label="Reset"></button>
+              </div>
+            </div>
+          </div>
+          <div
+            id="queueNowWorking"
+            class="queue-now-working"
+            hidden
+            role="status"
+            aria-live="polite"
+          ></div>
+          <div id="queueList" class="queue-list">
+            <div class="queue-empty">
+              <p>Queue is empty</p>
+            </div>
+          </div>
+        </section>
+
+<!-- Manual one-off -->
+        <section class="section" id="manualSection">
+          <header class="section-header">
+            <span class="step" id="manualStepNum" aria-hidden="true">2</span>
+            <div class="section-copy">
+              <p class="section-title" id="manualSectionTitle">Manual</p>
+            </div>
+          </header>
+          <button type="button" class="panel-toggle" id="toggleManualPanel" aria-expanded="true">
+            Hide one-off job form
+          </button>
+          <div class="panel-body" id="manualPanelBody">
+            <div class="grid-2">
+              <label class="field">
+                <span>Job title</span>
+                <input id="jobTitle" type="text" placeholder="Senior Software Engineer" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Company</span>
+                <input id="companyName" type="text" placeholder="Acme Inc." autocomplete="off" />
+              </label>
+            </div>
+            <label class="field">
+              <span>JD link</span>
+              <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Job description</span>
+              <textarea id="jdText" placeholder="Paste JD or fill from the open tab…" rows="3"></textarea>
+            </label>
+            <label class="field">
+              <span>Extra notes</span>
+              <textarea
+                id="oneOffExtraPrompt"
+                placeholder="Optional tweak for this draft only…"
+                rows="2"
+              ></textarea>
+            </label>
+
+            <div class="manual-tools" role="group" aria-label="Job helpers">
+              <button type="button" id="fillFromOpenTab" class="ghost compact" title="Scrape title, company, link, and JD from the active tab">
+                From tab
+              </button>
+            </div>
+
+            <div id="oneOffIdleActions" class="manual-primary">
+              <button type="button" id="runOneOff" class="primary" title="Run AI and open preview — no files yet">
+                Draft
+              </button>
+            </div>
+
+            <div id="oneOffDraftActions" class="one-off-review" hidden>
+              <div id="oneOffAtsBlock" class="one-off-ats" hidden>
+                <div class="row-split one-off-ats-header">
+                  <span id="oneOffAtsScore" class="ats-score" aria-label="ATS score"></span>
+                  <div class="one-off-ats-actions">
+                    <button type="button" id="openOneOffPreview" class="ghost compact" title="Open rendered draft">
+                      Preview
+                    </button>
+                    <button type="button" id="oneOffViewGaps" class="ghost compact">Gaps</button>
+                  </div>
+                </div>
+                <div id="oneOffAtsGaps" class="one-off-ats-gaps" hidden></div>
+              </div>
+              <div class="manual-primary manual-primary-split">
+                <button type="button" id="regenerateOneOff" class="ghost" title="Re-run AI with current fields and notes">
+                  Regenerate
+                </button>
+                <button type="button" id="confirmOneOff" class="primary" title="Save resume PDF and update Google Sheet">
+                  Confirm
+                </button>
+              </div>
+              <button type="button" id="discardOneOff" class="ghost compact manual-discard" title="Clear draft and return to Draft">
+                Discard
+              </button>
+            </div>
+          </div>
+        </section>
+
+<section class="section section-indeed" id="indeedSection" hidden aria-hidden="true">
+          <header class="section-header">
+            <span class="step" aria-hidden="true">*</span>
+            <div class="section-copy">
+              <p class="section-title">Indeed</p>
+            </div>
+            <span id="indeedGrabState" class="state-pill" data-state="idle">idle</span>
+          </header>
+          <ol class="workflow-steps" aria-label="Indeed workflow">
+            <li>Filter &amp; select</li>
+            <li>Grab job</li>
+            <li>Resume + apply</li>
+          </ol>
+          <div class="row row-2">
+            <button type="button" id="indeedGrabApply" class="primary">Grab &amp; auto-apply</button>
+            <button type="button" id="indeedGrabOnly" class="ghost">Grab to queue only</button>
+          </div>
+          <p id="indeedGrabStatus" class="hint">Idle</p>
+        </section>
+
+<!-- Apply -->
+        <section class="section section-apply" id="applySection">
+          <header class="section-header">
+            <span class="step" id="applyStepNum" aria-hidden="true">3</span>
+            <div class="section-copy">
+              <p class="section-title">Apply assist</p>
+            </div>
+          </header>
+          <label class="checkbox-field toggle-field">
+            <span>Autofill enabled</span>
+            <input type="checkbox" id="autofillEnabledToggle" checked />
+          </label>
+          <label class="checkbox-field toggle-field">
+            <span>Allow auto submit</span>
+            <input type="checkbox" id="allowSubmitToggle" />
+          </label>
+          <label class="checkbox-field toggle-field">
+            <span>OpenAI Custom Q&amp;A</span>
+            <input type="checkbox" id="openaiQaToggle" checked title="When on: Autofill leftovers and Scan page may call OpenAI. Ask panel can still use AI tab when this is off." />
+          </label>
+          <div class="apply-actions apply-actions-3">
+            <button type="button" id="autofillPage" class="primary" title="Open the in-page panel and fill the current step — never clicks Next or Submit">
+              Autofill
+              <kbd>Ctrl+Shift+Y</kbd>
+            </button>
+            <button type="button" id="autoApplyPage" class="ghost" title="Walk Next/Continue through the form; submits when Allow auto submit is on">
+              Auto Apply
+              <kbd>Ctrl+Shift+U</kbd>
+            </button>
+            <button type="button" id="customQaPage" class="ghost" title="Ask one question using the active profile (OpenAI API or ChatGPT/Claude tab), or scan leftover fields on the page">
+              Custom Q&amp;A
+              <kbd>Ctrl+Shift+Q</kbd>
+            </button>
+            </div>
+          <div id="customQaAskPanel" class="custom-qa-ask" hidden>
+            <p class="custom-qa-ask-title">Ask from active profile</p>
+            <label class="field-label" for="customQaQuestion">Question</label>
+            <textarea id="customQaQuestion" class="custom-qa-textarea" rows="3" placeholder="Paste or type the application question…"></textarea>
+            <div class="custom-qa-engines" role="radiogroup" aria-label="Answer engine">
+              <label class="radio-inline">
+                <input type="radio" name="customQaEngine" value="openai" checked />
+                <span>OpenAI API</span>
+              </label>
+              <label class="radio-inline">
+                <input type="radio" name="customQaEngine" value="chatgpt" />
+                <span>AI tab (ChatGPT/Claude)</span>
+              </label>
+            </div>
+            <label class="checkbox-field custom-qa-strong" id="customQaStrongWrap">
+              <span>Stronger OpenAI model (costs more)</span>
+              <input type="checkbox" id="customQaStrongModel" />
+            </label>
+            <div class="custom-qa-actions">
+              <button type="button" id="customQaGenerate" class="primary">Generate</button>
+              <button type="button" id="customQaScanPage" class="ghost" title="Scan empty special questions on the focused application tab">Scan page</button>
+            </div>
+            <label class="field-label" for="customQaAnswer">Answer</label>
+            <textarea id="customQaAnswer" class="custom-qa-textarea" rows="4" placeholder="Generated answer appears here…"></textarea>
+            <p class="custom-qa-meta" id="customQaMeta" hidden></p>
+            <div class="custom-qa-actions custom-qa-actions-secondary">
+              <button type="button" id="customQaCopy" class="ghost" disabled>Copy</button>
+              <button type="button" id="customQaSave" class="ghost" disabled>Save to bank</button>
+            </div>
+          </div>
+          <div class="qa-bank-block">
+            <div class="qa-bank-head">
+              <p class="subsection-title">Q&amp;A bank</p>
+              <span class="qa-bank-note" id="qaBankNote">0 saved</span>
+            </div>
+            <label class="checkbox-field">
+              <span>Learn mode — save answers you type on forms</span>
+              <input type="checkbox" id="qaLearnToggle" checked />
+            </label>
+            <div class="qa-toolbar" role="toolbar" aria-label="Q&A bank tools">
+              <div class="btn-group">
+                <button type="button" id="qaOpenEditorBtn" class="ghost icon-button" title="Open editor" aria-label="Open editor"></button>
+                <button type="button" id="qaImportBundledBtn" class="ghost icon-button" title="Load bundled bank" aria-label="Load bundled bank"></button>
+                <button type="button" id="qaImportBtn" class="ghost icon-button" title="Import JSON" aria-label="Import JSON"></button>
+                <button type="button" id="qaExportBtn" class="ghost icon-button" title="Export JSON" aria-label="Export JSON"></button>
+              </div>
+              <input type="file" id="qaImportInput" accept="application/json,.json" hidden />
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <details class="setup-panel" id="setupPanel">
+        <summary class="setup-summary">
+          <span class="setup-summary-title">Setup</span>
+          <span class="setup-summary-hint">Template · AI · Humanize · Profile · Integrations</span>
+        </summary>
+        <div class="setup-body">
+        <section class="section" id="personSetupSection">
+          <header class="section-header">
+            <span class="step step-muted" aria-hidden="true">·</span>
+            <div class="section-copy">
+              <p class="section-title">Profile editor</p>
+            </div>
+          </header>
           <label class="field file-field">
             <span>Add or update from resume file</span>
             <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
@@ -380,12 +726,12 @@
           </div>
         </section>
 
-        <!-- Resume style -->
+<!-- Resume style -->
         <section class="section section-style">
           <header class="section-header">
-            <span class="step" aria-hidden="true">2</span>
+            <span class="step step-muted" aria-hidden="true">·</span>
             <div class="section-copy">
-              <p class="section-title">Resume style</p>
+              <p class="section-title">Template</p>
             </div>
           </header>
           <div class="row-split">
@@ -399,10 +745,10 @@
           </div>
         </section>
 
-        <!-- AI engine -->
+<!-- AI engine -->
         <section class="section" id="aiProviderSection">
           <header class="section-header">
-            <span class="step" aria-hidden="true">3</span>
+            <span class="step step-muted" aria-hidden="true">·</span>
             <div class="section-copy">
               <p class="section-title">AI engine</p>
             </div>
@@ -447,346 +793,10 @@
           </div>
         </section>
 
-        <!-- Jobs queue (CSV + shared batch) — US bid only -->
-        <section class="section section-hero" id="jobsSection">
-          <header class="section-header">
-            <span class="step" id="jobsStepNum" aria-hidden="true">4</span>
-            <div class="section-copy">
-              <p class="section-title">Jobs queue</p>
-            </div>
-            <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
-          </header>
-          <label class="field file-field">
-            <span>Upload jobs CSV (optional)</span>
-            <input id="csvFile" type="file" accept=".csv,text/csv" />
-          </label>
-          <div class="row row-2">
-            <button type="button" id="csvRefresh" class="ghost" title="Re-read pinned file, URL, or native watcher">
-              Refresh CSV
-            </button>
-            <button type="button" id="csvPinFile" class="ghost" title="Remember a local CSV for auto-poll (File System Access)">
-              Pin local CSV…
-            </button>
-          </div>
-          <button type="button" class="panel-toggle" id="toggleCsvSourcePanel" aria-expanded="false">
-            Auto-source settings
-          </button>
-          <div class="panel-body" id="csvSourcePanelBody" hidden>
-            <div class="grid-2">
-              <label class="field">
-                <span>Poll every (minutes)</span>
-                <input id="csvPollMinutes" type="number" min="5" max="720" step="5" value="30" />
-              </label>
-              <label class="field checkbox-field">
-                <span>Enable URL poll</span>
-                <input id="csvUrlEnabled" type="checkbox" />
-              </label>
-            </div>
-            <label class="field">
-              <span>CSV URL (http/https — cron publishes here)</span>
-              <input id="csvUrl" type="url" placeholder="https://example.com/jobs_latest.csv" autocomplete="off" />
-            </label>
-            <div class="grid-2">
-              <label class="field checkbox-field">
-                <span>Poll pinned local file</span>
-                <input id="csvPinEnabled" type="checkbox" />
-              </label>
-              <label class="field checkbox-field">
-                <span>Native OS watcher</span>
-                <input id="csvNativeEnabled" type="checkbox" />
-              </label>
-            </div>
-            <label class="field">
-              <span>Native watch path (optional)</span>
-              <input
-                id="csvNativePath"
-                type="text"
-                placeholder="D:\Jobs\jobs_latest.csv"
-                autocomplete="off"
-              />
-            </label>
-            <p class="hint" id="csvPinHint">No local CSV pinned.</p>
-            <p class="hint" id="csvSourceStatus">Auto-source idle.</p>
-            <p class="hint" id="csvExtensionIdHint"></p>
-            <div class="row row-2">
-              <button type="button" id="csvSourceSave" class="primary">Save source settings</button>
-              <button type="button" id="csvClearPin" class="ghost danger">Clear pin</button>
-            </div>
-          </div>
-          <div class="channel-toggle" role="group" aria-label="Job source filter">
-            <span class="channel-label">Source filter</span>
-            <div class="channel-grid">
-              <button type="button" class="channel-btn active" id="filterDice" data-filter="dice" title="Dice only — generate then auto-apply+submit">
-                Dice
-              </button>
-              <button type="button" class="channel-btn" id="filterLinkedIn" data-filter="linkedin" title="LinkedIn-hosted jobs">
-                LinkedIn
-              </button>
-              <button type="button" class="channel-btn" id="filterJobright" data-filter="jobright" title="Jobright.ai jobs">
-                Jobright
-              </button>
-              <button type="button" class="channel-btn" id="filterWorkday" data-filter="workday" title="MyWorkday jobs — build files; apply via Autofill panel">
-                Workday
-              </button>
-              <button type="button" class="channel-btn" id="filterGreenhouse" data-filter="greenhouse" title="Greenhouse jobs — build files; apply via Autofill panel">
-                Greenhouse
-              </button>
-              <button type="button" class="channel-btn" id="filterAshby" data-filter="ashby" title="Ashby jobs — build files; apply via Autofill panel">
-                Ashby
-              </button>
-              <button type="button" class="channel-btn" id="filterLever" data-filter="lever" title="Lever jobs — build files; apply via Autofill panel">
-                Lever
-              </button>
-              <!-- Indeed filter kept in DOM but hidden — auto-apply not supported right now -->
-              <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed / Apply-on-Indeed" hidden>
-                Indeed
-              </button>
-              <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards (not Dice, LinkedIn, Jobright, Workday, Greenhouse, Ashby, or Lever)">
-                Other
-              </button>
-              <button type="button" class="channel-btn" id="filterAll" data-filter="all" title="All US jobs — build resume and cover letter only (no auto-apply)">
-                All
-              </button>
-            </div>
-          </div>
-          <div id="csvSummary" class="csv-summary is-idle">
-            <span class="summary-idle">No jobs loaded</span>
-          </div>
-          <label class="field">
-            <span>Output folder (under Downloads)</span>
-            <input id="outputDir" type="text" placeholder="Lewis-SF" autocomplete="off" />
-          </label>
-          <p class="hint" id="outputDirHint">Matches this profile’s sheet tab name. Chrome saves under Downloads only.</p>
-          <div class="batch-toolbar" role="toolbar" aria-label="Batch and queue controls">
-            <div class="batch-toolbar-cluster" role="group" aria-label="Run controls">
-              <div class="btn-group">
-                <button type="button" id="batchStart" class="primary icon-button" title="Start" aria-label="Start"></button>
-                <button type="button" id="batchPause" class="ghost icon-button" title="Pause" aria-label="Pause"></button>
-                <button type="button" id="batchSkip" class="ghost icon-button" title="Skip" aria-label="Skip"></button>
-              </div>
-              <span class="btn-group-sep" aria-hidden="true"></span>
-              <div class="btn-group">
-                <button type="button" id="batchStop" class="ghost danger icon-button" title="Stop" aria-label="Stop"></button>
-              </div>
-            </div>
-            <div class="batch-toolbar-cluster batch-toolbar-secondary" role="group" aria-label="Queue tools">
-              <div class="btn-group">
-                <button type="button" id="forceSaveChatgpt" class="ghost icon-button" title="Save JSON" aria-label="Save JSON"></button>
-                <button type="button" id="retryErrors" class="ghost icon-button" title="Retry errors" aria-label="Retry errors"></button>
-              </div>
-              <span class="btn-group-sep" aria-hidden="true"></span>
-              <div class="btn-group">
-                <button type="button" id="clearJobs" class="ghost danger icon-button" title="Clear queue" aria-label="Clear queue"></button>
-                <button type="button" id="reset" class="ghost icon-button" title="Reset" aria-label="Reset"></button>
-              </div>
-            </div>
-          </div>
-          <div
-            id="queueNowWorking"
-            class="queue-now-working"
-            hidden
-            role="status"
-            aria-live="polite"
-          ></div>
-          <div id="queueList" class="queue-list">
-            <div class="queue-empty">
-              <p>Queue is empty</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Manual one-off -->
-        <section class="section" id="manualSection">
-          <header class="section-header">
-            <span class="step" id="manualStepNum" aria-hidden="true">5</span>
-            <div class="section-copy">
-              <p class="section-title" id="manualSectionTitle">Manual one-off</p>
-            </div>
-          </header>
-          <button type="button" class="panel-toggle" id="toggleManualPanel" aria-expanded="false">
-            Expand one-off job form
-          </button>
-          <div class="panel-body" id="manualPanelBody" hidden>
-            <div class="grid-2">
-              <label class="field">
-                <span>Job title</span>
-                <input id="jobTitle" type="text" placeholder="Senior Software Engineer" autocomplete="off" />
-              </label>
-              <label class="field">
-                <span>Company</span>
-                <input id="companyName" type="text" placeholder="Acme Inc." autocomplete="off" />
-              </label>
-            </div>
-            <label class="field">
-              <span>JD link</span>
-              <input id="jdLink" type="url" placeholder="https://..." autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>Job description</span>
-              <textarea id="jdText" placeholder="Paste JD or fill from the open tab…" rows="3"></textarea>
-            </label>
-            <label class="field">
-              <span>Extra notes</span>
-              <textarea
-                id="oneOffExtraPrompt"
-                placeholder="Optional tweak for this draft only…"
-                rows="2"
-              ></textarea>
-            </label>
-
-            <div class="manual-tools" role="group" aria-label="Job helpers">
-              <button type="button" id="fillFromOpenTab" class="ghost compact" title="Scrape title, company, link, and JD from the active tab">
-                From tab
-              </button>
-            </div>
-
-            <div id="oneOffIdleActions" class="manual-primary">
-              <button type="button" id="runOneOff" class="primary" title="Run AI and open preview — no files yet">
-                Draft
-              </button>
-            </div>
-
-            <div id="oneOffDraftActions" class="one-off-review" hidden>
-              <div id="oneOffAtsBlock" class="one-off-ats" hidden>
-                <div class="row-split one-off-ats-header">
-                  <span id="oneOffAtsScore" class="ats-score" aria-label="ATS score"></span>
-                  <div class="one-off-ats-actions">
-                    <button type="button" id="openOneOffPreview" class="ghost compact" title="Open rendered draft">
-                      Preview
-                    </button>
-                    <button type="button" id="oneOffViewGaps" class="ghost compact">Gaps</button>
-                  </div>
-                </div>
-                <div id="oneOffAtsGaps" class="one-off-ats-gaps" hidden></div>
-              </div>
-              <div class="manual-primary manual-primary-split">
-                <button type="button" id="regenerateOneOff" class="ghost" title="Re-run AI with current fields and notes">
-                  Regenerate
-                </button>
-                <button type="button" id="confirmOneOff" class="primary" title="Save resume PDF and update Google Sheet">
-                  Confirm
-                </button>
-              </div>
-              <button type="button" id="discardOneOff" class="ghost compact manual-discard" title="Clear draft and return to Draft">
-                Discard
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!--
-          Indeed grab UI — kept for future work; currently hidden (not numbered in the live flow).
-          When re-enabling: insert as step 6 and bump Apply assist → 7, Integrations → 8.
-        -->
-        <section class="section section-indeed" id="indeedSection" hidden aria-hidden="true">
-          <header class="section-header">
-            <span class="step" aria-hidden="true">*</span>
-            <div class="section-copy">
-              <p class="section-title">Indeed</p>
-            </div>
-            <span id="indeedGrabState" class="state-pill" data-state="idle">idle</span>
-          </header>
-          <ol class="workflow-steps" aria-label="Indeed workflow">
-            <li>Filter &amp; select</li>
-            <li>Grab job</li>
-            <li>Resume + apply</li>
-          </ol>
-          <div class="row row-2">
-            <button type="button" id="indeedGrabApply" class="primary">Grab &amp; auto-apply</button>
-            <button type="button" id="indeedGrabOnly" class="ghost">Grab to queue only</button>
-          </div>
-          <p id="indeedGrabStatus" class="hint">Idle</p>
-        </section>
-
-        <!-- Apply -->
-        <section class="section section-apply" id="applySection">
-          <header class="section-header">
-            <span class="step" id="applyStepNum" aria-hidden="true">6</span>
-            <div class="section-copy">
-              <p class="section-title">Apply assist</p>
-            </div>
-          </header>
-          <label class="checkbox-field toggle-field">
-            <span>Autofill enabled</span>
-            <input type="checkbox" id="autofillEnabledToggle" checked />
-          </label>
-          <label class="checkbox-field toggle-field">
-            <span>Allow auto submit</span>
-            <input type="checkbox" id="allowSubmitToggle" />
-          </label>
-          <label class="checkbox-field toggle-field">
-            <span>OpenAI Custom Q&amp;A</span>
-            <input type="checkbox" id="openaiQaToggle" checked title="When on: Autofill leftovers and Scan page may call OpenAI. Ask panel can still use AI tab when this is off." />
-          </label>
-          <div class="apply-actions apply-actions-3">
-            <button type="button" id="autofillPage" class="primary" title="Open the in-page panel and fill the current step — never clicks Next or Submit">
-              Autofill
-              <kbd>Ctrl+Shift+Y</kbd>
-            </button>
-            <button type="button" id="autoApplyPage" class="ghost" title="Walk Next/Continue through the form; submits when Allow auto submit is on">
-              Auto Apply
-              <kbd>Ctrl+Shift+U</kbd>
-            </button>
-            <button type="button" id="customQaPage" class="ghost" title="Ask one question using the active profile (OpenAI API or ChatGPT/Claude tab), or scan leftover fields on the page">
-              Custom Q&amp;A
-              <kbd>Ctrl+Shift+Q</kbd>
-            </button>
-            </div>
-          <div id="customQaAskPanel" class="custom-qa-ask" hidden>
-            <p class="custom-qa-ask-title">Ask from active profile</p>
-            <label class="field-label" for="customQaQuestion">Question</label>
-            <textarea id="customQaQuestion" class="custom-qa-textarea" rows="3" placeholder="Paste or type the application question…"></textarea>
-            <div class="custom-qa-engines" role="radiogroup" aria-label="Answer engine">
-              <label class="radio-inline">
-                <input type="radio" name="customQaEngine" value="openai" checked />
-                <span>OpenAI API</span>
-              </label>
-              <label class="radio-inline">
-                <input type="radio" name="customQaEngine" value="chatgpt" />
-                <span>AI tab (ChatGPT/Claude)</span>
-              </label>
-            </div>
-            <label class="checkbox-field custom-qa-strong" id="customQaStrongWrap">
-              <span>Stronger OpenAI model (costs more)</span>
-              <input type="checkbox" id="customQaStrongModel" />
-            </label>
-            <div class="custom-qa-actions">
-              <button type="button" id="customQaGenerate" class="primary">Generate</button>
-              <button type="button" id="customQaScanPage" class="ghost" title="Scan empty special questions on the focused application tab">Scan page</button>
-            </div>
-            <label class="field-label" for="customQaAnswer">Answer</label>
-            <textarea id="customQaAnswer" class="custom-qa-textarea" rows="4" placeholder="Generated answer appears here…"></textarea>
-            <p class="custom-qa-meta" id="customQaMeta" hidden></p>
-            <div class="custom-qa-actions custom-qa-actions-secondary">
-              <button type="button" id="customQaCopy" class="ghost" disabled>Copy</button>
-              <button type="button" id="customQaSave" class="ghost" disabled>Save to bank</button>
-            </div>
-          </div>
-          <div class="qa-bank-block">
-            <div class="qa-bank-head">
-              <p class="subsection-title">Q&amp;A bank</p>
-              <span class="qa-bank-note" id="qaBankNote">0 saved</span>
-            </div>
-            <label class="checkbox-field">
-              <span>Learn mode — save answers you type on forms</span>
-              <input type="checkbox" id="qaLearnToggle" checked />
-            </label>
-            <div class="qa-toolbar" role="toolbar" aria-label="Q&A bank tools">
-              <div class="btn-group">
-                <button type="button" id="qaOpenEditorBtn" class="ghost icon-button" title="Open editor" aria-label="Open editor"></button>
-                <button type="button" id="qaImportBundledBtn" class="ghost icon-button" title="Load bundled bank" aria-label="Load bundled bank"></button>
-                <button type="button" id="qaImportBtn" class="ghost icon-button" title="Import JSON" aria-label="Import JSON"></button>
-                <button type="button" id="qaExportBtn" class="ghost icon-button" title="Export JSON" aria-label="Export JSON"></button>
-              </div>
-              <input type="file" id="qaImportInput" accept="application/json,.json" hidden />
-            </div>
-          </div>
-        </section>
-
-        <!-- Integrations (collapsed by default) -->
+<!-- Integrations (collapsed by default) -->
         <section class="section section-muted" id="integrationsSection">
           <header class="section-header">
-            <span class="step step-muted" aria-hidden="true">7</span>
+            <span class="step step-muted" aria-hidden="true">·</span>
             <div class="section-copy">
               <p class="section-title">Integrations</p>
             </div>
@@ -852,7 +862,8 @@
             </div>
           </div>
         </section>
-      </div>
+        </div>
+      </details>
 
       <p id="status" class="status-bar is-idle" role="status" aria-live="polite">Ready</p>
     </main>

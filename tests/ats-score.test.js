@@ -22,19 +22,33 @@ const strongResume = {
   email: "candidate@example.com",
   headline: "Salesforce Technical Architect",
   profile:
-    "Salesforce architect delivering enterprise Service Cloud integrations, security, and data migration.",
-  technicalSummary: ["Apex", "Lightning Web Components", "SOQL", "MuleSoft"],
+    "Salesforce architect delivering enterprise Service Cloud integrations, security, and data migration with Apex and MuleSoft.",
+  technicalSummary: [
+    "Architected Service Cloud case routing with Omni-Channel and Apex services.",
+    "Shipped Lightning Web Components for agent desktops backed by SOQL-tuned queries.",
+    "Integrated Salesforce with MuleSoft APIs for data migration and security controls."
+  ],
   skills: [
     { category: "Salesforce Clouds", items: "Service Cloud" },
-    { category: "Development", items: "Apex, LWC, SOQL, MuleSoft" }
+    { category: "Development", items: "Apex, Lightning Web Components, SOQL, MuleSoft" }
   ],
   experience: [
     {
       company: "Acme",
       title: "Salesforce Technical Architect",
       bullets: [
-        "Led Service Cloud architecture and MuleSoft integrations.",
-        "Built Apex, Lightning Web Components, and SOQL data migration services."
+        "Led Service Cloud architecture for case management and Omni-Channel routing.",
+        "Built Apex services and Lightning Web Components for agent productivity.",
+        "Delivered MuleSoft integrations and SOQL-backed data migration with security reviews."
+      ]
+    },
+    {
+      company: "Beta",
+      title: "Senior Salesforce Developer",
+      bullets: [
+        "Extended Service Cloud with Apex triggers and Lightning Web Components.",
+        "Tuned SOQL and sharing rules for enterprise security requirements.",
+        "Connected MuleSoft APIs to Salesforce for integrations and data sync."
       ]
     }
   ],
@@ -62,6 +76,52 @@ test("ATS score rewards JD keyword and Salesforce product coverage", () => {
   assert.ok(strong.score > weak.score);
   assert.equal(strong.missingProducts.length, 0);
   assert.ok(weak.missingProducts.includes("Service Cloud"));
+  assert.ok(strong.components.productBulletProof?.score > 0);
+  assert.ok(strong.components.experienceEvidence?.score > 0);
+});
+
+test("skills-only products score lower than skills-plus-bullet proof", () => {
+  const skillsOnly = {
+    name: "Candidate",
+    email: "candidate@example.com",
+    headline: "Salesforce Technical Architect",
+    profile: "Salesforce architect focused on enterprise delivery.",
+    skills: [
+      { category: "Salesforce Clouds", items: "Service Cloud" },
+      { category: "Development", items: "Apex, Lightning Web Components, SOQL, MuleSoft" }
+    ],
+    experience: [
+      {
+        company: "Acme",
+        title: "Architect",
+        bullets: ["Led delivery for business stakeholders.", "Improved release quality."]
+      },
+      {
+        company: "Beta",
+        title: "Developer",
+        bullets: ["Supported releases.", "Worked with admins."]
+      }
+    ],
+    education: [{ school: "University" }]
+  };
+  const withProof = evaluateAtsScore(strongResume, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect",
+    roleTrack: "sf"
+  });
+  const withoutProof = evaluateAtsScore(skillsOnly, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect",
+    roleTrack: "sf"
+  });
+  assert.ok(withoutProof.skillsOnlyProducts.length >= 1);
+  assert.ok(
+    withProof.components.productBulletProof.score > withoutProof.components.productBulletProof.score
+  );
+  assert.ok(withProof.score > withoutProof.score);
+  const gaps = describeAtsGaps(withoutProof);
+  assert.ok(gaps.tips.some((t) => /prove|bullets|skills but not enough/i.test(t)));
+  assert.ok(!gaps.tips.some((t) => /add keyword row|JD Keywords row/i.test(t)));
 });
 
 test("ATS scoring is deterministic for identical inputs", () => {
@@ -255,7 +315,7 @@ Snowflake warehouse, dbt transformations, Apache Airflow orchestration, Kafka st
     headline: "Senior Data Engineer",
     profile: "Data engineer building Snowflake warehouses with dbt and Airflow pipelines.",
     skills: [
-      { category: "ETL & Data Pipeline Development", items: "Snowflake, dbt, Apache Airflow" },
+      { category: "ETL & Data Pipeline Development", items: "Snowflake, dbt, Apache Airflow, Kafka" },
       { category: "Programming Languages", items: "Python, SQL" }
     ],
     experience: [
@@ -264,7 +324,17 @@ Snowflake warehouse, dbt transformations, Apache Airflow orchestration, Kafka st
         title: "Senior Data Engineer",
         bullets: [
           "Built Snowflake marts and dbt incremental models fed by Airflow DAGs.",
-          "Implemented Kafka consumers for streaming ingestion into the warehouse."
+          "Implemented Kafka consumers for streaming ingestion into the warehouse.",
+          "Tuned Snowflake warehouses and dbt tests for pipeline reliability."
+        ]
+      },
+      {
+        company: "Beta",
+        title: "Data Engineer",
+        bullets: [
+          "Owned Snowflake stages and dbt snapshots for analytics marts.",
+          "Orchestrated Airflow backfills across Kafka-fed topics.",
+          "Partnered with analysts on warehouse SLAs and data quality checks."
         ]
       }
     ],
@@ -302,7 +372,17 @@ React, TypeScript, Node.js, AWS, Docker, Kubernetes, PostgreSQL.
         title: "Senior Full Stack Engineer",
         bullets: [
           "Delivered React TypeScript UI backed by Node.js APIs on AWS.",
-          "Containerized services with Docker and deployed via Kubernetes."
+          "Containerized services with Docker and deployed via Kubernetes.",
+          "Hardened PostgreSQL schemas supporting the Node.js API layer."
+        ]
+      },
+      {
+        company: "Beta",
+        title: "Software Engineer",
+        bullets: [
+          "Shipped React features with TypeScript for customer portals.",
+          "Built Node.js services on AWS with Docker images.",
+          "Operated Kubernetes deployments for the application stack."
         ]
       }
     ],
@@ -331,8 +411,9 @@ test("describeAtsGaps lists missing items and how-to-improve tips", () => {
   );
   const detail = describeAtsGaps(weak);
   assert.ok(detail.breakdown.length >= 3);
+  assert.ok(detail.breakdown.some((b) => b.key === "productBulletProof"));
   assert.ok(detail.missingProducts.includes("Service Cloud"));
-  assert.ok(detail.tips.some((t) => /Service Cloud|skills categories|bullets/i.test(t)));
+  assert.ok(detail.tips.some((t) => /Prove missing|Service Cloud|bullets/i.test(t)));
   assert.ok(detail.tips.some((t) => /JD Keywords|Mirror these JD terms/i.test(t)));
 
   const strongDetail = describeAtsGaps(
@@ -344,4 +425,8 @@ test("describeAtsGaps lists missing items and how-to-improve tips", () => {
   );
   assert.equal(strongDetail.missingProducts.length, 0);
   assert.ok(strongDetail.tips.length >= 1);
+  assert.ok(
+    strongDetail.tips.every((t) => !/add a "JD Keywords"|keyword-dump row to pad/i.test(t)),
+    `unexpected tips: ${strongDetail.tips.join(" | ")}`
+  );
 });

@@ -33,6 +33,7 @@ import {
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
+import { buildMustProveBlock, selectProjectBankExcerpts } from "./ats-score.js";
 import {
   normalizeResumeFilePrefix,
   outputDirFromPerson,
@@ -511,8 +512,21 @@ const SF_PROJECT_BANK_APPENDIX =
   "\n\n==================================================\n" +
   "ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY\n" +
   "==================================================\n" +
-  "Treat as PROJECT PATTERN AND ARCHITECTURE REFERENCE only — never as the candidate's claimed employers or official project titles.\n\n" +
+  "Treat as PROJECT PATTERN AND ARCHITECTURE REFERENCE only — never as the candidate's claimed employers or official project titles.\n" +
+  "Adapt patterns into EXISTING employers; never invent employers or paste bank titles as companies.\n\n" +
   "{SF_PROJECT_BANK}";
+
+/** Prefer a JD-scored bank excerpt (~4–6k) over dumping the full library. */
+export function resolveSfProjectBankForJd(jdText = "", { maxChars = 5500, maxProjects = 5 } = {}) {
+  const excerpt = selectProjectBankExcerpts({
+    jdText,
+    missingProducts: [],
+    bank: SF_ENTERPRISE_PROJECT_BANK,
+    maxProjects,
+    maxChars
+  });
+  return excerpt || String(SF_ENTERPRISE_PROJECT_BANK || "").slice(0, maxChars);
+}
 
 /** Append built-in SF project bank when the template lacks {SF_PROJECT_BANK}. */
 export function ensureSfProjectBankInTemplate(template, roleTrack) {
@@ -523,6 +537,40 @@ export function ensureSfProjectBankInTemplate(template, roleTrack) {
     return text;
   }
   return `${text.trimEnd()}${SF_PROJECT_BANK_APPENDIX}`;
+}
+
+/** Soft cap for total prompt size — trim bank first when humanize + person prompt bloat. */
+export const MAX_RESUME_PROMPT_CHARS = 52000;
+
+export function trimPromptToBudget(prompt, { maxChars = MAX_RESUME_PROMPT_CHARS } = {}) {
+  const text = String(prompt || "");
+  if (text.length <= maxChars) return text;
+  const bankStart = text.indexOf("ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY");
+  const bankMarker = "{SF_PROJECT_BANK}";
+  // Prefer trimming after the bank header / between bank body and later appendices.
+  if (bankStart >= 0) {
+    const afterHeader = text.indexOf("\n", bankStart + 40);
+    const bankBodyStart = afterHeader >= 0 ? afterHeader + 1 : bankStart;
+    const mustProve = text.indexOf("MUST PROVE (first-pass evidence", bankBodyStart);
+    const atsEv = text.indexOf("ATS EVIDENCE MATCH", bankBodyStart);
+    const humanize = text.indexOf("STRONG HUMANIZE", bankBodyStart);
+    const candidates = [mustProve, atsEv, humanize].filter((i) => i > bankBodyStart);
+    const bankBodyEnd = candidates.length ? Math.min(...candidates) : text.length;
+    const before = text.slice(0, bankBodyStart);
+    const bankBody = text.slice(bankBodyStart, bankBodyEnd);
+    const after = text.slice(bankBodyEnd);
+    const overhead = before.length + after.length + 80;
+    const keep = Math.max(1200, maxChars - overhead);
+    if (bankBody.length > keep) {
+      const trimmedBank =
+        bankBody.slice(0, keep).trimEnd() +
+        "\n\n[Project bank truncated to fit prompt budget — prioritize patterns already shown.]\n\n";
+      return before + trimmedBank + after;
+    }
+  }
+  // Fallback: hard slice keeping the end (JD / MUST PROVE / appendices often matter more).
+  void bankMarker;
+  return `${text.slice(0, Math.floor(maxChars * 0.35)).trimEnd()}\n\n[…prompt truncated…]\n\n${text.slice(-(Math.floor(maxChars * 0.6))).trimStart()}`;
 }
 
 const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman"]);
@@ -929,17 +977,28 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (!promptTemplate.includes("{JD}")) {
     throw new Error("Prompt must include the {JD} placeholder.");
   }
+  const sfProjectBank =
+    roleTrack === "sf"
+      ? resolveSfProjectBankForJd(jdText, {
+          maxChars: Number(extras.sfBankMaxChars) > 0 ? Number(extras.sfBankMaxChars) : 5500,
+          maxProjects: Number(extras.sfBankMaxProjects) > 0 ? Number(extras.sfBankMaxProjects) : 5
+        })
+      : "";
   const body = applyPlaceholders(
     promptTemplate,
-    personPlaceholderExtras(person, {
-      jdText,
-      jobTitle: extras.jobTitle || "",
-      companyName: extras.companyName || "",
-      masterResume: extras.masterResume
-    })
+    {
+      ...personPlaceholderExtras(person, {
+        jdText,
+        jobTitle: extras.jobTitle || "",
+        companyName: extras.companyName || "",
+        masterResume: extras.masterResume
+      }),
+      sfProjectBank: sfProjectBank || SF_ENTERPRISE_PROJECT_BANK
+    }
   );
+  const mustProve = buildMustProveBlock(jdText, roleTrack);
   const atsAppendix = getTrackAtsAppendix(roleTrack);
-  let prompt = `${body}\n\n${atsAppendix}`;
+  let prompt = mustProve ? `${body}\n\n${mustProve}\n\n${atsAppendix}` : `${body}\n\n${atsAppendix}`;
 
   const humanizeMode = normalizeStrongHumanizeMode(
     extras.strongHumanizeMode != null
@@ -963,7 +1022,9 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (additional) {
     prompt = `${prompt}\n\n---\nAdditional instructions for this job only (follow in addition to the rules above):\n${additional}`;
   }
-  return prompt;
+  return trimPromptToBudget(prompt, {
+    maxChars: Number(extras.maxPromptChars) > 0 ? Number(extras.maxPromptChars) : MAX_RESUME_PROMPT_CHARS
+  });
 }
 
 export async function buildCoverLetterPrompt({ jdText, jobTitle, companyName, roleTrack, sessionRoleTrack } = {}) {
