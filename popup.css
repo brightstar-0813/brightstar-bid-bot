@@ -264,6 +264,19 @@ h1 {
   border-color: var(--section-style-border);
 }
 
+.style-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+
+.style-export-actions > .primary,
+.style-export-actions > .ghost {
+  flex: 0 0 auto;
+}
+
 .section-muted {
   box-shadow: none;
   background: var(--section-muted-bg);

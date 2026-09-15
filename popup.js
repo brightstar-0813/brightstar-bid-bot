@@ -37,6 +37,8 @@ import {
 } from "./experience-rules.js";
 import { describeAtsGaps } from "./ats-score.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
+import { getStoredResumeJson } from "./history.js";
 import {
   extractSpreadsheetId,
   formatApplicationDate,
@@ -260,6 +262,11 @@ const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
 const previewTemplateBtn = document.getElementById("previewTemplate");
+const styleExportPasteEl = document.getElementById("styleExportPaste");
+const styleExportLoadLastBtn = document.getElementById("styleExportLoadLast");
+const styleExportPreviewBtn = document.getElementById("styleExportPreview");
+const styleExportPdfBtn = document.getElementById("styleExportPdf");
+const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
@@ -2639,6 +2646,87 @@ async function openTemplatePreview() {
   setStatus(`Opened preview for ${template?.label || "resume style"}.`);
 }
 
+function parseStyleExportPaste() {
+  const raw = String(styleExportPasteEl?.value || "").trim();
+  if (!raw) throw new Error("Paste resume text first.");
+  const person = profilesCache.find((p) => p.id === profileSelectEl?.value) || null;
+  const resumeData = resolvePastedResume(raw, { person });
+  if (!isStyledExportResume(resumeData)) {
+    throw new Error("Could not build a resume from that paste. Include a name and body text.");
+  }
+  return resumeData;
+}
+
+async function loadLastResumeIntoStyleExport() {
+  const profileId = profileSelectEl?.value || (await getActivePersonId().catch(() => "")) || "";
+  const resume = await getStoredResumeJson(profileId);
+  if (!resume || typeof resume !== "object") {
+    setStatus("No last resume JSON saved for this person yet.");
+    return;
+  }
+  if (styleExportPasteEl) {
+    styleExportPasteEl.value = JSON.stringify(resume, null, 2);
+  }
+  await chrome.storage.local.set({ [STYLE_EXPORT_PASTE_KEY]: resume }).catch(() => {});
+  setStatus("Loaded last resume JSON into paste box.");
+}
+
+async function openStyleExportPastePreview() {
+  const resumeData = parseStyleExportPaste();
+  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
+  await chrome.storage.local.set({
+    [STYLE_EXPORT_PASTE_KEY]: resumeData,
+    selected_template_id: templateId
+  });
+  const url = chrome.runtime.getURL(
+    `preview.html?source=paste&template=${encodeURIComponent(templateId)}`
+  );
+  const stored = (await chrome.storage.local.get(PREVIEW_WINDOW_KEY))[PREVIEW_WINDOW_KEY];
+  if (stored != null) {
+    try {
+      await chrome.windows.update(stored, { focused: true, drawAttention: true });
+      await chrome.runtime
+        .sendMessage({ type: "template_preview_show", templateId, source: "paste" })
+        .catch(() => {});
+      setStatus("Paste preview focused.");
+      return;
+    } catch {
+      // Window was closed.
+    }
+  }
+  const created = await chrome.windows.create({
+    url,
+    type: "popup",
+    width: 980,
+    height: 1040
+  });
+  await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
+  setStatus("Opened paste preview.");
+}
+
+async function exportStyleExportPdf() {
+  const raw = String(styleExportPasteEl?.value || "").trim();
+  if (!raw) {
+    setStatus("Paste resume text first.");
+    return;
+  }
+  // Soft-validate in the popup so the user gets an immediate message.
+  parseStyleExportPaste();
+  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
+  await persistJobFields();
+  setBusy(true);
+  setStatus("Exporting styled resume PDF…");
+  const res = await chrome.runtime.sendMessage({
+    type: "export_styled_resume_pdf",
+    jsonText: raw,
+    templateId
+  });
+  if (!res?.ok) {
+    setStatus(res?.error || "Style export failed to start.");
+    setBusy(false);
+  }
+}
+
 async function openDetachedWindow() {
   const res = await chrome.runtime.sendMessage({ type: "open_app_window" });
   if (!res?.ok) {
@@ -3540,6 +3628,18 @@ togglePacingSlackPanelBtn?.addEventListener("click", () => {
 });
 previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
+});
+styleExportLoadLastBtn?.addEventListener("click", () => {
+  loadLastResumeIntoStyleExport().catch((e) => setStatus(String(e.message || e)));
+});
+styleExportPreviewBtn?.addEventListener("click", () => {
+  openStyleExportPastePreview().catch((e) => setStatus(String(e.message || e)));
+});
+styleExportPdfBtn?.addEventListener("click", () => {
+  exportStyleExportPdf().catch((e) => {
+    setBusy(false);
+    setStatus(String(e.message || e));
+  });
 });
 testSlackBtn.addEventListener("click", testSlackWebhook);
 runOneOffBtn.addEventListener("click", () => {

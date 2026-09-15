@@ -11,6 +11,7 @@ import { showToast } from "./ui-toast.js";
 
 const PREVIEW_SOURCE_KEY = "template_preview_source";
 const ONE_OFF_DRAFT_KEY = "one_off_draft";
+const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 
 const templateSelectEl = document.getElementById("templateSelect");
 const useStyleBtn = document.getElementById("useStyle");
@@ -23,6 +24,7 @@ let templateId = params.get("template") || DEFAULT_TEMPLATE_ID;
 let source = "sample";
 let hasLastResume = false;
 let hasDraft = false;
+let hasPaste = false;
 let draftTemplateId = "";
 
 function setStatus(message, tone = "") {
@@ -74,10 +76,23 @@ async function loadDraftResume() {
   return null;
 }
 
+async function loadPasteResume() {
+  const stored = await chrome.storage.local.get(STYLE_EXPORT_PASTE_KEY);
+  if (isResumePreviewable(stored[STYLE_EXPORT_PASTE_KEY])) {
+    return stored[STYLE_EXPORT_PASTE_KEY];
+  }
+  return null;
+}
+
 async function loadResumeData() {
   if (source === "draft") {
     const data = await loadDraftResume();
     if (data) return { data, kind: "draft" };
+    source = "sample";
+  }
+  if (source === "paste") {
+    const data = await loadPasteResume();
+    if (data) return { data, kind: "paste" };
     source = "sample";
   }
   if (source === "last") {
@@ -99,11 +114,14 @@ async function renderPreview() {
   if (ledeEl) {
     ledeEl.hidden = false;
     if (kind === "draft") ledeEl.textContent = `Manual draft · ${template.label}`;
+    else if (kind === "paste") ledeEl.textContent = `Pasted resume · ${template.label}`;
     else if (kind === "last") ledeEl.textContent = `Last generated · ${template.label}`;
     else ledeEl.textContent = `Sample · ${template.label}`;
   }
   if (kind === "draft") {
     setStatus("Draft resume — Confirm in the bot when ready.", "ok");
+  } else if (kind === "paste") {
+    setStatus("Pasted resume — Export PDF from Resume style when ready.", "ok");
   }
 }
 
@@ -111,10 +129,12 @@ async function initSource() {
   const stored = await chrome.storage.local.get([
     "last_resume_json",
     PREVIEW_SOURCE_KEY,
-    ONE_OFF_DRAFT_KEY
+    ONE_OFF_DRAFT_KEY,
+    STYLE_EXPORT_PASTE_KEY
   ]);
   hasLastResume = isResumePreviewable(stored.last_resume_json);
   hasDraft = isResumePreviewable(stored[ONE_OFF_DRAFT_KEY]?.resumeData);
+  hasPaste = isResumePreviewable(stored[STYLE_EXPORT_PASTE_KEY]);
   draftTemplateId = String(
     stored[ONE_OFF_DRAFT_KEY]?.templateId || stored[ONE_OFF_DRAFT_KEY]?.jobMeta?.templateId || ""
   ).trim();
@@ -123,10 +143,14 @@ async function initSource() {
   if (querySource === "draft" && hasDraft) {
     source = "draft";
     if (draftTemplateId) templateId = draftTemplateId;
+  } else if (querySource === "paste" && hasPaste) {
+    source = "paste";
   } else if (querySource === "last" && hasLastResume) {
     source = "last";
   } else if (stored[PREVIEW_SOURCE_KEY] === "draft" && hasDraft) {
     source = "draft";
+  } else if (stored[PREVIEW_SOURCE_KEY] === "paste" && hasPaste) {
+    source = "paste";
   } else if (stored[PREVIEW_SOURCE_KEY] === "last" && hasLastResume) {
     source = "last";
   } else {
@@ -164,7 +188,7 @@ chrome.runtime.onMessage.addListener((message) => {
       templateId = message.templateId;
       templateSelectEl.value = templateId;
     }
-    if (message.source === "draft" || message.source === "last" || message.source === "sample") {
+    if (message.source === "draft" || message.source === "last" || message.source === "sample" || message.source === "paste") {
       source = message.source;
     }
     renderPreview().catch(() => {});
@@ -188,7 +212,19 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes[ONE_OFF_DRAFT_KEY]) return;
+  if (area !== "local") return;
+  if (changes[STYLE_EXPORT_PASTE_KEY] && (source === "paste" || params.get("source") === "paste")) {
+    hasPaste = isResumePreviewable(changes[STYLE_EXPORT_PASTE_KEY].newValue);
+    if (hasPaste) {
+      source = "paste";
+      renderPreview().catch(() => {});
+    } else {
+      source = "sample";
+      setStatus("Paste cleared.", "warn");
+      renderPreview().catch(() => {});
+    }
+  }
+  if (!changes[ONE_OFF_DRAFT_KEY]) return;
   const draft = changes[ONE_OFF_DRAFT_KEY].newValue;
   hasDraft = isResumePreviewable(draft?.resumeData);
   draftTemplateId = String(draft?.templateId || draft?.jobMeta?.templateId || "").trim();

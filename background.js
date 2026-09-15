@@ -102,6 +102,7 @@ import {
 import { formatRequiredEmployersList } from "./experience-rules.js";
 import { openProfileEditor } from "./open-profile-editor.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import {
   parseJobsCsv,
   filterJobsByChannel,
@@ -2390,6 +2391,56 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
   }
 
   return { jobDir, resumeFilePrefix: `${nameToken}_Resume`, nameToken, resumePdfName, saved };
+}
+
+/**
+ * Paste resume text (or JSON) → selected template → PDF only (no JD / cover / sheet).
+ */
+async function exportStyledResumePdf(jsonText, { templateId = "" } = {}) {
+  const raw = String(jsonText || "").trim();
+  if (!raw) throw new Error("Paste resume text first.");
+
+  const person = await getActivePerson().catch(() => null);
+  let resumeData = resolvePastedResume(raw, { person });
+  if (!isStyledExportResume(resumeData)) {
+    throw new Error(
+      "Could not build a resume from that paste. Include a name and body text (summary, experience, or skills)."
+    );
+  }
+  resumeData = sanitizeResumeData(resumeData) || resumeData;
+
+  const tid =
+    String(templateId || "").trim() ||
+    (await pickTemplateId({}, person || {})) ||
+    DEFAULT_TEMPLATE_ID;
+  const outputDir = await resolveOutputDir(person ? outputDirFromPerson(person) : "");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const exportDir = joinDownloadPath(outputDir || "Style-Export", `Style-Export-${stamp}`);
+  const nameToken = outputNameToken(
+    {
+      resumeFilePrefix: person?.resumeFilePrefix || "",
+      personName: person?.name || person?.label || ""
+    },
+    resumeData
+  );
+  const resumePdfName = `${nameToken}_Resume.pdf`;
+
+  await setStatus(`Building ${tid} resume HTML…`);
+  const html = resumeJsonToHtml(resumeData, tid);
+  await setStatus(
+    `Saving ${resumePdfName}… (Allow debugger if Chrome prompts — do not ignore the dialog)`
+  );
+  const pdfBase64 = await htmlToPdfBase64(html);
+  await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(exportDir, resumePdfName));
+
+  await chrome.storage.local.set({
+    style_export_paste_json: resumeData,
+    selected_template_id: tid
+  }).catch(() => {});
+
+  const status = `Exported ${resumePdfName} → Downloads / ${exportDir}`;
+  await setStatus(status);
+  return { ok: true, status, exportDir, resumePdfName, templateId: tid, resumeData };
 }
 
 function coverLetterTextToParagraphs(raw) {
@@ -9883,6 +9934,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((draft) => safeSendResponse(sendResponse, { ok: true, draft }))
       .catch((err) => safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) }));
     return true;
+  }
+
+  if (type === "export_styled_resume_pdf") {
+    if (isRunning) {
+      safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
+      return false;
+    }
+    isRunning = true;
+    startKeepAlive();
+    chrome.storage.local.set({ generation_running: true });
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    (async () => {
+      try {
+        const result = await exportStyledResumePdf(message.jsonText || "", {
+          templateId: message.templateId || ""
+        });
+        await chrome.storage.local.set({ generation_running: false });
+        await setStatus(result.status);
+      } catch (err) {
+        await chrome.storage.local.set({ generation_running: false });
+        await setStatus(`Style export failed: ${String(err?.message || err)}`);
+      } finally {
+        isRunning = false;
+        stopKeepAlive();
+      }
+    })();
+    return false;
   }
 
   if (type === "save_from_json") {
