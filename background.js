@@ -6521,7 +6521,8 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   }
 
   const jdLink = String(jobMeta.jdLink || "").trim();
-  if (jdLink) {
+  // Manual bid / one-off: user already verified the posting — skip live active/inactive probe.
+  if (jdLink && !isManualOneOffJob(jobMeta)) {
     if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
     await setStatus(
       `Row ${jobMeta.csvRow != null ? `${jobMeta.csvRow}: ` : ""}checking if job is active / already applied…`
