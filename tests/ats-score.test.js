@@ -413,11 +413,15 @@ test("describeAtsGaps lists missing items and how-to-improve tips", () => {
   assert.ok(detail.breakdown.length >= 3);
   assert.ok(detail.breakdown.some((b) => b.key === "productBulletProof"));
   assert.ok(detail.missingProducts.includes("Service Cloud"));
-  assert.ok(detail.tips.some((t) => /Prove missing|Service Cloud|bullets/i.test(t)));
-  assert.ok(detail.tips.some((t) => /JD Keywords|Mirror these JD terms/i.test(t)));
+  assert.ok(detail.tips.some((t) => /Skills & tech to add|Service Cloud/i.test(t)));
+  assert.ok(Array.isArray(detail.upgradeSkills) && detail.upgradeSkills.includes("Service Cloud"));
   assert.ok(Array.isArray(detail.findings) && detail.findings.length >= 1);
+  assert.ok(detail.findings.some((f) => f.kind === "missing-products" && Array.isArray(f.items) && f.items.length));
   assert.ok(detail.summary);
-  assert.match(detail.rebuildPrompt || "", /REBUILD FOR ATS GAPS/i);
+  assert.match(detail.rebuildPrompt || "", /Skills & tech to ADD/i);
+  if (detail.weaveTech?.length) {
+    assert.ok(detail.tips.some((t) => /JD tech language to weave/i.test(t)));
+  }
 
   const strongDetail = describeAtsGaps(
     evaluateAtsScore(strongResume, {

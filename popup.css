@@ -1444,6 +1444,66 @@ input[type="file"]::file-selector-button {
   line-height: 1.35;
 }
 
+.ats-gap-tech {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.ats-gap-tech-block {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #5eead4) 28%, var(--border, var(--line)));
+  background: color-mix(in srgb, var(--accent, #5eead4) 8%, transparent);
+}
+
+.ats-gap-tech-block.is-prove {
+  border-color: color-mix(in srgb, var(--gold, #d4a017) 35%, var(--border, var(--line)));
+  background: color-mix(in srgb, var(--gold, #d4a017) 8%, transparent);
+}
+
+.ats-gap-tech-block.is-weave {
+  border-color: color-mix(in srgb, var(--muted) 40%, var(--border, var(--line)));
+  background: color-mix(in srgb, var(--surface, var(--subblock-bg)) 88%, transparent);
+}
+
+.ats-gap-tech-block h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  color: var(--text, var(--ink));
+}
+
+.ats-gap-tech-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ats-gap-tech-list li {
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border, var(--line-strong));
+  background: color-mix(in srgb, var(--surface, var(--section-bg)) 92%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text, var(--ink));
+}
+
+.ats-gap-tech-hint {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .ats-gap-findings {
   display: flex;
   flex-direction: column;

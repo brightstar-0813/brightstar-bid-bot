@@ -599,11 +599,12 @@ export function describeAtsGaps(evaluation = {}) {
     const list = missingProducts.join(", ");
     findings.push({
       kind: "missing-products",
-      title: "Missing must-have tools",
-      body: `The JD needs these, and they barely show up (or not at all): ${list}. Put each under a real skills row (like “${primaryCategory}”) and name them in at least two bullets across your two most recent jobs.`
+      title: "Skills & tech to add",
+      items: missingProducts.slice(),
+      body: `Add these under “${primaryCategory}” (exact spellings), then prove each in ≥2 bullets across your two most recent roles.`
     });
     tips.push(
-      `Prove missing ${track.domainProductLabel || "products"} in real skills categories (e.g. "${primaryCategory}") AND in at least two experience bullets across the two most recent roles — never skills-only: ${list}.`
+      `Skills & tech to add (skills row + recent-role bullets): ${list}.`
     );
   }
 
@@ -611,23 +612,26 @@ export function describeAtsGaps(evaluation = {}) {
     const list = skillsOnly.join(", ");
     findings.push({
       kind: "skills-only",
-      title: "Listed in skills, not proved in work",
-      body: `These sit in the skills table but almost never appear in experience bullets: ${list}. Recruiters ignore skills-only claims. Rewrite the last two roles so each tool shows up in a real story (what you built, for whom, what changed).`
+      title: "Skills & tech to prove in bullets",
+      items: skillsOnly.slice(),
+      body: `Already in the skills table — rewrite the last two roles so each appears in a real story (what you built, for whom, what changed).`
     });
     tips.push(
-      `These appear in skills but not enough experience bullets — name each in concrete bullets for the two most recent roles: ${list}.`
+      `Skills & tech to prove in recent-role bullets: ${list}.`
     );
   }
 
   if (missingKeywords.length) {
-    const list = missingKeywords.slice(0, 10).join(", ");
+    const weave = missingKeywords.slice(0, 12);
+    const list = weave.join(", ");
     findings.push({
       kind: "missing-keywords",
-      title: "JD language not reflected",
-      body: `These words from the posting barely appear in the resume: ${list}. Weave them into the profile, full-sentence highlights, and bullets — never dump them into a “JD Keywords” skills row.`
+      title: "JD tech language to weave in",
+      items: weave,
+      body: `Use these terms naturally in profile, technicalSummary sentences, and bullets — never a “JD Keywords” dump row.`
     });
     tips.push(
-      `Mirror these JD terms naturally in profile, full-sentence technicalSummary, and experience bullets — never a "JD Keywords" skills row: ${list}.`
+      `JD tech language to weave (profile / bullets, not a keyword row): ${list}.`
     );
   }
 
@@ -731,14 +735,28 @@ export function describeAtsGaps(evaluation = {}) {
     track
   });
 
+  const upgradeSkills = [...new Set([...missingProducts, ...skillsOnly])];
+  const weaveTech = missingKeywords.slice(0, 12);
+
   const summary =
     Number.isFinite(score) && score >= ATS_TARGET_SCORE
       ? "Local match is strong. Skim findings if you want polish."
-      : findings.filter((f) => f.kind !== "score").length
-        ? `Here’s what a recruiter would still doubt (${findings.filter((f) => f.kind !== "score").length} issue${
-            findings.filter((f) => f.kind !== "score").length === 1 ? "" : "s"
-          }).`
-        : "Gaps recorded — rebuild to raise evidence.";
+      : upgradeSkills.length || weaveTech.length
+        ? [
+            upgradeSkills.length
+              ? `${upgradeSkills.length} skill${upgradeSkills.length === 1 ? "" : "s"}/tech to upgrade`
+              : "",
+            weaveTech.length
+              ? `${weaveTech.length} JD term${weaveTech.length === 1 ? "" : "s"} to weave`
+              : ""
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : findings.filter((f) => f.kind !== "score").length
+          ? `Here’s what a recruiter would still doubt (${findings.filter((f) => f.kind !== "score").length} issue${
+              findings.filter((f) => f.kind !== "score").length === 1 ? "" : "s"
+            }).`
+          : "Gaps recorded — rebuild to raise evidence.";
 
   return {
     score: evaluation?.score ?? null,
@@ -748,6 +766,8 @@ export function describeAtsGaps(evaluation = {}) {
     missingProducts,
     missingKeywords,
     skillsOnlyProducts: skillsOnly,
+    upgradeSkills,
+    weaveTech,
     tips,
     findings,
     summary,
@@ -774,17 +794,26 @@ export function buildGapsRebuildPrompt({
     `- Put must-have tools in real skills categories (e.g. "${primaryCategory}") with EXACT JD spellings.`,
     "- Prove tools in the TWO most recent roles with concrete bullets (feature → what you built → outcome).",
     track?.bulletInternalsHint ? `- Internals hint: ${track.bulletInternalsHint}` : "",
-    missingProducts.length ? `- Missing products to prove: ${missingProducts.join(", ")}` : "",
+    missingProducts.length
+      ? `- Skills & tech to ADD (skills row + prove in bullets):\n${missingProducts
+          .map((p) => `  • ${p}`)
+          .join("\n")}`
+      : "",
     skillsOnlyProducts.length
-      ? `- Skills-only today (must appear in bullets): ${skillsOnlyProducts.join(", ")}`
+      ? `- Skills & tech to PROVE in recent-role bullets:\n${skillsOnlyProducts
+          .map((p) => `  • ${p}`)
+          .join("\n")}`
       : "",
     missingKeywords.length
-      ? `- Weave naturally (not as a list): ${missingKeywords.slice(0, 12).join(", ")}`
+      ? `- JD tech language to weave naturally (not as a list):\n${missingKeywords
+          .slice(0, 12)
+          .map((k) => `  • ${k}`)
+          .join("\n")}`
       : "",
-    findings.filter((f) => f.kind !== "score" && f.kind !== "ok").length
+    findings.filter((f) => f.kind !== "score" && f.kind !== "ok" && !f.items?.length).length
       ? "- Focus areas:\n" +
         findings
-          .filter((f) => f.kind !== "score" && f.kind !== "ok")
+          .filter((f) => f.kind !== "score" && f.kind !== "ok" && !f.items?.length)
           .map((f) => `  • ${f.title}: ${f.body}`)
           .join("\n")
       : "",

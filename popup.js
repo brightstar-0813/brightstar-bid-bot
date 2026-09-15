@@ -1326,10 +1326,51 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
     parts.push(`<p class="ats-gap-summary">${escapeHtml(detail.summary)}</p>`);
   }
 
+  const techBlocks = [];
+  if (detail.missingProducts?.length) {
+    techBlocks.push(
+      `<div class="ats-gap-tech-block">` +
+        `<h4>Skills &amp; tech to add</h4>` +
+        `<ul class="ats-gap-tech-list">${detail.missingProducts
+          .map((item) => `<li>${escapeHtml(item)}</li>`)
+          .join("")}</ul>` +
+        `<p class="ats-gap-tech-hint">Add under a real skills category, then prove in ≥2 recent-role bullets.</p>` +
+        `</div>`
+    );
+  }
+  if (detail.skillsOnlyProducts?.length) {
+    techBlocks.push(
+      `<div class="ats-gap-tech-block is-prove">` +
+        `<h4>Already listed — prove in bullets</h4>` +
+        `<ul class="ats-gap-tech-list">${detail.skillsOnlyProducts
+          .map((item) => `<li>${escapeHtml(item)}</li>`)
+          .join("")}</ul>` +
+        `<p class="ats-gap-tech-hint">Name each in a concrete story for the two most recent roles.</p>` +
+        `</div>`
+    );
+  }
+  if (detail.weaveTech?.length) {
+    techBlocks.push(
+      `<div class="ats-gap-tech-block is-weave">` +
+        `<h4>JD tech language to weave</h4>` +
+        `<ul class="ats-gap-tech-list">${detail.weaveTech
+          .map((item) => `<li>${escapeHtml(item)}</li>`)
+          .join("")}</ul>` +
+        `<p class="ats-gap-tech-hint">Use in profile / bullets — not a keyword dump row.</p>` +
+        `</div>`
+    );
+  }
+  if (techBlocks.length) {
+    parts.push(`<div class="ats-gap-tech">${techBlocks.join("")}</div>`);
+  }
+
   const findings = Array.isArray(detail.findings) ? detail.findings : [];
-  if (findings.length) {
+  const narrative = findings.filter(
+    (f) => f.kind === "score" || f.kind === "headline" || f.kind === "recent-roles" || f.kind === "proof" || f.kind === "structure" || f.kind === "weak-areas" || f.kind === "ok" || f.kind === "fallback"
+  );
+  if (narrative.length) {
     parts.push(
-      `<div class="ats-gap-findings">${findings
+      `<div class="ats-gap-findings">${narrative
         .map(
           (f) =>
             `<article class="ats-gap-finding" data-kind="${escapeHtml(f.kind || "")}">` +
@@ -1339,7 +1380,7 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
         )
         .join("")}</div>`
     );
-  } else if (detail.tips.length) {
+  } else if (!techBlocks.length && detail.tips.length) {
     parts.push(
       `<div class="one-off-ats-gap-group one-off-ats-improve"><strong>What to fix</strong><ul>${detail.tips
         .map((tip) => `<li>${escapeHtml(tip)}</li>`)
