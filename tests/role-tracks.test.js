@@ -6,6 +6,7 @@ import {
   jdRequiredSkills,
   resolveEffectiveRoleTrack,
   resolveRoleTrackForPerson,
+  isRoleTrackLockedForPerson,
   isTrackDefaultPrompt,
   normalizeRoleTrackId
 } from "../role-tracks.js";
@@ -38,10 +39,33 @@ test("jdRequiredSkills returns track-specific catalog matches", () => {
 });
 
 test("resolveEffectiveRoleTrack prefers session override", () => {
+  // Draft / unset id only — saved profiles lock their setup track.
   const person = { roleTrack: "sf" };
   assert.equal(resolveEffectiveRoleTrack(person, ""), "sf");
   assert.equal(resolveEffectiveRoleTrack(person, "de"), "de");
   assert.equal(resolveEffectiveRoleTrack(person, "fs"), "fs");
+});
+
+test("resolveEffectiveRoleTrack ignores session override for built-in profiles", () => {
+  const sfBuiltin = { id: "dmario-lewis", roleTrack: "sf", builtin: true };
+  const deBuiltin = { id: "david-oliveira-de", roleTrack: "de", builtin: true };
+  assert.equal(resolveEffectiveRoleTrack(sfBuiltin, "de"), "sf");
+  assert.equal(resolveEffectiveRoleTrack(sfBuiltin, "fs"), "sf");
+  assert.equal(resolveEffectiveRoleTrack(deBuiltin, "sf"), "de");
+  assert.equal(resolveEffectiveRoleTrack(deBuiltin, "ai"), "de");
+});
+
+test("resolveEffectiveRoleTrack ignores session override for saved custom profiles", () => {
+  const custom = { id: "custom-jane", roleTrack: "de", builtin: false };
+  assert.equal(resolveEffectiveRoleTrack(custom, "sf"), "de");
+  assert.equal(resolveEffectiveRoleTrack(custom, "ai"), "de");
+});
+
+test("isRoleTrackLockedForPerson locks built-ins and saved customs", () => {
+  assert.equal(isRoleTrackLockedForPerson({ builtin: true, roleTrack: "sf" }), true);
+  assert.equal(isRoleTrackLockedForPerson({ id: "custom-1", builtin: false, roleTrack: "de" }), true);
+  assert.equal(isRoleTrackLockedForPerson({ roleTrack: "fs" }), false);
+  assert.equal(isRoleTrackLockedForPerson({ id: "", roleTrack: "ai" }), false);
 });
 
 test("resolveRoleTrackForPerson infers sf for built-in Salesforce profiles", () => {

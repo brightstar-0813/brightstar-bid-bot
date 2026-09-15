@@ -311,10 +311,63 @@ export function resolveRoleTrackForPerson(person) {
   return "sf";
 }
 
+/**
+ * Track is chosen at profile setup (new profile), then locked.
+ * Built-ins ship fixed; saved customs keep their setup track until re-created.
+ */
+export function isRoleTrackLockedForPerson(person) {
+  if (!person) return false;
+  if (person.builtin) return true;
+  // Persisted custom profile — already set up; do not re-edit track here.
+  return Boolean(String(person.id || "").trim());
+}
+
 export function resolveEffectiveRoleTrack(person, sessionOverride) {
+  // Saved profiles (built-in + custom) always use their setup track — no session override.
+  if (isRoleTrackLockedForPerson(person)) {
+    return resolveRoleTrackForPerson(person);
+  }
   const session = String(sessionOverride ?? "").trim();
   if (session && ROLE_TRACK_IDS.includes(session)) return session;
   return resolveRoleTrackForPerson(person);
+}
+
+/**
+ * Sync role-track toggle buttons: active track + lock non-active when set up.
+ * @param {Iterable<HTMLElement>|HTMLElement[]} buttons
+ * @param {{ track?: string, locked?: boolean }} [opts]
+ */
+export function applyRoleTrackToggleState(buttons, { track, locked = false } = {}) {
+  const active = normalizeRoleTrackId(track);
+  const list = Array.from(buttons || []);
+  for (const btn of list) {
+    if (btn.dataset.defaultTitle == null) {
+      btn.dataset.defaultTitle = btn.getAttribute("title") || "";
+    }
+    const isActive = btn.dataset.track === active;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    // Keep the active chip enabled so it stays visually primary; block the rest.
+    btn.disabled = Boolean(locked) && !isActive;
+    btn.title = locked && !isActive ? "Track set for this profile" : btn.dataset.defaultTitle;
+  }
+  const group = list[0]?.closest?.(".role-track-toggle");
+  if (group) {
+    group.classList.toggle("is-locked", Boolean(locked));
+    group.setAttribute("aria-disabled", locked ? "true" : "false");
+  }
+}
+
+/**
+ * Sync a role-track <select> value and disabled (locked) state.
+ * @param {HTMLSelectElement|null|undefined} selectEl
+ * @param {{ track?: string, locked?: boolean }} [opts]
+ */
+export function applyRoleTrackSelectState(selectEl, { track, locked = false } = {}) {
+  if (!selectEl) return;
+  selectEl.value = normalizeRoleTrackId(track);
+  selectEl.disabled = Boolean(locked);
+  selectEl.title = locked ? "Track set for this profile" : "";
 }
 
 export function getTrackPromptTemplate(roleTrack) {
@@ -362,7 +415,9 @@ export function formatRoleTrackStatus(roleTrack, { sessionOverride = "", personT
   const track = getRoleTrack(roleTrack);
   const session = String(sessionOverride || "").trim();
   const person = normalizeRoleTrackId(personTrack || roleTrack);
-  if (session && session !== person) {
+  const effective = normalizeRoleTrackId(roleTrack);
+  // Only call it a session override when the effective track actually is the session value.
+  if (session && session === effective && session !== person) {
     return `${track.shortLabel} (session override)`;
   }
   return `${track.shortLabel} (person default)`;
