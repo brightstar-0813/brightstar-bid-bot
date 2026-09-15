@@ -2394,9 +2394,10 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
 }
 
 /**
- * Paste resume text (or JSON) → selected template → PDF only (no JD / cover / sheet).
+ * Paste resume text (or JSON) → job folder (jd.txt + resume PDF) + Applied on Google Sheet.
+ * Same save/sheet path as Manual Bid Confirm, without AI cover letter.
  */
-async function exportStyledResumePdf(jsonText, { templateId = "" } = {}) {
+async function exportStyledResumePdf(jsonText, { templateId = "", jobMeta = {} } = {}) {
   const raw = String(jsonText || "").trim();
   if (!raw) throw new Error("Paste resume text first.");
 
@@ -2409,38 +2410,71 @@ async function exportStyledResumePdf(jsonText, { templateId = "" } = {}) {
   }
   resumeData = sanitizeResumeData(resumeData) || resumeData;
 
+  const jdLink = String(jobMeta.jdLink || "").trim();
+  const jobTitle = String(jobMeta.jobTitle || "").trim();
+  const companyName = String(jobMeta.companyName || "").trim();
+  if (!jobTitle && !companyName) throw new Error("Add a job title or company.");
+
   const tid =
-    String(templateId || "").trim() ||
-    (await pickTemplateId({}, person || {})) ||
+    String(templateId || jobMeta.templateId || "").trim() ||
+    (await pickTemplateId(jobMeta, person || {})) ||
     DEFAULT_TEMPLATE_ID;
-  const outputDir = await resolveOutputDir(person ? outputDirFromPerson(person) : "");
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const exportDir = joinDownloadPath(outputDir || "Style-Export", `Style-Export-${stamp}`);
-  const nameToken = outputNameToken(
-    {
-      resumeFilePrefix: person?.resumeFilePrefix || "",
-      personName: person?.name || person?.label || ""
-    },
-    resumeData
+  const resumeFilePrefix = normalizeResumeFilePrefix(
+    jobMeta.resumeFilePrefix || person?.resumeFilePrefix,
+    person?.name || person?.label || resumeData?.name || ""
   );
-  const resumePdfName = `${nameToken}_Resume.pdf`;
+  let meta = {
+    ...jobMeta,
+    jobTitle,
+    companyName,
+    jdLink,
+    jdText: String(jobMeta.jdText || "").trim(),
+    templateId: tid,
+    resumeFilePrefix,
+    personName: person?.name || person?.label || resumeData?.name || "",
+    profileId: jobMeta.profileId || person?.id || "",
+    bidSource: "one-off",
+    outputDir: await resolveOutputDir(
+      jobMeta.outputDir || (person ? outputDirFromPerson(person) : "")
+    )
+  };
 
-  await setStatus(`Building ${tid} resume HTML…`);
-  const html = resumeJsonToHtml(resumeData, tid);
-  await setStatus(
-    `Saving ${resumePdfName}… (Allow debugger if Chrome prompts — do not ignore the dialog)`
+  const csvRow = await ensureOneOffQueueJob(meta);
+  meta = { ...meta, csvRow };
+
+  await chrome.storage.local
+    .set({
+      style_export_paste_json: resumeData,
+      selected_template_id: tid
+    })
+    .catch(() => {});
+
+  await setStatus("Saving jd.txt + resume PDF…");
+  const result = await saveResumeAndCoverLetter(
+    null,
+    JSON.stringify(resumeData, null, 2),
+    resumeData,
+    meta,
+    { runCoverLetter: false }
   );
-  const pdfBase64 = await htmlToPdfBase64(html);
-  await downloadBase64File(pdfBase64, "application/pdf", joinDownloadPath(exportDir, resumePdfName));
 
-  await chrome.storage.local.set({
-    style_export_paste_json: resumeData,
-    selected_template_id: tid
+  await updateQueueJob(csvRow, {
+    status: "done",
+    jobDir: result.savedDir,
+    profileId: meta.profileId || "",
+    bidSource: "one-off",
+    error: ""
+  }).catch(() => {});
+  await rememberApplyHistory(csvRow, {
+    jobDir: result.savedDir,
+    jdLink: meta.jdLink || "",
+    status: "done",
+    title: meta.jobTitle,
+    company: meta.companyName
   }).catch(() => {});
 
-  const status = `Exported ${resumePdfName} → Downloads / ${exportDir}`;
-  await setStatus(status);
-  return { ok: true, status, exportDir, resumePdfName, templateId: tid, resumeData };
+  await setStatus(result.status);
+  return { ok: true, status: result.status, savedDir: result.savedDir, templateId: tid, resumeData };
 }
 
 function coverLetterTextToParagraphs(raw) {
@@ -9948,7 +9982,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const result = await exportStyledResumePdf(message.jsonText || "", {
-          templateId: message.templateId || ""
+          templateId: message.templateId || "",
+          jobMeta: message.jobMeta || {}
         });
         await chrome.storage.local.set({ generation_running: false });
         await setStatus(result.status);

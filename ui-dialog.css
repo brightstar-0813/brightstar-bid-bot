@@ -5,7 +5,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 20px;
 }
 
 .ui-dialog-backdrop {
@@ -56,7 +56,13 @@
 .ui-dialog-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ui-dialog-actions .ui-dialog-cancel {
+  margin-right: auto;
 }
 
 .ui-dialog-actions button {
@@ -70,4 +76,102 @@
 .ui-dialog-actions .danger.primary {
   background: var(--err-fg, #dc3545);
   border-color: transparent;
+}
+
+.ui-dialog.ui-dialog-form {
+  width: min(100%, 640px);
+  max-height: min(94vh, 820px);
+  padding: 18px 18px 16px;
+  overflow: auto;
+}
+
+.ui-dialog-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.ui-dialog-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ui-dialog-fields .field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+}
+
+.ui-dialog-fields .field > span {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted, #9aa8bc);
+}
+
+.ui-dialog-fields input,
+.ui-dialog-fields textarea,
+.ui-dialog-fields select {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.12));
+  background: var(--field-bg, rgba(0, 0, 0, 0.22));
+  color: var(--ink, #f4f7fb);
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ui-dialog-fields select {
+  height: 38px;
+}
+
+.ui-dialog-fields textarea {
+  resize: vertical;
+  min-height: 200px;
+  line-height: 1.4;
+}
+
+.ui-dialog-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--err-fg, #ff8e9a);
+}
+
+.ui-dialog-fields .ui-dialog-actions {
+  margin-top: 6px;
+  flex-wrap: nowrap;
+}
+
+.ui-dialog-form .ui-dialog-actions button {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 88px;
+  height: 36px;
+}
+
+.ui-dialog-form .ui-dialog-actions .ui-dialog-confirm {
+  min-width: 120px;
+}
+
+@media (max-width: 560px) {
+  .ui-dialog.ui-dialog-form {
+    width: min(100%, 100%);
+    max-height: 96vh;
+  }
+
+  .ui-dialog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ui-dialog-fields .ui-dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .ui-dialog-form .ui-dialog-actions button {
+    flex: 1 1 auto;
+  }
 }

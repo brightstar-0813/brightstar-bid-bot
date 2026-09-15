@@ -38,7 +38,6 @@ import {
 import { describeAtsGaps } from "./ats-score.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
-import { getStoredResumeJson } from "./history.js";
 import {
   extractSpreadsheetId,
   formatApplicationDate,
@@ -108,7 +107,7 @@ import {
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { OPENAI_QA_ASSIST_KEY } from "./openai.js";
 import { mountThemeSwatches } from "./theme.js";
-import { confirmDialog } from "./ui-dialog.js";
+import { confirmDialog, jobDetailsDialog } from "./ui-dialog.js";
 
 const DEFAULT_OUTPUT_DIR = "Applications";
 const QUEUE_KEY = "job_queue";
@@ -263,10 +262,7 @@ const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
 const previewTemplateBtn = document.getElementById("previewTemplate");
 const styleExportPasteEl = document.getElementById("styleExportPaste");
-const styleExportLoadLastBtn = document.getElementById("styleExportLoadLast");
-const styleExportPreviewBtn = document.getElementById("styleExportPreview");
 const styleExportPdfBtn = document.getElementById("styleExportPdf");
-const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
@@ -1302,6 +1298,8 @@ const ACTION_ICON_PATHS = {
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/>',
   draft:
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h6"/>',
+  sheet:
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h3"/><path d="M13 13h3"/><path d="M8 17h3"/><path d="M13 17h3"/>',
   autofill:
     '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   qa: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>'
@@ -2657,38 +2655,29 @@ function parseStyleExportPaste() {
   return resumeData;
 }
 
-async function loadLastResumeIntoStyleExport() {
-  const profileId = profileSelectEl?.value || (await getActivePersonId().catch(() => "")) || "";
-  const resume = await getStoredResumeJson(profileId);
-  if (!resume || typeof resume !== "object") {
-    setStatus("No last resume JSON saved for this person yet.");
-    return;
-  }
-  if (styleExportPasteEl) {
-    styleExportPasteEl.value = JSON.stringify(resume, null, 2);
-  }
-  await chrome.storage.local.set({ [STYLE_EXPORT_PASTE_KEY]: resume }).catch(() => {});
-  setStatus("Loaded last resume JSON into paste box.");
-}
+const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 
-async function openStyleExportPastePreview() {
+async function openStyleExportPreview(templateId = "") {
   const resumeData = parseStyleExportPaste();
-  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
+  const tid =
+    String(templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   await chrome.storage.local.set({
     [STYLE_EXPORT_PASTE_KEY]: resumeData,
-    selected_template_id: templateId
+    selected_template_id: tid
   });
+  if (templateSelectEl && tid) templateSelectEl.value = tid;
+
   const url = chrome.runtime.getURL(
-    `preview.html?source=paste&template=${encodeURIComponent(templateId)}`
+    `preview.html?source=paste&template=${encodeURIComponent(tid)}`
   );
   const stored = (await chrome.storage.local.get(PREVIEW_WINDOW_KEY))[PREVIEW_WINDOW_KEY];
   if (stored != null) {
     try {
       await chrome.windows.update(stored, { focused: true, drawAttention: true });
       await chrome.runtime
-        .sendMessage({ type: "template_preview_show", templateId, source: "paste" })
+        .sendMessage({ type: "template_preview_show", templateId: tid, source: "paste" })
         .catch(() => {});
-      setStatus("Paste preview focused.");
+      setStatus("Preview focused.");
       return;
     } catch {
       // Window was closed.
@@ -2701,7 +2690,7 @@ async function openStyleExportPastePreview() {
     height: 1040
   });
   await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
-  setStatus("Opened paste preview.");
+  setStatus("Opened resume preview.");
 }
 
 async function exportStyleExportPdf() {
@@ -2710,16 +2699,59 @@ async function exportStyleExportPdf() {
     setStatus("Paste resume text first.");
     return;
   }
-  // Soft-validate in the popup so the user gets an immediate message.
   parseStyleExportPaste();
-  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
+
+  const details = await jobDetailsDialog({
+    title: "Export resume PDF",
+    confirmText: "Export & save",
+    previewText: "Preview",
+    templates: templatesCache.length ? templatesCache : getAllTemplates(),
+    initial: {
+      jobTitle: (jobTitleEl?.value || "").trim(),
+      companyName: (companyNameEl?.value || "").trim(),
+      jdLink: (jdLinkEl?.value || "").trim(),
+      jdText: (jdTextEl?.value || "").trim(),
+      templateId: templateSelectEl?.value || DEFAULT_TEMPLATE_ID
+    },
+    onPreview: async ({ templateId }) => {
+      await openStyleExportPreview(templateId);
+    }
+  });
+  if (!details) {
+    setStatus("Export cancelled.");
+    return;
+  }
+
+  // Keep Manual Bid fields + active style in sync.
+  if (jobTitleEl) jobTitleEl.value = details.jobTitle;
+  if (companyNameEl) companyNameEl.value = details.companyName;
+  if (jdLinkEl) jdLinkEl.value = details.jdLink;
+  if (jdTextEl) jdTextEl.value = details.jdText;
+  const templateId = details.templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
+  if (templateSelectEl && templateId) {
+    templateSelectEl.value = templateId;
+    chrome.storage.local.set({ selected_template_id: templateId }).catch(() => {});
+  }
+
+  const { outputDir, person } = await resolveUiOutputDir();
   await persistJobFields();
   setBusy(true);
-  setStatus("Exporting styled resume PDF…");
+  setStatus("Exporting resume + recording on Google Sheet…");
   const res = await chrome.runtime.sendMessage({
     type: "export_styled_resume_pdf",
     jsonText: raw,
-    templateId
+    templateId,
+    jobMeta: {
+      ...details,
+      outputDir,
+      templateId,
+      spreadsheetUrl: spreadsheetUrlEl.value.trim(),
+      sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
+      sheetTabName: (sheetTabNameEl?.value || "").trim(),
+      resumeFilePrefix: person?.resumeFilePrefix || resumeFilePrefixFromName(person?.name || person?.label),
+      profileId: person?.id || "",
+      bidSource: "one-off"
+    }
   });
   if (!res?.ok) {
     setStatus(res?.error || "Style export failed to start.");
@@ -3628,12 +3660,6 @@ togglePacingSlackPanelBtn?.addEventListener("click", () => {
 });
 previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
-});
-styleExportLoadLastBtn?.addEventListener("click", () => {
-  loadLastResumeIntoStyleExport().catch((e) => setStatus(String(e.message || e)));
-});
-styleExportPreviewBtn?.addEventListener("click", () => {
-  openStyleExportPastePreview().catch((e) => setStatus(String(e.message || e)));
 });
 styleExportPdfBtn?.addEventListener("click", () => {
   exportStyleExportPdf().catch((e) => {
