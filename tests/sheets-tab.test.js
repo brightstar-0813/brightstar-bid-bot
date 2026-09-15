@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildSheetRowTsv,
   defaultSheetTabNameForPerson,
+  resolveSheetTabNameForPerson,
   sanitizeSheetTabName
 } from "../sheets.js";
 
@@ -17,10 +18,47 @@ test("sanitizeSheetTabName trims and caps length", () => {
   assert.equal(sanitizeSheetTabName("  Hello  "), "Hello");
 });
 
-test("defaultSheetTabNameForPerson prefers label then name", () => {
-  assert.equal(defaultSheetTabNameForPerson({ label: "D'mario Lewis" }), "D'mario Lewis");
-  assert.equal(defaultSheetTabNameForPerson({ name: "Edrwin" }), "Edrwin");
-  assert.equal(defaultSheetTabNameForPerson({}), "Profile");
+test("defaultSheetTabNameForPerson uses Firstname-TRACK", () => {
+  assert.equal(
+    defaultSheetTabNameForPerson({ label: "Sandeep Mahankali", name: "Sandeep Mahankali", roleTrack: "sf" }),
+    "Sandeep-SF"
+  );
+  assert.equal(
+    defaultSheetTabNameForPerson({ name: "David Leandro de Oliveira", roleTrack: "de" }),
+    "David-DE"
+  );
+  assert.equal(defaultSheetTabNameForPerson({ name: "Edrwin" }), "Edrwin-SF");
+  assert.equal(defaultSheetTabNameForPerson({}), "Profile-SF");
+});
+
+test("resolveSheetTabNameForPerson keeps explicit tabs, regenerates full-name leftovers", () => {
+  assert.equal(
+    resolveSheetTabNameForPerson({
+      label: "Sandeep Mahankali",
+      name: "Sandeep Mahankali",
+      roleTrack: "sf",
+      sheetTabName: "Sandeep-SF"
+    }),
+    "Sandeep-SF"
+  );
+  assert.equal(
+    resolveSheetTabNameForPerson({
+      label: "Sandeep Mahankali",
+      name: "Sandeep Mahankali",
+      roleTrack: "sf",
+      sheetTabName: "Sandeep Mahankali"
+    }),
+    "Sandeep-SF"
+  );
+  assert.equal(
+    resolveSheetTabNameForPerson({
+      label: "Jane Doe",
+      name: "Jane Doe",
+      roleTrack: "fs",
+      sheetTabName: "Team-Jane"
+    }),
+    "Team-Jane"
+  );
 });
 
 test("buildSheetRowTsv ends with Status and has no JD column", () => {

@@ -42,7 +42,7 @@ import {
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { clearQa, cloneQaBank } from "./qa-store.js";
 import {
-  defaultSheetTabNameForPerson,
+  resolveSheetTabNameForPerson,
   sanitizeSheetTabName
 } from "./sheets.js";
 
@@ -58,7 +58,7 @@ export {
   isTrackDefaultPrompt,
   isTrackDefaultCoverLetter
 } from "./role-tracks.js";
-export { defaultSheetTabNameForPerson, sanitizeSheetTabName } from "./sheets.js";
+export { defaultSheetTabNameForPerson, resolveSheetTabNameForPerson, sanitizeSheetTabName } from "./sheets.js";
 export const GENERIC_COVER_LETTER_PROMPT = coverLetterPrompt;
 
 /** Default ATS / MyWorkday account password for create-account + sign-in. */
@@ -73,6 +73,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: dmarioLewisPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Lewis_Resume",
+    sheetTabName: "Lewis-SF",
+    outputDir: "Lewis-SF",
     builtin: true,
     kind: "resume",
     name: "D'Mario Lewis",
@@ -112,6 +114,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: edrwinRevolorioPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Revolorio_Resume",
+    sheetTabName: "Edrwin-SF",
+    outputDir: "Edrwin-SF",
     builtin: true,
     kind: "resume",
     name: "Edrwin S Revolorio",
@@ -150,6 +154,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: sandeepMahankaliPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Mahankali_Resume",
+    sheetTabName: "Sandeep-SF",
+    outputDir: "Sandeep-SF",
     builtin: true,
     kind: "resume",
     name: "Sandeep Mahankali",
@@ -192,6 +198,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: michaelIbeaPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Ibea_Resume",
+    sheetTabName: "Michael-SF",
+    outputDir: "Michael-SF",
     builtin: true,
     kind: "resume",
     name: "Michael Haries Namuco Ibea",
@@ -229,6 +237,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: carlosCapulongPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Capulong_Resume",
+    sheetTabName: "Carlos-SF",
+    outputDir: "Carlos-SF",
     builtin: true,
     kind: "resume",
     name: "Carlos Padonan Capulong",
@@ -267,6 +277,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: davidOliveiraPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Oliveira_Resume",
+    sheetTabName: "David-SF",
+    outputDir: "David-SF",
     builtin: true,
     kind: "resume",
     name: "David Leandro de Oliveira",
@@ -305,6 +317,8 @@ export const BUILTIN_PROFILES = [
     promptTemplate: davidOliveiraDePrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Oliveira_Resume",
+    sheetTabName: "David-DE",
+    outputDir: "David-DE",
     builtin: true,
     kind: "resume",
     name: "David Leandro de Oliveira",
@@ -367,6 +381,8 @@ Federal University of Pernambuco — Bachelor's Degree in Mathematics and Comput
     promptTemplate: victorHolandaPrompt,
     templateId: "ats-modern",
     resumeFilePrefix: "Holanda_Resume",
+    sheetTabName: "Victor-SF",
+    outputDir: "Victor-SF",
     builtin: true,
     kind: "resume",
     name: "Victor Barros de Holanda",
@@ -701,9 +717,10 @@ export async function syncActivePersonOutputContext(person) {
   const p = normalizePerson(person);
   const resumeFilePrefix = normalizeResumeFilePrefix(p.resumeFilePrefix, p.name || p.label);
   const sheet = p.id ? await getPersonSheetConfig(p.id).catch(() => ({})) : {};
-  const sheetTabName =
-    sanitizeSheetTabName(p.sheetTabName || sheet.sheetTabName || "") ||
-    defaultSheetTabNameForPerson(p);
+  const sheetTabName = resolveSheetTabNameForPerson({
+    ...p,
+    sheetTabName: p.sheetTabName || sheet.sheetTabName || ""
+  });
   const outputDir = resolveOutputDirForPerson({
     ...p,
     resumeFilePrefix,
@@ -725,19 +742,18 @@ export async function getActivePerson() {
   const id = await getActivePersonId();
   const person = normalizePerson(await getProfileById(id));
   const sheet = await getPersonSheetConfig(person.id);
+  const sheetTabName = resolveSheetTabNameForPerson({
+    ...person,
+    sheetTabName: sheet.sheetTabName || person.sheetTabName || ""
+  });
   return {
     ...person,
     spreadsheetUrl: sheet.spreadsheetUrl || person.spreadsheetUrl || "",
     sheetsWebAppUrl: sheet.sheetsWebAppUrl || person.sheetsWebAppUrl || "",
-    sheetTabName:
-      sheet.sheetTabName ||
-      person.sheetTabName ||
-      defaultSheetTabNameForPerson(person),
+    sheetTabName,
     outputDir:
-      sanitizeSheetTabName(sheet.sheetTabName || person.sheetTabName || "") ||
-      sheet.outputDir ||
-      person.outputDir ||
-      ""
+      sanitizeSheetTabName(sheet.outputDir || sheet.sheetTabName || person.outputDir || person.sheetTabName || "") ||
+      sheetTabName
   };
 }
 
@@ -1167,9 +1183,15 @@ export async function addCustomProfile({
     educationHistory: Array.isArray(educationHistory) ? educationHistory : [],
     spreadsheetUrl: String(spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(sheetsWebAppUrl || "").trim(),
-    sheetTabName: sanitizeSheetTabName(sheetTabName) || defaultSheetTabNameForPerson({ label: displayName, name }),
-    outputDir: String(outputDir || "").trim()
+    sheetTabName: resolveSheetTabNameForPerson({
+      label: displayName,
+      name,
+      roleTrack: normalizeRoleTrackId(roleTrack),
+      sheetTabName
+    }),
+    outputDir: ""
   };
+  profile.outputDir = String(outputDir || "").trim() || profile.sheetTabName;
   custom.push(profile);
   await chrome.storage.local.set({ [CUSTOM_PROFILES_KEY]: custom });
   await setPersonSheetConfig(profile.id, {
@@ -1248,12 +1270,16 @@ export async function savePersonProfile(person) {
     educationHistory: Array.isArray(person?.educationHistory) ? person.educationHistory : undefined,
     spreadsheetUrl: String(person?.spreadsheetUrl || "").trim(),
     sheetsWebAppUrl: String(person?.sheetsWebAppUrl || "").trim(),
-    sheetTabName:
-      sanitizeSheetTabName(person?.sheetTabName) ||
-      defaultSheetTabNameForPerson({ label: displayName, name: person?.name }),
-    outputDir: String(person?.outputDir || "").trim(),
+    sheetTabName: resolveSheetTabNameForPerson({
+      label: displayName,
+      name: person?.name,
+      roleTrack: normalizeRoleTrackId(person?.roleTrack),
+      sheetTabName: person?.sheetTabName
+    }),
+    outputDir: "",
     kind: "resume"
   };
+  payload.outputDir = String(person?.outputDir || "").trim() || payload.sheetTabName;
 
   const custom = await getCustomProfiles();
   const isBuiltin = BUILTIN_PROFILES.some((b) => b.id === person?.id);
@@ -1285,10 +1311,13 @@ export async function savePersonProfile(person) {
     await setPersonSheetConfig(existingId, {
       spreadsheetUrl: mergedPayload.spreadsheetUrl,
       sheetsWebAppUrl: mergedPayload.sheetsWebAppUrl,
-      sheetTabName:
-        mergedPayload.sheetTabName ||
-        defaultSheetTabNameForPerson({ label: displayName, name: mergedPayload.name }),
-      outputDir: mergedPayload.outputDir
+      sheetTabName: resolveSheetTabNameForPerson({
+        label: displayName,
+        name: mergedPayload.name,
+        roleTrack: mergedPayload.roleTrack,
+        sheetTabName: mergedPayload.sheetTabName
+      }),
+      outputDir: mergedPayload.outputDir || mergedPayload.sheetTabName
     });
     const profile = next.find((p) => p.id === existingId);
     await syncActivePersonOutputContext(profile);

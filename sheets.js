@@ -1,3 +1,5 @@
+import { normalizeRoleTrackId } from "./role-tracks.js";
+
 export function extractSpreadsheetId(urlOrId) {
   const raw = String(urlOrId || "").trim();
   if (!raw) return "";
@@ -22,12 +24,32 @@ export function sanitizeSheetTabName(name) {
   return s;
 }
 
-/** Default tab label for a person when no custom sheetTabName is saved. */
+/** First name token for Firstname-SF style sheet tabs / save folders. */
+export function personSheetFirstNameToken(person = {}) {
+  const source = String(person?.name || person?.label || "").trim();
+  const first = source.split(/\s+/).filter(Boolean)[0] || "";
+  const token = first.replace(/[^A-Za-z0-9]+/g, "");
+  return token || "Profile";
+}
+
+/**
+ * Default tab / Downloads folder: [Firstname]-[TRACK] (e.g. Sandeep-SF, David-DE).
+ */
 export function defaultSheetTabNameForPerson(person = {}) {
-  return (
-    sanitizeSheetTabName(person?.sheetTabName || person?.label || person?.name || person?.id || "") ||
-    "Profile"
-  );
+  const track = normalizeRoleTrackId(person?.roleTrack).toUpperCase();
+  const first = personSheetFirstNameToken(person);
+  return sanitizeSheetTabName(`${first}-${track}`) || `Profile-${track}`;
+}
+
+/**
+ * Prefer an explicit custom tab; regenerate when empty or still set to the full display name.
+ */
+export function resolveSheetTabNameForPerson(person = {}) {
+  const existing = sanitizeSheetTabName(person?.sheetTabName || "");
+  const label = String(person?.label || "").trim();
+  const name = String(person?.name || "").trim();
+  if (existing && existing !== label && existing !== name) return existing;
+  return defaultSheetTabNameForPerson(person);
 }
 
 export function formatApplicationDate(date = new Date()) {

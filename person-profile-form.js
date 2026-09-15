@@ -20,6 +20,7 @@ import {
 import { normalizeRoleTrackId } from "./role-tracks.js";
 import { normalizeResumeFilePrefix, resumeFilePrefixFromName } from "./resume-profile.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import { resolveSheetTabNameForPerson } from "./sheets.js";
 
 export { requiredExperienceToText };
 
@@ -155,7 +156,13 @@ export function fillPersonForm(root, person, opts = {}) {
   set("requiredExperience", requiredExperienceToText(person.requiredExperience || []));
   set("promptTemplate", person.promptTemplate || "");
   set("coverLetterPrompt", person.coverLetterPrompt || "");
-  set("sheetTabName", person.sheetTabName || person.label || person.name || "");
+  set(
+    "sheetTabName",
+    resolveSheetTabNameForPerson({
+      ...person,
+      roleTrack: opts.roleTrack || person.roleTrack
+    })
+  );
 
   const templateEl = root.querySelector("#templateSelect");
   if (templateEl && person.templateId) templateEl.value = person.templateId;
@@ -163,6 +170,8 @@ export function fillPersonForm(root, person, opts = {}) {
   const track = opts.roleTrack || person.roleTrack;
   if (track) {
     const trackId = normalizeRoleTrackId(track);
+    const trackSelect = root.querySelector("#roleTrackSelect, #inlineRoleTrackSelect");
+    if (trackSelect) trackSelect.value = trackId;
     for (const btn of root.querySelectorAll(".role-track-btn")) {
       const active = btn.dataset.track === trackId;
       btn.classList.toggle("is-active", active);
@@ -191,10 +200,13 @@ export function readPersonFromForm(root, opts = {}) {
   };
 
   const templateEl = root.querySelector("#templateSelect");
+  const trackSelect = root.querySelector("#roleTrackSelect, #inlineRoleTrackSelect");
   const roleTrack =
     opts.roleTrack ||
     normalizeRoleTrackId(
-      root.querySelector(".role-track-btn.is-active")?.dataset?.track || "sf"
+      trackSelect?.value ||
+        root.querySelector(".role-track-btn.is-active")?.dataset?.track ||
+        "sf"
     );
 
   return {
@@ -361,6 +373,7 @@ export function mergeExtractedProfileIntoPerson(person, parsed, resumeText, { re
 export async function savePersonFromForm(root, opts = {}) {
   let person = readPersonFromForm(root, opts);
   if (opts.sheetTabName != null) person.sheetTabName = String(opts.sheetTabName).trim();
+  person.sheetTabName = resolveSheetTabNameForPerson(person);
   // Save folder always mirrors sheet tab name.
   person.outputDir = String(person.sheetTabName || opts.outputDir || "").trim();
   if (Array.isArray(opts.workHistory)) person.workHistory = opts.workHistory;
