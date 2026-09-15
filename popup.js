@@ -19,8 +19,7 @@
   syncActivePersonOutputContext,
   applyUsApplicantDefaults,
   promptHasFixedCompanyHistory,
-  defaultSheetTabNameForPerson,
-  sanitizeSheetTabName
+  resolveSheetTabNameForPerson
 } from "./profiles.js";
 import {
   getSessionRoleTrack,
@@ -29,6 +28,8 @@ import {
   isTrackDefaultPrompt,
   isTrackDefaultCoverLetter,
   normalizeRoleTrackId,
+  isRoleTrackLockedForPerson,
+  applyRoleTrackToggleState,
   SESSION_ROLE_TRACK_KEY
 } from "./role-tracks.js";
 import {
@@ -116,9 +117,11 @@ const BATCH_STATE_KEY = "batch_state";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
 const PROFILE_EDITOR_PANEL_OPEN_KEY = "profile_editor_panel_open";
-const BID_MARKET_KEY = "bid_market";
-const BID_MARKETS = { US: "us", NON_US: "non_us" };
-const DEFAULT_BID_MARKET = BID_MARKETS.US;
+const ALLOW_BATCH_KEY = "allow_batch_process";
+/** @deprecated Migrated into ALLOW_BATCH_KEY; still read for older installs. */
+const LEGACY_BID_MARKET_KEY = "bid_market";
+const ALLOW_BATCH = { YES: "yes", NO: "no" };
+const DEFAULT_ALLOW_BATCH = ALLOW_BATCH.YES;
 const PREVIEW_WINDOW_KEY = "template_preview_window_id";
 const INDEED_CAPTURE_STATE_KEY = "indeed_capture_state"; // legacy; cleared on reset
 const INDEED_GRAB_STATUS_KEY = "indeed_grab_status";
@@ -153,13 +156,12 @@ if (inlineProfileEditorEl && profileEditorPanelBody) {
     setStatus,
     setPanelOpen: (open) => {
       chrome.storage.local.set({ [PROFILE_EDITOR_PANEL_OPEN_KEY]: open }).catch(() => {});
-      const setup = document.getElementById("setupPanel");
-      if (setup && open) setup.open = true;
     },
     onSaved: async (saved) => {
       if (!saved?.id) return;
       await refreshProfiles(saved.id);
       await syncPersonContext(saved);
+      await resetActiveTrackForPerson(saved);
     },
     onClose: async () => {
       const id = await getActivePersonId().catch(() => profileSelectEl?.value);
@@ -224,9 +226,9 @@ const jobsStepNumEl = document.getElementById("jobsStepNum");
 const manualStepNumEl = document.getElementById("manualStepNum");
 const applyStepNumEl = document.getElementById("applyStepNum");
 const manualSectionTitleEl = document.getElementById("manualSectionTitle");
-const bidMarketUsBtn = document.getElementById("bidMarketUs");
-const bidMarketNonUsBtn = document.getElementById("bidMarketNonUs");
-let bidMarketCache = DEFAULT_BID_MARKET;
+const allowBatchYesBtn = document.getElementById("allowBatchYes");
+const allowBatchNoBtn = document.getElementById("allowBatchNo");
+let allowBatchCache = DEFAULT_ALLOW_BATCH;
 
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
@@ -266,6 +268,7 @@ const discardOneOffBtn = document.getElementById("discardOneOff");
 const openOneOffPreviewBtn = document.getElementById("openOneOffPreview");
 const oneOffIdleActionsEl = document.getElementById("oneOffIdleActions");
 const oneOffDraftActionsEl = document.getElementById("oneOffDraftActions");
+const oneOffAdditionalPromptFieldEl = document.getElementById("oneOffAdditionalPromptField");
 const oneOffExtraPromptEl = document.getElementById("oneOffExtraPrompt");
 const oneOffAtsBlock = document.getElementById("oneOffAtsBlock");
 const oneOffAtsScoreEl = document.getElementById("oneOffAtsScore");
@@ -365,20 +368,28 @@ function syncBatchPill() {
   el.dataset.state = batchState || "idle";
 }
 
-function setActiveRoleTrackUi(track) {
-  const active = normalizeRoleTrackId(track);
-  for (const btn of activeRoleTrackBtns) {
-    const isActive = btn.dataset.track === active;
-    btn.classList.toggle("is-active", isActive);
-    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-  }
+function setActiveRoleTrackUi(track, { locked = false } = {}) {
+  applyRoleTrackToggleState(activeRoleTrackBtns, {
+    track,
+    locked
+  });
 }
 
-async function syncActiveTrackUi({ savedTrack } = {}) {
+async function syncActiveTrackUi({ savedTrack, person } = {}) {
   if (!activeRoleTrackBtns.length) return;
+  const activePerson =
+    person ||
+    profilesCache.find((p) => p.id === profileSelectEl.value) ||
+    (await getActivePerson().catch(() => null));
+  const locked = isRoleTrackLockedForPerson(activePerson);
+  const personTrack = savedTrack || resolveRoleTrackForPerson(activePerson);
+  if (locked) {
+    setActiveRoleTrackUi(personTrack, { locked: true });
+    return;
+  }
   const sessionTrack = await getSessionRoleTrack();
-  const activeTrack = sessionTrack || savedTrack || readActiveRoleTrack();
-  setActiveRoleTrackUi(activeTrack);
+  const activeTrack = sessionTrack || personTrack || readActiveRoleTrack();
+  setActiveRoleTrackUi(activeTrack, { locked: false });
 }
 
 function applyTrackTemplatesToForm(_roleTrack, _person) {
@@ -386,13 +397,19 @@ function applyTrackTemplatesToForm(_roleTrack, _person) {
 }
 
 async function applyActiveRoleTrackChange({ track: nextTrack } = {}) {
-  const track = normalizeRoleTrackId(nextTrack ?? readActiveRoleTrack());
   const person = profilesCache.find((p) => p.id === profileSelectEl.value) || (await getActivePerson());
   const savedTrack = resolveRoleTrackForPerson(person);
+  if (isRoleTrackLockedForPerson(person)) {
+    await setSessionRoleTrack(savedTrack);
+    setActiveRoleTrackUi(savedTrack, { locked: true });
+    setStatus(`Track: ${getRoleTrack(savedTrack).label} (set for profile)`);
+    return;
+  }
 
-  setActiveRoleTrackUi(track);
+  const track = normalizeRoleTrackId(nextTrack ?? readActiveRoleTrack());
+  setActiveRoleTrackUi(track, { locked: false });
   await setSessionRoleTrack(track);
-  await syncActiveTrackUi({ savedTrack });
+  await syncActiveTrackUi({ savedTrack, person });
   const label = getRoleTrack(track).label;
   setStatus(track === savedTrack ? `Track: ${label}` : `Track: ${label} (session only)`);
 }
@@ -400,8 +417,8 @@ async function applyActiveRoleTrackChange({ track: nextTrack } = {}) {
 async function resetActiveTrackForPerson(person) {
   const savedTrack = resolveRoleTrackForPerson(person);
   await setSessionRoleTrack(savedTrack);
-  setActiveRoleTrackUi(savedTrack);
-  await syncActiveTrackUi({ savedTrack });
+  setActiveRoleTrackUi(savedTrack, { locked: isRoleTrackLockedForPerson(person) });
+  await syncActiveTrackUi({ savedTrack, person });
 }
 
 function syncAutofillUi(enabled = autofillEnabledCache) {
@@ -648,8 +665,7 @@ async function syncSheetConfigFromPerson(person) {
   const sheetsWebAppUrl = String(
     data.sheets_web_app_url || person?.sheetsWebAppUrl || ""
   ).trim();
-  const sheetTabName =
-    sanitizeSheetTabName(person?.sheetTabName || "") || defaultSheetTabNameForPerson(person || {});
+  const sheetTabName = resolveSheetTabNameForPerson(person || {});
   const resolved = resolveOutputDirForPerson({
     ...person,
     sheetTabName,
@@ -684,8 +700,10 @@ function updatePersonSheetSectionLabels(person) {
     personSheetSectionTitleEl.textContent = label ? `This profile · ${label}` : "This profile";
   }
   if (personSheetSectionHintEl) {
-    personSheetSectionHintEl.textContent = "";
-    personSheetSectionHintEl.hidden = true;
+    personSheetSectionHintEl.hidden = false;
+    personSheetSectionHintEl.textContent = label
+      ? `Sheet tab for ${label} is also the Downloads folder.`
+      : "Sheet tab name is also the save folder under Downloads.";
   }
 }
 
@@ -693,8 +711,10 @@ async function persistActivePersonSheetFromUi() {
   const person = await getActivePerson().catch(() => null);
   const spreadsheetUrl = spreadsheetUrlEl?.value?.trim() || "";
   const sheetsWebAppUrl = sheetsWebAppUrlEl?.value?.trim() || "";
-  const sheetTabName =
-    sanitizeSheetTabName(sheetTabNameEl?.value || "") || defaultSheetTabNameForPerson(person || {});
+  const sheetTabName = resolveSheetTabNameForPerson({
+    ...(person || {}),
+    sheetTabName: sheetTabNameEl?.value || person?.sheetTabName || ""
+  });
   const resolved = resolveOutputDirForPerson({
     ...person,
     sheetTabName,
@@ -736,9 +756,10 @@ async function loadActivePersonIntoForm() {
 
 async function persistJobFields() {
   const person = await getActivePerson().catch(() => null);
-  const sheetTabName =
-    sanitizeSheetTabName(sheetTabNameEl?.value || person?.sheetTabName || "") ||
-    defaultSheetTabNameForPerson(person || {});
+  const sheetTabName = resolveSheetTabNameForPerson({
+    ...(person || {}),
+    sheetTabName: sheetTabNameEl?.value || person?.sheetTabName || ""
+  });
   const personDir = person
     ? resolveOutputDirForPerson({ ...person, sheetTabName, outputDir: sheetTabName })
     : "";
@@ -908,7 +929,8 @@ async function loadSettings() {
     STRONG_HUMANIZE_MODE_KEY,
     MANUAL_PANEL_OPEN_KEY,
     PROFILE_EDITOR_PANEL_OPEN_KEY,
-    BID_MARKET_KEY,
+    ALLOW_BATCH_KEY,
+    LEGACY_BID_MARKET_KEY,
     "generation_status",
     "generation_running",
     QUEUE_KEY,
@@ -960,11 +982,10 @@ async function loadSettings() {
   }
   renderAiProvider(data[AI_PROVIDER_KEY]);
   renderHumanizeMode(data[STRONG_HUMANIZE_MODE_KEY]);
-  renderBidMarket(data[BID_MARKET_KEY] || DEFAULT_BID_MARKET, {
-    expandManual: false
-  });
+  const allowBatch = resolveAllowBatch(data);
+  renderAllowBatch(allowBatch, { expandManual: false });
   setManualPanelOpen(
-    Boolean(data[MANUAL_PANEL_OPEN_KEY]) || isNonUsBidMarket(data[BID_MARKET_KEY]),
+    Boolean(data[MANUAL_PANEL_OPEN_KEY]) || !isAllowBatchEnabled(allowBatch),
     { persist: false }
   );
   if (inlineProfileEditor && Boolean(data[PROFILE_EDITOR_PANEL_OPEN_KEY])) {
@@ -1269,12 +1290,20 @@ const ACTION_ICON_PATHS = {
   bundled:
     '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.27 6.96 8.73 5.05 8.73-5.05M12 22.08V12"/>',
   import: '<path d="M12 3v12"/><path d="m7 10 5-5 5 5"/><path d="M5 21h14"/>',
-  export: '<path d="M12 3v12"/><path d="m7 14 5 5 5-5"/><path d="M5 21h14"/>'
+  export: '<path d="M12 3v12"/><path d="m7 14 5 5 5-5"/><path d="M5 21h14"/>',
+  scrape:
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/>',
+  draft:
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h6"/>',
+  autofill:
+    '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  qa: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>'
 };
 
 function setIconButton(button, icon, label) {
   button.classList.add("icon-button");
   button.setAttribute("aria-label", label);
+  if (label) button.title = label;
   button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICON_PATHS[icon] || ""}</svg>`;
 }
 
@@ -1347,7 +1376,7 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
     parts.push(
       `<div class="ats-gap-rebuild">` +
         `<button type="button" class="primary compact ats-rebuild-btn"${rowAttr}>Rebuild for gaps</button>` +
-        `<p class="ats-gap-rebuild-note">Uses Gaps as an extra prompt (plus Extra notes if filled).</p>` +
+        `<p class="ats-gap-rebuild-note">Uses Gaps as an additional prompt (plus Additional prompt if filled).</p>` +
         `</div>`
     );
   }
@@ -1499,20 +1528,25 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
   const draftReady = hasUsableOneOffDraft();
   if (oneOffIdleActionsEl) oneOffIdleActionsEl.hidden = draftReady;
   if (oneOffDraftActionsEl) oneOffDraftActionsEl.hidden = !draftReady;
+  if (oneOffAdditionalPromptFieldEl) oneOffAdditionalPromptFieldEl.hidden = !draftReady;
 
   if (runOneOffBtn) {
     runOneOffBtn.disabled = busy;
     const force = oneOffNeedsForceDraft();
-    runOneOffBtn.textContent = force ? "Force draft" : "Draft";
-    runOneOffBtn.removeAttribute("title");
+    setIconButton(
+      runOneOffBtn,
+      force ? "retry" : "draft",
+      force ? "Force Generate Draft Version" : "Generate Draft Version"
+    );
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
     const score = Number(lastOneOffAtsCache?.atsScore);
-    const needsGaps =
-      draftReady && Number.isFinite(score) && score < 90;
+    const needsGaps = draftReady && Number.isFinite(score) && score < 90;
     regenerateOneOffBtn.textContent = needsGaps ? "Regenerate for gaps" : "Regenerate";
-    regenerateOneOffBtn.removeAttribute("title");
+    regenerateOneOffBtn.title = needsGaps
+      ? "Rebuild using Gaps and Additional prompt"
+      : "Re-run AI with current fields and additional prompt";
   }
   if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
   if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
@@ -2646,68 +2680,98 @@ function setPacingSlackPanelOpen(open) {
     : "Show pacing & Slack";
 }
 
-function normalizeBidMarket(value) {
+function normalizeAllowBatch(value) {
   const v = String(value || "")
     .trim()
     .toLowerCase()
     .replace(/[-\s]+/g, "_");
-  if (v === BID_MARKETS.NON_US || v === "nonus" || v === "not_us" || v === "intl" || v === "international") {
-    return BID_MARKETS.NON_US;
+  if (
+    v === ALLOW_BATCH.NO ||
+    v === "false" ||
+    v === "0" ||
+    v === "off" ||
+    v === "non_us" ||
+    v === "nonus" ||
+    v === "not_us" ||
+    v === "intl" ||
+    v === "international"
+  ) {
+    return ALLOW_BATCH.NO;
   }
-  return BID_MARKETS.US;
+  if (
+    v === ALLOW_BATCH.YES ||
+    v === "true" ||
+    v === "1" ||
+    v === "on" ||
+    v === "us"
+  ) {
+    return ALLOW_BATCH.YES;
+  }
+  return DEFAULT_ALLOW_BATCH;
 }
 
-function isNonUsBidMarket(market = bidMarketCache) {
-  return normalizeBidMarket(market) === BID_MARKETS.NON_US;
+/** Prefer allow_batch_process; fall back to legacy bid_market (us / non_us). */
+function resolveAllowBatch(data = {}) {
+  if (data[ALLOW_BATCH_KEY] !== undefined && data[ALLOW_BATCH_KEY] !== null && data[ALLOW_BATCH_KEY] !== "") {
+    return normalizeAllowBatch(data[ALLOW_BATCH_KEY]);
+  }
+  if (data[LEGACY_BID_MARKET_KEY] !== undefined && data[LEGACY_BID_MARKET_KEY] !== null) {
+    return normalizeAllowBatch(data[LEGACY_BID_MARKET_KEY]);
+  }
+  return DEFAULT_ALLOW_BATCH;
 }
 
-function renderBidMarket(market, { expandManual = false } = {}) {
-  bidMarketCache = normalizeBidMarket(market);
-  const nonUs = isNonUsBidMarket(bidMarketCache);
-  document.body.classList.toggle("bid-market-non-us", nonUs);
-  document.body.classList.toggle("bid-market-us", !nonUs);
+function isAllowBatchEnabled(value = allowBatchCache) {
+  return normalizeAllowBatch(value) === ALLOW_BATCH.YES;
+}
 
-  for (const btn of [bidMarketUsBtn, bidMarketNonUsBtn]) {
+function renderAllowBatch(value, { expandManual = false } = {}) {
+  allowBatchCache = normalizeAllowBatch(value);
+  const batchOff = !isAllowBatchEnabled(allowBatchCache);
+  document.body.classList.toggle("batch-process-off", batchOff);
+  document.body.classList.toggle("batch-process-on", !batchOff);
+
+  for (const btn of [allowBatchYesBtn, allowBatchNoBtn]) {
     if (!btn) continue;
-    const active = btn.dataset.market === bidMarketCache;
+    const active = btn.dataset.allowBatch === allowBatchCache;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
   }
 
   if (jobsSectionEl) {
-    jobsSectionEl.hidden = nonUs;
-    jobsSectionEl.setAttribute("aria-hidden", nonUs ? "true" : "false");
+    jobsSectionEl.hidden = batchOff;
+    jobsSectionEl.setAttribute("aria-hidden", batchOff ? "true" : "false");
   }
-  // Indeed grab stays product-hidden; never surface it for Non-US.
-  if (indeedSectionEl && nonUs) {
+  // Indeed grab stays product-hidden; never surface it when batch is off.
+  if (indeedSectionEl && batchOff) {
     indeedSectionEl.hidden = true;
     indeedSectionEl.setAttribute("aria-hidden", "true");
   }
 
   if (jobsStepNumEl) jobsStepNumEl.textContent = "4";
-  if (manualStepNumEl) manualStepNumEl.textContent = nonUs ? "4" : "5";
-  if (applyStepNumEl) applyStepNumEl.textContent = nonUs ? "5" : "6";
+  if (manualStepNumEl) manualStepNumEl.textContent = batchOff ? "4" : "5";
+  if (applyStepNumEl) applyStepNumEl.textContent = batchOff ? "5" : "6";
   if (manualSectionTitleEl) {
-    manualSectionTitleEl.textContent = nonUs ? "Manual bid" : "Manual one-off";
+    manualSectionTitleEl.textContent = batchOff ? "Manual bid" : "Manual one-off";
   }
   if (manualSectionEl) {
-    manualSectionEl.classList.toggle("section-hero", nonUs);
+    manualSectionEl.classList.toggle("section-hero", batchOff);
   }
 
-  if (nonUs && expandManual) {
+  if (batchOff && expandManual) {
     setManualPanelOpen(true);
   }
 }
 
-async function setBidMarket(market) {
-  const next = normalizeBidMarket(market);
-  const prev = bidMarketCache;
-  renderBidMarket(next, { expandManual: next === BID_MARKETS.NON_US });
-  await chrome.storage.local.set({ [BID_MARKET_KEY]: next });
-  if (next === BID_MARKETS.NON_US && prev !== BID_MARKETS.NON_US) {
-    setStatus("Non-US.");
-  } else if (next === BID_MARKETS.US && prev !== BID_MARKETS.US) {
-    setStatus("US.");
+async function setAllowBatch(value) {
+  const next = normalizeAllowBatch(value);
+  const prev = allowBatchCache;
+  renderAllowBatch(next, { expandManual: next === ALLOW_BATCH.NO });
+  await chrome.storage.local.set({ [ALLOW_BATCH_KEY]: next });
+  if (next === ALLOW_BATCH.NO && prev !== ALLOW_BATCH.NO) {
+    setStatus("Batch off.");
+  } else if (next === ALLOW_BATCH.YES && prev !== ALLOW_BATCH.YES) {
+    setStatus("Batch on.");
   }
 }
 
@@ -2844,7 +2908,7 @@ async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {})
 
 async function confirmOneOffSave() {
   if (!hasUsableOneOffDraft()) {
-    setStatus("No draft to confirm. Click Draft first.");
+    setStatus("No draft to confirm. Generate a draft first.");
     return;
   }
   const { outputDir, person } = await resolveUiOutputDir();
@@ -3312,9 +3376,17 @@ addProfileBtn?.addEventListener("click", () => {
 
 activeRoleTrackBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
+    if (btn.disabled) return;
+    const person = profilesCache.find((p) => p.id === profileSelectEl.value);
+    if (isRoleTrackLockedForPerson(person)) {
+      applyActiveRoleTrackChange({ track: resolveRoleTrackForPerson(person) }).catch((e) =>
+        setStatus(String(e.message || e))
+      );
+      return;
+    }
     const track = normalizeRoleTrackId(btn.dataset.track);
     if (track === readActiveRoleTrack()) return;
-    setActiveRoleTrackUi(track);
+    setActiveRoleTrackUi(track, { locked: false });
     applyActiveRoleTrackChange({ track }).catch((e) =>
       setStatus(String(e.message || e))
     );
@@ -3545,11 +3617,11 @@ humanizeOnBtn?.addEventListener("click", () => {
   setHumanizeMode(STRONG_HUMANIZE_MODES.ON).catch((e) => setStatus(String(e.message || e)));
 });
 
-bidMarketUsBtn?.addEventListener("click", () => {
-  setBidMarket(BID_MARKETS.US).catch((e) => setStatus(String(e.message || e)));
+allowBatchYesBtn?.addEventListener("click", () => {
+  setAllowBatch(ALLOW_BATCH.YES).catch((e) => setStatus(String(e.message || e)));
 });
-bidMarketNonUsBtn?.addEventListener("click", () => {
-  setBidMarket(BID_MARKETS.NON_US).catch((e) => setStatus(String(e.message || e)));
+allowBatchNoBtn?.addEventListener("click", () => {
+  setAllowBatch(ALLOW_BATCH.NO).catch((e) => setStatus(String(e.message || e)));
 });
 
 for (const el of [
@@ -3594,6 +3666,18 @@ function initThemePicker() {
   mountThemeSwatches(themeSwatchesEl, {
     onSelect: (theme) => setStatus(`Theme: ${theme.label}`)
   });
+}
+
+if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from this page");
+if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate Draft Version");
+if (autofillPageBtn) {
+  setIconButton(autofillPageBtn, "autofill", "Autofill (Ctrl+Shift+Y)");
+}
+if (autoApplyPageBtn) {
+  setIconButton(autoApplyPageBtn, "apply", "Auto Apply (Ctrl+Shift+U)");
+}
+if (customQaPageBtn) {
+  setIconButton(customQaPageBtn, "qa", "Custom Q&A (Ctrl+Shift+Q)");
 }
 
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
@@ -3658,9 +3742,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[SESSION_ROLE_TRACK_KEY]) {
     syncActiveTrackUi().catch(() => {});
   }
-  if (changes[BID_MARKET_KEY] && changes[BID_MARKET_KEY].newValue !== undefined) {
-    renderBidMarket(changes[BID_MARKET_KEY].newValue, {
-      expandManual: normalizeBidMarket(changes[BID_MARKET_KEY].newValue) === BID_MARKETS.NON_US
+  if (changes[ALLOW_BATCH_KEY] && changes[ALLOW_BATCH_KEY].newValue !== undefined) {
+    renderAllowBatch(changes[ALLOW_BATCH_KEY].newValue, {
+      expandManual: normalizeAllowBatch(changes[ALLOW_BATCH_KEY].newValue) === ALLOW_BATCH.NO
+    });
+  } else if (changes[LEGACY_BID_MARKET_KEY] && changes[LEGACY_BID_MARKET_KEY].newValue !== undefined) {
+    renderAllowBatch(changes[LEGACY_BID_MARKET_KEY].newValue, {
+      expandManual: normalizeAllowBatch(changes[LEGACY_BID_MARKET_KEY].newValue) === ALLOW_BATCH.NO
     });
   }
   if (changes[LAST_ONE_OFF_ATS_KEY]) {

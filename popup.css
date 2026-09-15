@@ -157,9 +157,14 @@ h1 {
 }
 
 .profile-editor-panel .inline-profile-toolbar,
-.profile-editor-panel .profile-completeness-bar {
+.profile-editor-panel .inline-editor-track-field {
   flex-shrink: 0;
   margin: 0;
+}
+
+.profile-editor-panel .inline-editor-track-field select:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
 }
 
 /* Pin Apply / Resume / Bid setup to the top of the editor shell */
@@ -197,7 +202,7 @@ h1 {
   gap: 8px;
 }
 
-/* Pin Save / Duplicate / Full editor / Delete to the bottom of the editor shell */
+/* Pin Save / Full editor / Delete to the bottom of the editor shell */
 .inline-profile-actions {
   flex-shrink: 0;
   position: relative;
@@ -212,19 +217,9 @@ h1 {
   gap: 8px;
 }
 
-.inline-profile-actions > .primary {
+.inline-profile-actions > .primary,
+.inline-profile-actions > .ghost {
   width: 100%;
-}
-
-.inline-profile-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.inline-profile-tools > .ghost {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .inline-profile-delete {
@@ -575,7 +570,7 @@ button:disabled {
 button.primary,
 #batchStart,
 #runOneOff,
-#autoApplyPage,
+#autofillPage,
 #savePerson,
 #csvSourceSave,
 #indeedCaptureStart {
@@ -594,7 +589,7 @@ button.primary,
 button.primary:hover,
 #batchStart:hover,
 #runOneOff:hover,
-#autoApplyPage:hover,
+#autofillPage:hover,
 #savePerson:hover,
 #csvSourceSave:hover,
 #indeedCaptureStart:hover {
@@ -698,9 +693,33 @@ button.primary:hover,
   grid-template-columns: repeat(4, 1fr);
 }
 
-.bid-market-switch {
+.role-track-toggle.is-locked .role-track-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.role-track-toggle.is-locked .role-track-btn.is-active:not(:disabled) {
+  cursor: default;
+}
+
+.allow-batch-switch {
   display: inline-flex;
   align-self: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.allow-batch-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.allow-batch-chips {
+  display: inline-flex;
   align-items: stretch;
   padding: 2px;
   gap: 2px;
@@ -709,7 +728,7 @@ button.primary:hover,
   background: color-mix(in srgb, var(--surface) 70%, transparent);
 }
 
-.bid-market-chip {
+.allow-batch-chip {
   appearance: none;
   border: 0;
   margin: 0;
@@ -726,18 +745,18 @@ button.primary:hover,
   white-space: nowrap;
 }
 
-.bid-market-chip:hover {
+.allow-batch-chip:hover {
   color: var(--fg);
 }
 
-.bid-market-chip.is-active {
+.allow-batch-chip.is-active {
   background: color-mix(in srgb, var(--gold) 22%, transparent);
   color: var(--gold-bright, var(--gold));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent);
 }
 
-body.bid-market-non-us #jobsSection,
-body.bid-market-non-us #indeedSection {
+body.batch-process-off #jobsSection,
+body.batch-process-off #indeedSection {
   display: none !important;
 }
 
@@ -1520,8 +1539,33 @@ input[type="file"]::file-selector-button {
 .manual-tools {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   margin: 2px 0 10px;
+}
+
+.manual-tools > .icon-button,
+.manual-primary-icons > .icon-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.manual-tools > .icon-button svg,
+.manual-primary-icons > .icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.manual-primary-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .manual-primary {
@@ -2065,42 +2109,32 @@ input[type="file"]::file-selector-button {
 }
 
 .apply-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.apply-actions-3 {
-  grid-template-columns: 1fr 1fr 1fr;
-}
-
-@media (max-width: 360px) {
-  .apply-actions-3 {
-    grid-template-columns: 1fr;
-  }
-}
-
-.apply-actions button {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.apply-actions .btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.apply-actions button.icon-button {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 7px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-height: 56px;
-  padding: 10px 8px 9px;
+  flex: 0 0 auto;
 }
 
-.apply-actions kbd {
-  font-family: var(--font);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--kbd-bg);
-  color: inherit;
-  opacity: 0.78;
+.apply-actions button.icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .custom-qa-ask {

@@ -7,8 +7,7 @@ import {
   fetchExistingSheetDedupKeys,
   buildKnownLinkSet,
   normalizeJobLink,
-  defaultSheetTabNameForPerson,
-  sanitizeSheetTabName
+  resolveSheetTabNameForPerson
 } from "./sheets.js";
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
 import {
@@ -1006,9 +1005,10 @@ async function getSheetConfig() {
   const webAppUrl = String(
     data.sheets_web_app_url || personCfg.sheetsWebAppUrl || person?.sheetsWebAppUrl || ""
   ).trim();
-  const sheetTabName =
-    sanitizeSheetTabName(personCfg.sheetTabName || person?.sheetTabName || "") ||
-    defaultSheetTabNameForPerson(person || {});
+  const sheetTabName = resolveSheetTabNameForPerson({
+    ...(person || {}),
+    sheetTabName: personCfg.sheetTabName || person?.sheetTabName || ""
+  });
   return { spreadsheetUrl, webAppUrl, sheetTabName };
 }
 
@@ -9773,7 +9773,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const draft = await getOneOffDraft();
         if (!draft?.resumeData) {
-          throw new Error("No draft to confirm. Click Draft first.");
+          throw new Error("No draft to confirm. Generate a draft first.");
         }
         meta = { ...(draft.jobMeta || {}), bidSource: "one-off" };
         if (message.jobMeta && typeof message.jobMeta === "object") {
