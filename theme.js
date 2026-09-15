@@ -1,5 +1,6 @@
 /**
- * UI theme catalog + apply/persist helpers (popup, Q&A editor, preview).
+ * UI theme catalog + apply/persist helpers.
+ * Picker lives in the popup header; other surfaces apply the shared chrome.storage theme.
  */
 
 export const UI_THEME_KEY = "ui_theme";
@@ -84,7 +85,7 @@ export function watchThemeChanges(onChange) {
 }
 
 /**
- * Mount theme swatches into a container. Shared by popup, Q&A editor, and preview.
+ * Mount theme swatches (popup header only). Other surfaces call loadAndApplyTheme + watchThemeChanges.
  * @param {HTMLElement | null} container
  * @param {{ onSelect?: (theme: { id: string, label: string }) => void }} [options]
  */

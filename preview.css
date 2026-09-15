@@ -26,9 +26,11 @@ body {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 16px;
   flex-wrap: wrap;
   padding: 10px 16px;
+  min-height: 56px;
   border-bottom: 1px solid var(--line);
   background: var(--topbar-bg);
   backdrop-filter: blur(10px);
@@ -38,8 +40,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-right: auto;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .brand-icon {
@@ -82,23 +84,34 @@ h1 {
   white-space: normal;
 }
 
-.preview-bar .topbar-actions {
+.preview-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .field {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 160px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
 }
 
 .field span {
   color: var(--ink-soft);
   font-size: var(--font-size-ui-sm);
   font-weight: 650;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.field select {
+  min-width: 168px;
+  max-width: 240px;
 }
 
 select,
@@ -132,6 +145,8 @@ button:hover {
 
 button.primary,
 #useStyle {
+  flex-shrink: 0;
+  white-space: nowrap;
   background: linear-gradient(
     180deg,
     var(--btn-primary-top) 0%,
@@ -152,32 +167,6 @@ button.primary:hover,
     var(--btn-primary-mid) 48%,
     var(--btn-primary-hover-bottom) 100%
   );
-}
-
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.seg-btn {
-  width: auto;
-  height: 34px;
-  border: none;
-  border-radius: 0;
-  background: var(--btn-ghost-bg);
-  color: var(--ink-soft);
-}
-
-.seg-btn + .seg-btn {
-  border-left: 1px solid var(--control-border);
-}
-
-.seg-btn.active {
-  background: var(--btn-bg);
-  color: var(--gold-bright);
-  font-weight: 800;
 }
 
 .stage {

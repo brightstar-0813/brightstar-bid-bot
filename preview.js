@@ -6,15 +6,13 @@ import {
 } from "./templates/index.js";
 import { getActivePerson } from "./profiles.js";
 import { isResumePreviewable, sampleResumeForPerson } from "./templates/preview-sample.js";
-import { loadAndApplyTheme, watchThemeChanges, mountThemeSwatches } from "./theme.js";
+import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
+import { showToast } from "./ui-toast.js";
 
 const PREVIEW_SOURCE_KEY = "template_preview_source";
 const ONE_OFF_DRAFT_KEY = "one_off_draft";
 
 const templateSelectEl = document.getElementById("templateSelect");
-const sourceSampleBtn = document.getElementById("sourceSample");
-const sourceDraftBtn = document.getElementById("sourceDraft");
-const sourceLastBtn = document.getElementById("sourceLast");
 const useStyleBtn = document.getElementById("useStyle");
 const pageEl = document.getElementById("page");
 const ledeEl = document.getElementById("previewLede");
@@ -66,17 +64,6 @@ function populateTemplates() {
   templateSelectEl.value = templateId;
 }
 
-function syncSourceButtons() {
-  sourceSampleBtn.classList.toggle("active", source === "sample");
-  sourceDraftBtn?.classList.toggle("active", source === "draft");
-  sourceLastBtn.classList.toggle("active", source === "last");
-  if (sourceDraftBtn) {
-    sourceDraftBtn.disabled = !hasDraft;
-    sourceDraftBtn.title = hasDraft ? "Manual bid draft resume" : "Draft a Manual bid first";
-  }
-  sourceLastBtn.disabled = !hasLastResume;
-}
-
 async function loadDraftResume() {
   const stored = await chrome.storage.local.get(ONE_OFF_DRAFT_KEY);
   const draft = stored[ONE_OFF_DRAFT_KEY];
@@ -107,7 +94,6 @@ async function loadResumeData() {
 async function renderPreview() {
   const template = getTemplateById(templateId);
   const { data, kind } = await loadResumeData();
-  syncSourceButtons();
   const html = resumeJsonToHtml(data, templateId);
   pageEl.srcdoc = html;
   if (ledeEl) {
@@ -148,28 +134,12 @@ async function initSource() {
   }
 }
 
-async function setSource(next) {
-  if (next === "draft" && !hasDraft) {
-    setStatus("No Manual draft yet — showing sample layout.", "warn");
-    source = "sample";
-  } else if (next === "last" && !hasLastResume) {
-    setStatus("No generated resume yet — showing sample layout.", "warn");
-    source = "sample";
-  } else {
-    source = next;
-  }
-  await chrome.storage.local.set({ [PREVIEW_SOURCE_KEY]: source });
-  if (source === "draft" && draftTemplateId) {
-    templateId = draftTemplateId;
-    templateSelectEl.value = templateId;
-  }
-  await renderPreview();
-}
-
 async function useThisStyle() {
   await chrome.storage.local.set({ selected_template_id: templateId });
   const template = getTemplateById(templateId);
-  setStatus(`${template.label} is now the active resume style.`);
+  const msg = `${template.label} is now the active resume style.`;
+  setStatus(msg, "ok");
+  showToast(msg, { kind: "ok", placement: "center" });
 }
 
 templateSelectEl.addEventListener("change", () => {
@@ -177,13 +147,16 @@ templateSelectEl.addEventListener("change", () => {
   const url = new URL(location.href);
   url.searchParams.set("template", templateId);
   history.replaceState({}, "", url);
-  renderPreview().catch((err) => setStatus(String(err?.message || err)));
+  renderPreview().catch((err) => setStatus(String(err?.message || err), "err"));
 });
 
-sourceSampleBtn.addEventListener("click", () => setSource("sample"));
-sourceDraftBtn?.addEventListener("click", () => setSource("draft"));
-sourceLastBtn.addEventListener("click", () => setSource("last"));
-useStyleBtn.addEventListener("click", () => useThisStyle().catch((err) => setStatus(String(err?.message || err))));
+useStyleBtn.addEventListener("click", () =>
+  useThisStyle().catch((err) => {
+    const msg = String(err?.message || err);
+    setStatus(msg, "err");
+    showToast(msg, { kind: "err", placement: "center" });
+  })
+);
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "template_preview_show") {
@@ -229,11 +202,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
       renderPreview().catch(() => {});
     } else {
       source = "sample";
-      syncSourceButtons();
       setStatus("Draft cleared.", "warn");
     }
-  } else {
-    syncSourceButtons();
   }
 });
 
@@ -263,9 +233,6 @@ window.addEventListener("keydown", (event) => {
 
 loadAndApplyTheme().catch(() => {});
 watchThemeChanges();
-mountThemeSwatches(document.getElementById("themeSwatches"), {
-  onSelect: (theme) => setStatus(`Theme: ${theme.label}`)
-});
 
 populateTemplates();
 initSource()
