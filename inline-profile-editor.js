@@ -21,14 +21,15 @@ import {
   fillPersonForm,
   readPersonFromForm,
   savePersonFromForm,
-  applyCompleteness,
   isEditingBuiltin,
   requiredExperienceToText
 } from "./person-profile-form.js";
+import { resolveSheetTabNameForPerson, defaultSheetTabNameForPerson } from "./sheets.js";
 import {
   normalizeRoleTrackId,
   resolveRoleTrackForPerson,
-  getTrackPromptTemplate
+  getTrackPromptTemplate,
+  applyRoleTrackSelectState
 } from "./role-tracks.js";
 import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
 import { parseEmployersFromResume } from "./resume-profile.js";
@@ -56,14 +57,12 @@ export function createInlineProfileEditor(opts) {
   const formRoot = panelEl.querySelector("#inlineProfileForm");
   const selectEl = panelEl.querySelector("#inlineProfileSelect");
   const saveBtn = panelEl.querySelector("#inlineProfileSave");
-  const saveAsNewBtn = panelEl.querySelector("#inlineProfileSaveAsNew");
   const openFullEditorBtn = panelEl.querySelector("#inlineOpenFullEditor");
   const deleteBtn = panelEl.querySelector("#inlineProfileDelete");
-  const completenessEl = panelEl.querySelector("#inlineCompleteness");
   const saveStatusEl = panelEl.querySelector("#inlineProfileSaveStatus");
   const templateSelectEl = panelEl.querySelector("#inlineTemplateSelect");
+  const roleTrackSelectEl = panelEl.querySelector("#inlineRoleTrackSelect");
   const tabBtns = Array.from(panelEl.querySelectorAll(".profile-tab"));
-  const roleTrackBtns = Array.from(formRoot?.querySelectorAll(".role-track-btn") || []);
 
   let profilesCache = [];
   let editingPersonId = null;
@@ -109,27 +108,22 @@ export function createInlineProfileEditor(opts) {
     }
   }
 
-  function setActiveRoleTrackUi(track) {
+  function setActiveRoleTrackUi(track, { locked = false } = {}) {
     activeRoleTrack = normalizeRoleTrackId(track);
-    for (const btn of roleTrackBtns) {
-      const on = btn.dataset.track === activeRoleTrack;
-      btn.classList.toggle("is-active", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    }
+    applyRoleTrackSelectState(roleTrackSelectEl, {
+      track: activeRoleTrack,
+      locked
+    });
+  }
+
+  function syncTrackLockForPerson(_person) {
+    const isNew = !editingPersonId || selectEl?.value === NEW_PROFILE_ID;
+    // Only a brand-new draft can pick a track; built-in + saved custom stay locked.
+    setActiveRoleTrackUi(activeRoleTrack, { locked: !isNew });
   }
 
   function syncSaveLabel() {
     if (saveBtn) saveBtn.textContent = isEditingBuiltin(editingPersonId) ? "Save as mine" : "Save";
-  }
-
-  function renderCompleteness(person) {
-    if (!completenessEl) return;
-    const { complete, missing } = applyCompleteness(person || {});
-    completenessEl.hidden = false;
-    completenessEl.className = `profile-completeness-bar${complete ? "" : " is-warn"}`;
-    completenessEl.textContent = complete
-      ? "Autofill ready"
-      : `Still needed: ${missing.join(", ")}`;
   }
 
   function populateSelect(selectedId) {
@@ -217,21 +211,32 @@ export function createInlineProfileEditor(opts) {
     const coverEl = formRoot.querySelector("#personCoverPrompt");
     if (resumeEl) resumeEl.value = resolvePromptTemplateForTrack(person, nextTrack);
     if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(person, nextTrack);
+    const tabEl = formRoot.querySelector("#inlineSheetTabName");
+    if (tabEl) {
+      const prevDefault = defaultSheetTabNameForPerson({ ...person, roleTrack: previousTrack });
+      const currentTab = String(tabEl.value || "").trim();
+      if (!currentTab || currentTab === prevDefault) {
+        tabEl.value = defaultSheetTabNameForPerson({ ...person, roleTrack: nextTrack });
+      }
+    }
   }
 
   async function loadPerson(person) {
     editingPersonId = person?.id || null;
     const track = person?.roleTrack || resolveRoleTrackForPerson(person);
     setActiveRoleTrackUi(track);
+    syncTrackLockForPerson(person);
     populateTemplates(person?.templateId || DEFAULT_TEMPLATE_ID);
     fillPersonForm(formRoot, person || {}, { roleTrack: track });
     const tabEl = formRoot.querySelector("#inlineSheetTabName");
     if (tabEl) {
-      tabEl.value = person?.sheetTabName || person?.label || person?.name || "";
+      tabEl.value = resolveSheetTabNameForPerson({
+        ...(person || {}),
+        roleTrack: track
+      });
     }
     populateSelect(person?.id || NEW_PROFILE_ID);
     syncSaveLabel();
-    renderCompleteness(person || {});
     setSaveStatus("");
   }
 
@@ -248,7 +253,10 @@ export function createInlineProfileEditor(opts) {
     const sheet = await getPersonSheetConfig(full.id);
     await loadPerson({
       ...full,
-      sheetTabName: sheet?.sheetTabName || full.sheetTabName || full.label || full.name || "",
+      sheetTabName: resolveSheetTabNameForPerson({
+        ...full,
+        sheetTabName: sheet?.sheetTabName || full.sheetTabName || ""
+      }),
       outputDir: sheet?.outputDir || full.outputDir || ""
     });
   }
@@ -260,7 +268,6 @@ export function createInlineProfileEditor(opts) {
 
   async function saveProfile({ asNew = false } = {}) {
     if (saveBtn) saveBtn.disabled = true;
-    if (saveAsNewBtn) saveAsNewBtn.disabled = true;
     setSaveStatus("Saving…");
     try {
       const result = await savePersonFromForm(formRoot, {
@@ -292,7 +299,6 @@ export function createInlineProfileEditor(opts) {
       return null;
     } finally {
       if (saveBtn) saveBtn.disabled = false;
-      if (saveAsNewBtn) saveAsNewBtn.disabled = false;
     }
   }
 
@@ -355,10 +361,6 @@ export function createInlineProfileEditor(opts) {
       saveProfile({ asNew: false }).catch(() => {});
     });
 
-    saveAsNewBtn?.addEventListener("click", () => {
-      saveProfile({ asNew: true }).catch(() => {});
-    });
-
     openFullEditorBtn?.addEventListener("click", () => {
       const id =
         selectEl?.value === NEW_PROFILE_ID ? "" : String(selectEl?.value || editingPersonId || "").trim();
@@ -389,14 +391,20 @@ export function createInlineProfileEditor(opts) {
       opts.onSaved?.({ id: DEFAULT_PROFILE_ID, label: "default" });
     });
 
-    roleTrackBtns.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const track = normalizeRoleTrackId(btn.dataset.track);
-        if (track === activeRoleTrack) return;
-        const previousTrack = activeRoleTrack;
-        setActiveRoleTrackUi(track);
-        applyTrackPrompts(track, previousTrack);
-      });
+    roleTrackSelectEl?.addEventListener("change", () => {
+      const isNew = !editingPersonId || selectEl?.value === NEW_PROFILE_ID;
+      if (!isNew || roleTrackSelectEl.disabled) {
+        applyRoleTrackSelectState(roleTrackSelectEl, {
+          track: activeRoleTrack,
+          locked: true
+        });
+        return;
+      }
+      const track = normalizeRoleTrackId(roleTrackSelectEl.value);
+      if (track === activeRoleTrack) return;
+      const previousTrack = activeRoleTrack;
+      setActiveRoleTrackUi(track, { locked: false });
+      applyTrackPrompts(track, previousTrack);
     });
 
     formRoot?.querySelector("#detectRequiredExperience")?.addEventListener("click", () => {
@@ -411,15 +419,6 @@ export function createInlineProfileEditor(opts) {
       const el = formRoot.querySelector("#personRequiredExperience");
       if (el) el.value = requiredExperienceToText(detected);
       setSaveStatus(`Detected ${detected.length} employer(s).`, { ok: true });
-    });
-
-    formRoot?.addEventListener("input", () => {
-      const person = readPersonFromForm(formRoot, {
-        editingPersonId,
-        roleTrack: activeRoleTrack,
-        templateId: templateSelectEl?.value
-      });
-      renderCompleteness(person);
     });
   }
 
