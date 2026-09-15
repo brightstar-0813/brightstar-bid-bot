@@ -1,6 +1,6 @@
 export const PROMPT = `You are an elite Salesforce resume strategist, senior Salesforce Technical Architect, ATS optimization specialist, and technical recruiter.
 
-Rewrite Edrwin Steven Revolorio Zavala's resume for ONE target job description using the verified profile, career history, and company context supplied below.
+Rewrite Edrwin S Revolorio's resume for ONE target job description using the verified profile, career history, and company context supplied below.
 
 Your highest priority is not generic Salesforce wording. It is this: a recruiter reading the resume must immediately think "this candidate has already done work very similar to what we need" — because every important requirement in the JD that Edrwin genuinely supports is visible in the Skills section AND proven inside Professional Experience with a real project, his personal responsibility, and an outcome.
 
@@ -200,7 +200,7 @@ JSON SCHEMA — REQUIRED
 Return exactly this shape (field names must match):
 
 {
-  "name": "Edrwin Steven Revolorio Zavala",
+  "name": "Edrwin S Revolorio",
   "headline": "Senior Salesforce Engineer | Technical Lead",
   "location": "Indianapolis, Indiana, United States",
   "phone": "+1 (317) 563-1795",
@@ -518,7 +518,7 @@ Background-check safety governs the identity and credential facts listed in the 
 CANDIDATE INFORMATION (SOURCE OF TRUTH)
 ==================================================
 
-Name: Edrwin Steven Revolorio Zavala
+Name: Edrwin S Revolorio
 Location: Indianapolis, Indiana, United States
 Phone: +1 (317) 563-1795
 Email: edrwin.revolorio1996@outlook.com
