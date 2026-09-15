@@ -7,9 +7,9 @@ let toastTimer = null;
 
 /**
  * @param {string} message
- * @param {{ kind?: "ok"|"err"|"info", duration?: number }} [opts]
+ * @param {{ kind?: "ok"|"err"|"info", duration?: number, placement?: "bottom"|"center" }} [opts]
  */
-export function showToast(message, { kind = "ok", duration = 3200 } = {}) {
+export function showToast(message, { kind = "ok", duration = 3200, placement = "bottom" } = {}) {
   const text = String(message || "").trim();
   if (!text) return;
 
@@ -21,8 +21,9 @@ export function showToast(message, { kind = "ok", duration = 3200 } = {}) {
     document.body.appendChild(toastEl);
   }
 
+  const place = placement === "center" ? "center" : "bottom";
   toastEl.textContent = text;
-  toastEl.className = `ui-toast-host is-${kind || "ok"} is-visible`;
+  toastEl.className = `ui-toast-host is-${kind || "ok"} is-${place} is-visible`;
 
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
