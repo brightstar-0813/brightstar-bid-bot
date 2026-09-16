@@ -212,9 +212,24 @@ function isSkillsHeaderRow(category, items) {
   );
 }
 
+const MAX_SKILL_ITEMS_LEN = 4000;
+const MAX_SKILL_CATEGORY_LEN = 96;
+
 function parseSkills(lines) {
   const out = [];
   let sawStructured = false;
+
+  const pushSkillRow = (category, items) => {
+    const cat = String(category || "").trim().slice(0, MAX_SKILL_CATEGORY_LEN);
+    const rowItems = String(items || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_SKILL_ITEMS_LEN);
+    if (!cat && !rowItems) return;
+    if (isSkillsHeaderRow(cat, rowItems)) return;
+    sawStructured = true;
+    out.push({ category: cat || "Skills", items: rowItems });
+  };
 
   for (const line of lines || []) {
     const t = String(line).trim();
@@ -223,53 +238,47 @@ function parseSkills(lines) {
     if (isMarkdownTableRow(t)) {
       const cells = splitTableCells(t);
       if (cells.length < 2) continue;
-      const category = cells[0];
-      const items = cells.slice(1).join(", ").replace(/\s+/g, " ").trim();
-      if (isSkillsHeaderRow(category, items)) continue;
-      if (!category && !items) continue;
-      sawStructured = true;
-      out.push({ category: category.slice(0, 80), items: items.slice(0, 500) });
+      pushSkillRow(cells[0], cells.slice(1).join(", "));
       continue;
     }
 
     const tsv = splitTsvCells(t);
     if (tsv.length >= 2) {
-      const category = tsv[0].slice(0, 80);
-      const items = tsv.slice(1).join(", ").replace(/\s+/g, " ").trim().slice(0, 500);
-      if (isSkillsHeaderRow(category, items)) continue;
+      const category = tsv[0];
+      const items = tsv.slice(1).join(", ");
       // Reject rows where "category" looks like a duty sentence.
-      if (category.length > 48 || /[.]$/.test(category)) {
+      if (category.length > 72 || /[.]$/.test(category)) {
         // fall through
       } else {
-        sawStructured = true;
-        out.push({ category, items });
+        pushSkillRow(category, items);
         continue;
       }
     }
 
-    if (sawStructured) continue;
-
     const cleaned = stripBullet(t);
     if (!cleaned) continue;
-    const colon = cleaned.match(/^([^:]{2,48}):\s*(.+)$/);
+    const colon = cleaned.match(/^([^:]{2,72}):\s*(.+)$/);
     if (colon) {
-      out.push({ category: colon[1].trim().slice(0, 80), items: colon[2].trim().slice(0, 500) });
+      pushSkillRow(colon[1].trim(), colon[2].trim());
       continue;
     }
-    const pipe = cleaned.match(/^([^|]{2,48})\|\s*(.+)$/);
+    const pipe = cleaned.match(/^([^|]{2,72})\|\s*(.+)$/);
     if (pipe) {
-      out.push({ category: pipe[1].trim().slice(0, 80), items: pipe[2].trim().slice(0, 500) });
+      pushSkillRow(pipe[1].trim(), pipe[2].trim());
       continue;
     }
+
+    if (sawStructured) continue;
+
     // Single-line leftovers: keep as one generic row only when nothing structured yet.
-    out.push({ category: "Skills", items: cleaned.slice(0, 500) });
+    out.push({ category: "Skills", items: cleaned.slice(0, MAX_SKILL_ITEMS_LEN) });
   }
 
   // Merge only anonymous single-line leftovers — never collapse real category rows.
   if (out.length > 1 && out.every((r) => /^Skills$/i.test(r.category))) {
     return [{ category: "Skills", items: out.map((r) => r.items).join(", ") }];
   }
-  return out.filter((r) => r.category || r.items).slice(0, 20);
+  return out.filter((r) => r.category || r.items);
 }
 
 function parseEducation(lines) {
@@ -288,7 +297,21 @@ function parseEducation(lines) {
   if (buf.length) blocks.push(buf);
   if (!blocks.length) return [];
 
-  return blocks.slice(0, 6).map((parts) => {
+  // School-first paste: "University of X" blank line then degree block.
+  const merged = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const cur = blocks[i];
+    const schoolOnly =
+      cur.length === 1 && /university|college|school|institute|academy/i.test(cur[0]);
+    if (schoolOnly && i + 1 < blocks.length) {
+      merged.push([cur[0], ...blocks[i + 1]]);
+      i++;
+    } else {
+      merged.push(cur);
+    }
+  }
+
+  return merged.map((parts) => {
     const joined = parts.join(" | ");
     const year =
       (joined.match(
@@ -311,21 +334,32 @@ function parseEducation(lines) {
           !/^(remote|hybrid|on-?site)$/i.test(p) &&
           p.length < 80 &&
           !/[.]$/.test(p) &&
-          !/\b(bachelor|master|diploma|computer science)\b/i.test(p)
+          !/\b(bachelor|master|diploma|computer science|honou?rs?|upper division|lower division)\b/i.test(p)
       ) ||
       parts[0] ||
       "";
+    const honours =
+      parts.find(
+        (p) =>
+          p !== school &&
+          p !== degree &&
+          p !== year &&
+          /\b(honou?rs?|cum laude|distinction|upper division|lower division)\b/i.test(p)
+      ) || "";
     const details =
       parts.find(
         (p) =>
           p !== school &&
           p !== degree &&
           p !== year &&
-          (/,\s*[A-Z]{2}\b|united states|usa|brazil|michigan|california|texas|illinois|pernambuco|recife|colorado|new york/i.test(
+          p !== honours &&
+          (/,\s*[A-Z]{2}\b|united states|usa|brazil|philippines|hong kong|michigan|california|texas|illinois|pernambuco|recife|colorado|new york|cavite/i.test(
             p
           ) ||
             (/^[A-Z][A-Za-z .'-]+(?:,\s*[A-Z][A-Za-z .'-]+)+$/.test(p) && p.length < 60))
-      ) || "";
+      ) ||
+      honours ||
+      "";
     return {
       school: String(school).slice(0, 120),
       degree: String(degree).slice(0, 120),
@@ -363,7 +397,7 @@ function parseCerts(lines) {
     if (/linkedin/i.test(c) && out.some((x) => /salesforce\s+certified/i.test(x))) return false;
     return c.length <= 120;
   });
-  return (filtered.length ? filtered : out).slice(0, 16);
+  return filtered.length ? filtered : out;
 }
 
 const TITLE_WORD_RE =
@@ -371,13 +405,19 @@ const TITLE_WORD_RE =
 
 function looksLikeJobTitle(line) {
   const t = stripMarkdownDecor(line);
-  if (!t || t.length > 90 || t.length < 4) return false;
+  if (!t || t.length > 120 || t.length < 4) return false;
   if (DATE_RANGE_RE.test(t)) return false;
   if (/[.]$/.test(t) && t.length > 40) return false;
+  if (isCorporateSuffixLine(t)) return false;
   // Require a role keyword — bare company names like "Intrado" must not count as titles.
   if (!TITLE_WORD_RE.test(t)) return false;
   const words = t.split(/\s+/);
-  return words.length <= 10;
+  return words.length <= 14;
+}
+
+function isCorporateSuffixLine(line) {
+  const t = stripMarkdownDecor(line);
+  return /\b(inc|llc|corp|corporation|ltd|limited|co|company|plc|gmbh|s\.?a\.?)\.?\s*$/i.test(t);
 }
 
 function looksLikeCompanyLine(line) {
@@ -385,11 +425,15 @@ function looksLikeCompanyLine(line) {
   if (!t || t.length > 80 || t.length < 2) return false;
   if (DATE_RANGE_RE.test(t)) return false;
   if (looksLikeJobTitle(t)) return false;
-  if (/[.]$/.test(t)) return false;
+  // Allow "Smart Park Inc." / "Intrado Life & Safety Inc." — reject other sentence-ending periods.
+  if (/[.]$/.test(t) && !isCorporateSuffixLine(t)) return false;
   if (/^(remote|hybrid|on-?site)$/i.test(t)) return false;
   if (isLocationLine(t)) return false;
-  return t.split(/\s+/).length <= 8;
+  return t.split(/\s+/).length <= 10;
 }
+
+const GEO_LOCATION_ANCHOR_RE =
+  /\b(remote|hybrid|on-?site|usa|u\.?s\.?a\.?|united states|united kingdom|brazil|canada|india|germany|australia|philippines|hong kong|pennsylvania|colorado|cavite|california|texas|illinois|pernambuco|recife|new york|longmont|philadelphia|imus|sheung wan)\b/i;
 
 function isLocationLine(line) {
   const t = stripMarkdownDecor(line);
@@ -397,11 +441,14 @@ function isLocationLine(line) {
   if (DATE_RANGE_RE.test(t) && !/\|/.test(t)) return false;
   if (/^(remote|hybrid|on-?site)$/i.test(t)) return true;
   if (/\b(remote|hybrid|on-?site)\b/i.test(t) && (/\|/.test(t) || /,/.test(t))) return true;
-  if (/united states|united kingdom|brazil|canada|india|germany|australia/i.test(t) && t.length < 90) {
-    return true;
-  }
-  // City, State / City, Country
-  if (/^[A-Za-z .'-]+,\s*[A-Za-z .'-]+/.test(t) && t.length < 80 && !TITLE_WORD_RE.test(t)) {
+  if (GEO_LOCATION_ANCHOR_RE.test(t) && t.length < 90) return true;
+  // City, State / City, Country — require a geographic anchor so project phrases are not locations.
+  if (
+    /^[A-Za-z .'-]+,\s*[A-Za-z .'-]+/.test(t) &&
+    t.length < 80 &&
+    !TITLE_WORD_RE.test(t) &&
+    GEO_LOCATION_ANCHOR_RE.test(t)
+  ) {
     return true;
   }
   return false;
@@ -433,9 +480,38 @@ function looksLikeCombinedRoleHeader(line) {
   if (!raw || isBulletLine(raw) || isMarkdownTableRow(raw)) return false;
   if (/^#{1,3}\s+\S/.test(raw)) return true;
   const t = stripMarkdownDecor(raw);
-  if (t.length > 140 || /[.]$/.test(t)) return false;
+  if (t.length > 140 || /[.!?]$/.test(t)) return false;
   if (/\s[-–—]\s/.test(t) && t.length < 120) return true;
   if (/[|·•]/.test(t) && TITLE_WORD_RE.test(t) && t.length < 100) return true;
+  return false;
+}
+
+function collectingDuties(job) {
+  return Boolean(job && (job.bullets || []).length > 0);
+}
+
+function isDutyProse(line) {
+  const t = stripMarkdownDecor(line);
+  if (!t || t.length < 50) return false;
+  if (isBulletLine(line)) return true;
+  if (/[.!?]$/.test(t) && t.split(/\s+/).length >= 8) return true;
+  return false;
+}
+
+function isContinuationLine(line, prevBullet) {
+  const t = stripMarkdownDecor(line);
+  if (!t || !prevBullet) return false;
+  if (
+    looksLikeCompanyLine(t) ||
+    looksLikeJobTitle(t) ||
+    looksLikeDateMetaLine(t) ||
+    isLocationLine(t) ||
+    looksLikeProjectLine(t)
+  ) {
+    return false;
+  }
+  if (/^[a-z('"(\[]/.test(t)) return true;
+  if (t.length < 48 && !/[.!?]$/.test(t)) return true;
   return false;
 }
 
@@ -478,6 +554,10 @@ function parseExperience(lines) {
       }
       if (!cur.location && isLocationLine(t)) {
         cur.location = t.slice(0, 80);
+        continue;
+      }
+      if (!cur.company && looksLikeCompanyLine(t)) {
+        cur.company = t.slice(0, 120);
         continue;
       }
       if (!cur.title && looksLikeJobTitle(t)) {
@@ -561,43 +641,53 @@ function parseExperience(lines) {
 
     const plain = stripMarkdownDecor(trimmed);
 
+    if (cur && collectingDuties(cur) && isContinuationLine(plain, cur.bullets[cur.bullets.length - 1])) {
+      cur.bullets[cur.bullets.length - 1] = `${cur.bullets[cur.bullets.length - 1]} ${plain}`.replace(
+        /\s+/g,
+        " "
+      );
+      continue;
+    }
+
     // Combined Markdown / "Company — Title" header
-    if (looksLikeCombinedRoleHeader(trimmed) && !looksLikeDateMetaLine(trimmed)) {
+    if (
+      looksLikeCombinedRoleHeader(trimmed) &&
+      !looksLikeDateMetaLine(trimmed) &&
+      !(collectingDuties(cur) && isDutyProse(trimmed))
+    ) {
       if (cur && (cur.company || cur.title || (cur.bullets || []).length)) push();
       startFromCombinedHeader(trimmed);
       continue;
     }
 
     // Dates
-    if (looksLikeDateMetaLine(trimmed)) {
+    if (looksLikeDateMetaLine(trimmed) && !(collectingDuties(cur) && isDutyProse(trimmed))) {
       const job = ensureJob();
-      if ((job.bullets || []).length > 0 && job.dates) {
-        // Date after duties → new role starting with dates is rare; treat as duty skip
-      } else {
+      if (!(job.bullets || []).length || !job.dates) {
         const datePrefix = plain.match(DATE_RANGE_RE);
-        job.dates = datePrefix[0].trim().slice(0, 60);
+        job.dates = datePrefix[0].trim().slice(0, 80);
         const rest = plain
           .replace(datePrefix[0], "")
           .replace(/^[\s|·•,]+/, "")
           .trim();
-        if (rest && !job.location) job.location = rest.slice(0, 80);
+        if (rest && !job.location) job.location = rest.slice(0, 120);
+        continue;
       }
-      continue;
     }
 
     // Location (before duties)
     if (isLocationLine(plain) && cur && !(cur.bullets || []).length) {
-      const loc = plain.slice(0, 80);
+      const loc = plain.slice(0, 120);
       if (!cur.location) cur.location = loc;
-      else if (cur.location && !cur.location.includes(plain) && /^(remote|hybrid|on-?site)$/i.test(plain)) {
-        cur.location = `${cur.location} | ${plain}`.slice(0, 80);
+      else if (!cur.location.includes(plain) && /^(remote|hybrid|on-?site)$/i.test(plain)) {
+        cur.location = `${cur.location} | ${plain}`.slice(0, 120);
       }
       continue;
     }
 
     // Title fills open job missing title
     if (looksLikeJobTitle(plain) && cur && cur.company && !cur.title && !(cur.bullets || []).length) {
-      cur.title = plain.slice(0, 120);
+      cur.title = plain.slice(0, 160);
       continue;
     }
 
@@ -610,7 +700,7 @@ function parseExperience(lines) {
       !(cur.bullets || []).length &&
       (cur.dates || cur.location || cur.title)
     ) {
-      cur.project = plain.slice(0, 120);
+      cur.project = plain.slice(0, 160);
       continue;
     }
 
@@ -662,7 +752,7 @@ function parseExperience(lines) {
   push();
 
   if (!jobs.length) {
-    const bullets = paragraphsFrom(lines).filter((p) => p.length > 8).slice(0, 40);
+    const bullets = paragraphsFrom(lines).filter((p) => p.length > 8);
     if (bullets.length) {
       jobs.push({
         company: "Professional Experience",
@@ -675,13 +765,13 @@ function parseExperience(lines) {
     }
   }
 
-  return jobs.slice(0, 12).map((j) => ({
+  return jobs.map((j) => ({
     company: j.company || "",
     title: j.title || "",
     dates: j.dates || "",
     location: j.location || "",
     project: j.project || "",
-    bullets: (j.bullets || []).slice(0, 16)
+    bullets: (j.bullets || []).filter(Boolean)
   }));
 }
 
@@ -759,7 +849,7 @@ export function plainTextToResumeData(text, { person = null } = {}) {
     email: extracted.email || emailFromText || String(person?.email || "").trim(),
     linkedin: extracted.linkedin || linkedinFromText || String(person?.linkedin || "").trim(),
     profile: profileParts.join("\n\n").trim(),
-    technicalSummary: paragraphsFrom(sections.technicalSummary || []).slice(0, 8),
+    technicalSummary: paragraphsFrom(sections.technicalSummary || []),
     skills: parseSkills(sections.skills || []),
     experience,
     education: parseEducation(sections.education || []),
