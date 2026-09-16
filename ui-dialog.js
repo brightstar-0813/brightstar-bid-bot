@@ -176,10 +176,20 @@ export function jobDetailsDialog({
     textEl.value = String(initial.jdText || "");
 
     let done = false;
+    const onStorageChange = (changes, area) => {
+      if (done || area !== "local" || !changes.selected_template_id || !templateEl) return;
+      const next = String(changes.selected_template_id.newValue || "").trim();
+      if (!next || templateEl.value === next) return;
+      if (Array.from(templateEl.options).some((o) => o.value === next)) {
+        templateEl.value = next;
+      }
+    };
+
     const finish = (value) => {
       if (done) return;
       done = true;
       document.removeEventListener("keydown", onKey);
+      chrome.storage.onChanged.removeListener(onStorageChange);
       host.remove();
       resolve(value);
     };
@@ -221,8 +231,16 @@ export function jobDetailsDialog({
       });
     });
 
+    templateEl?.addEventListener("change", () => {
+      const tid = String(templateEl.value || "").trim();
+      if (!tid) return;
+      chrome.storage.local.set({ selected_template_id: tid }).catch(() => {});
+      chrome.runtime.sendMessage({ type: "template_preview_show", templateId: tid }).catch(() => {});
+    });
+
     document.body.appendChild(host);
     document.addEventListener("keydown", onKey);
+    chrome.storage.onChanged.addListener(onStorageChange);
     host.querySelector("[data-ui-dismiss]")?.addEventListener("click", () => finish(null));
     host.querySelector(".ui-dialog-cancel")?.addEventListener("click", () => finish(null));
     (templateEl || (titleEl.value ? linkEl : titleEl)).focus();

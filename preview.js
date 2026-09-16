@@ -158,8 +158,18 @@ async function initSource() {
   }
 }
 
+async function persistActiveTemplate(nextId = templateId) {
+  const tid = String(nextId || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
+  templateId = tid;
+  templateSelectEl.value = tid;
+  await chrome.storage.local.set({ selected_template_id: tid });
+  const url = new URL(location.href);
+  url.searchParams.set("template", tid);
+  history.replaceState({}, "", url);
+}
+
 async function useThisStyle() {
-  await chrome.storage.local.set({ selected_template_id: templateId });
+  await persistActiveTemplate(templateId);
   const template = getTemplateById(templateId);
   const msg = `${template.label} is now the active resume style.`;
   setStatus(msg, "ok");
@@ -167,11 +177,9 @@ async function useThisStyle() {
 }
 
 templateSelectEl.addEventListener("change", () => {
-  templateId = templateSelectEl.value;
-  const url = new URL(location.href);
-  url.searchParams.set("template", templateId);
-  history.replaceState({}, "", url);
-  renderPreview().catch((err) => setStatus(String(err?.message || err), "err"));
+  persistActiveTemplate(templateSelectEl.value)
+    .then(() => renderPreview())
+    .catch((err) => setStatus(String(err?.message || err), "err"));
 });
 
 useStyleBtn.addEventListener("click", () =>
@@ -213,6 +221,17 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes.selected_template_id) {
+    const next = String(changes.selected_template_id.newValue || "").trim();
+    if (next && next !== templateId) {
+      templateId = next;
+      templateSelectEl.value = next;
+      const url = new URL(location.href);
+      url.searchParams.set("template", next);
+      history.replaceState({}, "", url);
+      renderPreview().catch(() => {});
+    }
+  }
   if (changes[STYLE_EXPORT_PASTE_KEY] && (source === "paste" || params.get("source") === "paste")) {
     hasPaste = isResumePreviewable(changes[STYLE_EXPORT_PASTE_KEY].newValue);
     if (hasPaste) {
@@ -272,8 +291,10 @@ watchThemeChanges();
 
 populateTemplates();
 initSource()
-  .then(() => {
-    templateSelectEl.value = templateId;
+  .then(async () => {
+    const stored = await chrome.storage.local.get("selected_template_id");
+    const active = String(stored.selected_template_id || templateId || DEFAULT_TEMPLATE_ID).trim();
+    if (active) await persistActiveTemplate(active);
     return renderPreview();
   })
   .catch((err) => setStatus(`Preview failed: ${String(err?.message || err)}`, "err"));

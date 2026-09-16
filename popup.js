@@ -2701,6 +2701,13 @@ async function exportStyleExportPdf() {
   }
   parseStyleExportPaste();
 
+  const storedTemplate = (await chrome.storage.local.get("selected_template_id")).selected_template_id;
+  const activeTemplateId =
+    String(storedTemplate || templateSelectEl?.value || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
+  if (templateSelectEl && templateSelectEl.value !== activeTemplateId) {
+    templateSelectEl.value = activeTemplateId;
+  }
+
   const details = await jobDetailsDialog({
     title: "Export resume PDF",
     confirmText: "Export & save",
@@ -2711,7 +2718,7 @@ async function exportStyleExportPdf() {
       companyName: (companyNameEl?.value || "").trim(),
       jdLink: (jdLinkEl?.value || "").trim(),
       jdText: (jdTextEl?.value || "").trim(),
-      templateId: templateSelectEl?.value || DEFAULT_TEMPLATE_ID
+      templateId: activeTemplateId
     },
     onPreview: async ({ templateId }) => {
       await openStyleExportPreview(templateId);
@@ -3895,6 +3902,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const next = changes.selected_template_id.newValue;
     if (next && templateSelectEl.value !== next) {
       templateSelectEl.value = next;
+      chrome.runtime.sendMessage({ type: "template_preview_show", templateId: next }).catch(() => {});
     }
   }
   if (changes[INDEED_GRAB_STATUS_KEY]) {
