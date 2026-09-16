@@ -297,18 +297,28 @@ function parseEducation(lines) {
   if (buf.length) blocks.push(buf);
   if (!blocks.length) return [];
 
-  // School-first paste: "University of X" blank line then degree block.
+  const isSchoolLine = (p) => /university|college|school|institute|academy/i.test(p);
+  const isDegreeLine = (p) =>
+    /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|ph\.?d\.?|mba|bachelor|master|diploma)\b/i.test(p);
+
+  // Merge split school / degree blocks separated by blank lines.
   const merged = [];
   for (let i = 0; i < blocks.length; i++) {
     const cur = blocks[i];
-    const schoolOnly =
-      cur.length === 1 && /university|college|school|institute|academy/i.test(cur[0]);
-    if (schoolOnly && i + 1 < blocks.length) {
-      merged.push([cur[0], ...blocks[i + 1]]);
+    const next = blocks[i + 1];
+    const schoolOnly = cur.length === 1 && isSchoolLine(cur[0]) && !isDegreeLine(cur[0]);
+    const degreeOnly = cur.length >= 1 && isDegreeLine(cur[0]) && !cur.some(isSchoolLine);
+    if (schoolOnly && next) {
+      merged.push([cur[0], ...next]);
       i++;
-    } else {
-      merged.push(cur);
+      continue;
     }
+    if (degreeOnly && next && next.some(isSchoolLine)) {
+      merged.push([...cur, ...next]);
+      i++;
+      continue;
+    }
+    merged.push(cur);
   }
 
   return merged.map((parts) => {
@@ -319,12 +329,9 @@ function parseEducation(lines) {
       ) ||
         joined.match(/\b((?:19|20)\d{2})\b/) ||
         [])[0] || "";
-    const degree =
-      parts.find((p) =>
-        /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|ph\.?d\.?|mba|bachelor|master|diploma)\b/i.test(p)
-      ) || "";
-    const school =
-      parts.find((p) => /university|college|school|institute|academy/i.test(p)) ||
+    const degree = parts.find((p) => isDegreeLine(p)) || "";
+    let school =
+      parts.find((p) => isSchoolLine(p) && p !== degree) ||
       // Degree-first blocks: school is usually the next non-degree, non-date, non-city line
       parts.find(
         (p) =>
@@ -336,8 +343,12 @@ function parseEducation(lines) {
           !/[.]$/.test(p) &&
           !/\b(bachelor|master|diploma|computer science|honou?rs?|upper division|lower division)\b/i.test(p)
       ) ||
-      parts[0] ||
       "";
+    // Never mirror the degree into school (causes duplicate bold/regular lines on PDF).
+    if (school && degree && school.toLowerCase() === degree.toLowerCase()) school = "";
+    if (!school && parts[0] && parts[0] !== degree && !DATE_RANGE_RE.test(parts[0]) && !isDegreeLine(parts[0])) {
+      school = parts[0];
+    }
     const honours =
       parts.find(
         (p) =>

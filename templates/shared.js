@@ -426,10 +426,23 @@ export function educationYearLine(edu) {
 export function renderEducationRows(education) {
   return educationList(education)
     .map((edu) => {
-      const school = escapeHtml(edu.school || "");
-      const degree = escapeHtml(edu.degree || "");
+      const degreeRaw = String(edu.degree || "").trim();
+      let schoolRaw = String(edu.school || "").trim();
+      if (schoolRaw && degreeRaw && schoolRaw.toLowerCase() === degreeRaw.toLowerCase()) {
+        schoolRaw = "";
+      }
+      const school = escapeHtml(schoolRaw);
+      const degree = escapeHtml(degreeRaw);
       const year = escapeHtml(educationYearLine(edu));
-      const details = escapeHtml(educationLocationLine(edu));
+      let detailsRaw = educationLocationLine(edu);
+      if (detailsRaw && degreeRaw && detailsRaw.toLowerCase() === degreeRaw.toLowerCase()) {
+        detailsRaw = "";
+      }
+      if (detailsRaw && schoolRaw && detailsRaw.toLowerCase() === schoolRaw.toLowerCase()) {
+        detailsRaw = "";
+      }
+      const details = escapeHtml(detailsRaw);
+      if (!school && !degree) return "";
       return `<div class="edu-row">
   <div class="edu-main">
     ${degree ? `<div class="edu-degree">${degree}</div>` : ""}
@@ -439,6 +452,7 @@ export function renderEducationRows(education) {
   ${year ? `<div class="edu-year">${year}</div>` : ""}
 </div>`;
     })
+    .filter(Boolean)
     .join("\n");
 }
 
@@ -535,10 +549,23 @@ export function renderJobsDatedColumn(jobs) {
 export function renderEducationDatedColumn(education) {
   return educationList(education)
     .map((edu) => {
-      const school = escapeHtml(edu.school || "");
-      const degree = escapeHtml(edu.degree || "");
+      const degreeRaw = String(edu.degree || "").trim();
+      let schoolRaw = String(edu.school || "").trim();
+      if (schoolRaw && degreeRaw && schoolRaw.toLowerCase() === degreeRaw.toLowerCase()) {
+        schoolRaw = "";
+      }
+      const school = escapeHtml(schoolRaw);
+      const degree = escapeHtml(degreeRaw);
       const year = escapeHtml(educationYearLine(edu));
-      const details = escapeHtml(educationLocationLine(edu));
+      let detailsRaw = educationLocationLine(edu);
+      if (detailsRaw && degreeRaw && detailsRaw.toLowerCase() === degreeRaw.toLowerCase()) {
+        detailsRaw = "";
+      }
+      if (detailsRaw && schoolRaw && detailsRaw.toLowerCase() === schoolRaw.toLowerCase()) {
+        detailsRaw = "";
+      }
+      const details = escapeHtml(detailsRaw);
+      if (!school && !degree) return "";
       return `<article class="edu-col">
   <div class="job-dates">${year}</div>
   <div class="job-body">
@@ -548,6 +575,7 @@ export function renderEducationDatedColumn(education) {
   </div>
 </article>`;
     })
+    .filter(Boolean)
     .join("\n");
 }
 
