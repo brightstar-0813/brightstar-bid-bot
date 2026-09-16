@@ -1,3 +1,7 @@
+import { folderSegment, jobDirMatchesCsvRow } from "./job-folder.js";
+
+export { folderSegment, jobDirMatchesCsvRow };
+
 /**
  * Per-job resume + cover letter PDFs in IndexedDB.
  * chrome.storage.local cannot hold many base64 PDFs (quota / pruning), and
@@ -100,23 +104,6 @@ function sameJobDir(a, b) {
   const left = String(a || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   const right = String(b || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   return Boolean(left && right && left === right);
-}
-
-function folderSegment(jobDir) {
-  const parts = String(jobDir || "")
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((p) => p.trim())
-    .filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : "";
-}
-
-/** Folder names are `{csvRow} - {Company} - {Title}`. */
-export function jobDirMatchesCsvRow(jobDir, csvRow) {
-  if (csvRow == null || String(csvRow).trim() === "" || Number.isNaN(Number(csvRow))) return true;
-  const segment = folderSegment(jobDir);
-  if (!segment) return false;
-  return new RegExp(`^${Number(csvRow)}\\s+-\\s+`).test(segment);
 }
 
 export async function getJobDocs({ csvRow, jobDir, jdLink } = {}) {

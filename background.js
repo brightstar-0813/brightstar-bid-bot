@@ -103,6 +103,7 @@ import { formatRequiredEmployersList } from "./experience-rules.js";
 import { openProfileEditor } from "./open-profile-editor.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
+import { buildJobFolderName, folderSegment, isLegacyRowPrefixedFolder } from "./job-folder.js";
 import {
   parseJobsCsv,
   filterJobsByChannel,
@@ -1072,8 +1073,8 @@ async function persistJobContextForAutofill(job = {}) {
     jobDir = String(row?.jobDir || hist[String(csvRow)]?.jobDir || "").trim();
   }
   if (jobDir && csvRow !== "") {
-    const folder = jobDir.replace(/\\/g, "/").split("/").pop() || "";
-    if (!new RegExp(`^${Number(csvRow)}\\s+-\\s+`).test(folder)) {
+    const folder = folderSegment(jobDir);
+    if (isLegacyRowPrefixedFolder(folder) && !new RegExp(`^${Number(csvRow)}\\s+-\\s+`).test(folder)) {
       jobDir = "";
     }
   }
@@ -2305,16 +2306,6 @@ async function htmlToPdfBase64(html, { attempts = 3 } = {}) {
 
 // MV3 service workers have no URL.createObjectURL / Blob URL support,
 // so all downloads use data: URLs (see downloadTextFile / downloadBase64File above).
-
-function buildJobFolderName(jobMeta = {}) {
-  const companyPart = String(jobMeta.companyName || "").trim() || "Company";
-  const titlePart = String(jobMeta.jobTitle || "").trim() || "untitled-job";
-  const csvRow = jobMeta.csvRow;
-  if (csvRow != null && csvRow !== "" && !Number.isNaN(Number(csvRow))) {
-    return sanitizePathSegment(`${Number(csvRow)} - ${companyPart} - ${titlePart}`, "untitled-job");
-  }
-  return sanitizePathSegment(`${companyPart} - ${titlePart}`, "untitled-job");
-}
 
 /** First-name token for files like Name_Resume.pdf / Name_Cover Letter.pdf */
 function outputNameToken(jobMeta = {}, resumeData = {}) {

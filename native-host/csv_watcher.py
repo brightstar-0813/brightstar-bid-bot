@@ -184,7 +184,12 @@ def find_job_folder(csv_row, job_dir: str, output_dir: str = ""):
     def matches_row(path: Path) -> bool:
         if not prefix:
             return True
-        return path.name.startswith(prefix)
+        if path.name.startswith(prefix):
+            return True
+        # Date-based folders (e.g. 9-15_Company-Title) don't embed csvRow.
+        if re.match(r"^\d{1,2}-\d{1,2}_", path.name):
+            return True
+        return False
 
     raw = str(job_dir or "").strip().replace("/", os.sep)
     if raw:
@@ -327,13 +332,14 @@ def handle_list_job_folders(output_dir: str = "") -> None:
         for child in children:
             if not child.is_dir():
                 continue
-            match = re.match(r"^(\d+)\s+-\s+", child.name)
-            if not match:
+            legacy = re.match(r"^(\d+)\s+-\s+", child.name)
+            dated = re.match(r"^(\d{1,2})-(\d{1,2})_", child.name)
+            if not legacy and not dated:
                 continue
             resume, cover = pick_pdfs(child)
             folders.append(
                 {
-                    "csvRow": int(match.group(1)),
+                    "csvRow": int(legacy.group(1)) if legacy else None,
                     "folder": str(child),
                     "name": child.name,
                     "hasResume": bool(resume),

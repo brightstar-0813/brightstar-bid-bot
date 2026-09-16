@@ -77,6 +77,7 @@ import {
   jobDocsId,
   putJobDocs
 } from "./job-docs-db.js";
+import { folderFitsJob, folderSegment } from "./job-folder.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
@@ -149,15 +150,6 @@ function hasCsvRow(csvRow) {
   return csvRow != null && String(csvRow).trim() !== "" && !Number.isNaN(Number(csvRow));
 }
 
-function folderSegment(jobDir) {
-  const parts = String(jobDir || "")
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((p) => p.trim())
-    .filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : "";
-}
-
 function toStoredJobDir(absPath, appsDir = "") {
   const n = String(absPath || "").replace(/\\/g, "/");
   if (!n) return "";
@@ -171,16 +163,6 @@ function toStoredJobDir(absPath, appsDir = "") {
   if (m) return `${m[1]}/${m[2]}`;
   const segment = folderSegment(n);
   return segment ? `${apps}/${segment}` : n;
-}
-
-function folderFitsJob(jobDir, job = {}) {
-  const csvRow = job.csvRow;
-  if (!jobDirMatchesCsvRow(jobDir, csvRow)) return false;
-  const company = String(job.company || job.companyName || "").trim().toLowerCase();
-  if (!company) return true;
-  const name = folderSegment(jobDir).toLowerCase();
-  const token = company.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim();
-  return !token || name.includes(token.slice(0, 24));
 }
 
 async function resolveAppsOutputDir() {
@@ -221,7 +203,7 @@ async function listJobFoldersFromDownloads() {
   let results = [];
   try {
     results = await chrome.downloads.search({
-      filenameRegex: `${folderAlt}[\\\\/]\\d+\\s+-\\s+`,
+      filenameRegex: `${folderAlt}[\\\\/](?:\\d{1,2}-\\d{1,2}_[^/]+|\\d+\\s+-\\s+[^/]+)`,
       limit: 1000,
       orderBy: ["-startTime"]
     });
@@ -230,21 +212,22 @@ async function listJobFoldersFromDownloads() {
   }
   const byRow = new Map();
   const pathRe = new RegExp(
-    `(?:${escaped}|Resume Applications|Applications-[^/]+)\\/(\\d+)\\s+-\\s+[^/]+`,
+    `(?:${escaped}|Resume Applications|Applications-[^/]+)\\/(?:(\\d{1,2}-\\d{1,2}_[^/]+)|(\\d+)\\s+-\\s+[^/]+)`,
     "i"
   );
   for (const row of results || []) {
     const path = String(row?.filename || "").replace(/\\/g, "/");
     const match = path.match(pathRe);
     if (!match) continue;
-    const csvRow = Number(match[1]);
+    const csvRow = match[2] ? Number(match[2]) : null;
     const folder = match[0].replace(/\\/g, "/");
     const parts = folder.split("/");
     const name = parts.pop() || "";
     const appsName = parts.pop() || appsDir;
     const jobDir = `${appsName}/${name}`;
     const isActiveApps = appsName.toLowerCase() === appsDir.toLowerCase();
-    const prev = byRow.get(csvRow);
+    const rowKey = csvRow != null ? String(csvRow) : jobDir.toLowerCase();
+    const prev = byRow.get(rowKey);
     if (prev && !isActiveApps) {
       const prevIsActive = String(prev.jobDir || "").toLowerCase().startsWith(`${appsDir.toLowerCase()}/`);
       if (prevIsActive) continue;
@@ -269,7 +252,7 @@ async function listJobFoldersFromDownloads() {
       next.hasCover = true;
       next.coverName = next.coverName || fileName;
     }
-    byRow.set(csvRow, next);
+    byRow.set(rowKey, next);
   }
   return [...byRow.values()];
 }
@@ -280,7 +263,10 @@ export async function listJobFoldersFromDisk() {
     const res = await sendNativeMessage({ type: "list_job_folders", outputDir: appsDir });
     if (res?.ok && Array.isArray(res.folders)) {
       return res.folders.map((f) => ({
-        csvRow: Number(f.csvRow),
+        csvRow:
+          f.csvRow != null && String(f.csvRow).trim() !== "" && !Number.isNaN(Number(f.csvRow))
+            ? Number(f.csvRow)
+            : null,
         jobDir: toStoredJobDir(f.folder || f.name, appsDir),
         absPath: f.folder || "",
         name: f.name || folderSegment(f.folder),
@@ -311,7 +297,8 @@ export async function locateJobFolder({ csvRow, jobDir, jdLink, company, title, 
   };
   const hit =
     folders.find((f) => Number(f.csvRow) === n && folderFitsJob(f.jobDir, job)) ||
-    folders.find((f) => Number(f.csvRow) === n);
+    folders.find((f) => Number(f.csvRow) === n) ||
+    folders.find((f) => folderFitsJob(f.jobDir, job));
   if (!hit) return located;
   return { ...located, csvRow: n, jobDir: hit.jobDir };
 }
@@ -321,12 +308,14 @@ export async function hydrateJobsWithFolders(jobs = []) {
   if (!list.length) return list;
   const folders = await listJobFoldersFromDisk();
   if (!folders.length) return list;
-  const byRow = new Map(folders.map((f) => [Number(f.csvRow), f]));
   return list.map((job) => {
     const n = Number(job.csvRow);
     const existing = String(job.jobDir || "").trim();
-    const hit = byRow.get(n);
-    if (existing && jobDirMatchesCsvRow(existing, n)) {
+    const hit =
+      folders.find((f) => Number(f.csvRow) === n && folderFitsJob(f.jobDir, job)) ||
+      folders.find((f) => Number(f.csvRow) === n) ||
+      folders.find((f) => folderFitsJob(f.jobDir, job));
+    if (existing) {
       return {
         ...job,
         hasFiles: true,
@@ -350,10 +339,10 @@ function downloadPathInJobFolder(absPath, jobDir, csvRow) {
   if (!norm) return false;
   const segment = folderSegment(jobDir).toLowerCase();
   if (segment && (norm.includes(`/${segment}/`) || norm.endsWith(`/${segment}`))) {
-    return !hasCsvRow(csvRow) || jobDirMatchesCsvRow(jobDir, csvRow);
+    return true;
   }
   if (hasCsvRow(csvRow)) {
-    return new RegExp(`/${Number(csvRow)}\\s+-\\s+[^/]+/`).test(norm);
+    if (new RegExp(`/${Number(csvRow)}\\s+-\\s+[^/]+/`).test(norm)) return true;
   }
   return false;
 }
@@ -452,14 +441,19 @@ async function lookupSavedJobFolder({ csvRow, jobDir, jdLink } = {}) {
     const fromQueue = String(job?.jobDir || "").trim();
     const fromHist = String(remembered?.jobDir || "").trim();
     const passed = String(jobDir || "").trim();
-    const chosen =
-      (fromQueue && jobDirMatchesCsvRow(fromQueue, n) && fromQueue) ||
-      (fromHist && jobDirMatchesCsvRow(fromHist, n) && fromHist) ||
-      (passed && jobDirMatchesCsvRow(passed, n) && passed) ||
-      "";
+    const chosen = fromQueue || fromHist || passed || "";
     if (!chosen) {
       const folders = await listJobFoldersFromDisk();
-      const hit = folders.find((f) => Number(f.csvRow) === n);
+      const jobHint = {
+        csvRow: n,
+        company: job?.companyName || job?.company || "",
+        companyName: job?.companyName || job?.company || "",
+        title: job?.jobTitle || job?.title || "",
+        jobTitle: job?.jobTitle || job?.title || ""
+      };
+      const hit =
+        folders.find((f) => Number(f.csvRow) === n) ||
+        folders.find((f) => folderFitsJob(f.jobDir, jobHint));
       if (hit?.jobDir) {
         return {
           csvRow: n,
