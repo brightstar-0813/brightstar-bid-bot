@@ -235,7 +235,7 @@ Return exactly this shape (field names must match):
     {
       "company": "Culligan International",
       "location": "Rosemont, Illinois, United States | Remote",
-      "title": "Senior Salesforce Engineer / Salesforce Architect",
+      "title": "Senior Salesforce Engineer | Technical Architect",
       "dates": "Apr 2024 - Present",
       "project": "Water Services CRM and Field Service Platform",
       "bullets": [
@@ -518,7 +518,7 @@ Location: Muskegon, Michigan, United States
 Phone: +1 (248) 340-3582
 Email: dmario.lewis1992@outlook.com
 LinkedIn: https://www.linkedin.com/in/dmario-lewis/
-Base identity: Senior Salesforce Engineer / Salesforce Architect
+Base identity: Senior Salesforce Engineer | Technical Architect
 Experience framing: 12+ years of overall technology experience, including 11+ years delivering Salesforce solutions across consumer services, education, manufacturing, nonprofit, and retail organizations.
 
 Education:
@@ -535,7 +535,7 @@ FIXED COMPANY HISTORY — DO NOT MODIFY COMPANY NAMES, LOCATIONS, MODES, OR DATE
 (Employment type is deliberately absent. Never add it back.)
 ==================================================
 
-Culligan International (Rosemont, Illinois, United States | Remote) — default title: Senior Salesforce Engineer / Salesforce Architect | Apr 2024 - Present
+Culligan International (Rosemont, Illinois, United States | Remote) — default title: Senior Salesforce Engineer | Technical Architect | Apr 2024 - Present
 
 Fusion Academy (Grand Rapids, Michigan, United States | Hybrid) — default title: Salesforce Architect | Sep 2021 - Apr 2024
 
