@@ -262,6 +262,7 @@ const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
 const previewTemplateBtn = document.getElementById("previewTemplate");
 const styleExportPasteEl = document.getElementById("styleExportPaste");
+const styleExportClearBtn = document.getElementById("styleExportClear");
 const styleExportPdfBtn = document.getElementById("styleExportPdf");
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const runOneOffBtn = document.getElementById("runOneOff");
@@ -2657,6 +2658,17 @@ function parseStyleExportPaste() {
 
 const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 
+async function clearStyleExport() {
+  if (styleExportPasteEl) styleExportPasteEl.value = "";
+  if (jobTitleEl) jobTitleEl.value = "";
+  if (companyNameEl) companyNameEl.value = "";
+  if (jdLinkEl) jdLinkEl.value = "";
+  if (jdTextEl) jdTextEl.value = "";
+  await chrome.storage.local.remove(STYLE_EXPORT_PASTE_KEY).catch(() => {});
+  await persistJobFields().catch(() => {});
+  setStatus("Cleared paste and job details.");
+}
+
 async function openStyleExportPreview(templateId = "") {
   const resumeData = parseStyleExportPaste();
   const tid =
@@ -3667,6 +3679,9 @@ togglePacingSlackPanelBtn?.addEventListener("click", () => {
 });
 previewTemplateBtn?.addEventListener("click", () => {
   openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
+});
+styleExportClearBtn?.addEventListener("click", () => {
+  clearStyleExport().catch((e) => setStatus(String(e.message || e)));
 });
 styleExportPdfBtn?.addEventListener("click", () => {
   exportStyleExportPdf().catch((e) => {
