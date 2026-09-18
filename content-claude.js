@@ -246,53 +246,9 @@
     }
   };
 
-  function ensureSaveButton() {
-    if (document.getElementById("brightstar-save-json-btn")) return;
-    const btn = document.createElement("button");
-    btn.id = "brightstar-save-json-btn";
-    btn.type = "button";
-    btn.textContent = "Brightstar: Save resume JSON";
-    Object.assign(btn.style, {
-      position: "fixed",
-      zIndex: "2147483646",
-      right: "16px",
-      bottom: "72px",
-      padding: "10px 14px",
-      background: "#0b3d5c",
-      color: "#fff",
-      border: "none",
-      borderRadius: "8px",
-      font: "13px/1.3 Arial, Helvetica, sans-serif",
-      fontWeight: "700",
-      cursor: "pointer",
-      boxShadow: "0 4px 14px rgba(0,0,0,0.28)"
-    });
-    btn.addEventListener("click", async () => {
-      try {
-        showToast("Harvesting resume JSON from Claude…", { sticky: true });
-        const data = await persistHarvest({ allowStreaming: true });
-        if (!data) {
-          showToast("No full resume JSON found. Scroll to the JSON block, then click again.");
-          return;
-        }
-        showToast(`Found JSON (${data.experience.length} jobs). Saving files…`, { sticky: true });
-        const res = await chrome.runtime.sendMessage({
-          type: "force_save_chatgpt_resume",
-          resumeData: data
-        });
-        if (!res?.ok) {
-          showToast(res?.error || "Save failed.");
-          return;
-        }
-        showToast(res.status || "Save started.");
-      } catch (err) {
-        showToast(`Save failed: ${String(err?.message || err)}`);
-      }
-    });
-    (document.body || document.documentElement).appendChild(btn);
-  }
+  // Remove legacy floating save button if an older content script left it on the page.
+  document.getElementById("brightstar-save-json-btn")?.remove();
 
-  ensureSaveButton();
   let harvestTimer = null;
   const scheduleHarvest = (ms) => {
     if (harvestTimer) clearInterval(harvestTimer);

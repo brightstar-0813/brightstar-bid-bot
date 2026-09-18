@@ -9460,7 +9460,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         if (!isUsableResumeJson(data)) {
           throw new Error(
-            `Could not find full resume JSON (${describeResumeGaps(data) || "empty"}). On ChatGPT click "Brightstar: Save resume JSON" (bottom-right), or copy the JSON and use Ctrl+Shift+V.`
+            `Could not find full resume JSON (${describeResumeGaps(data) || "empty"}). Scroll to the JSON on the AI page, or copy it and use Ctrl+Shift+V.`
           );
         }
 
