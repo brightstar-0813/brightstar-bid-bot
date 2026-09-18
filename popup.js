@@ -61,6 +61,7 @@ import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resu
 import {
   AI_PROVIDER_KEY,
   AI_PROVIDERS,
+  DELETE_AI_CHAT_HISTORY_KEY,
   aiProviderLabel,
   normalizeAiProvider
 } from "./ai-provider.js";
@@ -300,6 +301,7 @@ const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const allowSubmitToggleEl = document.getElementById("allowSubmitToggle");
 const openaiQaToggleEl = document.getElementById("openaiQaToggle");
+const deleteAiChatToggleEl = document.getElementById("deleteAiChatToggle");
 const autofillEnabledToggleEl = document.getElementById("autofillEnabledToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
@@ -945,7 +947,8 @@ async function loadSettings() {
     "qa_learn_enabled",
     "allowSubmitOnAssist",
     AUTOFILL_ENABLED_KEY,
-    OPENAI_QA_ASSIST_KEY
+    OPENAI_QA_ASSIST_KEY,
+    DELETE_AI_CHAT_HISTORY_KEY
   ]);
 
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
@@ -1035,6 +1038,7 @@ async function loadSettings() {
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   if (allowSubmitToggleEl) allowSubmitToggleEl.checked = Boolean(data.allowSubmitOnAssist);
   if (openaiQaToggleEl) openaiQaToggleEl.checked = data[OPENAI_QA_ASSIST_KEY] !== false;
+  if (deleteAiChatToggleEl) deleteAiChatToggleEl.checked = data[DELETE_AI_CHAT_HISTORY_KEY] !== false;
   syncAutofillUi(data[AUTOFILL_ENABLED_KEY] !== false);
   await refreshQaBank().catch(() => {});
   await hydrateJobDirsInUi().catch(() => {});
@@ -3784,6 +3788,15 @@ openaiQaToggleEl?.addEventListener("change", () => {
       : "OpenAI Custom Q&A off."
   );
 });
+deleteAiChatToggleEl?.addEventListener("change", () => {
+  const on = Boolean(deleteAiChatToggleEl.checked);
+  chrome.storage.local.set({ [DELETE_AI_CHAT_HISTORY_KEY]: on }).catch(() => {});
+  setStatus(
+    on
+      ? "Delete AI chat after job: on."
+      : "Delete AI chat after job: off — shared AI accounts keep history."
+  );
+});
 autofillEnabledToggleEl?.addEventListener("change", () => {
   const enabled = Boolean(autofillEnabledToggleEl.checked);
   syncAutofillUi(enabled);
@@ -3908,6 +3921,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[OPENAI_QA_ASSIST_KEY] && openaiQaToggleEl && changes[OPENAI_QA_ASSIST_KEY].newValue !== undefined) {
     openaiQaToggleEl.checked = changes[OPENAI_QA_ASSIST_KEY].newValue !== false;
     syncAutofillUi();
+  }
+  if (
+    changes[DELETE_AI_CHAT_HISTORY_KEY] &&
+    deleteAiChatToggleEl &&
+    changes[DELETE_AI_CHAT_HISTORY_KEY].newValue !== undefined
+  ) {
+    deleteAiChatToggleEl.checked = changes[DELETE_AI_CHAT_HISTORY_KEY].newValue !== false;
   }
   if (changes.qa_bank_version) refreshQaBank().catch(() => {});
   if (changes.qa_learn_enabled && qaLearnToggleEl && changes.qa_learn_enabled.newValue !== undefined) {

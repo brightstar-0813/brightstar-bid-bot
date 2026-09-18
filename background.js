@@ -145,6 +145,7 @@ import {
   aiProviderLabel,
   aiProviderNewChatUrl,
   isAiProviderUrl,
+  isDeleteAiChatHistoryEnabled,
   normalizeAiProvider
 } from "./ai-provider.js";
 
@@ -4461,6 +4462,18 @@ async function deleteCurrentAiConversation(
   const provider = await getStoredAiProvider();
   const label = aiProviderLabel(provider);
 
+  if (!(await isDeleteAiChatHistoryEnabled())) {
+    if (!skipExtras) {
+      try {
+        await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
+      } catch {
+        // ignore
+      }
+      await setStatus(`Keeping ${label} chat history (Delete AI chat after job is off).`);
+    }
+    return { ok: true, via: "skipped-toggle-off", chatId: String(chatId || "").trim() };
+  }
+
   // Top-level cleanup: gather every id for this job, delete each, then one blank shell.
   if (!skipExtras) {
     const ids = [];
@@ -5122,7 +5135,9 @@ async function cooldownBeforeNextJob({
   }
   if (typeof tabId === "number") {
     try {
-      await setStatus("Cooling down — removing finished AI chat…");
+      if (await isDeleteAiChatHistoryEnabled()) {
+        await setStatus("Cooling down — removing finished AI chat…");
+      }
       await deleteCurrentAiConversation(tabId, { chatId });
     } catch (err) {
       await setStatus(`Cooling down — chat cleanup skipped: ${String(err?.message || err)}`);

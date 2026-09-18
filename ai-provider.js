@@ -2,6 +2,9 @@
 
 export const AI_PROVIDER_KEY = "ai_provider";
 
+/** When true (default), finished job chats are removed from ChatGPT/Claude history. */
+export const DELETE_AI_CHAT_HISTORY_KEY = "delete_ai_chat_history";
+
 export const AI_PROVIDERS = Object.freeze({
   CHATGPT: "chatgpt",
   CLAUDE: "claude"
@@ -29,6 +32,15 @@ export function aiProviderNewChatUrl(provider) {
   return normalizeAiProvider(provider) === AI_PROVIDERS.CLAUDE
     ? "https://claude.ai/new"
     : "https://chatgpt.com/";
+}
+
+export async function isDeleteAiChatHistoryEnabled() {
+  try {
+    const data = await chrome.storage.local.get(DELETE_AI_CHAT_HISTORY_KEY);
+    return data[DELETE_AI_CHAT_HISTORY_KEY] !== false;
+  } catch {
+    return true;
+  }
 }
 
 export function isChatGptUrl(url) {
