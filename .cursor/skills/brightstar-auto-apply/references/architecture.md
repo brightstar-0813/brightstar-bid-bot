@@ -72,6 +72,14 @@ Indeed hosted vs external: `indeed.js` (`hostedApply` / `externalApply` / apply 
 
 `npm run check` is syntax-only (`node --check` on key entry files). `npm test` runs `node --test tests`.
 
+### Agent UI smoke (optional)
+
+With project [`.cursor/mcp.json`](../../../mcp.json) (`chrome-devtools-mcp` +
+`--categoryExtensions`), agents can `install_extension` / `reload_extension` this
+unpacked build, open the popup via `trigger_extension_action`, and snapshot UI —
+see [agent-extension-smoke.md](agent-extension-smoke.md). Does not replace unit tests
+or submit-policy walks.
+
 ## Common pitfalls
 
 - Editing fill logic only in the runner — DOM must change in `content/autofill.js`.

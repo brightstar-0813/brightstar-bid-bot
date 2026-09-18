@@ -21,6 +21,7 @@ Progressive disclosure (per [Agent Skills](https://www.skills.sh/) / agentskills
 
 1. This file — activate and follow first
 2. Deeper detail only when needed: [references/architecture.md](references/architecture.md)
+3. Agent install/reload/popup smoke via Chrome DevTools MCP: [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
 
 ## Product in one screen
 
@@ -118,6 +119,13 @@ npm test
 - Adapters / autofill / indeed → relevant `tests/*.test.js`
 - Submit policy → walk: Dice hosted, Indeed hosted, Indeed external, manual Apply
 - UI-only → reload unpacked + smoke the changed path
+- **Agent browser smoke** (when `chrome-devtools` MCP is enabled with `--categoryExtensions`):
+  `install_extension` / `reload_extension` on this repo → `trigger_extension_action` →
+  `take_snapshot` on the popup. Prefer this over asking the user to click Reload on
+  `chrome://extensions` when the MCP tools are available. Details:
+  [references/agent-extension-smoke.md](references/agent-extension-smoke.md).
+  Still remind the user to reload their **daily** Chrome profile if they are not using
+  the MCP-launched browser.
 
 ## Output & sheet
 
@@ -133,4 +141,5 @@ State: layer touched, submit-safety impact (yes/no), reload/test steps.
 ## References
 
 - Runtime, pipeline, pitfalls: [references/architecture.md](references/architecture.md)
+- Agent extension install/debug (Chrome DevTools MCP): [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
 - Ecosystem: discover/install skills via [skills.sh](https://www.skills.sh/) (`npx skills add <owner/repo>`)
