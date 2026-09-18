@@ -896,14 +896,24 @@
     }
   };
 
-  // Remove legacy floating save button if an older content script left it on the page.
-  document.getElementById("brightstar-save-json-btn")?.remove();
+  // Legacy floating save button is retired — keep killing it so stale content
+  // scripts from before reload cannot leave it on the composer.
+  const removeLegacySaveButton = () => {
+    document.getElementById("brightstar-save-json-btn")?.remove();
+    document.querySelectorAll("button").forEach((el) => {
+      if (/brightstar:\s*save resume json/i.test(String(el.textContent || "").trim())) {
+        el.remove();
+      }
+    });
+  };
+  removeLegacySaveButton();
 
   // Fast harvest while a batch/one-off is running so recognition → file save is snappy.
   let harvestTimer = null;
   const scheduleHarvest = (ms) => {
     if (harvestTimer) clearInterval(harvestTimer);
     harvestTimer = setInterval(() => {
+      removeLegacySaveButton();
       watchStreaming();
       persistHarvest().catch(() => {});
     }, ms);
@@ -918,4 +928,8 @@
       scheduleHarvest(changes.generation_running.newValue ? 1000 : 4000);
     }
   });
+  const bodyWatch = new MutationObserver(() => removeLegacySaveButton());
+  if (document.body) {
+    bodyWatch.observe(document.body, { childList: true, subtree: true });
+  }
 })();
