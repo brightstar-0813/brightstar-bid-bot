@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "agentmail": {
+      "source": "agentmail-to/agentmail-skills",
+      "sourceType": "github",
+      "skillPath": "agentmail/SKILL.md",
+      "computedHash": "04dc8438810848e2fe2110d46babbe2883d2ebf2d70366646d41f79ab01d30cf"
+    },
+    "agentmail-mcp": {
+      "source": "agentmail-to/agentmail-skills",
+      "sourceType": "github",
+      "skillPath": "agentmail-mcp/SKILL.md",
+      "computedHash": "231ea8963aecbf9ee762545acc9409669378887543b8956f3103bb2d8749b015"
+    }
+  }
+}

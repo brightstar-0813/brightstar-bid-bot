@@ -1,0 +1,676 @@
+import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
+import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import {
+  getResumeProfiles,
+  getActivePersonId,
+  setActivePersonId,
+  getProfileById,
+  getBuiltinPreset,
+  deleteCustomProfile,
+  getPersonSheetConfig,
+  DEFAULT_PROFILE_ID,
+  resolveCoverLetterTemplateForTrack,
+  resolvePromptTemplateForTrack,
+  applyUsApplicantDefaults
+} from "./profiles.js";
+import {
+  fillPersonForm,
+  readPersonFromForm,
+  savePersonFromForm,
+  isEditingBuiltin,
+  mergeExtractedProfileIntoPerson,
+  requiredExperienceToText
+} from "./person-profile-form.js";
+import { defaultSheetTabNameForPerson, resolveSheetTabNameForPerson } from "./sheets.js";
+import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
+import {
+  namesLikelyDifferent,
+  extractProfileFromResumeText,
+  parseEmployersFromResume
+} from "./resume-profile.js";
+import {
+  normalizeRoleTrackId,
+  resolveRoleTrackForPerson,
+  getTrackPromptTemplate,
+  applyRoleTrackSelectState
+} from "./role-tracks.js";
+import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
+import { getQaCount } from "./qa-store.js";
+import { confirmDialog } from "./ui-dialog.js";
+import { showToast } from "./ui-toast.js";
+import {
+  fillResumeWizard,
+  initResumeWizard,
+  readResumeWizard,
+  seedWorkHistoryFromEmployers
+} from "./resume-wizard.js";
+
+const NEW_PROFILE_ID = "__new__";
+const formRoot = document.getElementById("profileForm");
+const profileSelectEl = document.getElementById("profileSelect");
+const profilePickerBtn = document.getElementById("profilePickerBtn");
+const profilePickerLabel = document.getElementById("profilePickerLabel");
+const profilePickerMenu = document.getElementById("profilePickerMenu");
+const deleteProfileBtn = document.getElementById("deleteProfile");
+const statusEl = document.getElementById("status");
+const savePersonTopBtn = document.getElementById("savePersonTop");
+const personSaveStatusEl = document.getElementById("personSaveStatus");
+const qaBankNoteEl = document.getElementById("qaBankNote");
+const openQaEditorBtn = document.getElementById("openQaEditorBtn");
+const templateSelectEl = document.getElementById("templateSelect");
+const personResumeFileEl = document.getElementById("personResumeFile");
+const replaceResumeFromFileBtn = document.getElementById("replaceResumeFromFile");
+const clearMasterResumeBtn = document.getElementById("clearMasterResume");
+const detectRequiredExperienceBtn = document.getElementById("detectRequiredExperience");
+const masterResumeFileHintEl = document.getElementById("masterResumeFileHint");
+const roleTrackSelectEl = document.getElementById("roleTrackSelect");
+
+function profileTabsNav() {
+  return document.getElementById("profileTabs") || document.querySelector("nav.profile-tabs");
+}
+
+let profilesCache = [];
+let editingPersonId = null;
+let activeRoleTrack = "sf";
+let activeTab = "apply";
+let editorInitializing = true;
+
+const params = new URLSearchParams(location.search);
+const initialTab = params.get("tab") || "apply";
+const initialPresetId = params.get("preset") || "";
+const initialProfileId = params.get("profileId") || "";
+
+const VALID_TABS = new Set(["apply", "resume", "batch"]);
+
+if (personResumeFileEl) personResumeFileEl.setAttribute("accept", MASTER_RESUME_ACCEPT);
+
+/** Map legacy tab names from entry points. */
+function normalizeTab(tab) {
+  const t = String(tab || "apply").toLowerCase();
+  if (t === "prompts" || t === "integrations") return "batch";
+  return VALID_TABS.has(t) ? t : "apply";
+}
+
+function setStatus(message, kind = "") {
+  if (!statusEl) return;
+  const text = String(message || "").trim();
+  if (!text || kind === "ok") {
+    statusEl.hidden = true;
+    statusEl.textContent = "";
+    return;
+  }
+  statusEl.hidden = false;
+  statusEl.textContent = text;
+  statusEl.className = `editor-status status-bar is-${kind || "err"}`;
+}
+
+function setSaveStatus(message, { ok = true } = {}) {
+  if (!personSaveStatusEl) return;
+  if (!message) {
+    personSaveStatusEl.hidden = true;
+    personSaveStatusEl.textContent = "";
+    personSaveStatusEl.className = "profile-save-status";
+    return;
+  }
+  personSaveStatusEl.hidden = false;
+  personSaveStatusEl.textContent = message;
+  personSaveStatusEl.className = `profile-save-status ${ok ? "ok" : "err"}`;
+}
+
+function readActiveRoleTrack() {
+  return normalizeRoleTrackId(activeRoleTrack);
+}
+
+function setActiveRoleTrackUi(track, { locked = false } = {}) {
+  activeRoleTrack = normalizeRoleTrackId(track);
+  applyRoleTrackSelectState(roleTrackSelectEl, {
+    track: activeRoleTrack,
+    locked
+  });
+}
+
+function syncTrackLockForPerson(_person) {
+  const isNew = !editingPersonId || profileSelectEl?.value === NEW_PROFILE_ID;
+  setActiveRoleTrackUi(activeRoleTrack, { locked: !isNew });
+}
+
+function updateEditorUrl(tab, profileId) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set("tab", tab);
+    if (profileId) url.searchParams.set("profileId", profileId);
+    else url.searchParams.delete("profileId");
+    history.replaceState(null, "", `${url.pathname}${url.search}`);
+  } catch {
+    /* ignore */
+  }
+}
+
+function setActiveTab(tabId) {
+  const tab = normalizeTab(tabId);
+  activeTab = tab;
+  const tabsNav = profileTabsNav();
+  const tabButtons = tabsNav
+    ? Array.from(tabsNav.querySelectorAll(".profile-tab[data-tab]"))
+    : [];
+  for (const btn of tabButtons) {
+    const isActive = btn.dataset.tab === tab;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    btn.tabIndex = isActive ? 0 : -1;
+  }
+  const panels = formRoot
+    ? Array.from(formRoot.querySelectorAll(":scope > .profile-tab-panel"))
+    : [];
+  for (const panel of panels) {
+    const isActive = panel.dataset.panel === tab;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
+    panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+  }
+  updateEditorUrl(tab, profileSelectEl?.value || editingPersonId || "");
+}
+
+function wireProfileTabs() {
+  const tabsNav = profileTabsNav();
+  if (!tabsNav || tabsNav.dataset.bound === "1") return;
+  tabsNav.dataset.bound = "1";
+  tabsNav.addEventListener("click", (event) => {
+    const btn = event.target.closest(".profile-tab[data-tab]");
+    if (!btn || !tabsNav.contains(btn)) return;
+    event.preventDefault();
+    setActiveTab(btn.dataset.tab);
+  });
+  tabsNav.addEventListener("keydown", (event) => {
+    const tabs = Array.from(tabsNav.querySelectorAll(".profile-tab[data-tab]"));
+    const currentIndex = tabs.findIndex((btn) => btn.classList.contains("is-active"));
+    if (currentIndex < 0) return;
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = Math.min(currentIndex + 1, tabs.length - 1);
+    else if (event.key === "ArrowLeft") nextIndex = Math.max(currentIndex - 1, 0);
+    else return;
+    event.preventDefault();
+    const nextTab = tabs[nextIndex]?.dataset?.tab;
+    if (nextTab) {
+      setActiveTab(nextTab);
+      tabs[nextIndex]?.focus();
+    }
+  });
+}
+
+function syncSaveButtonLabels() {
+  const label = isEditingBuiltin(editingPersonId) ? "Save as mine" : "Save";
+  if (savePersonTopBtn) savePersonTopBtn.textContent = label;
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function profileOptionLabel(profile) {
+  if (!profile) return "Add a new profile";
+  return profile.builtin ? profile.label : `${profile.label} (custom)`;
+}
+
+function setProfilePickerOpen(open) {
+  if (!profilePickerBtn || !profilePickerMenu) return;
+  profilePickerMenu.hidden = !open;
+  profilePickerBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function syncProfilePickerLabel(selectedId) {
+  if (!profilePickerLabel) return;
+  if (selectedId === NEW_PROFILE_ID || !selectedId) {
+    profilePickerLabel.textContent = "Add a new profile";
+    return;
+  }
+  const profile = profilesCache.find((p) => p.id === selectedId);
+  profilePickerLabel.textContent = profileOptionLabel(profile) || "Add a new profile";
+}
+
+function populateProfileSelect(selectedId) {
+  if (!profileSelectEl) return;
+
+  const validIds = new Set(profilesCache.map((p) => p.id));
+  let nextId = NEW_PROFILE_ID;
+  if (selectedId === NEW_PROFILE_ID) {
+    nextId = NEW_PROFILE_ID;
+  } else if (validIds.has(selectedId)) {
+    nextId = selectedId;
+  } else if (validIds.has(DEFAULT_PROFILE_ID)) {
+    nextId = DEFAULT_PROFILE_ID;
+  } else if (profilesCache[0]?.id) {
+    nextId = profilesCache[0].id;
+  }
+
+  profileSelectEl.value = nextId;
+  syncProfilePickerLabel(nextId);
+
+  if (profilePickerMenu) {
+    const items = [
+      {
+        id: NEW_PROFILE_ID,
+        label: "Add a new profile",
+        meta: "Start a blank person record"
+      },
+      ...profilesCache.map((profile) => ({
+        id: profile.id,
+        label: profileOptionLabel(profile),
+        meta: profile.builtin ? "Built-in starter" : "Your saved profile"
+      }))
+    ];
+    profilePickerMenu.innerHTML = items
+      .map(
+        (item) => `
+      <li role="option" class="profile-picker-option${item.id === nextId ? " is-active" : ""}" data-profile-id="${escapeHtml(item.id)}" aria-selected="${item.id === nextId ? "true" : "false"}">
+        <span class="profile-picker-option-label">${escapeHtml(item.label)}</span>
+        <span class="profile-picker-option-meta">${escapeHtml(item.meta)}</span>
+      </li>`
+      )
+      .join("");
+  }
+
+  const selected =
+    nextId === NEW_PROFILE_ID ? null : profilesCache.find((p) => p.id === nextId);
+  if (deleteProfileBtn) deleteProfileBtn.hidden = !(selected && !selected.builtin);
+}
+
+function onProfilePickerSelect(profileId) {
+  setProfilePickerOpen(false);
+  if (profileId === NEW_PROFILE_ID) {
+    startNewProfile().catch((err) => setStatus(String(err.message || err), "err"));
+    return;
+  }
+  loadProfileById(profileId).catch((err) => setStatus(String(err.message || err), "err"));
+}
+
+function wireProfilePicker() {
+  if (!profilePickerBtn || !profilePickerMenu || profilePickerBtn.dataset.bound === "1") return;
+  profilePickerBtn.dataset.bound = "1";
+
+  profilePickerBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setProfilePickerOpen(profilePickerMenu.hidden);
+  });
+
+  profilePickerMenu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-profile-id]");
+    if (!option) return;
+    event.stopPropagation();
+    onProfilePickerSelect(option.dataset.profileId);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(".profile-picker-wrap")) return;
+    setProfilePickerOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setProfilePickerOpen(false);
+  });
+}
+
+function populateTemplateSelect(selectedId) {
+  if (!templateSelectEl) return;
+  const templates = getAllTemplates();
+  templateSelectEl.innerHTML = "";
+  for (const template of templates) {
+    const option = document.createElement("option");
+    option.value = template.id;
+    option.textContent = template.label;
+    templateSelectEl.appendChild(option);
+  }
+  const validIds = new Set(templates.map((t) => t.id));
+  templateSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_TEMPLATE_ID;
+}
+
+async function refreshQaBankNote(profileId) {
+  if (!qaBankNoteEl) return;
+  try {
+    const count = await getQaCount(profileId || "");
+    qaBankNoteEl.textContent = count === 1 ? "1 answer" : `${count} answers`;
+  } catch {
+    qaBankNoteEl.textContent = "0 answers";
+  }
+}
+
+async function loadPersonIntoForm(person) {
+  editingPersonId = person?.id || null;
+  const track = person?.roleTrack || resolveRoleTrackForPerson(person);
+  setActiveRoleTrackUi(track);
+  syncTrackLockForPerson(person);
+  populateTemplateSelect(person?.templateId || DEFAULT_TEMPLATE_ID);
+  fillPersonForm(formRoot, person, { roleTrack: track });
+  fillResumeWizard(formRoot, person);
+  const pickerId = person?.id || NEW_PROFILE_ID;
+  if (profileSelectEl) profileSelectEl.value = pickerId;
+  // Rebuild menu + visible label so the closed picker never stays on "Add a new profile"
+  // after loading a real person (built-in or custom).
+  populateProfileSelect(pickerId);
+  syncSaveButtonLabels();
+  await refreshQaBankNote(person?.id);
+  setSaveStatus("");
+}
+
+function blankNewPerson() {
+  const track = "sf";
+  return applyUsApplicantDefaults({
+    id: null,
+    label: "",
+    name: "",
+    email: "",
+    phone: "",
+    linkedin: "",
+    portfolio: "",
+    location: "",
+    address: "",
+    zip: "",
+    masterResume: "",
+    requiredExperience: [],
+    roleTrack: track,
+    promptTemplate: getTrackPromptTemplate(track),
+    coverLetterPrompt: resolveCoverLetterTemplateForTrack({ roleTrack: track }, track),
+    templateId: DEFAULT_TEMPLATE_ID,
+    resumeFilePrefix: "",
+    signatureTitle: "",
+    autofillExtras: {},
+    builtin: false
+  });
+}
+
+async function startNewProfile() {
+  editingPersonId = null;
+  populateProfileSelect(NEW_PROFILE_ID);
+  await loadPersonIntoForm(blankNewPerson());
+  setActiveTab("apply");
+}
+
+async function loadProfileById(profileId) {
+  const id = String(profileId || "").trim();
+  if (!id || id === NEW_PROFILE_ID) throw new Error("No profile selected.");
+  const full = await getProfileById(id);
+  if (!full?.id) throw new Error("Profile not found.");
+  const resolvedId = full.id;
+  await setActivePersonId(resolvedId);
+  const config = await getPersonSheetConfig(resolvedId);
+  const withSheet = {
+    ...full,
+    sheetTabName: resolveSheetTabNameForPerson({
+      ...full,
+      sheetTabName: config?.sheetTabName || full.sheetTabName || ""
+    }),
+    outputDir: config?.outputDir || full.outputDir || ""
+  };
+  populateProfileSelect(resolvedId);
+  await loadPersonIntoForm(withSheet);
+}
+
+async function refreshProfiles(selectedId) {
+  profilesCache = await getResumeProfiles();
+  populateProfileSelect(selectedId || (await getActivePersonId()));
+}
+
+function applyTrackTemplatesToForm(nextTrack, person, previousTrack) {
+  const base = {
+    ...(person || {}),
+    ...readPersonFromForm(formRoot, {
+      editingPersonId,
+      roleTrack: previousTrack,
+      templateId: templateSelectEl?.value
+    }),
+    roleTrack: previousTrack
+  };
+  const resumeEl = formRoot.querySelector("#personResumePrompt");
+  const coverEl = formRoot.querySelector("#personCoverPrompt");
+  if (resumeEl) resumeEl.value = resolvePromptTemplateForTrack(base, nextTrack);
+  if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(base, nextTrack);
+  const tabEl = formRoot.querySelector("#sheetTabName");
+  if (tabEl) {
+    const prevDefault = defaultSheetTabNameForPerson({ ...base, roleTrack: previousTrack });
+    const currentTab = String(tabEl.value || "").trim();
+    if (!currentTab || currentTab === prevDefault) {
+      tabEl.value = defaultSheetTabNameForPerson({ ...base, roleTrack: nextTrack });
+    }
+  }
+}
+
+async function saveProfile({ asNew = false } = {}) {
+  if (savePersonTopBtn) savePersonTopBtn.disabled = true;
+  setSaveStatus("Saving…");
+  try {
+    const wizardData = readResumeWizard(formRoot);
+    const result = await savePersonFromForm(formRoot, {
+      asNew: asNew || profileSelectEl?.value === NEW_PROFILE_ID,
+      editingPersonId: asNew || profileSelectEl?.value === NEW_PROFILE_ID ? null : editingPersonId,
+      roleTrack: readActiveRoleTrack(),
+      templateId: templateSelectEl?.value,
+      workHistory: wizardData.workHistory,
+      educationHistory: wizardData.educationHistory
+    });
+    const saved = result?.profile || result;
+    editingPersonId = saved?.id || editingPersonId;
+    await refreshProfiles(saved?.id);
+    await loadPersonIntoForm(saved);
+    const msg = result?.fromBuiltin ? `Saved as ${saved.label}` : `Saved ${saved.label}`;
+    setSaveStatus(msg, { ok: true });
+    showToast(msg, { kind: "ok" });
+    setStatus("");
+    return saved;
+  } catch (err) {
+    const msg = String(err?.message || err);
+    setSaveStatus(msg, { ok: false });
+    showToast(msg, { kind: "err", duration: 4500 });
+    setStatus(msg, "err");
+    if (err.focusKey) {
+      const idMap = {
+        label: "personLabel",
+        promptTemplate: "personResumePrompt",
+        masterResume: "personMasterResume",
+        requiredExperience: "personRequiredExperience",
+        coverLetterPrompt: "personCoverPrompt"
+      };
+      formRoot.querySelector(`#${idMap[err.focusKey] || ""}`)?.focus();
+      if (err.focusKey === "promptTemplate" || err.focusKey === "coverLetterPrompt") setActiveTab("batch");
+      if (err.focusKey === "masterResume" || err.focusKey === "requiredExperience") setActiveTab("resume");
+      if (err.focusKey === "label") setActiveTab("apply");
+    }
+    return null;
+  } finally {
+    if (savePersonTopBtn) savePersonTopBtn.disabled = false;
+  }
+}
+
+async function importFromResumeText(text, { sourceLabel = "resume" } = {}) {
+  const resumeText = String(text || "").trim();
+  if (resumeText.length < 40) {
+    throw new Error("Not enough text to import. Upload a text-based PDF/DOCX or paste resume text.");
+  }
+  const parsed = extractProfileFromResumeText(resumeText);
+  const current = await getProfileById(editingPersonId || profileSelectEl.value);
+  const asNew =
+    isEditingBuiltin(editingPersonId) ||
+    Boolean(parsed.name && current?.name && namesLikelyDifferent(current.name, parsed.name));
+  const merged = mergeExtractedProfileIntoPerson(current, parsed, resumeText, { resetEeo: asNew });
+  if (parsed.employers?.length) {
+    merged.workHistory = seedWorkHistoryFromEmployers(parsed.employers);
+  }
+  fillPersonForm(formRoot, merged, { roleTrack: readActiveRoleTrack() });
+  fillResumeWizard(formRoot, merged);
+  applyTrackTemplatesToForm(readActiveRoleTrack(), merged);
+  setActiveTab("resume");
+  if (parsed.name) {
+    await saveProfile({ asNew });
+  } else {
+    setSaveStatus("Imported — add name, then Save.", { ok: true });
+    setActiveTab("apply");
+  }
+}
+
+async function openQaEditor() {
+  const profileId = profileSelectEl.value || editingPersonId || "";
+  const url = new URL(chrome.runtime.getURL("qa-editor.html"));
+  if (profileId) url.searchParams.set("profileId", profileId);
+  const href = url.toString();
+  try {
+    await chrome.windows.create({ url: href, type: "popup", width: 980, height: 860, focused: true });
+  } catch {
+    await chrome.tabs.create({ url: href, active: true });
+  }
+}
+
+deleteProfileBtn?.addEventListener("click", async () => {
+  const profileId = profileSelectEl.value;
+  const selected = profilesCache.find((p) => p.id === profileId);
+  if (!selected || selected.builtin) return;
+  if (
+    !(await confirmDialog({
+      title: "Delete person?",
+      message: `"${selected.label}" will be removed permanently.`,
+      confirmText: "Delete",
+      danger: true
+    }))
+  )
+    return;
+  await deleteCustomProfile(profileId);
+  await refreshProfiles(DEFAULT_PROFILE_ID);
+  await loadProfileById(profileSelectEl.value);
+  setStatus(`Deleted ${selected.label}`, "ok");
+});
+
+roleTrackSelectEl?.addEventListener("change", () => {
+  const isNew = !editingPersonId || profileSelectEl?.value === NEW_PROFILE_ID;
+  if (!isNew || roleTrackSelectEl.disabled) {
+    applyRoleTrackSelectState(roleTrackSelectEl, {
+      track: activeRoleTrack,
+      locked: true
+    });
+    return;
+  }
+  const track = normalizeRoleTrackId(roleTrackSelectEl.value);
+  const previousTrack = readActiveRoleTrack();
+  if (track === previousTrack) return;
+  const person = profilesCache.find((p) => p.id === editingPersonId);
+  setActiveRoleTrackUi(track, { locked: false });
+  applyTrackTemplatesToForm(track, person, previousTrack);
+});
+
+formRoot?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  saveProfile({ asNew: false }).catch(() => {});
+});
+
+openQaEditorBtn?.addEventListener("click", () => {
+  openQaEditor().catch((err) => setStatus(String(err.message || err), "err"));
+});
+
+replaceResumeFromFileBtn?.addEventListener("click", () => personResumeFileEl?.click());
+
+clearMasterResumeBtn?.addEventListener("click", () => {
+  const el = formRoot.querySelector("#personMasterResume");
+  if (el) el.value = "";
+  if (personResumeFileEl) personResumeFileEl.value = "";
+  if (masterResumeFileHintEl) masterResumeFileHintEl.textContent = "";
+});
+
+personResumeFileEl?.addEventListener("change", async () => {
+  const file = personResumeFileEl.files?.[0];
+  if (!file) return;
+  try {
+    const { text, fileName } = await extractMasterResumeFromFile(file);
+    await importFromResumeText(text, { sourceLabel: fileName });
+    if (masterResumeFileHintEl) {
+      masterResumeFileHintEl.textContent = `Loaded ${fileName} (${text.length} chars).`;
+    }
+    personResumeFileEl.value = "";
+  } catch (err) {
+    setStatus(String(err.message || err), "err");
+  }
+});
+
+detectRequiredExperienceBtn?.addEventListener("click", () => {
+  const prompt = formRoot.querySelector("#personResumePrompt")?.value || "";
+  const resume = formRoot.querySelector("#personMasterResume")?.value || "";
+  const detected = parseRequiredExperienceFromPrompt(prompt).length
+    ? parseRequiredExperienceFromPrompt(prompt)
+    : parseEmployersFromResume(resume);
+  if (!detected.length) {
+    setSaveStatus("No employers detected from prompt or resume.", { ok: false });
+    return;
+  }
+  const el = formRoot.querySelector("#personRequiredExperience");
+  if (el) el.value = requiredExperienceToText(detected);
+  setSaveStatus(`Detected ${detected.length} employer(s).`, { ok: true });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || editorInitializing) return;
+  if (changes.custom_profiles) {
+    refreshProfiles(profileSelectEl?.value).catch(() => {});
+  }
+  if (changes.active_person_id?.newValue && changes.active_person_id.newValue !== editingPersonId) {
+    const next = String(changes.active_person_id.newValue || "").trim();
+    if (!next || next === NEW_PROFILE_ID) return;
+    loadProfileById(next).catch(() => {});
+  }
+  if (changes.qa_bank_version) {
+    refreshQaBankNote(editingPersonId).catch(() => {});
+  }
+});
+
+async function resolveEditorProfileId() {
+  // Never trust the hidden input default (__new__) before profiles are loaded.
+  const fromUrl = String(initialProfileId || "").trim();
+  if (fromUrl && fromUrl !== NEW_PROFILE_ID) return fromUrl;
+  if (fromUrl === NEW_PROFILE_ID) return NEW_PROFILE_ID;
+
+  const activeId = String((await getActivePersonId()) || "").trim();
+  if (activeId && activeId !== NEW_PROFILE_ID) return activeId;
+
+  return profilesCache.find((p) => p.id === DEFAULT_PROFILE_ID)?.id || profilesCache[0]?.id || NEW_PROFILE_ID;
+}
+
+async function init() {
+  editorInitializing = true;
+  try {
+    wireProfileTabs();
+    wireProfilePicker();
+    await loadAndApplyTheme();
+    watchThemeChanges();
+    initResumeWizard(formRoot);
+    setActiveTab(normalizeTab(initialTab));
+    populateTemplateSelect(DEFAULT_TEMPLATE_ID);
+
+    profilesCache = await getResumeProfiles();
+    const targetId = await resolveEditorProfileId();
+    populateProfileSelect(targetId);
+
+    if (initialPresetId) {
+      const preset = getBuiltinPreset(initialPresetId);
+      if (preset) {
+        await loadPersonIntoForm({ ...preset, id: preset.id });
+        setActiveTab("batch");
+        return;
+      }
+    }
+
+    // Edit profile from popup → open that person. "Add a new profile" only when chosen.
+    if (targetId === NEW_PROFILE_ID) {
+      await startNewProfile();
+    } else {
+      await loadProfileById(targetId);
+    }
+    setStatus("");
+  } finally {
+    editorInitializing = false;
+  }
+}
+
+init().catch((err) => {
+  editorInitializing = false;
+  setStatus(String(err.message || err), "err");
+});
