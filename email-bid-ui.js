@@ -10,8 +10,7 @@ import {
   testSmtpMailbox,
   smtpPresetForEmail,
   buildWebComposeUrl,
-  formatSmtpConnectError,
-  isPersonalMicrosoftMailbox
+  formatSmtpConnectError
 } from "./email-send.js";
 
 /**
@@ -19,7 +18,7 @@ import {
  *   getActivePerson: () => Promise<object|null>,
  *   setStatus: (msg: string) => void,
  *   setBusy: (busy: boolean) => void,
- *   showToast: (msg: string, opts?: object) => void,
+ *   setIconButton?: (button: HTMLElement, icon: string, label: string) => void,
  *   DEFAULT_TEMPLATE_ID: string,
  *   templateSelectEl: HTMLSelectElement|null,
  *   spreadsheetUrlEl: HTMLInputElement|null,
@@ -31,7 +30,7 @@ export function initEmailBidUi(deps) {
     getActivePerson,
     setStatus,
     setBusy,
-    showToast,
+    setIconButton,
     DEFAULT_TEMPLATE_ID,
     templateSelectEl,
     spreadsheetUrlEl,
@@ -40,28 +39,32 @@ export function initEmailBidUi(deps) {
 
   const toggleBtn = document.getElementById("toggleEmailBidPanel");
   const panelBody = document.getElementById("emailBidPanelBody");
-  const fromHint = document.getElementById("emailBidFromHint");
   const titleEl = document.getElementById("emailBidTitle");
   const companyEl = document.getElementById("emailBidCompany");
   const jdLinkEl = document.getElementById("emailBidJdLink");
   const jdTextEl = document.getElementById("emailBidJdText");
   const fillTabBtn = document.getElementById("emailBidFillTab");
   const prepareBtn = document.getElementById("emailBidPrepare");
-  const mailboxHint = document.getElementById("emailBidMailboxHint");
   const emailEl = document.getElementById("emailBidMailboxEmail");
   const passwordEl = document.getElementById("emailBidMailboxPassword");
   const mailboxSaveBtn = document.getElementById("emailBidMailboxSave");
   const mailboxDisconnectBtn = document.getElementById("emailBidMailboxDisconnect");
-  const mailboxStatus = document.getElementById("emailBidMailboxStatus");
   const draftBlock = document.getElementById("emailBidDraftBlock");
   const toListEl = document.getElementById("emailBidToList");
   const subjectEl = document.getElementById("emailBidSubject");
   const bodyEl = document.getElementById("emailBidBody");
   const customResumeEl = document.getElementById("emailBidCustomResume");
-  const attachHint = document.getElementById("emailBidAttachHint");
   const confirmBtn = document.getElementById("emailBidConfirmSend");
   const openWebBtn = document.getElementById("emailBidOpenWeb");
-  const statusHint = document.getElementById("emailBidStatusHint");
+
+  if (typeof setIconButton === "function") {
+    if (fillTabBtn) setIconButton(fillTabBtn, "scrape", "Fill from tab");
+    if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts & draft");
+    if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect mailbox");
+    if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect mailbox");
+    if (confirmBtn) setIconButton(confirmBtn, "apply", "Confirm & Send (SMTP)");
+    if (openWebBtn) setIconButton(openWebBtn, "mail", "Open in Outlook / Gmail");
+  }
 
   /** @type {null|object} */
   let draftCache = null;
@@ -88,29 +91,11 @@ export function initEmailBidUi(deps) {
     const email =
       (emailEl?.dataset.touched === "1" && String(emailEl.value || "").trim().toLowerCase()) ||
       String(box?.email || profileEmail).trim().toLowerCase();
-    if (fromHint) {
-      fromHint.textContent = email
-        ? `From: ${email} · finds Recruiters, HR, CTO, Leads · sheet on send`
-        : "From: — enter email below or set active profile email";
-    }
-    if (mailboxHint) {
-      mailboxHint.textContent = isPersonalMicrosoftMailbox(email)
-        ? "Outlook.com often blocks password SMTP — use Open in Outlook / Gmail if Connect fails."
-        : "SMTP needs an app password. If Connect times out, use Open in Outlook / Gmail.";
-    }
     if (emailEl && emailEl.dataset.touched !== "1") {
       emailEl.value = email;
     }
     if (passwordEl) {
-      passwordEl.placeholder = box?.password
-        ? "•••••••• (saved — leave blank to keep)"
-        : "App password";
-    }
-    if (mailboxStatus) {
-      mailboxStatus.textContent =
-        box?.connected && box.email
-          ? `Connected: ${box.email}`
-          : "Not connected — enter email + password, then Connect";
+      passwordEl.placeholder = box?.password ? "••••••••" : "App password";
     }
   }
 
@@ -128,20 +113,16 @@ export function initEmailBidUi(deps) {
           c.confidence != null && Number.isFinite(Number(c.confidence))
             ? ` · ${Math.round(Number(c.confidence) * 100)}%`
             : "";
-        const src = c.source ? ` · ${escapeHtml(c.source)}` : "";
         return `<label class="email-bid-to-row">
           <input type="checkbox" data-email="${escapeHtml(email)}" ${checked ? "checked" : ""} />
           <span class="email-bid-to-meta">
             <strong>${escapeHtml(c.name || email)}</strong>
             <span class="email-bid-to-email">${escapeHtml(email)}</span>
-            <span class="email-bid-to-role">${escapeHtml(c.role || "")}${conf}${src}</span>
+            <span class="email-bid-to-role">${escapeHtml(c.role || "")}${conf}</span>
           </span>
         </label>`;
       })
       .join("");
-    if (!toListEl.innerHTML) {
-      toListEl.innerHTML = `<p class="hint">No contacts yet — Find contacts &amp; draft.</p>`;
-    }
   }
 
   function selectedRecipients() {
@@ -161,12 +142,6 @@ export function initEmailBidUi(deps) {
     renderToList(draft.contacts || [], draft.toEmails || []);
     if (subjectEl) subjectEl.value = draft.subject || "";
     if (bodyEl) bodyEl.value = draft.body || "";
-    const names = (draft.attachments || []).map((a) => a.fileName).filter(Boolean);
-    if (attachHint) {
-      attachHint.textContent = names.length
-        ? `Attachments: ${names.join(", ")}`
-        : "Attachments: last generated resume/cover unless you pick a PDF";
-    }
   }
 
   function collectJobMeta(person) {
@@ -197,7 +172,6 @@ export function initEmailBidUi(deps) {
     const email = readMailboxEmail() || profileEmail;
     if (!email) {
       setStatus("Enter an email address.");
-      showToast("Enter an email address", { kind: "err" });
       return;
     }
     if (emailEl) emailEl.value = email;
@@ -223,12 +197,8 @@ export function initEmailBidUi(deps) {
       if (emailEl) emailEl.dataset.touched = "0";
       await refreshFromAndMailbox();
       setStatus(`Mailbox connected: ${email}`);
-      showToast(`Mailbox connected: ${email}`, { kind: "ok" });
     } catch (err) {
-      const msg = formatSmtpConnectError(err, email);
-      if (mailboxStatus) mailboxStatus.textContent = `Connect failed — ${msg.slice(0, 140)}`;
-      setStatus(`Mailbox connect failed: ${msg}`);
-      showToast(msg, { kind: "err", duration: 7000 });
+      setStatus(`Mailbox connect failed: ${formatSmtpConnectError(err, email)}`);
     }
   }
 
@@ -272,9 +242,7 @@ export function initEmailBidUi(deps) {
         savedAt: Date.now()
       }
     });
-    if (attachHint) attachHint.textContent = `Custom resume: ${file.name}`;
     setStatus(`Custom email resume: ${file.name}`);
-    showToast("Custom resume saved for Email Bid", { kind: "ok" });
   }
 
   async function prepare() {
@@ -288,15 +256,192 @@ export function initEmailBidUi(deps) {
       setStatus("Add company, link, or JD for Email Bid.");
       return;
     }
-    if (statusHint) statusHint.textContent = "Finding hiring contacts…";
     setBusy(true);
     setStatus("Email Bid · finding hiring contacts & drafting…");
     const res = await chrome.runtime.sendMessage({ type: "email_bid_prepare", jobMeta });
     if (!res?.ok) {
       setBusy(false);
-      if (statusHint) statusHint.textContent = res?.error || "Failed";
       setStatus(res?.error || "Email Bid prepare failed to start.");
     }
+  }
+
+  async function resolveResumeAttachment() {
+    const person = await getActivePerson().catch(() => null);
+    const store = await chrome.storage.local.get([EMAIL_BID_CUSTOM_RESUME_KEY]);
+    const custom = store[EMAIL_BID_CUSTOM_RESUME_KEY];
+    if (
+      custom?.base64 &&
+      (!custom.profileId || !person?.id || custom.profileId === person.id)
+    ) {
+      return {
+        fileName: custom.fileName || "Resume.pdf",
+        mimeType: custom.mimeType || "application/pdf",
+        base64: String(custom.base64).replace(/^data:[^;]+;base64,/, "")
+      };
+    }
+    const res = await chrome.runtime
+      .sendMessage({
+        type: "email_bid_resume_attachment",
+        jobMeta: draftCache?.jobMeta || collectJobMeta(person)
+      })
+      .catch(() => null);
+    if (res?.ok && res.attachment?.base64) {
+      return {
+        fileName: res.attachment.fileName || "Resume.pdf",
+        mimeType: res.attachment.mimeType || "application/pdf",
+        base64: String(res.attachment.base64).replace(/^data:[^;]+;base64,/, "")
+      };
+    }
+    return null;
+  }
+
+  async function downloadResumeAttachment(att) {
+    if (!att?.base64) return null;
+    const safeName = String(att.fileName || "Resume.pdf").replace(/[\\/:*?"<>|]/g, "_");
+    const url = `data:${att.mimeType || "application/pdf"};base64,${att.base64}`;
+    const downloadId = await chrome.downloads.download({
+      url,
+      filename: `EmailBid/${safeName}`,
+      conflictAction: "uniquify",
+      saveAs: false
+    });
+    return { downloadId, fileName: safeName };
+  }
+
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * Attach PDF once via Outlook/Gmail "Attach file" input — never Pictures, never retries
+   * that re-fire change on every file input (that was duplicating the resume).
+   */
+  async function tryAttachResumeInComposeTab(tabId, att) {
+    if (!att?.base64 || !tabId) return false;
+    if (att.base64.length > 700_000) return false;
+    const wantName = String(att.fileName || "Resume.pdf");
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await sleep(attempt === 0 ? 2000 : 800);
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          args: [wantName, att.base64, att.mimeType || "application/pdf"],
+          func: (fileName, base64, mimeType) => {
+            try {
+              const FLAG = "__brightstarEmailBidAttached";
+              if (window[FLAG]) {
+                return { ok: true, via: "already-injected", skipped: true };
+              }
+
+              const pageText = String(document.body?.innerText || "");
+              // Outlook shows each attachment chip with the file name — bail if present.
+              if (fileName && pageText.includes(fileName)) {
+                window[FLAG] = true;
+                return { ok: true, via: "already-on-page", skipped: true };
+              }
+
+              const labelOf = (el) =>
+                `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${
+                  el.textContent || ""
+                }`.toLowerCase();
+
+              const isPictureControl = (el) => {
+                const t = labelOf(el);
+                return /picture|photo|image|inline image|insert picture/.test(t);
+              };
+
+              const acceptsPdf = (input) => {
+                const accept = String(input.getAttribute("accept") || "")
+                  .toLowerCase()
+                  .trim();
+                if (/image\//.test(accept) && !/pdf|application\//.test(accept)) return false;
+                if (!accept || accept === "*" || accept === "*/*") return true;
+                return /pdf|application\/pdf|\.pdf|application\/\*/.test(accept);
+              };
+
+              const scoreInput = (input) => {
+                const accept = String(input.getAttribute("accept") || "").toLowerCase();
+                const id = `${input.id || ""} ${input.name || ""} ${input.className || ""}`.toLowerCase();
+                let score = 0;
+                if (/pdf/.test(accept)) score += 5;
+                if (/attach|file|upload|document/.test(id)) score += 3;
+                if (/image\//.test(accept)) score -= 10;
+                if (input.multiple) score -= 1;
+                return score;
+              };
+
+              // Reveal Attach file once (do not click on every retry after inject).
+              if (!window.__brightstarEmailBidAttachClicked) {
+                const candidates = Array.from(
+                  document.querySelectorAll(
+                    'button, div[role="button"], span[role="button"], div[data-icon-name], button[data-icon-name]'
+                  )
+                );
+                const preferred = candidates.find((el) => {
+                  if (isPictureControl(el)) return false;
+                  const t = labelOf(el);
+                  const icon = `${el.getAttribute("data-icon-name") || ""}`.toLowerCase();
+                  return (
+                    /attach file|attach files/.test(t) ||
+                    icon === "attach" ||
+                    icon === "attachregular" ||
+                    icon === "attach20regular"
+                  );
+                });
+                if (preferred) {
+                  preferred.click();
+                  window.__brightstarEmailBidAttachClicked = true;
+                }
+              }
+
+              const inputs = Array.from(document.querySelectorAll('input[type="file"]'))
+                .filter(acceptsPdf)
+                .sort((a, b) => scoreInput(b) - scoreInput(a));
+
+              const input = inputs[0];
+              if (!input) {
+                // Allow another Attach click on the next poll if the ribbon wasn't ready.
+                window.__brightstarEmailBidAttachClicked = false;
+                return {
+                  ok: false,
+                  inputs: document.querySelectorAll('input[type="file"]').length,
+                  pdfInputs: 0
+                };
+              }
+
+              const bin = atob(base64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              const file = new File([bytes], fileName, { type: mimeType || "application/pdf" });
+              const dt = new DataTransfer();
+              dt.items.add(file);
+
+              // Mark BEFORE dispatch so concurrent/retry scripts cannot multi-attach.
+              window[FLAG] = true;
+              input.files = dt.files;
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+
+              return {
+                ok: true,
+                via: "file-input-once",
+                accept: input.getAttribute("accept") || "",
+                inputCount: inputs.length
+              };
+            } catch (err) {
+              return { ok: false, error: String(err?.message || err) };
+            }
+          }
+        });
+        const result = results?.[0]?.result;
+        if (result?.ok) return true;
+      } catch {
+        /* tab may still be loading */
+      }
+    }
+    return false;
   }
 
   async function openWebCompose() {
@@ -315,14 +460,39 @@ export function initEmailBidUi(deps) {
       setStatus("Subject and message are required.");
       return;
     }
-    const url = buildWebComposeUrl(from, { to: toEmails, subject, body });
-    await chrome.tabs.create({ url, active: true });
-    if (statusHint) {
-      statusHint.textContent =
-        "Opened web compose — attach resume PDF there, then Send. SMTP Connect not required.";
+
+    const att = await resolveResumeAttachment();
+    let downloadedName = "";
+    if (att) {
+      try {
+        const dl = await downloadResumeAttachment(att);
+        downloadedName = dl?.fileName || att.fileName || "Resume.pdf";
+      } catch (err) {
+        setStatus(`Resume download failed: ${String(err?.message || err)}`);
+      }
+    } else {
+      setStatus("No resume PDF — pick Resume PDF first.");
     }
-    setStatus("Email Bid · opened Outlook/Gmail compose (attach resume, then Send)");
-    showToast("Attach your resume in the browser, then Send", { kind: "ok", duration: 5000 });
+
+    const url = buildWebComposeUrl(from, { to: toEmails, subject, body });
+    const tab = await chrome.tabs.create({ url, active: true });
+
+    let injected = false;
+    if (att && tab?.id) {
+      injected = await tryAttachResumeInComposeTab(tab.id, att);
+    }
+
+    setStatus(
+      injected
+        ? "Email Bid · compose opened with resume attached"
+        : downloadedName
+          ? `Email Bid · resume in Downloads/EmailBid/${downloadedName} — use Attach file (paperclip), not Pictures`
+          : "Email Bid · opened compose (no resume PDF)"
+    );
+
+    chrome.runtime
+      .sendMessage({ type: "email_bid_cleanup_chats", quiet: true })
+      .catch(() => {});
   }
 
   async function confirmSend() {
@@ -347,12 +517,10 @@ export function initEmailBidUi(deps) {
     }
     const box = await getProfileMailbox(person?.id || "", from).catch(() => null);
     if (!box?.connected) {
-      // This network often blocks SMTP TLS — fall back to web compose instead of failing.
       await openWebCompose();
       return;
     }
     const jobMeta = draftCache?.jobMeta || collectJobMeta(person);
-    if (statusHint) statusHint.textContent = "Sending…";
     setBusy(true);
     setStatus(`Email Bid · sending to ${toEmails.length} recipient(s)…`);
     const res = await chrome.runtime.sendMessage({
@@ -364,7 +532,6 @@ export function initEmailBidUi(deps) {
     });
     if (!res?.ok) {
       setBusy(false);
-      if (statusHint) statusHint.textContent = res?.error || "Failed";
       setStatus(res?.error || "Email Bid send failed to start.");
     }
   }
@@ -414,32 +581,26 @@ export function initEmailBidUi(deps) {
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === "email_bid_toast") {
       const kind = message.kind === "err" || message.kind === "info" ? message.kind : "ok";
-      showToast(String(message.message || ""), { kind, duration: 4200 });
       if (message.message) setStatus(String(message.message));
-      if (statusHint && message.message) statusHint.textContent = String(message.message);
       if (kind === "ok" || kind === "err") setBusy(false);
     }
     if (message?.type === "email_bid_prepare_done") {
       setBusy(false);
       if (!message.ok) {
-        if (statusHint) statusHint.textContent = message.error || "Prepare failed";
         setStatus(message.error || "Email Bid prepare failed.");
         return;
       }
       applyDraft(message.draft);
-      if (statusHint) {
-        statusHint.textContent = `Draft ready — ${(message.draft?.toEmails || []).length} recipient(s). Review To, then Confirm & Send.`;
-      }
+      setStatus(
+        `Email Bid draft ready — ${(message.draft?.toEmails || []).length} recipient(s)`
+      );
       setPanelOpen(true);
     }
     if (message?.type === "email_bid_send_done") {
       setBusy(false);
-      if (statusHint) {
-        statusHint.textContent = message.ok
-          ? message.status || "Sent"
-          : message.error || "Send failed";
-      }
-      if (message.ok) showToast(message.status || "Email Bid sent", { kind: "ok" });
+      setStatus(
+        message.ok ? message.status || "Email Bid sent" : message.error || "Email Bid send failed"
+      );
     }
   });
 

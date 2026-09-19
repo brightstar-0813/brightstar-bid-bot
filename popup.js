@@ -1308,7 +1308,14 @@ const ACTION_ICON_PATHS = {
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h3"/><path d="M13 13h3"/><path d="M8 17h3"/><path d="M13 17h3"/>',
   autofill:
     '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
-  qa: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>'
+  qa: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>',
+  search:
+    '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  connect:
+    '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7.1-7.1l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7.1 7.1l1-1"/>',
+  disconnect:
+    '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7.1-7.1l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7.1 7.1l1-1"/><path d="m4 4 16 16"/>',
+  mail: '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>'
 };
 
 function setIconButton(button, icon, label) {
@@ -3920,7 +3927,7 @@ initEmailBidUi({
   getActivePerson,
   setStatus,
   setBusy,
-  showToast,
+  setIconButton,
   DEFAULT_TEMPLATE_ID,
   templateSelectEl,
   spreadsheetUrlEl,

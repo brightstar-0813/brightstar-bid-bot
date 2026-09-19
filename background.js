@@ -155,6 +155,7 @@ import {
   resolveEmailBidAttachments
 } from "./email-bid.js";
 import { harvestContactsFromAiText } from "./email-contacts.js";
+import { harvestEmailDraftFromAiText } from "./prompts/email-compose.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
@@ -1023,49 +1024,308 @@ async function getSheetConfig() {
 }
 
 /**
- * Email Bid: harvest contact JSON via active AI tab.
+ * Email Bid: run a prompt on the AI tab and wait for contacts or draft JSON.
  * @param {string} prompt
- * @param {{ company?: string }} [opts]
+ * @param {{ company?: string, harvest?: "contacts"|"draft" }} [opts]
  */
-async function runEmailBidContactAi(prompt, opts = {}) {
+/**
+ * Track ChatGPT/Claude conversation ids created during Email Bid prepare so
+ * they can be deleted after send (when "Delete AI chat after job" is on).
+ * @param {{ tabId?: number|null, chatIds?: string[] }} tracked
+ * @param {number} tabId
+ * @param {string} chatId
+ */
+function trackEmailBidAiChat(tracked, tabId, chatId) {
+  if (!tracked || typeof tracked !== "object") return;
+  if (typeof tabId === "number") tracked.tabId = tabId;
+  const id = String(chatId || "").trim();
+  if (!id) return;
+  if (!Array.isArray(tracked.chatIds)) tracked.chatIds = [];
+  if (!tracked.chatIds.includes(id)) tracked.chatIds.push(id);
+}
+
+const EMAIL_BID_PENDING_AI_CHATS_KEY = "email_bid_pending_ai_chats";
+
+/** Persist prepare-time chat ids until Confirm & Send / Open in Outlook. */
+async function saveEmailBidPendingAiChats(tracked = {}) {
+  const chatIds = [
+    ...new Set((Array.isArray(tracked?.chatIds) ? tracked.chatIds : []).map(String).filter(Boolean))
+  ];
+  const tabId = typeof tracked?.tabId === "number" ? tracked.tabId : null;
+  try {
+    if (!chatIds.length && tabId == null) {
+      await chrome.storage.local.remove(EMAIL_BID_PENDING_AI_CHATS_KEY);
+      return;
+    }
+    const prev = await chrome.storage.local.get(EMAIL_BID_PENDING_AI_CHATS_KEY);
+    const old = prev[EMAIL_BID_PENDING_AI_CHATS_KEY] || {};
+    const merged = [
+      ...new Set([...(Array.isArray(old.chatIds) ? old.chatIds : []), ...chatIds].map(String).filter(Boolean))
+    ].slice(-12);
+    await chrome.storage.local.set({
+      [EMAIL_BID_PENDING_AI_CHATS_KEY]: {
+        tabId: tabId ?? (typeof old.tabId === "number" ? old.tabId : null),
+        chatIds: merged,
+        savedAt: Date.now()
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadEmailBidPendingAiChats() {
+  try {
+    const data = await chrome.storage.local.get(EMAIL_BID_PENDING_AI_CHATS_KEY);
+    const pending = data[EMAIL_BID_PENDING_AI_CHATS_KEY] || {};
+    return {
+      tabId: typeof pending.tabId === "number" ? pending.tabId : null,
+      chatIds: (Array.isArray(pending.chatIds) ? pending.chatIds : []).map(String).filter(Boolean)
+    };
+  } catch {
+    return { tabId: null, chatIds: [] };
+  }
+}
+
+/**
+ * Sidebar leftovers from Email Bid (contacts + outreach draft). ChatGPT titles
+ * often look like "Find hiring contacts" / "Write hiring outreach email".
+ */
+async function collectEmailBidChatIdsFromSidebar(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [p],
+      func: (site) => {
+        const re =
+          /find hiring contacts|hiring outreach email|write hiring outreach|hiring contact search|research contacts|outreach contacts|email bid|contact research/i;
+        const out = [];
+        const seen = new Set();
+        const hrefRe = site === "claude" ? /\/chat\/([a-f0-9-]+)/i : /\/c\/([a-zA-Z0-9_-]+)/;
+        const sel = site === "claude" ? 'a[href*="/chat/"]' : 'a[href*="/c/"]';
+        for (const a of document.querySelectorAll(sel)) {
+          const href = String(a.getAttribute("href") || a.href || "");
+          const id = (href.match(hrefRe) || [])[1] || "";
+          if (!id || seen.has(id)) continue;
+          const title = String(a.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (!title || !re.test(title)) continue;
+          seen.add(id);
+          out.push(id);
+          if (out.length >= 16) break;
+        }
+        return out;
+      }
+    });
+    return (Array.isArray(results?.[0]?.result) ? results[0].result : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Remove AI chats used for the last Email Bid (tracked ids + matching sidebar
+ * titles). Respects "Delete AI chat after job". Called after send / open web.
+ */
+async function cleanupEmailBidAiChats(tracked = {}, { sweepSidebar = true, quiet = false } = {}) {
+  const pending = await loadEmailBidPendingAiChats();
+  const preferredTab =
+    typeof tracked?.tabId === "number"
+      ? tracked.tabId
+      : typeof pending.tabId === "number"
+        ? pending.tabId
+        : null;
+  const tabId = await resolveAiTabForCleanup(preferredTab);
+  if (typeof tabId !== "number") {
+    try {
+      await chrome.storage.local.remove(EMAIL_BID_PENDING_AI_CHATS_KEY);
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, via: "no-tab" };
+  }
+
+  const provider = await getStoredAiProvider();
+  const ids = [];
+  const pushId = (v) => {
+    const id = String(v || "").trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  (Array.isArray(tracked?.chatIds) ? tracked.chatIds : []).forEach(pushId);
+  pending.chatIds.forEach(pushId);
+
+  if (sweepSidebar) {
+    try {
+      const fromSidebar = await collectEmailBidChatIdsFromSidebar(tabId, provider);
+      fromSidebar.forEach(pushId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!(await isDeleteAiChatHistoryEnabled())) {
+    try {
+      if (ids.length) {
+        const stored = await chrome.storage.local.get(["last_ai_chat_id", "last_ai_chat_ids"]);
+        const prev = Array.isArray(stored.last_ai_chat_ids) ? stored.last_ai_chat_ids : [];
+        const kept = prev.map(String).filter((id) => id && !ids.includes(id));
+        const patch = { last_ai_chat_ids: kept };
+        if (ids.includes(String(stored.last_ai_chat_id || ""))) {
+          patch.last_ai_chat_id = kept[kept.length - 1] || "";
+        }
+        await chrome.storage.local.set(patch);
+      }
+      await chrome.storage.local.remove(EMAIL_BID_PENDING_AI_CHATS_KEY);
+    } catch {
+      /* ignore */
+    }
+    await setStatus("Keeping AI chat history (Delete AI chat after job is off).");
+    return { ok: true, via: "skipped-toggle-off" };
+  }
+
+  if (!ids.length) {
+    try {
+      await chrome.storage.local.remove(EMAIL_BID_PENDING_AI_CHATS_KEY);
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, via: "nothing-to-delete" };
+  }
+
+  if (!quiet) {
+    await setStatus(
+      `Email Bid · removing AI chat${ids.length > 1 ? `s (${ids.length})` : ""}…`
+    );
+  }
+  const failed = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    const id = ids[i];
+    try {
+      await deleteCurrentAiConversation(tabId, {
+        chatId: id,
+        skipExtras: true,
+        leaveBlank: false
+      });
+    } catch {
+      failed.push(id);
+    }
+  }
+  try {
+    await ensureFreshChat(tabId, provider);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const stored = await chrome.storage.local.get(["last_ai_chat_id", "last_ai_chat_ids"]);
+    const prev = Array.isArray(stored.last_ai_chat_ids) ? stored.last_ai_chat_ids : [];
+    const kept = prev
+      .map(String)
+      .filter((id) => id && !ids.includes(id))
+      .concat(failed);
+    const patch = { last_ai_chat_ids: [...new Set(kept)].slice(-8) };
+    if (ids.includes(String(stored.last_ai_chat_id || ""))) {
+      patch.last_ai_chat_id =
+        failed[0] || patch.last_ai_chat_ids[patch.last_ai_chat_ids.length - 1] || "";
+    }
+    await chrome.storage.local.set(patch);
+    if (!failed.length && !patch.last_ai_chat_ids.length) {
+      await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
+    }
+    if (failed.length) {
+      await chrome.storage.local.set({
+        [EMAIL_BID_PENDING_AI_CHATS_KEY]: {
+          tabId,
+          chatIds: failed,
+          savedAt: Date.now()
+        }
+      });
+    } else {
+      await chrome.storage.local.remove(EMAIL_BID_PENDING_AI_CHATS_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+  if (failed.length) {
+    if (!quiet) await setStatus(`Email Bid chat cleanup partial — ${failed.length} left.`);
+    return { ok: false, via: "partial", failed };
+  }
+  if (!quiet) await setStatus("Email Bid · AI chat history cleared.");
+  return { ok: true, via: "ok", chatIds: ids };
+}
+
+async function runEmailBidAi(prompt, opts = {}) {
+  const harvest = opts.harvest === "draft" ? "draft" : "contacts";
   const provider = await getStoredAiProvider();
   const tab = await ensureAiTab(provider);
   const tabId = tab?.id;
   if (typeof tabId !== "number") {
     throw new Error(`Open ${aiProviderLabel(provider)} in a browser tab first.`);
   }
+  trackEmailBidAiChat(opts.trackedChats, tabId, "");
   await aiSendPrompt(tabId, prompt, true);
+  let chatId = await rememberAiChatFromTab(tabId, provider).catch(() => "");
+  trackEmailBidAiChat(opts.trackedChats, tabId, chatId);
+  if (chatId) {
+    await dismissEmptyNewChatStubs(tabId, provider, { keepChatId: chatId }).catch(() => 0);
+  }
   const start = Date.now();
   const timeoutMs = 3 * 60 * 1000;
   let lastText = "";
   while (Date.now() - start < timeoutMs) {
     await sleep(2000);
     if (batchControl.stop) break;
+    // Conversation id can appear slightly after the first message.
+    if (opts.trackedChats && !String(chatId || "").trim()) {
+      chatId = await rememberAiChatFromTab(tabId, provider).catch(() => "");
+      trackEmailBidAiChat(opts.trackedChats, tabId, chatId);
+    }
     const plain = await readLatestAssistantPlainText(tabId).catch(() => "");
     if (plain && plain.length > 40) lastText = plain;
     const state = await chatgptPollState(tabId, { harvestJson: true }).catch(() => null);
     if (state?.text && String(state.text).length > 40) lastText = String(state.text);
-    if (lastText && harvestContactsFromAiText(lastText, { company: opts.company }).length) {
+    if (!lastText) continue;
+    if (harvest === "draft") {
+      if (harvestEmailDraftFromAiText(lastText)?.subject) return lastText;
+    } else if (harvestContactsFromAiText(lastText, { company: opts.company }).length) {
       return lastText;
     }
   }
   if (lastText) return lastText;
-  throw new Error("Timed out waiting for contact research JSON from the AI tab.");
+  throw new Error(
+    harvest === "draft"
+      ? "Timed out waiting for email draft JSON from the AI tab."
+      : "Timed out waiting for contact research JSON from the AI tab."
+  );
+}
+
+/** @deprecated use runEmailBidAi */
+async function runEmailBidContactAi(prompt, opts = {}) {
+  return runEmailBidAi(prompt, { ...opts, harvest: "contacts" });
 }
 
 /**
  * Shared deps for Email Bid prepare / confirm send.
  * @param {object} person
  * @param {object} jobMeta
- * @param {{ writeSheet?: boolean }} [extra]
+ * @param {{ writeSheet?: boolean, trackedChats?: { tabId?: number|null, chatIds?: string[] } }} [extra]
  */
 function buildEmailBidDeps(person, jobMeta, extra = {}) {
   const company = jobMeta?.company || jobMeta?.companyName || "";
+  const trackedChats = extra.trackedChats || null;
   return {
     attachCover: true,
     writeSheet: extra.writeSheet !== false,
     reportStatus: setStatus,
-    runAiPrompt: async (prompt) => runEmailBidContactAi(prompt, { company }),
+    runAiPrompt: async (prompt, promptOpts = {}) =>
+      runEmailBidAi(prompt, {
+        company,
+        harvest: promptOpts.harvest === "draft" ? "draft" : "contacts",
+        trackedChats
+      }),
     resolveResumeAttachment: async () => {
       const docs = await resolveUploadDocs({
         csvRow: jobMeta?.csvRow,
@@ -10088,9 +10348,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (type === "email_bid_resume_attachment") {
+    (async () => {
+      try {
+        const person = await getActivePerson();
+        const jobMeta = message.jobMeta || {};
+        const deps = buildEmailBidDeps(person || {}, jobMeta);
+        const attachments = await resolveEmailBidAttachments(person || {}, jobMeta, deps);
+        const resume =
+          attachments.find((a) => a.kind === "resume") || attachments[0] || null;
+        safeSendResponse(
+          sendResponse,
+          resume?.base64
+            ? {
+                ok: true,
+                attachment: {
+                  fileName: resume.fileName || "Resume.pdf",
+                  mimeType: resume.mimeType || "application/pdf",
+                  base64: resume.base64,
+                  kind: resume.kind || "resume"
+                }
+              }
+            : { ok: false, error: "No resume PDF found — pick a custom resume or generate docs first." }
+        );
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "email_bid_prepare") {
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
+      const trackedChats = { tabId: null, chatIds: [] };
+      let draftOk = false;
+      let draftStatus = "";
       try {
         const person = await getActivePerson();
         if (!person?.email) throw new Error("Active profile email is required for Email Bid.");
@@ -10112,9 +10405,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             })
             .catch(() => null));
 
-        const deps = buildEmailBidDeps(person, jobMeta);
+        const deps = buildEmailBidDeps(person, jobMeta, { trackedChats });
         const draft = await prepareEmailBidDraft(person, jobMeta, resumeJson, deps);
+        draftOk = Boolean(draft?.ok);
         const attachments = draft?.ok ? await resolveEmailBidAttachments(person, jobMeta, deps) : [];
+        if (draftOk) {
+          draftStatus = `Email Bid draft ready — review To (${
+            draft.toEmails?.length || 0
+          }) then Confirm & Send`;
+        }
         chrome.runtime
           .sendMessage({
             type: "email_bid_prepare_done",
@@ -10146,6 +10445,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.runtime
           .sendMessage({ type: "email_bid_prepare_done", ok: false, error: msg })
           .catch(() => {});
+      } finally {
+        // Keep chats until Confirm & Send / Open in Outlook — then delete.
+        try {
+          await saveEmailBidPendingAiChats(trackedChats);
+        } catch {
+          /* ignore */
+        }
+        if (draftOk && draftStatus) {
+          await setStatus(draftStatus);
+        }
       }
     })();
     return false;
@@ -10163,6 +10472,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     startKeepAlive();
     safeSendResponse(sendResponse, { ok: true, started: true });
     (async () => {
+      let sendOk = false;
+      let sendStatus = "";
       try {
         const person = await getActivePerson();
         if (!person?.email) throw new Error("Active profile email is required for Email Bid.");
@@ -10187,13 +10498,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
           deps
         );
+        sendOk = Boolean(result?.ok);
+        sendStatus = sendOk
+          ? `Email Bid sent — ${(message.toEmails || []).length || result.toEmails?.length || 0} recipients`
+          : result?.error || result?.reason || "Send failed";
         chrome.runtime
           .sendMessage({
             type: "email_bid_send_done",
-            ok: Boolean(result?.ok),
-            status: result?.ok
-              ? `Email Bid sent — ${(message.toEmails || []).length || result.toEmails?.length || 0} recipients`
-              : result?.error || result?.reason || "Send failed",
+            ok: sendOk,
+            status: sendStatus,
             error: result?.error || result?.reason || ""
           })
           .catch(() => {});
@@ -10206,6 +10519,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } finally {
         isRunning = false;
         stopKeepAlive();
+        if (sendOk) {
+          try {
+            await cleanupEmailBidAiChats({}, { sweepSidebar: true });
+          } catch (cleanupErr) {
+            await setStatus(
+              `Email Bid chat cleanup skipped: ${String(cleanupErr?.message || cleanupErr)}`
+            );
+          }
+          if (sendStatus) await setStatus(sendStatus);
+        }
+      }
+    })();
+    return false;
+  }
+
+  if (type === "email_bid_cleanup_chats") {
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    (async () => {
+      try {
+        if (isRunning) {
+          await setStatus("Email Bid chat cleanup deferred — batch still running.");
+          chrome.runtime
+            .sendMessage({
+              type: "email_bid_cleanup_chats_done",
+              ok: false,
+              deferred: true,
+              error: "busy"
+            })
+            .catch(() => {});
+          return;
+        }
+        const detail = await cleanupEmailBidAiChats(
+          {},
+          { sweepSidebar: true, quiet: Boolean(message.quiet) }
+        );
+        chrome.runtime
+          .sendMessage({
+            type: "email_bid_cleanup_chats_done",
+            ok: Boolean(detail?.ok !== false),
+            via: detail?.via || "",
+            error: detail?.error || ""
+          })
+          .catch(() => {});
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Email Bid chat cleanup skipped: ${msg}`);
+        chrome.runtime
+          .sendMessage({ type: "email_bid_cleanup_chats_done", ok: false, error: msg })
+          .catch(() => {});
       }
     })();
     return false;

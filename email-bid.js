@@ -4,7 +4,7 @@
 
 import { buildEmailContactsPrompt } from "./prompts/email-contacts.js";
 import { harvestContactsFromAiText } from "./email-contacts.js";
-import { composeEmailBid } from "./email-compose.js";
+import { composeEmailBidSmart } from "./email-compose.js";
 import { EMAIL_BID_CUSTOM_RESUME_KEY, sendEmailBidMessage } from "./email-send.js";
 
 export async function reportEmailBidStatus(message, kind = "info", reportStatus) {
@@ -82,12 +82,13 @@ export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
     return { ok: false, reason: "no-contacts", contacts: [] };
   }
 
-  await status(`Email Bid · drafting message (${contacts.length} contact(s))…`);
-  const composed = composeEmailBid({
+  await status(`Email Bid · drafting a human note for ${label}…`);
+  const composed = await composeEmailBidSmart({
     contacts,
     person,
-    job: { title, company, jdText: jobMeta?.jdText || "" },
-    resumeJson
+    job: { title, company, jdText: jobMeta?.jdText || jobMeta?.description || "" },
+    resumeJson,
+    runAiPrompt: deps.runAiPrompt
   });
 
   await status(
@@ -105,7 +106,8 @@ export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
     templateId: composed.templateId,
     templateName: composed.templateName,
     roleKind: composed.roleKind,
-    primaryName: composed.primaryName
+    primaryName: composed.primaryName,
+    source: composed.source || "local"
   };
 }
 

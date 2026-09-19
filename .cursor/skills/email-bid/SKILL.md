@@ -44,9 +44,9 @@ Independent **Email Bid** panel in the popup/side panel:
 1. Job fields (title, company, link, JD) + Fill from tab  
 2. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
 3. **Find contacts** via AI engine → To checklist (check/uncheck)  
-4. Subject + body (human template; **no signature block** — mailbox signature)  
+4. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block.  
 5. Attachments: last generated resume/cover **or** custom PDF  
-6. **Confirm & Send** → separate SMTP sends (or one multi-To if user prefers list)  
+6. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
 7. Progress on **bottom status bar**; sheet Ready→Applied on successful send  
 
 Does **not** auto-run after batch/manual generate.
@@ -56,14 +56,22 @@ Does **not** auto-run after batch/manual generate.
 - Short, role-specific; 2–3 resume-backed strengths  
 - Do not claim JD buzzwords absent from resume  
 - Prefer personalized copy per primary contact; To list may include several checked recipients  
+- End with a short closing greeting (Warm regards / Thank you / Best regards) — no name/phone/LinkedIn block  
 - Status reports who was emailed + confidence  
+
+## AI chat cleanup
+
+After **Confirm & Send** or **Open in Outlook / Gmail**, delete the ChatGPT/Claude
+conversations from the last Email Bid (contacts + draft) when **Delete AI chat after job**
+is on. Also sweeps Recents titles like "Find hiring contacts" / "Write hiring outreach email".
+Cleanup is deferred if a batch/generate is running.
 
 ## Ownership
 
 | Concern | Files |
 |---------|--------|
 | Orchestration | `email-bid.js` |
-| Templates / roles | `prompts/email-templates.js`, `email-compose.js` |
+| Templates / roles | `prompts/email-templates.js`, `prompts/email-compose.js`, `email-compose.js` |
 | Contact harvest | `email-contacts.js`, `prompts/email-contacts.js` |
 | SMTP send | `email-send.js`, `native-host/csv_watcher.py` |
 | UI | `email-bid-ui.js`, `popup.html`, `popup.css` (wired from `popup.js`) |

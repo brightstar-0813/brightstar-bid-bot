@@ -836,8 +836,6 @@
             Expand Email Bid
           </button>
           <div class="panel-body" id="emailBidPanelBody" hidden>
-            <p class="hint" id="emailBidFromHint">From: active profile · finds Recruiters, HR, CTO, Leads · sheet on send</p>
-
             <div class="subblock">
               <p class="subsection-title">Job</p>
               <div class="grid-2">
@@ -858,15 +856,28 @@
                 <span>Job description</span>
                 <textarea id="emailBidJdText" placeholder="Paste JD…" rows="3"></textarea>
               </label>
-              <div class="row-split" style="gap:8px;flex-wrap:wrap;">
-                <button type="button" id="emailBidFillTab" class="ghost compact">Fill from tab</button>
-                <button type="button" id="emailBidPrepare" class="primary compact">Find contacts &amp; draft</button>
+              <div class="manual-tools" role="group" aria-label="Email Bid job helpers">
+                <button
+                  type="button"
+                  id="emailBidFillTab"
+                  class="ghost compact icon-button"
+                  title="Fill from tab"
+                  aria-label="Fill from tab"
+                ></button>
+                <div class="manual-primary-icons">
+                  <button
+                    type="button"
+                    id="emailBidPrepare"
+                    class="primary icon-button"
+                    title="Find contacts & draft"
+                    aria-label="Find contacts and draft"
+                  ></button>
+                </div>
               </div>
             </div>
 
             <div class="subblock">
               <p class="subsection-title">Mailbox</p>
-              <p class="hint" id="emailBidMailboxHint">SMTP needs an app password. If Connect times out, use Open in Outlook / Gmail (this PC blocks SMTP TLS).</p>
               <label class="field">
                 <span>Email</span>
                 <input id="emailBidMailboxEmail" type="email" placeholder="you@outlook.com" autocomplete="username" />
@@ -875,15 +886,26 @@
                 <span>Password</span>
                 <input id="emailBidMailboxPassword" type="password" placeholder="App password" autocomplete="new-password" />
               </label>
-              <div class="row-split" style="gap:8px;flex-wrap:wrap;">
-                <button type="button" id="emailBidMailboxSave" class="primary compact">Connect</button>
-                <button type="button" id="emailBidMailboxDisconnect" class="ghost compact">Disconnect</button>
+              <div class="manual-tools" role="group" aria-label="Mailbox actions">
+                <button
+                  type="button"
+                  id="emailBidMailboxSave"
+                  class="primary icon-button"
+                  title="Connect mailbox"
+                  aria-label="Connect mailbox"
+                ></button>
+                <button
+                  type="button"
+                  id="emailBidMailboxDisconnect"
+                  class="ghost icon-button"
+                  title="Disconnect mailbox"
+                  aria-label="Disconnect mailbox"
+                ></button>
               </div>
-              <p class="hint" id="emailBidMailboxStatus">Not connected</p>
             </div>
 
             <div id="emailBidDraftBlock" class="email-bid-draft" hidden>
-              <p class="subsection-title">To (hiring contacts)</p>
+              <p class="subsection-title">To</p>
               <div id="emailBidToList" class="email-bid-to-list" role="group" aria-label="Recipients"></div>
               <label class="field">
                 <span>Subject</span>
@@ -894,17 +916,26 @@
                 <textarea id="emailBidBody" rows="10" placeholder="Email body…"></textarea>
               </label>
               <label class="field">
-                <span>Custom resume PDF (optional)</span>
+                <span>Resume PDF</span>
                 <input id="emailBidCustomResume" type="file" accept="application/pdf,.pdf" />
               </label>
-              <p class="hint" id="emailBidAttachHint">Attachments: last generated resume/cover unless you pick a PDF</p>
-              <div class="manual-primary" style="display:flex;flex-direction:column;gap:8px;">
-                <button type="button" id="emailBidConfirmSend" class="primary">Confirm &amp; Send (SMTP)</button>
-                <button type="button" id="emailBidOpenWeb" class="ghost">Open in Outlook / Gmail</button>
+              <div class="manual-tools email-bid-send-tools" role="group" aria-label="Send actions">
+                <button
+                  type="button"
+                  id="emailBidConfirmSend"
+                  class="primary icon-button"
+                  title="Confirm & Send (SMTP)"
+                  aria-label="Confirm and Send via SMTP"
+                ></button>
+                <button
+                  type="button"
+                  id="emailBidOpenWeb"
+                  class="ghost icon-button"
+                  title="Open in Outlook / Gmail"
+                  aria-label="Open in Outlook or Gmail"
+                ></button>
               </div>
-              <p class="hint">Web compose works when SMTP Connect fails — attach your resume in the browser, then Send.</p>
             </div>
-            <p class="hint" id="emailBidStatusHint" role="status">Idle</p>
           </div>
         </section>
 

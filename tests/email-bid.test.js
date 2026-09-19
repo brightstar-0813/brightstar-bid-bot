@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildEmailContactsPrompt } from "../prompts/email-contacts.js";
 import { harvestContactsFromAiText, normalizeContacts } from "../email-contacts.js";
-import { composeEmailBid } from "../email-compose.js";
+import { composeEmailBid, harvestEmailDraftFromAiText } from "../email-compose.js";
+import { pickTemplateVariant, selectTemplateForRole } from "../prompts/email-templates.js";
+import { buildEmailComposePrompt } from "../prompts/email-compose.js";
 import {
   smtpPresetForEmail,
   mailProviderForEmail,
@@ -58,14 +60,54 @@ describe("composeEmailBid", () => {
       contacts: [
         { name: "Sam Lead", role: "Engineering Manager", email: "sam@acme.com", confidence: 0.85 }
       ],
-      person: { firstName: "Alex", lastName: "Lee", email: "alex@example.com" },
-      job: { title: "Backend Engineer", company: "Acme" },
-      resumeJson: null
+      person: { firstName: "Alex", lastName: "Lee", name: "Alex Lee", email: "alex@example.com" },
+      job: {
+        title: "Backend Engineer",
+        company: "Acme",
+        jdText: "Requirements: Python and AWS. We build cloud platforms for fintech customers."
+      },
+      resumeJson: {
+        skills: ["Python", "AWS", "SQL"],
+        experience: [
+          {
+            company: "PriorCo",
+            title: "Engineer",
+            bullets: ["Led Python services on AWS that cut latency 30%"]
+          }
+        ]
+      }
     });
     assert.ok(composed.toEmails.includes("sam@acme.com"));
     assert.ok(String(composed.subject || "").length > 3);
     assert.ok(String(composed.body || "").length > 20);
+    assert.match(composed.body, /(?:Warm regards|Thank you|Best regards|Thanks),?\s*$/i);
     assert.ok(!/Best regards,[\s\S]*Alex Lee/i.test(composed.body));
+    assert.ok(!/I recently learned about/i.test(composed.body));
+  });
+
+  it("picks different local variants for different jobs", () => {
+    const family = selectTemplateForRole("recruiter");
+    const a = pickTemplateVariant(family, { company: "Acme", title: "SE", jdText: "aaa" });
+    const b = pickTemplateVariant(family, { company: "Beta", title: "PM", jdText: "zzz different" });
+    assert.ok(a.subject);
+    assert.ok(b.subject);
+    // Same job is stable
+    const a2 = pickTemplateVariant(family, { company: "Acme", title: "SE", jdText: "aaa" });
+    assert.equal(a.subject, a2.subject);
+    assert.equal(a.body, a2.body);
+    // Different jobs usually differ (hash collision possible but unlikely here)
+    assert.notEqual(`${a.subject}|${a.body}`, `${b.subject}|${b.body}`);
+  });
+
+  it("harvests AI draft JSON", () => {
+    const draft = harvestEmailDraftFromAiText(
+      `{"subject":"Quick note on Salesforce at Acme","body":"Hi Pat,\\n\\nI saw the Salesforce Developer role and wanted to share how my Apex and Lightning work maps to what you need.\\n\\nResume attached.","angle":"JD Apex match"}`
+    );
+    assert.equal(draft.subject, "Quick note on Salesforce at Acme");
+    assert.match(draft.body, /Hi Pat/);
+    assert.match(draft.body, /(?:Warm regards|Thank you|Best regards|Thanks),?\s*$/i);
+    assert.ok(!/Alex Lee|LinkedIn|\\d{3}[-.]\\d{3}/i.test(draft.body));
+    assert.ok(buildEmailComposePrompt({ company: "Acme", title: "SE" }).includes("closing greeting"));
   });
 });
 

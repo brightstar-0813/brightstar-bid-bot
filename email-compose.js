@@ -1,13 +1,20 @@
 /**
- * Fill human-style templates from profile + JD + resume (no signature block).
+ * Fill human-style templates from profile + JD + resume.
+ * Short closing greeting only — mailbox signature adds name/phone.
  */
 
 import {
   EMAIL_TEMPLATES,
   classifyContactRole,
   pickPrimaryContact,
-  selectTemplateForRole
+  selectTemplateForRole,
+  pickTemplateVariant
 } from "./prompts/email-templates.js";
+import {
+  buildEmailComposePrompt,
+  ensureEmailClosing,
+  harvestEmailDraftFromAiText
+} from "./prompts/email-compose.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -15,6 +22,9 @@ function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Prefer skills that appear in the JD when they also appear on the resume.
+ */
 export function pickSkills(resumeJson, jdText = "", limit = 3) {
   const skills = [];
   const raw = resumeJson?.skills;
@@ -26,16 +36,23 @@ export function pickSkills(resumeJson, jdText = "", limit = 3) {
         if (Array.isArray(items)) skills.push(...items.map(clean));
         else if (s.name) skills.push(clean(s.name));
       }
-      if (skills.length >= limit) break;
     }
   }
-  const filtered = [...new Set(skills.filter(Boolean))];
-  if (filtered.length >= 2) return filtered.slice(0, limit);
+  const unique = [...new Set(skills.filter(Boolean))];
+  const jd = String(jdText || "").toLowerCase();
+  const jdMatched = unique.filter((s) => jd.includes(String(s).toLowerCase()));
+  const ordered = [...jdMatched, ...unique.filter((s) => !jdMatched.includes(s))];
+  if (ordered.length >= 2) return ordered.slice(0, limit);
+
   const jdBits = String(jdText || "").match(
-    /\b(Salesforce|React|Python|Java|AWS|Azure|Kubernetes|SQL|Lightning|Apex|Node\.?js|TypeScript|DevOps|CI\/CD)\b/gi
+    /\b(Salesforce|Lightning|Apex|React|Python|Java|AWS|Azure|Kubernetes|SQL|Node\.?js|TypeScript|DevOps|CI\/CD|Snowflake|dbt)\b/gi
   );
-  if (jdBits) filtered.push(...jdBits.map(clean));
-  return [...new Set(filtered)].slice(0, limit);
+  if (jdBits) {
+    for (const bit of jdBits.map(clean)) {
+      if (!ordered.includes(bit)) ordered.push(bit);
+    }
+  }
+  return [...new Set(ordered)].slice(0, limit);
 }
 
 export function pickRecentEmployer(resumeJson, person = {}) {
@@ -46,15 +63,26 @@ export function pickRecentEmployer(resumeJson, person = {}) {
   return clean(person.currentCompany) || "my recent role";
 }
 
-export function pickAchievement(resumeJson) {
+export function pickAchievement(resumeJson, jdText = "") {
   const exp = resumeJson?.experience;
+  const jd = String(jdText || "").toLowerCase();
   if (Array.isArray(exp)) {
+    let fallback = "";
     for (const job of exp) {
       const bullets = job?.bullets || job?.highlights || job?.achievements;
-      if (Array.isArray(bullets) && bullets[0]) return clean(bullets[0]).slice(0, 180);
+      if (!Array.isArray(bullets)) continue;
+      for (const b of bullets) {
+        const line = clean(b).slice(0, 180);
+        if (!line) continue;
+        if (!fallback) fallback = line;
+        if (jd && line.toLowerCase().split(/\W+/).some((w) => w.length > 4 && jd.includes(w))) {
+          return line;
+        }
+      }
     }
+    if (fallback) return fallback;
   }
-  return "delivering reliable results on complex projects";
+  return "shipping reliable delivery on complex projects";
 }
 
 export function pickCompanyReason(jdText, company) {
@@ -63,14 +91,21 @@ export function pickCompanyReason(jdText, company) {
     /(?:about\s+(?:us|the\s+company)|our\s+mission|we\s+(?:are|build|help))[:\s]+([^\n.]{20,120})/i
   );
   if (m) return clean(m[1]);
-  if (company) return `the work ${company} is doing in this space`;
-  return "your team's mission and product focus";
+  const product = text.match(
+    /\b(?:platform|product|customers?|clients?|healthcare|fintech|saas|cloud|data)\b[^\n.]{0,80}/i
+  );
+  if (product) return clean(product[0]).slice(0, 100);
+  if (company) return `the problems ${company} is solving in this space`;
+  return "the team's product focus";
 }
 
 export function pickKeyRequirement(jdText, skills = []) {
+  const text = String(jdText || "");
+  const m = text.match(
+    /(?:requirements?|qualifications?|must\s*have|you(?:'ll| will)\s+(?:need|bring))[:\s]+([^\n]{12,110})/i
+  );
+  if (m) return clean(m[1]).replace(/^[•\-\d.)\s]+/, "").slice(0, 100);
   if (skills[0]) return skills[0];
-  const m = String(jdText || "").match(/(?:requirements?|qualifications?)[:\s]+([^\n]{15,100})/i);
-  if (m) return clean(m[1]);
   return "the core skills listed in the role";
 }
 
@@ -82,7 +117,16 @@ export function pickYears(person = {}, resumeJson = null) {
   return "several";
 }
 
+function personDisplayName(person = {}) {
+  return (
+    clean(person.name || person.fullName) ||
+    clean([person.firstName, person.lastName].filter(Boolean).join(" ")) ||
+    "Candidate"
+  );
+}
+
 /**
+ * Local fallback compose (variant picked from job seed).
  * @param {{
  *   contacts?: Array<object>,
  *   person?: object,
@@ -99,17 +143,18 @@ export function composeEmailBid(opts = {}) {
 
   const primary = pickPrimaryContact(contacts);
   const kind = classifyContactRole(primary?.role);
-  const template =
+  const family =
     (opts.templateId && EMAIL_TEMPLATES[opts.templateId]) || selectTemplateForRole(kind);
+  const variant = pickTemplateVariant(family, job);
 
   const skills = pickSkills(resumeJson, job.jdText, 3);
   const title = clean(job.title) || clean(person.title) || "the open role";
   const company = clean(job.company) || "your company";
-  const yourName = clean(person.name || person.fullName) || "Candidate";
+  const yourName = personDisplayName(person);
   const greetingName = clean(primary?.name)?.split(/\s+/)[0] || "there";
   const specialty = clean(person.headline || person.trackLabel || skills[0]) || "software engineering";
   const recentCompany = pickRecentEmployer(resumeJson, person);
-  const achievement = pickAchievement(resumeJson);
+  const achievement = pickAchievement(resumeJson, job.jdText);
   const companyReason = pickCompanyReason(job.jdText, company);
   const keyReq = pickKeyRequirement(job.jdText, skills);
   const years = pickYears(person, resumeJson);
@@ -139,7 +184,7 @@ export function composeEmailBid(opts = {}) {
     "[specific requirement]": keyReq,
     "[Key Skill]": skills[0] || specialty,
     "[requirement 1]": skills[0] || keyReq,
-    "[requirement 2]": skills[1] || "cross-team delivery",
+    "[requirement 2]": skills[1] || keyReq || "cross-team delivery",
     "[company]": recentCompany,
     "[relevant responsibility]": achievement,
     "[specific task or result]": achievement,
@@ -150,19 +195,18 @@ export function composeEmailBid(opts = {}) {
     "[short example showing ownership and impact]": achievement
   };
 
-  let subject = template.subject;
-  let body = template.body;
+  let subject = variant.subject;
+  let body = variant.body;
   const keys = Object.keys(map).sort((a, b) => b.length - a.length);
   for (const key of keys) {
     subject = subject.split(key).join(map[key]);
     body = body.split(key).join(map[key]);
   }
   subject = subject.replace(/\[[^\]]+\]/g, "").replace(/\s{2,}/g, " ").trim();
-  body = body
-    .replace(/\[[^\]]+\]/g, "")
-    .replace(/\n*(?:Best regards|Sincerely),?\s*\n(?:[^\n]*\n){0,4}\s*$/i, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  body = ensureEmailClosing(
+    body.replace(/\[[^\]]+\]/g, "").replace(/\n{3,}/g, "\n\n").trim(),
+    `${subject}|${company}|${title}`
+  );
 
   const toEmails = [
     ...new Set(
@@ -173,14 +217,54 @@ export function composeEmailBid(opts = {}) {
   ].slice(0, 8);
 
   return {
-    templateId: template.id,
-    templateName: template.name,
+    templateId: family.id,
+    templateName: family.name,
     roleKind: kind,
     primaryName: greetingName,
     subject,
     body,
-    toEmails
+    toEmails,
+    source: "local"
   };
 }
 
-export { EMAIL_RE };
+/**
+ * Try AI personalized draft; fall back to local variants.
+ * @param {object} opts same as composeEmailBid plus runAiPrompt
+ */
+export async function composeEmailBidSmart(opts = {}) {
+  const local = composeEmailBid(opts);
+  if (typeof opts.runAiPrompt !== "function") return local;
+
+  try {
+    const prompt = buildEmailComposePrompt({
+      company: opts.job?.company,
+      title: opts.job?.title,
+      jdText: opts.job?.jdText,
+      contacts: opts.contacts,
+      person: opts.person,
+      resumeJson: opts.resumeJson
+    });
+    const aiText = await opts.runAiPrompt(prompt, {
+      statusLabel: "Email Bid · draft",
+      expectJson: true,
+      harvest: "draft"
+    });
+    const draft = harvestEmailDraftFromAiText(aiText);
+    if (draft?.subject && draft?.body) {
+      return {
+        ...local,
+        subject: draft.subject,
+        body: draft.body,
+        templateName: `${local.templateName} (AI)`,
+        source: "ai",
+        angle: draft.angle || ""
+      };
+    }
+  } catch {
+    /* soft fallback */
+  }
+  return local;
+}
+
+export { EMAIL_RE, buildEmailComposePrompt, harvestEmailDraftFromAiText };
