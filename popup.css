@@ -418,6 +418,7 @@ h1 {
   letter-spacing: 0.08em;
 }
 
+
 .subblock {
   margin: 0 0 10px;
   padding: 10px;
@@ -723,6 +724,11 @@ button.primary:hover,
   align-self: flex-start;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.topbar > .allow-batch-switch + .allow-batch-switch {
+  margin-top: 0;
 }
 
 .allow-batch-label {

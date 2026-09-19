@@ -231,7 +231,6 @@ const manualSectionTitleEl = document.getElementById("manualSectionTitle");
 const allowBatchYesBtn = document.getElementById("allowBatchYes");
 const allowBatchNoBtn = document.getElementById("allowBatchNo");
 let allowBatchCache = DEFAULT_ALLOW_BATCH;
-
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
 const jobTitleEl = document.getElementById("jobTitle");
@@ -3107,7 +3106,11 @@ async function confirmOneOffSave() {
       outputDir,
       templateId: templateSelectEl.value || person?.templateId || DEFAULT_TEMPLATE_ID,
       spreadsheetUrl: spreadsheetUrlEl.value.trim(),
-      sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim()
+      sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
+      jobTitle: jobTitleEl?.value?.trim() || "",
+      companyName: companyNameEl?.value?.trim() || "",
+      jdLink: jdLinkEl?.value?.trim() || "",
+      jdText: jdTextEl?.value?.trim() || ""
     }
   });
 

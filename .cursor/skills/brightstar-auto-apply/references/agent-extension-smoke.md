@@ -46,7 +46,7 @@ explicitly requests a live apply smoke, and only on adapters that allow it.
 
 ## Last verified (isolated Chrome, not the daily profile)
 
-2026-09-18, extension **1.8.0**:
+2026-09-18, extension **1.8.0** (pre–Email Bid UI):
 
 - `install_extension` on this repo → id `nbgkamipkhgnnefaonpgdfmkbafpldgm`
 - Popup snapshot: status **Ready.**, queue **IDLE** / empty, **Start** present, **Allow auto submit** unchecked
@@ -54,9 +54,10 @@ explicitly requests a live apply smoke, and only on adapters that allow it.
 - `evaluate_script` on `sw-1` returned name + version `1.8.0`. No service-worker console errors.
 - `https://www.dice.com/` (page id on the Dice line, not the first page) had `[data-brightstar-autofill-panel]`
 
+**Email Bid:** removed from this extension (separate project). Do not expect Email Bid / mailbox UI in popup smoke.
+
 `list_console_messages` still requires `pageId` even when filtering by `serviceWorkerId`.
 `new_page` reprints every open page; the first number is often `about:blank`.
 
 Unit tests (`npm test`) remain the source of truth for adapters, Indeed hosted
-detection, and junk classification. This MCP path covers **integration UI** that
-Node tests cannot see.
+detection, and junk classification. This MCP path covers **integration UI** that Node tests cannot see.
