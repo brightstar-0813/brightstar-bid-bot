@@ -1,0 +1,237 @@
+/**
+ * Email Bid — prepare (contacts + draft) then confirm send. Integrated UI path.
+ */
+
+import { buildEmailContactsPrompt } from "./prompts/email-contacts.js";
+import { harvestContactsFromAiText } from "./email-contacts.js";
+import { composeEmailBid } from "./email-compose.js";
+import { EMAIL_BID_CUSTOM_RESUME_KEY, sendEmailBidMessage } from "./email-send.js";
+
+export async function reportEmailBidStatus(message, kind = "info", reportStatus) {
+  const text = String(message || "").trim();
+  if (!text) return;
+  try {
+    await chrome.storage.local.set({ generation_status: text });
+  } catch {
+    /* ignore */
+  }
+  if (typeof reportStatus === "function") {
+    try {
+      await reportStatus(text);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (kind === "ok" || kind === "err") {
+    try {
+      chrome.runtime
+        .sendMessage({ type: "email_bid_toast", message: text, kind })
+        .catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Find hiring contacts + compose draft (no send).
+ */
+export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
+  const company = String(jobMeta?.company || jobMeta?.companyName || "").trim();
+  const title = String(jobMeta?.title || jobMeta?.jobTitle || "").trim();
+  const label = company || title || "job";
+  const from = String(person?.email || "").trim().toLowerCase();
+  const status = (msg, kind = "info") => reportEmailBidStatus(msg, kind, deps.reportStatus);
+
+  if (!from) {
+    await status("Email Bid — set active profile email first", "err");
+    return { ok: false, reason: "no-profile-email" };
+  }
+  if (typeof deps.runAiPrompt !== "function") {
+    await status("Email Bid — AI helper unavailable", "err");
+    return { ok: false, reason: "no-ai" };
+  }
+
+  await status(`Email Bid · finding hiring contacts for ${label}…`);
+
+  const contactPrompt = buildEmailContactsPrompt({
+    company,
+    title,
+    jdLink: jobMeta?.jdLink || "",
+    jdText: jobMeta?.jdText || jobMeta?.description || "",
+    posterHint: jobMeta?.posterHint || jobMeta?.poster || ""
+  });
+
+  let contacts = [];
+  try {
+    const aiText = await deps.runAiPrompt(contactPrompt, {
+      statusLabel: "Email Bid · contacts",
+      expectJson: true
+    });
+    contacts = harvestContactsFromAiText(aiText, { company });
+  } catch (err) {
+    await status(
+      `Email Bid contacts failed — ${String(err?.message || err).slice(0, 80)}`,
+      "err"
+    );
+    return { ok: false, reason: "contacts-failed", error: String(err?.message || err) };
+  }
+
+  if (!contacts.length) {
+    await status(`Email Bid — no hiring contacts found for ${label}`, "info");
+    return { ok: false, reason: "no-contacts", contacts: [] };
+  }
+
+  await status(`Email Bid · drafting message (${contacts.length} contact(s))…`);
+  const composed = composeEmailBid({
+    contacts,
+    person,
+    job: { title, company, jdText: jobMeta?.jdText || "" },
+    resumeJson
+  });
+
+  await status(
+    `Email Bid draft ready — review To (${composed.toEmails.length}) then Confirm & Send`,
+    "info"
+  );
+
+  return {
+    ok: true,
+    from,
+    contacts,
+    toEmails: composed.toEmails,
+    subject: composed.subject,
+    body: composed.body,
+    templateId: composed.templateId,
+    templateName: composed.templateName,
+    roleKind: composed.roleKind,
+    primaryName: composed.primaryName
+  };
+}
+
+export async function resolveEmailBidAttachments(person, jobMeta, deps = {}) {
+  const store = await chrome.storage.local.get([EMAIL_BID_CUSTOM_RESUME_KEY]);
+  const custom = store[EMAIL_BID_CUSTOM_RESUME_KEY] || null;
+  const hasCustom =
+    custom &&
+    custom.base64 &&
+    (!custom.profileId || custom.profileId === person?.id);
+
+  /** @type {Array<{ fileName: string, mimeType?: string, base64: string, kind: string }>} */
+  const attachments = [];
+
+  if (hasCustom) {
+    attachments.push({
+      fileName: custom.fileName || "Resume.pdf",
+      mimeType: custom.mimeType || "application/pdf",
+      base64: custom.base64,
+      kind: "resume"
+    });
+  } else if (typeof deps.resolveResumeAttachment === "function") {
+    try {
+      const resumeAtt = await deps.resolveResumeAttachment({ person, jobMeta });
+      if (resumeAtt?.base64) {
+        attachments.push({
+          fileName: resumeAtt.fileName || "Resume.pdf",
+          mimeType: resumeAtt.mimeType || "application/pdf",
+          base64: resumeAtt.base64,
+          kind: "resume"
+        });
+      }
+    } catch {
+      /* soft */
+    }
+  }
+
+  if (deps.attachCover !== false && typeof deps.resolveCoverAttachment === "function") {
+    try {
+      const cover = await deps.resolveCoverAttachment({ person, jobMeta });
+      if (cover?.base64) {
+        attachments.push({
+          fileName: cover.fileName || "Cover Letter.pdf",
+          mimeType: cover.mimeType || "application/pdf",
+          base64: cover.base64,
+          kind: "cover"
+        });
+      }
+    } catch {
+      /* soft */
+    }
+  }
+
+  return attachments;
+}
+
+export async function sendConfirmedEmailBid(person, draft, deps = {}) {
+  const from = String(person?.email || "").trim().toLowerCase();
+  const toEmails = (draft.toEmails || [])
+    .map((e) => String(e || "").trim().toLowerCase())
+    .filter(Boolean);
+  const subject = String(draft.subject || "").trim();
+  const body = String(draft.body || "").trim();
+  const jobMeta = draft.jobMeta || {};
+  const label = String(
+    jobMeta.company || jobMeta.companyName || jobMeta.title || jobMeta.jobTitle || "job"
+  ).trim();
+  const status = (msg, kind = "info") => reportEmailBidStatus(msg, kind, deps.reportStatus);
+
+  if (!from) {
+    await status("Email Bid — profile email missing", "err");
+    return { ok: false, reason: "no-profile-email" };
+  }
+  if (!toEmails.length) {
+    await status("Email Bid — select at least one recipient", "err");
+    return { ok: false, reason: "no-recipients" };
+  }
+  if (!subject || !body) {
+    await status("Email Bid — subject and body required", "err");
+    return { ok: false, reason: "empty-message" };
+  }
+
+  let attachments = Array.isArray(draft.attachments) ? draft.attachments : [];
+  if (!attachments.length) {
+    attachments = await resolveEmailBidAttachments(person, jobMeta, deps);
+  }
+  if (!attachments.length) {
+    await status(
+      "Email Bid — no resume PDF (generate docs first or pick a custom resume)",
+      "err"
+    );
+    return { ok: false, reason: "no-resume" };
+  }
+
+  if (deps.writeSheet !== false && typeof deps.appendSheetReady === "function") {
+    try {
+      await deps.appendSheetReady(jobMeta);
+    } catch {
+      /* soft */
+    }
+  }
+
+  await status(`Email Bid · sending as ${from} → ${toEmails.length} recipient(s)…`);
+
+  try {
+    await sendEmailBidMessage({
+      from,
+      to: toEmails,
+      subject,
+      bodyText: body,
+      attachments,
+      profileId: person?.id || ""
+    });
+  } catch (err) {
+    await status(`Email Bid failed — ${String(err?.message || err).slice(0, 100)}`, "err");
+    return { ok: false, error: String(err?.message || err) };
+  }
+
+  if (deps.writeSheet !== false && typeof deps.markSheetApplied === "function") {
+    try {
+      await deps.markSheetApplied(jobMeta);
+    } catch {
+      /* soft */
+    }
+  }
+
+  await status(`Email Bid sent — ${label} (${toEmails.length} recipients)`, "ok");
+  return { ok: true, toEmails, subject, from };
+}

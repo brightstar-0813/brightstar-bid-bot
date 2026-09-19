@@ -2,10 +2,11 @@
 name: brightstar-auto-apply
 description: >-
   Guides safe changes to Brightstar Bid bot (Chrome MV3): CSV/Indeed batch,
-  ChatGPT/Claude resume harvest, ATS autofill, hosted auto-submit policy.
-  Use when the user wants to edit this repo, or mentions adapters, autofill,
-  batch/queue, Greenhouse/Workday/Dice/Indeed apply, role tracks, prompts,
-  profiles, Google Sheet, Slack, manifest matches, or submit-safety.
+  ChatGPT/Claude resume harvest, ATS autofill, Email Bid hiring outreach,
+  hosted auto-submit policy. Use when the user wants to edit this repo, or
+  mentions adapters, autofill, batch/queue, Greenhouse/Workday/Dice/Indeed
+  apply, Email Bid, role tracks, prompts, profiles, Google Sheet, Slack,
+  manifest matches, or submit-safety.
 compatibility: Cursor (Agent Skills / skills.sh layout)
 metadata:
   author: brightstar
@@ -28,6 +29,7 @@ Progressive disclosure (per [Agent Skills](https://www.skills.sh/) / agentskills
 1. Build resume + cover letter PDFs via open **ChatGPT or Claude** tab
 2. Queue US jobs from CSV / Indeed grab
 3. Autofill forms; **auto-submit only on allowed hosted paths**
+4. Optional **Email Bid**: discover hiring contacts (Recruiter/HR/CTO/Lead) → review To → SMTP send
 
 Master resume = text/PDF/DOCX (never ChatGPT JSON). Resume prompts must ask for **JSON only**.
 Prefer short control labels and live status text over long instructional hints in popup/panel UI.
@@ -49,6 +51,7 @@ Prefer short control labels and live status text over long instructional hints i
 | ATS score | `ats-score.js` |
 | Indeed hosted vs external | `indeed.js` |
 | Popup / queue UI | `popup.js` |
+| Email Bid (hiring outreach) | `email-bid.js`, `email-bid-ui.js`, `email-compose.js`, `email-contacts.js`, `email-send.js`, `prompts/email-*` |
 | Profiles | `profiles.js`, `person-profile-form.js`, `profile-editor.js` |
 | Q&A bank | `qa-store.js`, `qa-editor.js` |
 | OpenAI leftover / Custom Q&A | `ai-answers.js`, `openai.js`, `autofill-runner.js` (`answerCustomQaAsk`, `runCustomOpenAiQaOnTab`), popup Ask panel |

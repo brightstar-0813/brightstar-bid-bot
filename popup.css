@@ -418,6 +418,52 @@ h1 {
   letter-spacing: 0.08em;
 }
 
+.email-bid-draft {
+  margin-top: 4px;
+}
+
+.email-bid-to-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.email-bid-to-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--subblock-bg);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.email-bid-to-row input {
+  margin-top: 2px;
+}
+
+.email-bid-to-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.email-bid-to-email {
+  color: var(--muted, #9aa3ad);
+  word-break: break-all;
+}
+
+.email-bid-to-role {
+  color: var(--muted, #9aa3ad);
+  font-size: 11px;
+}
 
 .subblock {
   margin: 0 0 10px;

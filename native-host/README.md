@@ -10,5 +10,8 @@
 #   .\install-windows.ps1 -ExtensionId <chrome-extension-id> -CsvPath "D:\Work\JobHunting\Prompts\Bots\sf-job-capture\download\jobs_latest.csv"
 #
 # Then in the bot UI: enable Native watcher, Save source settings.
+#
+# Email Bid also uses this host for SMTP (`smtp_test` / `smtp_send`) with the
+# active profile mailbox app password — same install; no separate host.
 
 See install-windows.ps1 for registration details.

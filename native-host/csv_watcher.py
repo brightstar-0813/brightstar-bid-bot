@@ -351,6 +351,146 @@ def handle_list_job_folders(output_dir: str = "") -> None:
     send_message({"type": "job_folders", "ok": True, "folders": folders})
 
 
+def handle_smtp_test(msg: dict) -> None:
+    """Login-only SMTP check (app password)."""
+    try:
+        import smtplib
+        import ssl
+        import socket
+    except ImportError as exc:  # pragma: no cover
+        send_message({"type": "smtp_test", "ok": False, "error": str(exc)})
+        return
+
+    email = str(msg.get("email") or "").strip()
+    password = str(msg.get("password") or "")
+    host = str(msg.get("smtpHost") or "").strip()
+    port = int(msg.get("smtpPort") or 587)
+    if not email or not password or not host:
+        send_message({"type": "smtp_test", "ok": False, "error": "email, password, and smtpHost are required"})
+        return
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port, timeout=20) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=context)
+            smtp.ehlo()
+            smtp.login(email, password)
+        send_message({"type": "smtp_test", "ok": True, "email": email, "host": host, "port": port})
+    except (TimeoutError, socket.timeout) as exc:
+        send_message(
+            {
+                "type": "smtp_test",
+                "ok": False,
+                "error": f"SMTP timed out connecting to {host}:{port} — {exc}",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        send_message({"type": "smtp_test", "ok": False, "error": str(exc)})
+
+
+def _attach_files(message, attachments) -> None:
+    from email.mime.base import MIMEBase
+    from email import encoders
+
+    for att in attachments or []:
+        if not isinstance(att, dict):
+            continue
+        file_name = str(att.get("fileName") or "attachment.pdf")
+        mime_type = str(att.get("mimeType") or "application/pdf")
+        raw = b""
+        path_str = str(att.get("path") or "").strip()
+        if path_str:
+            path = Path(path_str).expanduser()
+            if path.is_file() and path.suffix.lower() == ".pdf":
+                raw = path.read_bytes()
+                file_name = file_name or path.name
+        if not raw:
+            b64 = str(att.get("base64") or "")
+            if "," in b64 and b64.strip().startswith("data:"):
+                b64 = b64.split(",", 1)[1]
+            if b64:
+                raw = base64.b64decode(b64)
+        if not raw:
+            continue
+        maintype, _, subtype = mime_type.partition("/")
+        if not subtype:
+            maintype, subtype = "application", "pdf"
+        part = MIMEBase(maintype, subtype)
+        part.set_payload(raw)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=file_name)
+        message.attach(part)
+
+
+def handle_smtp_send(msg: dict) -> None:
+    """Send multipart email with optional PDF attachments via SMTP."""
+    try:
+        import smtplib
+        import ssl
+        import socket
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+    except ImportError as exc:  # pragma: no cover
+        send_message({"type": "smtp_send", "ok": False, "error": str(exc)})
+        return
+
+    email = str(msg.get("email") or "").strip()
+    password = str(msg.get("password") or "")
+    host = str(msg.get("smtpHost") or "").strip()
+    port = int(msg.get("smtpPort") or 587)
+    to_list = msg.get("to") or []
+    if isinstance(to_list, str):
+        to_list = [to_list]
+    to_list = [str(t).strip() for t in to_list if str(t).strip()]
+    subject = str(msg.get("subject") or "")
+    body_text = str(msg.get("bodyText") or "")
+    attachments = msg.get("attachments") or []
+    if not email or not password or not host or not to_list:
+        send_message(
+            {
+                "type": "smtp_send",
+                "ok": False,
+                "error": "email, password, smtpHost, and to[] are required",
+            }
+        )
+        return
+    try:
+        message = MIMEMultipart()
+        message["From"] = email
+        message["To"] = ", ".join(to_list)
+        message["Subject"] = subject
+        message.attach(MIMEText(body_text, "plain", "utf-8"))
+        _attach_files(message, attachments)
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port, timeout=45) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=context)
+            smtp.ehlo()
+            smtp.login(email, password)
+            smtp.sendmail(email, to_list, message.as_string())
+        send_message(
+            {
+                "type": "smtp_send",
+                "ok": True,
+                "email": email,
+                "to": to_list,
+                "host": host,
+                "port": port,
+            }
+        )
+    except (TimeoutError, socket.timeout) as exc:
+        send_message(
+            {
+                "type": "smtp_send",
+                "ok": False,
+                "error": f"SMTP timed out on {host}:{port} — {exc}",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        send_message({"type": "smtp_send", "ok": False, "error": str(exc)})
+
+
 def main() -> int:
     watch_path = os.environ.get("BRIGHTSTAR_CSV_PATH", "").strip()
     if len(sys.argv) > 1 and not watch_path:
@@ -424,6 +564,10 @@ def main() -> int:
             )
         elif mtype == "list_job_folders":
             handle_list_job_folders(str(msg.get("outputDir") or ""))
+        elif mtype == "smtp_test":
+            handle_smtp_test(msg)
+        elif mtype == "smtp_send":
+            handle_smtp_send(msg)
         elif mtype == "stop":
             break
         else:

@@ -43,6 +43,7 @@ import {
 } from "./resume-profile.js";
 import {
   setLastGeneratedDocs,
+  getLastGeneratedDocs,
   startAutofillOnTab,
   startMultiStepApplyOnTab,
   startJobrightStyleAutofill,
@@ -148,6 +149,12 @@ import {
   isDeleteAiChatHistoryEnabled,
   normalizeAiProvider
 } from "./ai-provider.js";
+import {
+  prepareEmailBidDraft,
+  sendConfirmedEmailBid,
+  resolveEmailBidAttachments
+} from "./email-bid.js";
+import { harvestContactsFromAiText } from "./email-contacts.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
@@ -1013,6 +1020,125 @@ async function getSheetConfig() {
     sheetTabName: personCfg.sheetTabName || person?.sheetTabName || ""
   });
   return { spreadsheetUrl, webAppUrl, sheetTabName };
+}
+
+/**
+ * Email Bid: harvest contact JSON via active AI tab.
+ * @param {string} prompt
+ * @param {{ company?: string }} [opts]
+ */
+async function runEmailBidContactAi(prompt, opts = {}) {
+  const provider = await getStoredAiProvider();
+  const tab = await ensureAiTab(provider);
+  const tabId = tab?.id;
+  if (typeof tabId !== "number") {
+    throw new Error(`Open ${aiProviderLabel(provider)} in a browser tab first.`);
+  }
+  await aiSendPrompt(tabId, prompt, true);
+  const start = Date.now();
+  const timeoutMs = 3 * 60 * 1000;
+  let lastText = "";
+  while (Date.now() - start < timeoutMs) {
+    await sleep(2000);
+    if (batchControl.stop) break;
+    const plain = await readLatestAssistantPlainText(tabId).catch(() => "");
+    if (plain && plain.length > 40) lastText = plain;
+    const state = await chatgptPollState(tabId, { harvestJson: true }).catch(() => null);
+    if (state?.text && String(state.text).length > 40) lastText = String(state.text);
+    if (lastText && harvestContactsFromAiText(lastText, { company: opts.company }).length) {
+      return lastText;
+    }
+  }
+  if (lastText) return lastText;
+  throw new Error("Timed out waiting for contact research JSON from the AI tab.");
+}
+
+/**
+ * Shared deps for Email Bid prepare / confirm send.
+ * @param {object} person
+ * @param {object} jobMeta
+ * @param {{ writeSheet?: boolean }} [extra]
+ */
+function buildEmailBidDeps(person, jobMeta, extra = {}) {
+  const company = jobMeta?.company || jobMeta?.companyName || "";
+  return {
+    attachCover: true,
+    writeSheet: extra.writeSheet !== false,
+    reportStatus: setStatus,
+    runAiPrompt: async (prompt) => runEmailBidContactAi(prompt, { company }),
+    resolveResumeAttachment: async () => {
+      const docs = await resolveUploadDocs({
+        csvRow: jobMeta?.csvRow,
+        jobDir: jobMeta?.jobDir || jobMeta?.savedDir || "",
+        jdLink: jobMeta?.jdLink || ""
+      }).catch(() => null);
+      if (docs?.resume?.base64) {
+        return {
+          fileName: docs.resume.fileName || "Resume.pdf",
+          mimeType: docs.resume.mimeType || "application/pdf",
+          base64: docs.resume.base64
+        };
+      }
+      const last = await getLastGeneratedDocs().catch(() => null);
+      if (last?.resume?.base64) {
+        return {
+          fileName: last.resume.fileName || "Resume.pdf",
+          mimeType: last.resume.mimeType || "application/pdf",
+          base64: last.resume.base64
+        };
+      }
+      return null;
+    },
+    resolveCoverAttachment: async () => {
+      const docs = await resolveUploadDocs({
+        csvRow: jobMeta?.csvRow,
+        jobDir: jobMeta?.jobDir || jobMeta?.savedDir || "",
+        jdLink: jobMeta?.jdLink || ""
+      }).catch(() => null);
+      if (docs?.coverLetter?.base64) {
+        return {
+          fileName: docs.coverLetter.fileName || "Cover Letter.pdf",
+          mimeType: docs.coverLetter.mimeType || "application/pdf",
+          base64: docs.coverLetter.base64
+        };
+      }
+      const last = await getLastGeneratedDocs().catch(() => null);
+      if (last?.coverLetter?.base64) {
+        return {
+          fileName: last.coverLetter.fileName || "Cover Letter.pdf",
+          mimeType: last.coverLetter.mimeType || "application/pdf",
+          base64: last.coverLetter.base64
+        };
+      }
+      return null;
+    },
+    appendSheetReady: async (meta) => {
+      const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
+      if (!spreadsheetUrl || !webAppUrl) return;
+      await appendJobToSpreadsheet({
+        spreadsheetUrl,
+        webAppUrl,
+        sheetName: sheetTabName,
+        jobNo: meta?.csvRow != null ? meta.csvRow : meta?.jobNo || "",
+        jobTitle: meta?.title || meta?.jobTitle || "",
+        companyName: meta?.company || meta?.companyName || "",
+        jdLink: meta?.jdLink || "",
+        salary: meta?.salary || ""
+      });
+    },
+    markSheetApplied: async (meta) => {
+      const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
+      if (!spreadsheetUrl || !webAppUrl) return;
+      await markJobAppliedOnSpreadsheet({
+        spreadsheetUrl,
+        webAppUrl,
+        sheetName: sheetTabName,
+        jdLink: meta?.jdLink || "",
+        jobTitle: meta?.title || meta?.jobTitle || "",
+        companyName: meta?.company || meta?.companyName || ""
+      });
+    }
+  };
 }
 
 /** Persist harvested resume JSON scoped to the active person (avoids cross-profile autofill history). */
@@ -9954,6 +10080,129 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           csvRow: meta.csvRow
         });
         await setStatus(`Confirm failed: ${msg}`);
+      } finally {
+        isRunning = false;
+        stopKeepAlive();
+      }
+    })();
+    return false;
+  }
+
+  if (type === "email_bid_prepare") {
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    (async () => {
+      try {
+        const person = await getActivePerson();
+        if (!person?.email) throw new Error("Active profile email is required for Email Bid.");
+        const jobMeta = {
+          ...(message.jobMeta || {}),
+          bidSource: "email-bid",
+          profileId: person.id || ""
+        };
+        const resumeJson =
+          message.resumeJson ||
+          (await chrome.storage.local
+            .get(["last_resume_json"])
+            .then((d) => {
+              const last = d.last_resume_json;
+              if (last && typeof last === "object" && last.profileId && last.profileId !== person.id) {
+                return last.data || null;
+              }
+              return last?.data || last || null;
+            })
+            .catch(() => null));
+
+        const deps = buildEmailBidDeps(person, jobMeta);
+        const draft = await prepareEmailBidDraft(person, jobMeta, resumeJson, deps);
+        const attachments = draft?.ok ? await resolveEmailBidAttachments(person, jobMeta, deps) : [];
+        chrome.runtime
+          .sendMessage({
+            type: "email_bid_prepare_done",
+            ok: Boolean(draft?.ok),
+            draft: draft?.ok
+              ? {
+                  from: draft.from,
+                  contacts: draft.contacts,
+                  toEmails: draft.toEmails,
+                  subject: draft.subject,
+                  body: draft.body,
+                  templateId: draft.templateId,
+                  templateName: draft.templateName,
+                  attachments: attachments.map((a) => ({
+                    fileName: a.fileName,
+                    mimeType: a.mimeType,
+                    kind: a.kind
+                  })),
+                  jobMeta
+                }
+              : null,
+            reason: draft?.reason || "",
+            error: draft?.error || draft?.reason || ""
+          })
+          .catch(() => {});
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Email Bid prepare failed: ${msg}`);
+        chrome.runtime
+          .sendMessage({ type: "email_bid_prepare_done", ok: false, error: msg })
+          .catch(() => {});
+      }
+    })();
+    return false;
+  }
+
+  if (type === "email_bid_send") {
+    if (isRunning) {
+      safeSendResponse(sendResponse, {
+        ok: false,
+        error: "Busy — try again when generation is idle."
+      });
+      return false;
+    }
+    isRunning = true;
+    startKeepAlive();
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    (async () => {
+      try {
+        const person = await getActivePerson();
+        if (!person?.email) throw new Error("Active profile email is required for Email Bid.");
+        const jobMeta = {
+          ...(message.jobMeta || message.draft?.jobMeta || {}),
+          bidSource: "email-bid",
+          profileId: person.id || ""
+        };
+        const deps = buildEmailBidDeps(person, jobMeta);
+        let attachments = message.attachments || [];
+        if (!attachments.length) {
+          attachments = await resolveEmailBidAttachments(person, jobMeta, deps);
+        }
+        const result = await sendConfirmedEmailBid(
+          person,
+          {
+            toEmails: message.toEmails || message.draft?.toEmails || [],
+            subject: message.subject || message.draft?.subject || "",
+            body: message.body || message.draft?.body || "",
+            jobMeta,
+            attachments
+          },
+          deps
+        );
+        chrome.runtime
+          .sendMessage({
+            type: "email_bid_send_done",
+            ok: Boolean(result?.ok),
+            status: result?.ok
+              ? `Email Bid sent — ${(message.toEmails || []).length || result.toEmails?.length || 0} recipients`
+              : result?.error || result?.reason || "Send failed",
+            error: result?.error || result?.reason || ""
+          })
+          .catch(() => {});
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Email Bid send failed: ${msg}`);
+        chrome.runtime
+          .sendMessage({ type: "email_bid_send_done", ok: false, error: msg })
+          .catch(() => {});
       } finally {
         isRunning = false;
         stopKeepAlive();

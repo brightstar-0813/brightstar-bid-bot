@@ -44,6 +44,8 @@ import {
   formatApplicationDateTime
 } from "./sheets.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
+import { showToast } from "./ui-toast.js";
+import { initEmailBidUi } from "./email-bid-ui.js";
 import {
   parseJobsCsv,
   filterJobsByChannel,
@@ -3914,6 +3916,16 @@ if (qaImportBtn) setIconButton(qaImportBtn, "import", "Import JSON");
 if (qaExportBtn) setIconButton(qaExportBtn, "export", "Export JSON");
 
 initThemePicker();
+initEmailBidUi({
+  getActivePerson,
+  setStatus,
+  setBusy,
+  showToast,
+  DEFAULT_TEMPLATE_ID,
+  templateSelectEl,
+  spreadsheetUrlEl,
+  sheetsWebAppUrlEl
+});
 loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || err)}`));
 
 chrome.storage.onChanged.addListener((changes, area) => {
