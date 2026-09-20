@@ -44,6 +44,7 @@ export function initEmailBidUi(deps) {
   const jdLinkEl = document.getElementById("emailBidJdLink");
   const jdTextEl = document.getElementById("emailBidJdText");
   const fillTabBtn = document.getElementById("emailBidFillTab");
+  const clearJobBtn = document.getElementById("emailBidClearJob");
   const prepareBtn = document.getElementById("emailBidPrepare");
   const emailEl = document.getElementById("emailBidMailboxEmail");
   const passwordEl = document.getElementById("emailBidMailboxPassword");
@@ -59,6 +60,7 @@ export function initEmailBidUi(deps) {
 
   if (typeof setIconButton === "function") {
     if (fillTabBtn) setIconButton(fillTabBtn, "scrape", "Fill from tab");
+    if (clearJobBtn) setIconButton(clearJobBtn, "remove", "Clear job fields");
     if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts & draft");
     if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect mailbox");
     if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect mailbox");
@@ -142,6 +144,20 @@ export function initEmailBidUi(deps) {
     renderToList(draft.contacts || [], draft.toEmails || []);
     if (subjectEl) subjectEl.value = draft.subject || "";
     if (bodyEl) bodyEl.value = draft.body || "";
+  }
+
+  function clearJobFields() {
+    if (titleEl) titleEl.value = "";
+    if (companyEl) companyEl.value = "";
+    if (jdLinkEl) jdLinkEl.value = "";
+    if (jdTextEl) jdTextEl.value = "";
+    if (subjectEl) subjectEl.value = "";
+    if (bodyEl) bodyEl.value = "";
+    if (toListEl) toListEl.innerHTML = "";
+    if (customResumeEl) customResumeEl.value = "";
+    draftCache = null;
+    if (draftBlock) draftBlock.hidden = true;
+    setStatus("Cleared Email Bid job fields.");
   }
 
   function collectJobMeta(person) {
@@ -568,6 +584,7 @@ export function initEmailBidUi(deps) {
     if (panelBody && !panelBody.hidden) refreshFromAndMailbox().catch(() => {});
   });
   fillTabBtn?.addEventListener("click", () => fillFromTab().catch((e) => setStatus(String(e.message || e))));
+  clearJobBtn?.addEventListener("click", () => clearJobFields());
   prepareBtn?.addEventListener("click", () => prepare().catch((e) => setStatus(String(e.message || e))));
   confirmBtn?.addEventListener("click", () => confirmSend().catch((e) => setStatus(String(e.message || e))));
   openWebBtn?.addEventListener("click", () => openWebCompose().catch((e) => setStatus(String(e.message || e))));

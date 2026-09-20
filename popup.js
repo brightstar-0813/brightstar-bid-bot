@@ -267,6 +267,7 @@ const styleExportPasteEl = document.getElementById("styleExportPaste");
 const styleExportClearBtn = document.getElementById("styleExportClear");
 const styleExportPdfBtn = document.getElementById("styleExportPdf");
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
+const clearOneOffFieldsBtn = document.getElementById("clearOneOffFields");
 const runOneOffBtn = document.getElementById("runOneOff");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
 const confirmOneOffBtn = document.getElementById("confirmOneOff");
@@ -2970,9 +2971,20 @@ async function setAllowBatch(value) {
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
   if (fillFromOpenTabBtn) fillFromOpenTabBtn.disabled = busy;
+  if (clearOneOffFieldsBtn) clearOneOffFieldsBtn.disabled = busy;
   document.body.classList.toggle("is-busy", Boolean(busy));
   syncOneOffActionButtons({ busy: Boolean(busy) });
   syncBatchPill();
+}
+
+async function clearOneOffJobFields() {
+  if (jobTitleEl) jobTitleEl.value = "";
+  if (companyNameEl) companyNameEl.value = "";
+  if (jdLinkEl) jdLinkEl.value = "";
+  if (jdTextEl) jdTextEl.value = "";
+  if (oneOffExtraPromptEl) oneOffExtraPromptEl.value = "";
+  await persistJobFields().catch(() => {});
+  setStatus("Cleared job fields.");
 }
 
 async function fillFromOpenTab() {
@@ -3680,6 +3692,9 @@ forceSaveChatgptBtn.addEventListener("click", async () => {
 fillFromOpenTabBtn?.addEventListener("click", () => {
   fillFromOpenTab().catch((e) => setStatus(String(e.message || e)));
 });
+clearOneOffFieldsBtn?.addEventListener("click", () => {
+  clearOneOffJobFields().catch((e) => setStatus(String(e.message || e)));
+});
 copyAppsScriptBtn.addEventListener("click", copyAppsScript);
 keepOpenBtn?.addEventListener("click", dockOutOfPopup);
 openAsWindowBtn?.addEventListener("click", () => {
@@ -3883,6 +3898,7 @@ function initThemePicker() {
 }
 
 if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from this page");
+if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear job fields");
 if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate Draft Version");
 if (autofillPageBtn) {
   setIconButton(autofillPageBtn, "autofill", "Autofill (Ctrl+Shift+Y)");
