@@ -1700,6 +1700,10 @@ input[type="file"]::file-selector-button {
   gap: 8px;
 }
 
+.manual-tools > .manual-tools-end {
+  margin-left: auto;
+}
+
 .manual-primary {
   margin: 0 0 4px;
 }

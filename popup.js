@@ -269,6 +269,7 @@ const styleExportPdfBtn = document.getElementById("styleExportPdf");
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const clearOneOffFieldsBtn = document.getElementById("clearOneOffFields");
 const runOneOffBtn = document.getElementById("runOneOff");
+const logProfileApplyBtn = document.getElementById("logProfileApply");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
 const confirmOneOffBtn = document.getElementById("confirmOneOff");
 const discardOneOffBtn = document.getElementById("discardOneOff");
@@ -1598,6 +1599,10 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
       force ? "retry" : "draft",
       force ? "Force Generate Draft Version" : "Generate Draft Version"
     );
+  }
+  if (logProfileApplyBtn) {
+    logProfileApplyBtn.disabled = busy;
+    setIconButton(logProfileApplyBtn, "sheet", "Log apply — save JD and mark Applied");
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
@@ -3141,6 +3146,60 @@ async function confirmOneOffSave() {
   }
 }
 
+/** Save jd.txt and mark sheet Applied (Profile apply). No AI / PDF. */
+async function logProfileApply() {
+  const jobTitle = (jobTitleEl.value || "").trim();
+  const companyName = (companyNameEl.value || "").trim();
+  const jdLink = (jdLinkEl.value || "").trim();
+  const jdText = (jdTextEl.value || "").trim();
+  const { outputDir, person } = await resolveUiOutputDir();
+
+  if (!jobTitle && !companyName) {
+    setStatus("Enter a job title or company first.");
+    return;
+  }
+  if (!jdLink && !jdText) {
+    setStatus("Add a JD link or paste the job description first.");
+    return;
+  }
+
+  await persistJobFields();
+  setBusy(true);
+  setManualPanelOpen(true);
+  setStatus("Logging profile apply — saving JD…");
+
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: "log_profile_apply",
+      jobMeta: {
+        jobTitle,
+        companyName,
+        jdLink,
+        jdText,
+        outputDir,
+        spreadsheetUrl: spreadsheetUrlEl.value.trim(),
+        sheetsWebAppUrl: sheetsWebAppUrlEl.value.trim(),
+        profileId: person?.id || "",
+        resumeFilePrefix: person?.resumeFilePrefix || resumeFilePrefixFromName(person?.name || person?.label),
+        bidSource: "profile-apply"
+      }
+    });
+    if (!res?.ok) {
+      setStatus(res?.error || "Log apply failed.");
+      return;
+    }
+    if (res.duplicate) {
+      setStatus(res.status || "Already Applied on sheet — not re-logged.");
+      return;
+    }
+    setStatus(res.status || "Logged profile apply.");
+  } catch (err) {
+    setStatus(`Log apply failed: ${String(err?.message || err)}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function refreshQaBank() {
   if (!qaBankNoteEl) return;
   try {
@@ -3725,6 +3784,12 @@ runOneOffBtn.addEventListener("click", () => {
   const force = oneOffNeedsForceDraft();
   runOneOffDraft({ forceRebuild: force }).catch((e) => setStatus(String(e.message || e)));
 });
+logProfileApplyBtn?.addEventListener("click", () => {
+  logProfileApply().catch((e) => {
+    setBusy(false);
+    setStatus(String(e.message || e));
+  });
+});
 regenerateOneOffBtn?.addEventListener("click", () => {
   const score = Number(lastOneOffAtsCache?.atsScore);
   const needsGaps = Number.isFinite(score) && score < 90 && lastOneOffAtsCache?.atsEvaluation;
@@ -3900,6 +3965,9 @@ function initThemePicker() {
 if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from this page");
 if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear job fields");
 if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate Draft Version");
+if (logProfileApplyBtn) {
+  setIconButton(logProfileApplyBtn, "sheet", "Log apply — save JD and mark Applied");
+}
 if (autofillPageBtn) {
   setIconButton(autofillPageBtn, "autofill", "Autofill (Ctrl+Shift+Y)");
 }

@@ -2889,6 +2889,102 @@ async function exportStyledResumePdf(jsonText, { templateId = "", jobMeta = {} }
   return { ok: true, status: result.status, savedDir: result.savedDir, templateId: tid, resumeData };
 }
 
+/** Write jd.txt only under the person's Downloads job folder. */
+async function saveJdTxtOnly(jobMeta = {}) {
+  const outputDir = await resolveOutputDir(jobMeta.outputDir);
+  const jobFolder = buildJobFolderName(jobMeta);
+  const jobDir = joinDownloadPath(outputDir, jobFolder);
+  const jdTxt = buildJdTxtContent({
+    jobTitle: jobMeta.jobTitle || "",
+    companyName: jobMeta.companyName || "",
+    jdLink: jobMeta.jdLink || "",
+    jdText: jobMeta.jdText || ""
+  });
+  await setStatus(`Saving jd.txt → Downloads / ${jobDir}`);
+  await downloadTextFile(jdTxt, "text/plain", joinDownloadPath(jobDir, "jd.txt"));
+  return { jobDir };
+}
+
+/** Profile apply log: jd.txt + sheet Applied. No AI, PDF, or Apply clicks. */
+async function logProfileApply(jobMeta = {}) {
+  const person = await getActivePerson().catch(() => null);
+  const jobTitle = String(jobMeta.jobTitle || "").trim();
+  const companyName = String(jobMeta.companyName || "").trim();
+  const jdLink = String(jobMeta.jdLink || "").trim();
+  const jdText = String(jobMeta.jdText || "").trim();
+  if (!jobTitle && !companyName) throw new Error("Add a job title or company.");
+  if (!jdLink && !jdText) throw new Error("Add a JD link or paste the job description.");
+
+  let meta = {
+    ...jobMeta,
+    jobTitle,
+    companyName,
+    jdLink,
+    jdText,
+    salary: String(jobMeta.salary || "").trim(),
+    profileId: jobMeta.profileId || person?.id || "",
+    personName: person?.name || person?.label || "",
+    resumeFilePrefix: normalizeResumeFilePrefix(
+      jobMeta.resumeFilePrefix || person?.resumeFilePrefix,
+      person?.name || person?.label || ""
+    ),
+    bidSource: "profile-apply",
+    outputDir: await resolveOutputDir(
+      jobMeta.outputDir || (person ? outputDirFromPerson(person) : "")
+    )
+  };
+
+  const linkDup = await isJobLinkAlreadyCovered(meta.jdLink, { purpose: "apply" });
+  if (linkDup.covered) {
+    const status = `Already Applied — ${linkDup.reason || "same job link on sheet"}`;
+    await setStatus(status);
+    return { ok: true, duplicate: true, status };
+  }
+
+  const { jobDir } = await saveJdTxtOnly(meta);
+
+  let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
+  let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
+  let sheetTabName = String(jobMeta.sheetTabName || jobMeta.sheetName || "").trim();
+  if (!spreadsheetUrl || !sheetsWebAppUrl || !sheetTabName) {
+    const sheetCfg = await getSheetConfig();
+    if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheetUrl || "").trim();
+    if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.webAppUrl || "").trim();
+    if (!sheetTabName) sheetTabName = String(sheetCfg.sheetTabName || "").trim();
+  }
+
+  let sheetLabel = "";
+  if (spreadsheetUrl && sheetsWebAppUrl) {
+    await setStatus("Recording Applied on Google Sheet (Profile apply)…");
+    try {
+      const sheetResult = await markJobAppliedOnSpreadsheet({
+        spreadsheetUrl,
+        webAppUrl: sheetsWebAppUrl,
+        sheetName: sheetTabName,
+        jobNo: meta.csvRow != null ? meta.csvRow : meta.jobNo || "",
+        jobTitle: meta.jobTitle,
+        companyName: meta.companyName,
+        jdLink: meta.jdLink,
+        salary: meta.salary || "",
+        bidSource: "profile-apply"
+      });
+      sheetLabel = sheetResult.status || formatAppliedStatus();
+    } catch (sheetErr) {
+      const status = `jd.txt saved to Downloads / ${jobDir}, but sheet failed: ${String(sheetErr?.message || sheetErr)}`;
+      await setStatus(status);
+      return { ok: true, savedDir: jobDir, status, sheetError: String(sheetErr?.message || sheetErr) };
+    }
+  } else {
+    const status = `jd.txt saved to Downloads / ${jobDir}. Configure Google Sheet to record Applied.`;
+    await setStatus(status);
+    return { ok: true, savedDir: jobDir, status };
+  }
+
+  const status = `jd.txt saved · Sheet: ${sheetLabel} (Profile apply)`;
+  await setStatus(status);
+  return { ok: true, savedDir: jobDir, status, duplicate: false };
+}
+
 function coverLetterTextToParagraphs(raw) {
   let s = String(raw || "");
 
@@ -10669,6 +10765,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getOneOffDraft()
       .then((draft) => safeSendResponse(sendResponse, { ok: true, draft }))
       .catch((err) => safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+
+  if (type === "log_profile_apply") {
+    (async () => {
+      try {
+        const result = await logProfileApply(message.jobMeta || {});
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
     return true;
   }
 

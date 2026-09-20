@@ -8,7 +8,8 @@ import {
   sanitizeSheetTabName,
   BID_MODE_AUTO,
   BID_MODE_MANUAL,
-  BID_MODE_EMAIL
+  BID_MODE_EMAIL,
+  BID_MODE_PROFILE
 } from "../sheets.js";
 
 test("sanitizeSheetTabName strips illegal Google Sheets characters", () => {
@@ -87,4 +88,8 @@ test("resolveBidModeLabel maps sources to sheet labels", () => {
   assert.equal(resolveBidModeLabel("Manual bid"), BID_MODE_MANUAL);
   assert.equal(resolveBidModeLabel("email-bid"), BID_MODE_EMAIL);
   assert.equal(resolveBidModeLabel("Email bid"), BID_MODE_EMAIL);
+  assert.equal(resolveBidModeLabel("profile-apply"), BID_MODE_PROFILE);
+  assert.equal(resolveBidModeLabel("profile"), BID_MODE_PROFILE);
+  assert.equal(resolveBidModeLabel("Profile apply"), BID_MODE_PROFILE);
+  assert.equal(resolveBidModeLabel("one-click"), BID_MODE_PROFILE);
 });

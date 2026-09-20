@@ -77,10 +77,12 @@ export function formatAppliedStatus(date = new Date()) {
 export const BID_MODE_AUTO = "Auto bid";
 export const BID_MODE_MANUAL = "Manual bid";
 export const BID_MODE_EMAIL = "Email bid";
+export const BID_MODE_PROFILE = "Profile apply";
 
 /**
  * Map bidSource / explicit mode → sheet Bid mode label.
- * Batch / CSV / Indeed grab → Auto bid; one-off → Manual bid; email-bid → Email bid.
+ * Batch / CSV / Indeed grab → Auto bid; one-off → Manual bid; email-bid → Email bid;
+ * profile-apply → Profile apply.
  * @param {string} [bidSourceOrMode]
  */
 export function resolveBidModeLabel(bidSourceOrMode = "") {
@@ -89,8 +91,17 @@ export function resolveBidModeLabel(bidSourceOrMode = "") {
   if (/^auto\s*bid$/i.test(raw)) return BID_MODE_AUTO;
   if (/^manual\s*bid$/i.test(raw)) return BID_MODE_MANUAL;
   if (/^email\s*bid$/i.test(raw)) return BID_MODE_EMAIL;
+  if (/^profile\s*apply$/i.test(raw)) return BID_MODE_PROFILE;
   const src = raw.toLowerCase().replace(/_/g, "-");
   if (src === "email-bid" || src === "email") return BID_MODE_EMAIL;
+  if (
+    src === "profile-apply" ||
+    src === "profile" ||
+    src === "one-click" ||
+    src === "1-click"
+  ) {
+    return BID_MODE_PROFILE;
+  }
   if (src === "one-off" || src === "manual" || src === "manual-bid" || src === "oneoff") {
     return BID_MODE_MANUAL;
   }

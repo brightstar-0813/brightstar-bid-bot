@@ -8102,6 +8102,135 @@
     return data && (data.jobTitle || data.jdText) ? data : null;
   }
 
+  function zipRecruiterCanonicalLink() {
+    try {
+      const u = new URL(location.href);
+      // Prefer stable job detail paths over the search results URL.
+      if (/\/job(?:s)?\//i.test(u.pathname) && !/jobs-search/i.test(u.pathname)) {
+        u.hash = "";
+        ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"].forEach(
+          (k) => u.searchParams.delete(k)
+        );
+        return u.toString();
+      }
+    } catch {
+      /* fall through */
+    }
+    return canonicalPageUrl();
+  }
+
+  function scrapeZipRecruiterDom(doc = document) {
+    const root =
+      doc.querySelector('[data-testid="job-details"]') ||
+      doc.querySelector('[class*="job_details"]') ||
+      doc.querySelector('[class*="JobDetails"]') ||
+      doc.querySelector("article") ||
+      doc.querySelector("main") ||
+      doc.body ||
+      doc;
+    const text = (selector) => elementText(root.querySelector(selector));
+    const desc =
+      root.querySelector('[data-testid="job-description"]') ||
+      root.querySelector('[class*="job_description"]') ||
+      root.querySelector('[class*="JobDescription"]') ||
+      root.querySelector("#job_description") ||
+      root.querySelector('[itemprop="description"]');
+    const pageText = elementText(root);
+    const salaryText =
+      text('[data-testid="job-salary"]') ||
+      text('[class*="salary"]') ||
+      (pageText.match(/\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*\/\s*(?:yr|year|hr|hour))?/i) || [
+        ""
+      ])[0];
+    const location =
+      text('[data-testid="job-location"]') ||
+      text('[class*="location"]') ||
+      text('[itemprop="jobLocation"]');
+    const oneClick = Boolean(
+      root.querySelector(
+        'button, a, [role="button"]'
+      ) && /\b1[- ]?click\s*apply\b/i.test(pageText)
+    );
+    return {
+      jobTitle:
+        text('[data-testid="job-title"]') ||
+        text("h1") ||
+        text('[class*="job_title"]') ||
+        text('[itemprop="title"]'),
+      companyName:
+        text('[data-testid="job-company"]') ||
+        text('[data-testid="company-name"]') ||
+        text('[class*="company_name"]') ||
+        text('[itemprop="hiringOrganization"]') ||
+        text('a[href*="/co/"]'),
+      jdText: desc
+        ? String(desc.innerText || desc.textContent || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim()
+        : "",
+      jobLocation: location,
+      salaryRaw: salaryText || "",
+      workArrangement: /\bremote\b/i.test(`${location} ${pageText}`) ? "Remote" : "",
+      hostedApply: oneClick,
+      datePosted:
+        text('[data-testid="job-posted"]') ||
+        text('[class*="posted"]') ||
+        ""
+    };
+  }
+
+  function mergeZipRecruiterScrape(schema, dom) {
+    schema = schema || {};
+    dom = dom || {};
+    const jobTitle = dom.jobTitle || schema.jobTitle || "";
+    const jdText = dom.jdText || schema.jdText || "";
+    if (!jobTitle && !jdText) return null;
+    const link = zipRecruiterCanonicalLink() || schema.jdLink || canonicalPageUrl();
+    const salaryRaw =
+      dom.salaryRaw ||
+      [schema.salaryMin, schema.salaryMax].filter(Boolean).join(" - ") ||
+      "";
+    return {
+      ...schema,
+      ...dom,
+      jobTitle,
+      companyName: dom.companyName || schema.companyName || "",
+      jdLink: link,
+      jdText,
+      applyLink: schema.applyLink || link,
+      workArrangement: dom.workArrangement || schema.workArrangement || "",
+      employmentType: dom.employmentType || schema.employmentType || "",
+      salaryMin: schema.salaryMin || "",
+      salaryMax: schema.salaryMax || "",
+      salaryRaw,
+      hostedApply: Boolean(dom.hostedApply),
+      datePosted: schema.datePosted || dom.datePosted || "",
+      jobLocation: dom.jobLocation || schema.jobLocation || ""
+    };
+  }
+
+  async function scrapeZipRecruiter() {
+    let data = mergeZipRecruiterScrape(scrapeSchemaOrgJobPosting(), scrapeZipRecruiterDom(document));
+    if (data?.jobTitle && data?.jdText) return data;
+    for (const waitMs of [400, 900]) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      const next = mergeZipRecruiterScrape(
+        scrapeSchemaOrgJobPosting(),
+        scrapeZipRecruiterDom(document)
+      );
+      data = {
+        ...(data || {}),
+        ...(next || {}),
+        jobTitle: next?.jobTitle || data?.jobTitle || "",
+        companyName: next?.companyName || data?.companyName || "",
+        jdText: next?.jdText || data?.jdText || ""
+      };
+      if (data.jobTitle && data.jdText) return data;
+    }
+    return data && (data.jobTitle || data.jdText) ? data : null;
+  }
+
   function diceIdFromUrl(url = location.href) {
     try {
       const u = new URL(String(url || ""), "https://www.dice.com");
@@ -8428,7 +8557,8 @@
   const JOB_SCRAPERS = [
     { id: "jobright", host: /(^|\.)jobright\.ai$/i, scrape: scrapeJobright },
     { id: "dice", host: /(^|\.)dice\.com$/i, scrape: scrapeDice },
-    { id: "indeed", host: /(^|\.)indeed\.com$/i, scrape: scrapeIndeed }
+    { id: "indeed", host: /(^|\.)indeed\.com$/i, scrape: scrapeIndeed },
+    { id: "ziprecruiter", host: /(^|\.)ziprecruiter\.com$/i, scrape: scrapeZipRecruiter }
   ];
 
   async function scrapeJobPage() {

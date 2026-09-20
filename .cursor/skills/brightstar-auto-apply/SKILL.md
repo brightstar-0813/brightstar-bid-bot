@@ -51,6 +51,7 @@ Prefer short control labels and live status text over long instructional hints i
 | ATS score | `ats-score.js` |
 | Indeed hosted vs external | `indeed.js` |
 | Popup / queue UI | `popup.js` |
+| Profile apply (1-click log) | Manual Bid **Log apply** → `log_profile_apply` in `background.js` (`jd.txt` + sheet `Profile apply`) |
 | Email Bid (hiring outreach) | `email-bid.js`, `email-bid-ui.js`, `email-compose.js`, `email-contacts.js`, `email-send.js`, `prompts/email-*` |
 | Profiles | `profiles.js`, `person-profile-form.js`, `profile-editor.js` |
 | Q&A bank | `qa-store.js`, `qa-editor.js` |
@@ -67,13 +68,14 @@ Do not change without an explicit product decision:
 2. **External Indeed / external company ATS** = capture-only (files OK, never auto-submit).
 3. **Dice** may auto-apply+submit in batch / queue Apply. **All other ATS** (Greenhouse, Workday, Ashby, Lever, Jobgether, Indeed, …) = generate files + **in-page Autofill panel** only (Q&A bank, uploads, fill; submit only when the user runs panel/popup Auto Apply with submit allowed).
 4. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.
-5. Sheet dedupe = **job link only** (normalized), never company name. **Generate** skips if the link is already on the sheet (Ready or Applied). **Apply** only skips when the sheet status is Applied — a Ready row from the just-finished build must not block submit. Sheet **Bid mode** (column H): batch → `Auto bid`, manual one-off → `Manual bid`, Email Bid → `Email bid`.
+5. Sheet dedupe = **job link only** (normalized), never company name. **Generate** skips if the link is already on the sheet (Ready or Applied). **Apply** only skips when the sheet status is Applied — a Ready row from the just-finished build must not block submit. Sheet **Bid mode** (column H): batch → `Auto bid`, manual one-off → `Manual bid`, Email Bid → `Email bid`, site-profile / 1-click log → `Profile apply`.
 6. CSV upload/refresh **never auto-starts** generation — user clicks **Start** after review.
 7. Bad row: retry once → `failed` → continue batch.
 8. Never commit `.env` / secrets.
 9. After code changes, remind: **Reload** unpacked extension on `chrome://extensions`.
 10. **PDF output:** custom people must get `LastName_Resume` (never bare `Resume`). Save folder under Downloads defaults to the person's **sheet tab name** (e.g. `Lewis-SF`); fallback is `Applications-{Token}`. Source of truth is the active person (`resume-profile.js` + `syncActivePersonOutputContext`); do not freeze batch on generic `Applications` or absolute paths (Chrome saves those as `download`).
 11. **Custom profile parity:** Save-as-mine keeps rich / FIXED COMPANY HISTORY prompts (`resetEeo` ≠ `resetPrompts`); person template + sheet config are isolated; `last_resume_json` is scoped by `profileId`; queue rows get `profileId` on ingest/Start.
+12. **Profile apply (1-click / site profile):** Manual Bid **Log apply** saves `jd.txt` only and marks sheet **Applied** with bid mode `Profile apply` (`bidSource: profile-apply`). Never auto-clicks 1-Click Apply; never generates resume/cover PDFs.
 
 ## Change workflow
 
@@ -134,8 +136,9 @@ npm test
 
 - Folder: `Downloads/Applications-{Prefix}/[N] - [Company] - [Title]/`
 - Files: `jd.txt`, `{Name}_Resume.pdf`, `{Name}_Cover Letter.pdf` only
-- Sheet: build → **Ready**; confirmed submit / manual Apply / successful one-off → **Applied M/D/YYYY**
+- Sheet: build → **Ready**; confirmed submit / manual Apply / successful one-off → **Applied M/D/YYYY**; Profile apply log → **Applied** + Bid mode **Profile apply**
 - Sheet/Slack failure must not fail file generation
+- Profile apply path: `jd.txt` only (no resume PDF)
 
 ## When shipping
 

@@ -190,8 +190,17 @@ function normalizeBidMode_(value) {
   if (/^auto\s*bid$/i.test(raw)) return "Auto bid";
   if (/^manual\s*bid$/i.test(raw)) return "Manual bid";
   if (/^email\s*bid$/i.test(raw)) return "Email bid";
+  if (/^profile\s*apply$/i.test(raw)) return "Profile apply";
   var src = raw.toLowerCase().replace(/_/g, "-");
   if (src === "email-bid" || src === "email") return "Email bid";
+  if (
+    src === "profile-apply" ||
+    src === "profile" ||
+    src === "one-click" ||
+    src === "1-click"
+  ) {
+    return "Profile apply";
+  }
   if (src === "one-off" || src === "manual" || src === "manual-bid" || src === "oneoff") {
     return "Manual bid";
   }
