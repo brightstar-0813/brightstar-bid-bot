@@ -47,7 +47,7 @@ Independent **Email Bid** panel in the popup/side panel:
 4. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block.  
 5. Attachments: last generated resume/cover **or** custom PDF  
 6. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
-7. Progress on **bottom status bar**; sheet **Applied** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row)  
+7. Progress on **bottom status bar**; sheet **Applied** + **Bid mode = Email bid** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row)  
 
 Does **not** auto-run after batch/manual generate.
 

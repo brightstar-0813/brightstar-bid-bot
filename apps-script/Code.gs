@@ -13,10 +13,11 @@
  * POST body (text/plain JSON):
  *   action: "append" (default) | "listRows" | "listLinks" | "markApplied"
  *   spreadsheetId, optional sheetName (tab per profile; created if missing)
- *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status
+ *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status, bidMode
  *
- * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status
+ * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status | H Bid mode
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
+ * Bid mode: "Auto bid" (batch) | "Manual bid" (one-off) | "Email bid".
  * Dedup: same job link (normalized) is treated as duplicate within that tab.
  *
  * WorkSphere "Sync from sheet" calls listRows. Older scripts without listRows treated
@@ -81,9 +82,13 @@ function doPost(e) {
       const appliedOn = String(data.applicationDate || "").trim();
       const status =
         String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
+      const bidMode = normalizeBidMode_(data.bidMode);
       const row = findRowByLink_(sheet, jobLink);
       if (row > 0) {
         sheet.getRange(row, statusColumnForRow_(sheet, row)).setValue(status);
+        if (bidMode) {
+          sheet.getRange(row, bidModeColumnForRow_(sheet, row)).setValue(bidMode);
+        }
         return json_({
           ok: true,
           updated: true,
@@ -159,13 +164,13 @@ function resolveSheet_(ss, sheetName) {
   var existing = ss.getSheetByName(name);
   if (existing) return existing;
   var created = ss.insertSheet(name);
-  created.getRange(1, 1, 1, 7).setValues([
-    ["No", "Date", "Title", "Company", "Link", "Salary", "Status"]
+  created.getRange(1, 1, 1, 8).setValues([
+    ["No", "Date", "Title", "Company", "Link", "Salary", "Status", "Bid mode"]
   ]);
   return created;
 }
 
-/** One data row matching A–G: No | Date | Title | Company | Link | Salary | Status */
+/** One data row A–H: No | Date | Title | Company | Link | Salary | Status | Bid mode */
 function buildDataRow_(data, status) {
   return [
     data.jobNo || "",
@@ -174,8 +179,23 @@ function buildDataRow_(data, status) {
     String(data.companyName || "").trim(),
     String(data.jobLink || "").trim(),
     data.salary || "",
-    status || "Ready"
+    status || "Ready",
+    normalizeBidMode_(data.bidMode)
   ];
+}
+
+function normalizeBidMode_(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "Auto bid";
+  if (/^auto\s*bid$/i.test(raw)) return "Auto bid";
+  if (/^manual\s*bid$/i.test(raw)) return "Manual bid";
+  if (/^email\s*bid$/i.test(raw)) return "Email bid";
+  var src = raw.toLowerCase().replace(/_/g, "-");
+  if (src === "email-bid" || src === "email") return "Email bid";
+  if (src === "one-off" || src === "manual" || src === "manual-bid" || src === "oneoff") {
+    return "Manual bid";
+  }
+  return "Auto bid";
 }
 
 function normalizeLink_(url) {
@@ -208,7 +228,7 @@ function normalizeLink_(url) {
 }
 
 function headerRow_(sheet) {
-  var lastCol = Math.max(sheet.getLastColumn(), 7);
+  var lastCol = Math.max(sheet.getLastColumn(), 8);
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0] || [];
 }
 
@@ -220,7 +240,7 @@ function rowLooksLikeHeader_(row) {
     .join(" ");
   if (!joined) return false;
   if (/https?:\/\//i.test(joined)) return false;
-  return /\b(link|title|company|compay|status|date|salary)\b/.test(joined);
+  return /\b(link|title|company|compay|status|date|salary|bid\s*mode|bid\s*source)\b/.test(joined);
 }
 
 function cellLooksLikeUrl_(value) {
@@ -254,6 +274,21 @@ function statusColumnIndex_(headerRow) {
     if (idx >= 0) return idx;
   }
   return 6; // column G
+}
+
+function bidModeColumnIndex_(headerRow) {
+  var headers = (headerRow || []).map(function (h) {
+    return String(h || "")
+      .trim()
+      .toLowerCase();
+  });
+  var names = ["bid mode", "bidmode", "bid source", "mode", "source"];
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx >= 0) return idx;
+  }
+  // Default: immediately after Status.
+  return statusColumnIndex_(headerRow) + 1;
 }
 
 function findNamedColumnIndex_(headerRow, names) {
@@ -341,7 +376,40 @@ function ensureStatusHeader_(sheet) {
   }
 }
 
-/** Remove a previously added JD column so Status stays last and append stays 7 cells. */
+/** Ensure Bid mode sits immediately after Status (column H on a fresh sheet). */
+function ensureBidModeHeader_(sheet) {
+  var headers = headerRow_(sheet);
+  if (!rowLooksLikeHeader_(headers)) {
+    // No header row — still reserve H for Bid mode on writes.
+    return;
+  }
+  var statusIdx = statusColumnIndex_(headers);
+  var names = ["bid mode", "bidmode", "bid source", "mode"];
+  var found = -1;
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers
+      .map(function (h) {
+        return String(h || "")
+          .trim()
+          .toLowerCase();
+      })
+      .indexOf(names[i]);
+    if (idx >= 0) {
+      found = idx;
+      break;
+    }
+  }
+  if (found >= 0) {
+    if (!String(headers[found] || "").trim()) {
+      sheet.getRange(1, found + 1).setValue("Bid mode");
+    }
+    return;
+  }
+  var bidCol = statusIdx + 2; // 1-based column after Status
+  sheet.getRange(1, bidCol).setValue("Bid mode");
+}
+
+/** Remove a previously added JD column so Status / Bid mode stay aligned. */
 function dropJdColumnIfPresent_(sheet) {
   var headers = headerRow_(sheet);
   if (!rowLooksLikeHeader_(headers)) return;
@@ -349,13 +417,18 @@ function dropJdColumnIfPresent_(sheet) {
   if (jdIdx >= 0) sheet.deleteColumn(jdIdx + 1);
 }
 
-/** Drop columns past Status (orphaned Ready cells after JD removal / bad writes). */
-function trimColumnsPastStatus_(sheet) {
+/** Drop orphan columns past Bid mode (keeps Status + Bid mode). */
+function trimColumnsPastBidMode_(sheet) {
   var headers = headerRow_(sheet);
-  var statusCol = rowLooksLikeHeader_(headers) ? statusColumnIndex_(headers) + 1 : 7;
+  var lastKeep;
+  if (rowLooksLikeHeader_(headers)) {
+    lastKeep = Math.max(statusColumnIndex_(headers), bidModeColumnIndex_(headers)) + 1;
+  } else {
+    lastKeep = 8;
+  }
   var lastCol = sheet.getLastColumn();
-  if (lastCol > statusCol) {
-    sheet.deleteColumns(statusCol + 1, lastCol - statusCol);
+  if (lastCol > lastKeep) {
+    sheet.deleteColumns(lastKeep + 1, lastCol - lastKeep);
   }
 }
 
@@ -407,8 +480,9 @@ function pruneBlankReadyRows_(sheet) {
 /** Normalize layout before read/write. Returns blank rows pruned. */
 function ensureSheetLayout_(sheet) {
   ensureStatusHeader_(sheet);
+  ensureBidModeHeader_(sheet);
   dropJdColumnIfPresent_(sheet);
-  trimColumnsPastStatus_(sheet);
+  trimColumnsPastBidMode_(sheet);
   return pruneBlankReadyRows_(sheet);
 }
 
@@ -417,6 +491,12 @@ function statusColumnForRow_(sheet, row) {
   var headers = headerRow_(sheet);
   if (rowLooksLikeHeader_(headers)) return statusColumnIndex_(headers) + 1;
   return 7;
+}
+
+function bidModeColumnForRow_(sheet, row) {
+  var headers = headerRow_(sheet);
+  if (rowLooksLikeHeader_(headers)) return bidModeColumnIndex_(headers) + 1;
+  return 8;
 }
 
 function companyColumnIndex_(headerRow) {
@@ -448,6 +528,7 @@ function collectJobRows_(sheet) {
   var linkCol = hasHeader ? linkColumnIndex_(header) : 4;
   var salaryCol = hasHeader ? salaryColumnIndex_(header) : 5;
   var statusCol = hasHeader ? statusColumnIndex_(header) : 6;
+  var bidModeCol = hasHeader ? bidModeColumnIndex_(header) : 7;
   var out = [];
   for (var r = start; r < values.length; r++) {
     var row = values[r] || [];
@@ -473,7 +554,8 @@ function collectJobRows_(sheet) {
       company: company,
       link: link,
       salary: String(row[salaryCol] || "").trim(),
-      status: String(row[statusCol] || "").trim()
+      status: String(row[statusCol] || "").trim(),
+      bidMode: String(row[bidModeCol] || "").trim()
     });
   }
   return out;

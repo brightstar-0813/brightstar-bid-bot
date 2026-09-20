@@ -67,7 +67,7 @@ Do not change without an explicit product decision:
 2. **External Indeed / external company ATS** = capture-only (files OK, never auto-submit).
 3. **Dice** may auto-apply+submit in batch / queue Apply. **All other ATS** (Greenhouse, Workday, Ashby, Lever, Jobgether, Indeed, …) = generate files + **in-page Autofill panel** only (Q&A bank, uploads, fill; submit only when the user runs panel/popup Auto Apply with submit allowed).
 4. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.
-5. Sheet dedupe = **job link only** (normalized), never company name. **Generate** skips if the link is already on the sheet (Ready or Applied). **Apply** only skips when the sheet status is Applied — a Ready row from the just-finished build must not block submit.
+5. Sheet dedupe = **job link only** (normalized), never company name. **Generate** skips if the link is already on the sheet (Ready or Applied). **Apply** only skips when the sheet status is Applied — a Ready row from the just-finished build must not block submit. Sheet **Bid mode** (column H): batch → `Auto bid`, manual one-off → `Manual bid`, Email Bid → `Email bid`.
 6. CSV upload/refresh **never auto-starts** generation — user clicks **Start** after review.
 7. Bad row: retry once → `failed` → continue batch.
 8. Never commit `.env` / secrets.

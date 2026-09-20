@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import {
   buildSheetRowTsv,
   defaultSheetTabNameForPerson,
+  resolveBidModeLabel,
   resolveSheetTabNameForPerson,
-  sanitizeSheetTabName
+  sanitizeSheetTabName,
+  BID_MODE_AUTO,
+  BID_MODE_MANUAL,
+  BID_MODE_EMAIL
 } from "../sheets.js";
 
 test("sanitizeSheetTabName strips illegal Google Sheets characters", () => {
@@ -61,7 +65,7 @@ test("resolveSheetTabNameForPerson keeps explicit tabs, regenerates full-name le
   );
 });
 
-test("buildSheetRowTsv ends with Status and has no JD column", () => {
+test("buildSheetRowTsv ends with Bid mode after Status and has no JD column", () => {
   const row = buildSheetRowTsv({
     jobNo: "12",
     jobTitle: "SF Architect",
@@ -69,7 +73,18 @@ test("buildSheetRowTsv ends with Status and has no JD column", () => {
     jdLink: "https://example.com/job",
     salary: "150k",
     status: "Ready",
+    bidMode: "Auto bid",
     includeDate: false
   });
-  assert.equal(row, "12\t\tSF Architect\tAcme\thttps://example.com/job\t150k\tReady");
+  assert.equal(row, "12\t\tSF Architect\tAcme\thttps://example.com/job\t150k\tReady\tAuto bid");
+});
+
+test("resolveBidModeLabel maps sources to sheet labels", () => {
+  assert.equal(resolveBidModeLabel("batch"), BID_MODE_AUTO);
+  assert.equal(resolveBidModeLabel("indeed-grab"), BID_MODE_AUTO);
+  assert.equal(resolveBidModeLabel(""), BID_MODE_AUTO);
+  assert.equal(resolveBidModeLabel("one-off"), BID_MODE_MANUAL);
+  assert.equal(resolveBidModeLabel("Manual bid"), BID_MODE_MANUAL);
+  assert.equal(resolveBidModeLabel("email-bid"), BID_MODE_EMAIL);
+  assert.equal(resolveBidModeLabel("Email bid"), BID_MODE_EMAIL);
 });

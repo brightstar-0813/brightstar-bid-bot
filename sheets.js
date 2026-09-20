@@ -73,6 +73,31 @@ export function formatAppliedStatus(date = new Date()) {
   return `Applied ${formatApplicationDateTime(date)}`;
 }
 
+/** Sheet "Bid mode" labels (column H, next to Status). */
+export const BID_MODE_AUTO = "Auto bid";
+export const BID_MODE_MANUAL = "Manual bid";
+export const BID_MODE_EMAIL = "Email bid";
+
+/**
+ * Map bidSource / explicit mode → sheet Bid mode label.
+ * Batch / CSV / Indeed grab → Auto bid; one-off → Manual bid; email-bid → Email bid.
+ * @param {string} [bidSourceOrMode]
+ */
+export function resolveBidModeLabel(bidSourceOrMode = "") {
+  const raw = String(bidSourceOrMode || "").trim();
+  if (!raw) return BID_MODE_AUTO;
+  if (/^auto\s*bid$/i.test(raw)) return BID_MODE_AUTO;
+  if (/^manual\s*bid$/i.test(raw)) return BID_MODE_MANUAL;
+  if (/^email\s*bid$/i.test(raw)) return BID_MODE_EMAIL;
+  const src = raw.toLowerCase().replace(/_/g, "-");
+  if (src === "email-bid" || src === "email") return BID_MODE_EMAIL;
+  if (src === "one-off" || src === "manual" || src === "manual-bid" || src === "oneoff") {
+    return BID_MODE_MANUAL;
+  }
+  // batch, csv, indeed-grab, queue, etc.
+  return BID_MODE_AUTO;
+}
+
 /**
  * Normalize employer names so "Google LLC" and "Google, Inc." match.
  */
@@ -124,8 +149,8 @@ export function normalizeJobLink(url) {
 }
 
 /**
- * Tab-separated row matching sheet columns A–G:
- * No | Date | Title | Company | Link | Salary | Status
+ * Tab-separated row matching sheet columns A–H:
+ * No | Date | Title | Company | Link | Salary | Status | Bid mode
  * Paste into the first cell of an empty row in Google Sheets.
  */
 export function buildSheetRowTsv({
@@ -135,6 +160,7 @@ export function buildSheetRowTsv({
   jdLink,
   salary = "",
   status = "",
+  bidMode = "",
   includeDate = true
 }) {
   const cells = [
@@ -144,7 +170,8 @@ export function buildSheetRowTsv({
     companyName || "",
     jdLink || "",
     salary || "",
-    status || ""
+    status || "",
+    bidMode || ""
   ];
   return cells.join("\t");
 }
@@ -198,7 +225,9 @@ export async function appendJobToSpreadsheet({
   companyName,
   jdLink,
   salary,
-  status = "Ready"
+  status = "Ready",
+  bidMode = "",
+  bidSource = ""
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
@@ -215,7 +244,8 @@ export async function appendJobToSpreadsheet({
     companyName: companyName || "",
     jobLink: jdLink || "",
     salary: salary || "",
-    status: status || "Ready"
+    status: status || "Ready",
+    bidMode: resolveBidModeLabel(bidMode || bidSource)
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);
@@ -235,7 +265,9 @@ export async function markJobAppliedOnSpreadsheet({
   companyName,
   jdLink,
   salary,
-  status
+  status,
+  bidMode = "",
+  bidSource = ""
 }) {
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
@@ -254,7 +286,8 @@ export async function markJobAppliedOnSpreadsheet({
     companyName: companyName || "",
     jobLink: jdLink || "",
     salary: salary || "",
-    status: statusValue
+    status: statusValue,
+    bidMode: resolveBidModeLabel(bidMode || bidSource)
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);

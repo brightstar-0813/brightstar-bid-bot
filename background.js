@@ -1386,7 +1386,8 @@ function buildEmailBidDeps(person, jobMeta, extra = {}) {
         jobTitle: meta?.title || meta?.jobTitle || "",
         companyName: meta?.company || meta?.companyName || "",
         jdLink: meta?.jdLink || "",
-        salary: meta?.salary || ""
+        salary: meta?.salary || "",
+        bidSource: meta?.bidSource || "email-bid"
       });
       return { ok: true };
     },
@@ -1419,7 +1420,8 @@ async function recordEmailBidSheetApplied(jobMeta = {}) {
       jobTitle,
       companyName,
       jdLink,
-      salary: jobMeta?.salary || ""
+      salary: jobMeta?.salary || "",
+      bidSource: jobMeta?.bidSource || "email-bid"
     });
     return {
       ok: true,
@@ -1557,6 +1559,7 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
       companyName: jobMeta.companyName || jobMeta.company || "",
       jdLink,
       salary: jobMeta.salary || "",
+      bidSource: jobMeta.bidSource || (isManualOneOffJob(jobMeta) ? "one-off" : "batch"),
       ...(statusText ? { status: statusText } : {})
     });
     if (jobMeta.csvRow != null && jobMeta.csvRow !== "" && !statusText) {
@@ -6743,7 +6746,8 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
           jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || ""
+          salary: jobMeta.salary || "",
+          bidSource: jobMeta.bidSource || "one-off"
         });
         const label = sheetResult.status || formatAppliedStatus();
         status = `${status} Sheet: ${label}.`;
@@ -6756,7 +6760,8 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
           jobTitle: jobMeta.jobTitle,
           companyName: jobMeta.companyName,
           jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || ""
+          salary: jobMeta.salary || "",
+          bidSource: jobMeta.bidSource || "batch"
         });
         status = sheetResult.duplicate
           ? `${status} (already on Google Sheet — not re-appended)`
