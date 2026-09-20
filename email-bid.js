@@ -202,14 +202,6 @@ export async function sendConfirmedEmailBid(person, draft, deps = {}) {
     return { ok: false, reason: "no-resume" };
   }
 
-  if (deps.writeSheet !== false && typeof deps.appendSheetReady === "function") {
-    try {
-      await deps.appendSheetReady(jobMeta);
-    } catch {
-      /* soft */
-    }
-  }
-
   await status(`Email Bid · sending as ${from} → ${toEmails.length} recipient(s)…`);
 
   try {
@@ -226,14 +218,51 @@ export async function sendConfirmedEmailBid(person, draft, deps = {}) {
     return { ok: false, error: String(err?.message || err) };
   }
 
-  if (deps.writeSheet !== false && typeof deps.markSheetApplied === "function") {
-    try {
-      await deps.markSheetApplied(jobMeta);
-    } catch {
-      /* soft */
+  // Sheet only after a successful send — Applied upsert (no pre-send Ready row).
+  let sheetNote = "";
+  if (deps.writeSheet !== false) {
+    const record =
+      typeof deps.recordSheetApplied === "function"
+        ? deps.recordSheetApplied
+        : typeof deps.markSheetApplied === "function"
+          ? deps.markSheetApplied
+          : null;
+    if (record) {
+      try {
+        const sheetResult = await record(jobMeta);
+        if (sheetResult?.skipped && sheetResult?.reason === "no-sheet") {
+          sheetNote = " (sheet not configured)";
+        } else if (sheetResult?.ok === false) {
+          sheetNote = ` (sheet: ${String(sheetResult.error || sheetResult.reason || "failed").slice(0, 80)})`;
+          await status(
+            `Email Bid sent — sheet update failed: ${String(
+              sheetResult.error || sheetResult.reason || "unknown"
+            ).slice(0, 100)}`,
+            "err"
+          );
+        } else if (sheetResult?.appended) {
+          sheetNote = " · sheet Applied (new row)";
+        } else if (sheetResult?.updated) {
+          sheetNote = " · sheet Applied";
+        } else if (sheetResult?.ok !== false) {
+          sheetNote = " · sheet Applied";
+        }
+      } catch (err) {
+        sheetNote = ` (sheet: ${String(err?.message || err).slice(0, 80)})`;
+        await status(
+          `Email Bid sent — sheet update failed: ${String(err?.message || err).slice(0, 100)}`,
+          "err"
+        );
+      }
     }
   }
 
-  await status(`Email Bid sent — ${label} (${toEmails.length} recipients)`, "ok");
-  return { ok: true, toEmails, subject, from };
+  await status(`Email Bid sent — ${label} (${toEmails.length} recipients)${sheetNote}`, "ok");
+  return {
+    ok: true,
+    toEmails,
+    subject,
+    from,
+    statusMessage: `Email Bid sent — ${label} (${toEmails.length} recipients)${sheetNote}`
+  };
 }

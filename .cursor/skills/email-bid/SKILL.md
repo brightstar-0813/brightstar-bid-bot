@@ -47,7 +47,7 @@ Independent **Email Bid** panel in the popup/side panel:
 4. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block.  
 5. Attachments: last generated resume/cover **or** custom PDF  
 6. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
-7. Progress on **bottom status bar**; sheet Ready→Applied on successful send  
+7. Progress on **bottom status bar**; sheet **Applied** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row)  
 
 Does **not** auto-run after batch/manual generate.
 
@@ -75,4 +75,4 @@ Cleanup is deferred if a batch/generate is running.
 | Contact harvest | `email-contacts.js`, `prompts/email-contacts.js` |
 | SMTP send | `email-send.js`, `native-host/csv_watcher.py` |
 | UI | `email-bid-ui.js`, `popup.html`, `popup.css` (wired from `popup.js`) |
-| SW messages | `background.js` (`email_bid_prepare`, `email_bid_send`) |
+| SW messages | `background.js` (`email_bid_prepare`, `email_bid_send`, `email_bid_record_sheet`, `email_bid_cleanup_chats`) |

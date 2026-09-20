@@ -1373,8 +1373,11 @@ function buildEmailBidDeps(person, jobMeta, extra = {}) {
       return null;
     },
     appendSheetReady: async (meta) => {
+      // Kept for compatibility — Email Bid now prefers recordSheetApplied (Applied upsert).
       const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
-      if (!spreadsheetUrl || !webAppUrl) return;
+      if (!spreadsheetUrl || !webAppUrl) {
+        return { ok: false, skipped: true, reason: "no-sheet" };
+      }
       await appendJobToSpreadsheet({
         spreadsheetUrl,
         webAppUrl,
@@ -1385,20 +1388,48 @@ function buildEmailBidDeps(person, jobMeta, extra = {}) {
         jdLink: meta?.jdLink || "",
         salary: meta?.salary || ""
       });
+      return { ok: true };
     },
-    markSheetApplied: async (meta) => {
-      const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
-      if (!spreadsheetUrl || !webAppUrl) return;
-      await markJobAppliedOnSpreadsheet({
-        spreadsheetUrl,
-        webAppUrl,
-        sheetName: sheetTabName,
-        jdLink: meta?.jdLink || "",
-        jobTitle: meta?.title || meta?.jobTitle || "",
-        companyName: meta?.company || meta?.companyName || ""
-      });
-    }
+    markSheetApplied: async (meta) => recordEmailBidSheetApplied(meta || jobMeta),
+    recordSheetApplied: async (meta) => recordEmailBidSheetApplied(meta || jobMeta)
   };
+}
+
+/**
+ * Email Bid sheet write: upsert Applied by job link (Apps Script appends if missing).
+ * Prefer this over Ready-then-Applied so failed sends do not leave stray Ready rows.
+ */
+async function recordEmailBidSheetApplied(jobMeta = {}) {
+  const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
+  if (!spreadsheetUrl || !webAppUrl) {
+    return { ok: false, skipped: true, reason: "no-sheet" };
+  }
+  const jobTitle = String(jobMeta?.title || jobMeta?.jobTitle || "").trim();
+  const companyName = String(jobMeta?.company || jobMeta?.companyName || "").trim();
+  const jdLink = String(jobMeta?.jdLink || "").trim();
+  if (!jdLink && !jobTitle && !companyName) {
+    return { ok: false, reason: "no-job-identity" };
+  }
+  try {
+    const result = await markJobAppliedOnSpreadsheet({
+      spreadsheetUrl,
+      webAppUrl,
+      sheetName: sheetTabName,
+      jobNo: jobMeta?.csvRow != null ? jobMeta.csvRow : jobMeta?.jobNo || "",
+      jobTitle,
+      companyName,
+      jdLink,
+      salary: jobMeta?.salary || ""
+    });
+    return {
+      ok: true,
+      updated: Boolean(result?.updated),
+      appended: Boolean(result?.appended),
+      sheetName: sheetTabName
+    };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
 }
 
 /** Persist harvested resume JSON scoped to the active person (avoids cross-profile autofill history). */
@@ -10500,7 +10531,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         );
         sendOk = Boolean(result?.ok);
         sendStatus = sendOk
-          ? `Email Bid sent — ${(message.toEmails || []).length || result.toEmails?.length || 0} recipients`
+          ? result.statusMessage ||
+            `Email Bid sent — ${(message.toEmails || []).length || result.toEmails?.length || 0} recipients`
           : result?.error || result?.reason || "Send failed";
         chrome.runtime
           .sendMessage({
@@ -10529,6 +10561,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           if (sendStatus) await setStatus(sendStatus);
         }
+      }
+    })();
+    return false;
+  }
+
+  if (type === "email_bid_record_sheet") {
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    (async () => {
+      const jobMeta = {
+        ...(message.jobMeta || {}),
+        bidSource: "email-bid"
+      };
+      try {
+        const person = await getActivePerson().catch(() => null);
+        if (person?.id) jobMeta.profileId = jobMeta.profileId || person.id;
+        const sheetResult = await recordEmailBidSheetApplied(jobMeta);
+        let statusText = "";
+        if (sheetResult?.skipped && sheetResult?.reason === "no-sheet") {
+          statusText = "Email Bid · compose opened (sheet not configured)";
+        } else if (sheetResult?.reason === "no-job-identity") {
+          statusText =
+            "Email Bid · compose opened — add job title, company, or link for sheet Applied";
+        } else if (sheetResult?.ok === false) {
+          statusText = `Email Bid · compose opened — sheet failed: ${String(
+            sheetResult.error || sheetResult.reason || "unknown"
+          ).slice(0, 100)}`;
+          await setStatus(statusText);
+        } else if (sheetResult?.appended) {
+          statusText = "Email Bid · sheet Applied (new row)";
+          await setStatus(statusText);
+        } else {
+          statusText = "Email Bid · sheet Applied";
+          await setStatus(statusText);
+        }
+        chrome.runtime
+          .sendMessage({
+            type: "email_bid_record_sheet_done",
+            ok: sheetResult?.ok !== false || Boolean(sheetResult?.skipped),
+            sheet: sheetResult,
+            status: statusText
+          })
+          .catch(() => {});
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Email Bid · sheet failed: ${msg}`);
+        chrome.runtime
+          .sendMessage({ type: "email_bid_record_sheet_done", ok: false, error: msg })
+          .catch(() => {});
       }
     })();
     return false;

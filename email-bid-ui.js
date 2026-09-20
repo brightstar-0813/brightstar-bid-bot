@@ -490,6 +490,11 @@ export function initEmailBidUi(deps) {
           : "Email Bid · opened compose (no resume PDF)"
     );
 
+    const jobMeta = draftCache?.jobMeta || collectJobMeta(person);
+    // Treat web-compose handoff as the Email Bid "send" for sheet purposes (SMTP often blocked).
+    chrome.runtime
+      .sendMessage({ type: "email_bid_record_sheet", jobMeta })
+      .catch(() => {});
     chrome.runtime
       .sendMessage({ type: "email_bid_cleanup_chats", quiet: true })
       .catch(() => {});
@@ -601,6 +606,10 @@ export function initEmailBidUi(deps) {
       setStatus(
         message.ok ? message.status || "Email Bid sent" : message.error || "Email Bid send failed"
       );
+    }
+    if (message?.type === "email_bid_record_sheet_done") {
+      if (message.status) setStatus(String(message.status));
+      else if (message.error) setStatus(`Email Bid · sheet failed: ${message.error}`);
     }
   });
 
