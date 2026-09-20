@@ -41,8 +41,8 @@ Never invent addresses; never present inferred as confirmed.
 
 Independent **Email Bid** panel in the popup/side panel:
 
-1. Job fields (title, company, link, JD) + Fill from tab  
-2. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
+1. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
+2. Job fields (title, company, link, JD) + Fill from tab  
 3. **Find contacts** via AI engine → To checklist (check/uncheck)  
 4. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block.  
 5. Attachments: last generated resume/cover **or** custom PDF  

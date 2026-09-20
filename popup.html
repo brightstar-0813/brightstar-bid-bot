@@ -844,6 +844,34 @@
           </button>
           <div class="panel-body" id="emailBidPanelBody" hidden>
             <div class="subblock">
+              <p class="subsection-title">Mailbox</p>
+              <label class="field">
+                <span>Email</span>
+                <input id="emailBidMailboxEmail" type="email" placeholder="you@outlook.com" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input id="emailBidMailboxPassword" type="password" placeholder="App password" autocomplete="new-password" />
+              </label>
+              <div class="manual-tools" role="group" aria-label="Mailbox actions">
+                <button
+                  type="button"
+                  id="emailBidMailboxSave"
+                  class="primary icon-button"
+                  title="Connect mailbox"
+                  aria-label="Connect mailbox"
+                ></button>
+                <button
+                  type="button"
+                  id="emailBidMailboxDisconnect"
+                  class="ghost icon-button"
+                  title="Disconnect mailbox"
+                  aria-label="Disconnect mailbox"
+                ></button>
+              </div>
+            </div>
+
+            <div class="subblock">
               <p class="subsection-title">Job</p>
               <div class="grid-2">
                 <label class="field">
@@ -887,34 +915,6 @@
                     aria-label="Find contacts and draft"
                   ></button>
                 </div>
-              </div>
-            </div>
-
-            <div class="subblock">
-              <p class="subsection-title">Mailbox</p>
-              <label class="field">
-                <span>Email</span>
-                <input id="emailBidMailboxEmail" type="email" placeholder="you@outlook.com" autocomplete="username" />
-              </label>
-              <label class="field">
-                <span>Password</span>
-                <input id="emailBidMailboxPassword" type="password" placeholder="App password" autocomplete="new-password" />
-              </label>
-              <div class="manual-tools" role="group" aria-label="Mailbox actions">
-                <button
-                  type="button"
-                  id="emailBidMailboxSave"
-                  class="primary icon-button"
-                  title="Connect mailbox"
-                  aria-label="Connect mailbox"
-                ></button>
-                <button
-                  type="button"
-                  id="emailBidMailboxDisconnect"
-                  class="ghost icon-button"
-                  title="Disconnect mailbox"
-                  aria-label="Disconnect mailbox"
-                ></button>
               </div>
             </div>
 
