@@ -66,6 +66,7 @@ export function confirmDialog({
  *   confirmText?: string,
  *   cancelText?: string,
  *   previewText?: string,
+ *   clearText?: string,
  *   templates?: Array<{ id: string, label: string, description?: string }>,
  *   onPreview?: (values: {
  *     jobTitle: string,
@@ -95,6 +96,7 @@ export function jobDetailsDialog({
   confirmText = "Export & save",
   cancelText = "Cancel",
   previewText = "Preview",
+  clearText = "Clear",
   templates = [],
   onPreview = null,
   initial = {}
@@ -144,6 +146,7 @@ export function jobDetailsDialog({
           <p class="ui-dialog-error" hidden></p>
           <div class="ui-dialog-actions">
             <button type="button" class="ghost ui-dialog-cancel">${escapeHtml(cancelText)}</button>
+            <button type="button" class="ghost ui-dialog-clear">${escapeHtml(clearText)}</button>
             ${
               showPreview
                 ? `<button type="button" class="ghost ui-dialog-preview">${escapeHtml(previewText)}</button>`
@@ -163,6 +166,7 @@ export function jobDetailsDialog({
     const textEl = form.querySelector('[name="jdText"]');
     const errEl = host.querySelector(".ui-dialog-error");
     const previewBtn = host.querySelector(".ui-dialog-preview");
+    const clearBtn = host.querySelector(".ui-dialog-clear");
 
     const wantedTemplate = String(initial.templateId || "").trim();
     if (templateEl && wantedTemplate) {
@@ -212,6 +216,15 @@ export function jobDetailsDialog({
       templateId: String(templateEl?.value || "").trim()
     });
 
+    const clearJobFields = () => {
+      titleEl.value = "";
+      companyEl.value = "";
+      linkEl.value = "";
+      textEl.value = "";
+      showError("");
+      titleEl.focus();
+    };
+
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const values = readValues();
@@ -222,6 +235,8 @@ export function jobDetailsDialog({
       }
       finish(values);
     });
+
+    clearBtn?.addEventListener("click", () => clearJobFields());
 
     previewBtn?.addEventListener("click", () => {
       showError("");
