@@ -8,6 +8,7 @@ import {
   harvestContactsFromAiText,
   mergeContacts
 } from "./email-contacts.js";
+import { discoverPublicCompanyContacts } from "./email-contact-find.js";
 import { composeEmailBidSmart } from "./email-compose.js";
 import { EMAIL_BID_CUSTOM_RESUME_KEY, sendEmailBidMessage } from "./email-send.js";
 
@@ -75,25 +76,46 @@ export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
     .join("\n");
   const fromJob = extractContactsFromJobText(jobBlob, { role: title });
 
+  await status(`Email Bid · scanning public company pages for ${label}…`);
+  let fromPages = [];
+  try {
+    fromPages = await discoverPublicCompanyContacts({
+      company,
+      jdLink: jobMeta?.jdLink || "",
+      jdText: jobBlob,
+      title,
+      timeoutMs: 10000,
+      fetchImpl: typeof deps.fetchImpl === "function" ? deps.fetchImpl : undefined
+    });
+  } catch {
+    fromPages = [];
+  }
+
   let aiContacts = [];
   try {
+    await status(`Email Bid · AI contact search for ${label}…`);
     const aiText = await deps.runAiPrompt(contactPrompt, {
       statusLabel: "Email Bid · contacts",
       expectJson: true
     });
     aiContacts = harvestContactsFromAiText(aiText, { company });
   } catch (err) {
-    if (!fromJob.length) {
+    if (!fromJob.length && !fromPages.length) {
       await status(
         `Email Bid contacts failed — ${String(err?.message || err).slice(0, 80)}`,
         "err"
       );
       return { ok: false, reason: "contacts-failed", error: String(err?.message || err) };
     }
-    await status("Email Bid · AI contact search failed — using emails listed on the job.", "info");
+    await status(
+      "Email Bid · AI contact search failed — using JD / company-site emails.",
+      "info"
+    );
   }
 
-  const contacts = mergeContacts(fromJob, aiContacts);
+  const contacts = mergeContacts(fromJob, fromPages, aiContacts);
+  const sourceNote = `JD ${fromJob.length} · site ${fromPages.length} · AI ${aiContacts.length}`;
+  await status(`Email Bid · contacts ${sourceNote}`);
 
   if (!contacts.length) {
     await status(`Email Bid — no hiring contacts found for ${label}`, "info");
@@ -110,7 +132,7 @@ export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
   });
 
   await status(
-    `Email Bid draft ready — review To (${composed.toEmails.length}) then Confirm & Send`,
+    `Email Bid draft ready — review To (${composed.toEmails.length}) then Confirm & Send · ${sourceNote}`,
     "info"
   );
 
@@ -125,7 +147,12 @@ export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
     templateName: composed.templateName,
     roleKind: composed.roleKind,
     primaryName: composed.primaryName,
-    source: composed.source || "local"
+    source: composed.source || "local",
+    contactSources: {
+      jd: fromJob.length,
+      site: fromPages.length,
+      ai: aiContacts.length
+    }
   };
 }
 

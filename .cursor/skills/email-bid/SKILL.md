@@ -37,6 +37,15 @@ Priority:
 Discover **only**: `name`, `email`, `role`, and `phone` when publicly listed.  
 Never invent addresses or phone numbers.
 
+**Free waterfall (Find contacts):**
+
+1. Emails already written in the JD / poster hint  
+2. Public company-site scrape (`/`, `/contact`, `/about`, `/team`, `/careers`, …) — no paid APIs  
+3. AI deep-search prompt (ChatGPT/Claude tab; browsing only if the user’s session supports it)  
+
+Merge JD → site → AI (earlier wins). Status shows `JD N · site N · AI N`.  
+No Hunter / Apollo / AgentMail people search.
+
 ## UX (comfortable + complete)
 
 Lives inside the **Manual bid** panel (shared job fields — no duplicate title/company/link/JD):
@@ -74,7 +83,7 @@ Cleanup is deferred if a batch/generate is running.
 |---------|--------|
 | Orchestration | `email-bid.js` |
 | Templates / roles | `prompts/email-templates.js`, `prompts/email-compose.js`, `email-compose.js` |
-| Contact harvest | `email-contacts.js`, `prompts/email-contacts.js` |
+| Contact harvest | `email-contacts.js`, `email-contact-find.js`, `prompts/email-contacts.js` |
 | SMTP send | `email-send.js`, `native-host/csv_watcher.py` |
 | UI | `email-bid-ui.js`, `popup.html`, `popup.css` (wired from `popup.js`) |
 | SW messages | `background.js` (`email_bid_prepare`, `email_bid_send`, `email_bid_record_sheet`, `email_bid_cleanup_chats`) |

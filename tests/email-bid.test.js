@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildEmailContactsPrompt } from "../prompts/email-contacts.js";
 import { harvestContactsFromAiText, normalizeContacts, extractContactsFromJobText, mergeContacts } from "../email-contacts.js";
+import {
+  isJobBoardHost,
+  resolveCompanyDomainCandidates,
+  extractContactsFromHtml,
+  discoverPublicCompanyContacts
+} from "../email-contact-find.js";
 import { composeEmailBid, harvestEmailDraftFromAiText } from "../email-compose.js";
 import { pickTemplateVariant, selectTemplateForRole } from "../prompts/email-templates.js";
 import { buildEmailComposePrompt } from "../prompts/email-compose.js";
@@ -29,6 +35,8 @@ describe("email contacts prompt", () => {
     assert.match(prompt, /name.*email.*role.*phone/i);
     assert.match(prompt, /already written in the JD/i);
     assert.match(prompt, /empty list/i);
+    assert.match(prompt, /Deep search/i);
+    assert.match(prompt, /Do NOT invent first\.last@company\.com/i);
   });
 });
 
@@ -97,6 +105,65 @@ describe("harvestContactsFromAiText", () => {
     assert.equal(contacts.length, 1);
     assert.equal(contacts[0].email, "anjali.jaiswal@raasinfotek.com");
     assert.equal(contacts[0].name, "Anjali Jaiswal");
+  });
+});
+
+describe("free company-site contact find", () => {
+  it("skips job-board hosts when resolving domains", () => {
+    assert.equal(isJobBoardHost("www.linkedin.com"), true);
+    assert.equal(isJobBoardHost("dice.com"), true);
+    assert.equal(isJobBoardHost("boards.greenhouse.io"), true);
+    assert.equal(isJobBoardHost("raasinfotek.com"), false);
+    const fromBoard = resolveCompanyDomainCandidates({
+      company: "Acme",
+      jdLink: "https://www.linkedin.com/jobs/view/123"
+    });
+    assert.ok(!fromBoard.some((u) => /linkedin/i.test(u)));
+    const fromEmail = resolveCompanyDomainCandidates({
+      company: "",
+      emails: ["anjali.jaiswal@raasinfotek.com"]
+    });
+    assert.ok(fromEmail.includes("https://raasinfotek.com"));
+  });
+
+  it("extracts mailto and body emails from HTML", () => {
+    const html = `
+      <html><body>
+        <a href="mailto:careers@acme.com">Careers</a>
+        <p>Reach Pat Recruiter at pat.recruiter@acme.com for this role.</p>
+      </body></html>`;
+    const contacts = extractContactsFromHtml(html);
+    const emails = contacts.map((c) => c.email).sort();
+    assert.ok(emails.includes("careers@acme.com"));
+    assert.ok(emails.includes("pat.recruiter@acme.com"));
+  });
+
+  it("prefers site emails over empty AI and keeps JD first", async () => {
+    const htmlByUrl = {
+      "https://raasinfotek.com/": "<html><body><a href='mailto:careers@raasinfotek.com'>x</a></body></html>",
+      "https://raasinfotek.com/contact": "<html><body>Email: hr@raasinfotek.com</body></html>"
+    };
+    const fetchImpl = async (url) => {
+      const body = htmlByUrl[url] || "";
+      return {
+        ok: Boolean(body),
+        headers: { get: () => "text/html" },
+        text: async () => body
+      };
+    };
+    const fromPages = await discoverPublicCompanyContacts({
+      company: "Raas Infotek",
+      jdLink: "https://raasinfotek.com/jobs/1",
+      jdText: "Thanks, Anjali Jaiswal, Email: anjali.jaiswal@raasinfotek.com",
+      timeoutMs: 5000,
+      fetchImpl
+    });
+    const fromJob = extractContactsFromJobText(
+      "Thanks, Anjali Jaiswal, Email: anjali.jaiswal@raasinfotek.com"
+    );
+    const merged = mergeContacts(fromJob, fromPages, []);
+    assert.ok(merged.some((c) => c.email === "anjali.jaiswal@raasinfotek.com"));
+    assert.ok(merged.some((c) => c.email === "careers@raasinfotek.com" || c.email === "hr@raasinfotek.com"));
   });
 });
 
