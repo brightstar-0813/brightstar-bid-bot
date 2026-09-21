@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-21.workday-engine1";
+  const SCRIPT_BUILD = "2026-09-21.workday-fill2";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -425,6 +425,7 @@
       "address 1",
       "home address",
       "street",
+      "address",
       "legal address",
       "full mailing address",
       "mailing address",
@@ -951,11 +952,32 @@
       decline: ["I do not want to answer", "I do not wish to answer", "Prefer not to say"]
     },
     howDidYouHear: {
-      "Job Board": ["Job Board", "Job board", "Online Job Board", "Indeed", "LinkedIn", "Internet Search"],
-      LinkedIn: ["LinkedIn", "Linkedin"],
-      Indeed: ["Indeed"],
-      "Internet Search": ["Internet Search", "Search Engine", "Google"],
-      "Company Website": ["Company Website", "Company Career Site", "Career Site"]
+      "Job Board": [
+        "Job Board",
+        "Job board",
+        "Online Job Board",
+        "Indeed",
+        "LinkedIn",
+        "Internet Search",
+        "Other Job Board",
+        "External Job Board",
+        "Careers Site",
+        "Company Careers Site"
+      ],
+      LinkedIn: ["LinkedIn", "Linkedin", "LinkedIn.com"],
+      Indeed: ["Indeed", "Indeed.com"],
+      "Internet Search": ["Internet Search", "Search Engine", "Google", "Online Search"],
+      "Company Website": [
+        "Company Website",
+        "Company Career Site",
+        "Career Site",
+        "Careers at dentsu",
+        "Careers Website",
+        "Employer Website"
+      ],
+      Referral: ["Employee Referral", "Referral", "Referred by Employee", "Friend or Family"],
+      Recruiter: ["Recruiter", "Agency", "Staffing Agency", "Third Party"],
+      Other: ["Other", "Other Source", "Prefer not to say"]
     },
     selfIdentifyLanguage: {
       English: ["English", "EN", "en"]
@@ -1086,6 +1108,101 @@
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return true;
+  }
+
+  /**
+   * Workday (and similar React ATS) need focus + InputEvent + blur or the
+   * controlled store ignores a silent value write.
+   */
+  function setReactFriendlyValue(el, value) {
+    if (!el) return false;
+    const str = String(value ?? "");
+    try {
+      el.focus?.({ preventScroll: true });
+    } catch {
+      try {
+        el.focus?.();
+      } catch {
+        /* ignore */
+      }
+    }
+    const proto =
+      el instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+    try {
+      if (descriptor?.set) descriptor.set.call(el, str);
+      else el.value = str;
+    } catch {
+      return false;
+    }
+    try {
+      el.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          data: str,
+          inputType: "insertText"
+        })
+      );
+    } catch {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    try {
+      el.blur?.();
+    } catch {
+      /* ignore */
+    }
+    return String(el.value || "") === str || Boolean(String(el.value || "").trim());
+  }
+
+  /** Keys that are free text even when Workday marks the control as combobox/typeahead. */
+  const FREE_TEXT_FILL_KEYS = new Set([
+    "firstName",
+    "lastName",
+    "middleName",
+    "preferredName",
+    "email",
+    "phone",
+    "addressLine1",
+    "addressLine2",
+    "city",
+    "zipCode",
+    "linkedinUrl",
+    "portfolioUrl",
+    "githubUrl",
+    "currentEmployer",
+    "currentJobTitle",
+    "schoolName",
+    "fieldOfStudy"
+  ]);
+
+  /** US national phone for Workday (country code is a separate control). */
+  function formatPhoneForWorkday(raw) {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (!digits) return "";
+    let national = digits;
+    if (national.length === 11 && national.startsWith("1")) national = national.slice(1);
+    if (national.length > 10) national = national.slice(-10);
+    if (national.length !== 10) return national;
+    return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
+  }
+
+  /** US ZIP → ##### or #####-####; returns "" if unusable. */
+  function formatZipForWorkday(raw, country = "") {
+    const s = String(raw || "").trim();
+    const isUs =
+      !country ||
+      /^(us|usa|united states|united states of america)$/i.test(String(country).trim());
+    if (!isUs) return s;
+    const digits = s.replace(/\D/g, "");
+    if (digits.length === 5) return digits;
+    if (digits.length === 9) return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+    if (/^\d{5}(-\d{4})?$/.test(s)) return s;
+    return "";
   }
 
   function setNativeChecked(el, checked) {
@@ -1684,7 +1801,7 @@
       felonyConviction: "LEGAL_ATTESTATION",
       felonyExplanation: "LEGAL_ATTESTATION",
       postEmploymentRestrictions: "LEGAL_ATTESTATION",
-      workedForCompanyBefore: "LEGAL_ATTESTATION",
+      // workedForCompanyBefore: allow autofill when profile has Yes/No (user-supplied).
       relatedToEmployee: "CONFLICT_OF_INTEREST",
       governmentEmployee: "CONFLICT_OF_INTEREST",
       governmentEthicsRecusal: "LEGAL_ATTESTATION"
@@ -1709,6 +1826,11 @@
     const question = questionLabelForControl(el);
     const primary = normalize(question);
     const full = primary || labelTextForControl(el);
+
+    // Bare Workday "Address" label → street line (not section header noise).
+    if (/^address$/.test(primary)) {
+      return workdayPolicyAllowsKey("addressLine1") ? "addressLine1" : null;
+    }
 
     if (/\bextension\b/.test(primary)) return null;
     if (/\bdevice type\b/.test(primary)) {
@@ -2045,7 +2167,11 @@
       '[role="menuitemradio"]',
       '[role="treeitem"]',
       "li[data-value]",
-      ".select-option"
+      ".select-option",
+      '[data-automation-id="promptOption"]',
+      '[data-automation-id*="promptOption"]',
+      '[data-automation-id="menuItem"]',
+      '[data-automation-id*="menuItem"]'
     ];
     const nodes = [];
     for (const sel of selectors) {
@@ -2155,19 +2281,50 @@
     return [];
   }
 
+  /** Click Workday select / combobox chrome so promptOption list renders. */
+  function openWorkdaySelect(el) {
+    if (!el) return null;
+    const widget =
+      el.closest?.(
+        '[data-automation-id*="selectWidget"], [data-automation-id*="SelectWidget"], [data-automation-id*="dropdown"], [data-automation-id*="Dropdown"]'
+      ) ||
+      el.closest?.('[role="combobox"]') ||
+      el;
+    const clickTarget =
+      widget.querySelector?.(
+        '[data-automation-id*="selectInput"], [data-automation-id*="multiSelectContainer"], button, [aria-haspopup="listbox"]'
+      ) ||
+      widget;
+    try {
+      scrollElIntoView(clickTarget);
+      safeClick(clickTarget);
+    } catch {
+      try {
+        el.click?.();
+      } catch {
+        /* ignore */
+      }
+    }
+    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" ? el : widget.querySelector?.("input") || el;
+  }
+
   async function fillCustomDropdown(el, value, key = null) {
     if (value == null || String(value).trim() === "") return false;
     if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) return false;
     const candidates = key ? expandValueCandidates(key, value) : [String(value).trim()];
     const reactSelect = isReactSelectInput(el);
+    const onWorkday = typeof isWorkdayPage === "function" ? isWorkdayPage() : false;
 
     // Prefer already-open menu options.
     let options = collectVisibleOptions(document);
     let match = options.find((n) => optionMatchesAny(n.textContent, candidates));
     if (match) return clickOptionNode(match);
 
-    const input = openReactSelect(el);
-    options = await waitForOptions(reactSelect ? 10 : 6, reactSelect ? 100 : 80);
+    const input = onWorkday ? openWorkdaySelect(el) : openReactSelect(el);
+    options = await waitForOptions(
+      onWorkday ? 16 : reactSelect ? 10 : 6,
+      onWorkday ? 120 : reactSelect ? 100 : 80
+    );
     if (
       nearestEssayEditor(el) ||
       (options.length > 0 &&
@@ -2189,8 +2346,7 @@
       return ok;
     }
 
-    // Filter the menu (Greenhouse React-Select), then pick — never leave typed text as the answer.
-    // Prefer longer / status labels over bare Yes/No so citizenship dropdowns pick "U.S. Citizen".
+    // Filter the menu (Greenhouse React-Select / Workday searchable), then pick.
     const filterText =
       candidates.find((c) => String(c).trim().length > 3 && !isYesNoValue(c)) ||
       candidates.find((c) => String(c).trim().length >= 1 && !isYesNoValue(c)) ||
@@ -2198,12 +2354,13 @@
       candidates[0];
 
     if (input && input.tagName === "INPUT") {
-      setReactSelectFilter(input, filterText);
-      options = await waitForOptions(reactSelect ? 10 : 6, 100);
+      if (reactSelect) setReactSelectFilter(input, filterText);
+      else setReactFriendlyValue(input, filterText);
+      options = await waitForOptions(onWorkday ? 16 : reactSelect ? 10 : 6, onWorkday ? 120 : 100);
       match = options.find((n) => optionMatchesAny(n.textContent, candidates));
       if (match) {
         const ok = clickOptionNode(match);
-        clearReactSelectFilter(input);
+        if (reactSelect) clearReactSelectFilter(input);
         return ok;
       }
 
@@ -2217,18 +2374,16 @@
       );
       await sleep(80);
 
-      // Did a value chip / single-value appear?
       const root = getReactSelectRoot(el) || el.closest?.(".select__control")?.parentElement;
       const selected = root?.querySelector?.(
         ".select__single-value, .select__multi-value__label, [class*='select__single-value']"
       );
       if (selected && optionMatchesAny(selected.textContent, candidates)) {
-        clearReactSelectFilter(input);
+        if (reactSelect) clearReactSelectFilter(input);
         return true;
       }
 
-      // Never leave free-text in a React-Select / combobox.
-      clearReactSelectFilter(input);
+      if (reactSelect) clearReactSelectFilter(input);
       input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape", code: "Escape" }));
     }
 
@@ -3098,6 +3253,7 @@
     if (el.disabled || el.readOnly) return false;
     if (isEditorChrome(el) && !isRichTextEditor(el)) return false;
     const tag = el.tagName.toLowerCase();
+    const onWorkday = typeof isWorkdayPage === "function" && isWorkdayPage();
 
     let fillValue = value;
     if (key === "salaryExpectation" || key === "hourlyRate" || key === "desiredSalary") {
@@ -3112,6 +3268,21 @@
       fillValue = formatCompensationForField(value, ctx, key);
     }
 
+    if (key === "phone" && onWorkday) {
+      const formatted = formatPhoneForWorkday(fillValue);
+      if (formatted) fillValue = formatted;
+    }
+    if (key === "zipCode" && onWorkday) {
+      const countryHint =
+        document.body?.innerText?.match(/\bUnited States\b/i) ? "United States" : "";
+      const formatted = formatZipForWorkday(fillValue, countryHint);
+      if (formatted) fillValue = formatted;
+      else if (formatZipForWorkday(fillValue, "US") === "") {
+        // Invalid US ZIP — skip rather than trip Workday validation.
+        return false;
+      }
+    }
+
     if (tag === "select") return fillSelect(el, fillValue, key);
 
     if (tag === "input") {
@@ -3119,13 +3290,17 @@
       if (type === "checkbox" || type === "radio") return fillCheckboxOrRadio(el, fillValue, key);
       if (["hidden", "file", "submit", "button", "image", "reset"].includes(type)) return false;
 
-      // React-Select / combobox: ONLY pick from the option list — never type an answer.
-      if (isReactSelectInput(el) || looksLikeCombobox(el)) {
-        return fillCustomDropdown(el, fillValue, key);
-      }
+      const freeTextKey = key && FREE_TEXT_FILL_KEYS.has(key);
 
-      // Known select-like profile fields: try list first; never leave lowercase yes/no typed in.
-      if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(fillValue)) {
+      // React-Select / combobox: pick from the list — but free-text Workday fields
+      // (name, address, city, zip, phone) must type when the menu has no match.
+      if (isReactSelectInput(el) || looksLikeCombobox(el)) {
+        const ok = await fillCustomDropdown(el, fillValue, key);
+        if (ok) return true;
+        if (!freeTextKey && (SELECT_LIKE_KEYS.has(key) || isYesNoValue(fillValue))) return false;
+        if (!freeTextKey && !onWorkday) return false;
+        // Fall through to type for free-text / Workday typeaheads.
+      } else if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(fillValue)) {
         const ok = await fillCustomDropdown(el, fillValue, key);
         if (ok) return true;
         if (isYesNoValue(fillValue) || SELECT_LIKE_KEYS.has(key)) return false;
@@ -3133,19 +3308,28 @@
 
       const coerced = coerceValueForInput(el, fillValue);
       if (coerced == null) return false;
-      if (!setNativeValue(el, coerced)) return false;
-      // Inputs such as date / number silently drop values they cannot represent.
-      return Boolean(String(el.value || "").trim());
+      const writer = onWorkday || freeTextKey ? setReactFriendlyValue : setNativeValue;
+      if (!writer(el, coerced)) return false;
+      await sleep(onWorkday ? 40 : 0);
+      const committed = String(el.value || "").trim();
+      if (!committed) {
+        // One more attempt with React-friendly events.
+        if (!setReactFriendlyValue(el, coerced)) return false;
+        return Boolean(String(el.value || "").trim());
+      }
+      return true;
     }
 
     if (tag === "textarea") {
       if (SELECT_LIKE_KEYS.has(key) || isYesNoValue(fillValue) || looksLikeCombobox(el)) {
         const ok = await fillCustomDropdown(el, fillValue, key);
         if (ok) return true;
-        if (isYesNoValue(fillValue) || SELECT_LIKE_KEYS.has(key) || looksLikeCombobox(el)) return false;
+        if (isYesNoValue(fillValue) || SELECT_LIKE_KEYS.has(key)) return false;
+        if (looksLikeCombobox(el) && !(key && FREE_TEXT_FILL_KEYS.has(key))) return false;
       }
-      setNativeValue(el, String(fillValue));
-      return true;
+      const writer = onWorkday ? setReactFriendlyValue : setNativeValue;
+      writer(el, String(fillValue));
+      return Boolean(String(el.value || "").trim());
     }
 
     if (isRichTextEditor(el) || el.isContentEditable) {
@@ -5486,6 +5670,8 @@
         '[role="alert"]',
         '[aria-live="assertive"]',
         '[data-testid*="error" i]',
+        '[data-automation-id*="error" i]',
+        '[data-automation-id*="Error"]',
         '[class*="field-error" i]',
         '[class*="validation" i]',
         '[class*="errorMessage" i]',
@@ -5495,7 +5681,13 @@
     ).find((el) => {
       if (!isElVisible(el)) return false;
       const text = cleanLabelText(el.textContent || "");
-      return text && text.length <= 300 && /required|invalid|select|enter|answer|missing/i.test(text);
+      return (
+        text &&
+        text.length <= 400 &&
+        /required|invalid|select|enter|answer|missing|errors?\s+found|must have a value|does not match|postal code|zip/i.test(
+          text
+        )
+      );
     });
     return error ? cleanLabelText(error.textContent).slice(0, 180) : "";
   }
