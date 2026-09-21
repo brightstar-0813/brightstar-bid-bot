@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-21.zip-title1";
+  const SCRIPT_BUILD = "2026-09-21.zip-company2";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -8598,50 +8598,116 @@
       .trim();
   }
 
+  function zipCompanyFromCueText(raw) {
+    let s = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!s) return "";
+    const cue = s.match(
+      /^(?:see more jobs(?:\s+at)?|learn more about|more jobs at|jobs at)\s+(.+)$/i
+    );
+    if (cue) s = cue[1].trim();
+    return s.replace(/[\s↗→➥‣•·|]+$/g, "").trim();
+  }
+
   function zipLooksLikeCompanyName(name) {
-    const t = String(name || "").trim();
+    const t = zipCompanyFromCueText(name);
     if (!t || t.length > 80) return false;
+    if (!/[A-Za-z]{2}/.test(t)) return false;
     if (zipLooksLikeJobTitle(t) && t.length > 24) return false;
     if (
-      /^(view|company|about|apply|save|remote|hybrid|on-?site|full[- ]?time|part[- ]?time|new|hot|featured|easy apply|1[- ]?click apply|quick apply|be seen first|learn more)\b/i.test(
+      /^(view|company|about|apply|save|remote|hybrid|on-?site|full[- ]?time|part[- ]?time|new|hot|featured|easy apply|1[- ]?click apply|quick apply|be seen first|learn more|see more|posted|estimated|people enjoy|learn new)\b/i.test(
         t
       )
     ) {
       return false;
     }
     if (/\d+\s+jobs?\b/i.test(t)) return false;
+    // Pay rows ("$101K - $132K/yr", "$90/hr") and "Posted 4 days ago" are never companies.
+    if (/[$\u20ac\u00a3]|\b(\d+\s*(k|hr|yr)\b|per\s+(hour|year)|an\s+hour)/i.test(t)) return false;
+    if (/^\d/.test(t)) return false;
+    if (/\bago$/i.test(t)) return false;
     if (/,\s*[A-Z]{2}\b/.test(t) && t.length < 48) return false;
+    if (/^[A-Z]{2}\s*[-\u2013\u00b7\u2022]\s*(remote|hybrid|on-?site)\b/i.test(t)) return false;
     return true;
   }
 
-  /** ZipRecruiter detail pane: "Learn more about YO AI Labs" and industry • size lines. */
-  function zipCompanyFromPageText(pageText, jobTitle = "") {
+  /**
+   * Confidence of a company candidate by where it was found. ZipRecruiter repeats
+   * company-ish text all over the panel, so the poster cue above the JD has to beat
+   * the "Learn more about <other company>" widget that sits below it.
+   */
+  const ZIP_COMPANY_SCORE = {
+    cardCue: 96,
+    headerCue: 92,
+    headerLearn: 84,
+    card: 80,
+    headerLink: 76,
+    headerEmployees: 60,
+    headerLine: 48,
+    schema: 30,
+    bodyCue: 26,
+    bodyLearn: 18,
+    bodyLink: 12
+  };
+
+  function zipSplitDetailText(pageText) {
     const blob = String(pageText || "");
+    const m = blob.match(/\bjob\s*description\b/i);
+    if (!m || m.index === undefined) {
+      return { header: blob.slice(0, 2000), body: blob.slice(2000) };
+    }
+    return { header: blob.slice(0, m.index), body: blob.slice(m.index) };
+  }
+
+  /** Every company name the text offers, tagged with where it came from. */
+  function zipCompanyCandidatesFromText(pageText, jobTitle = "") {
+    const { header, body } = zipSplitDetailText(pageText);
     const title = String(jobTitle || "").trim().toLowerCase();
-    const reject = (raw) => {
-      const s = String(raw || "").trim();
-      if (!zipLooksLikeCompanyName(s)) return true;
-      if (title && s.toLowerCase() === title) return true;
-      return false;
+    const out = [];
+    const add = (raw, score, source) => {
+      const name = zipCompanyFromCueText(raw);
+      if (!name || !zipLooksLikeCompanyName(name)) return;
+      if (title && name.toLowerCase() === title) return;
+      out.push({ name, score, source });
+    };
+    const cues = (text, cueScore, learnScore, where) => {
+      for (const m of String(text).matchAll(/(?:see more jobs at|more jobs at)\s+([^\n]+)/gi)) {
+        add(m[1], cueScore, `${where}:cue`);
+      }
+      for (const m of String(text).matchAll(/learn more about\s+([^\n]+)/gi)) {
+        add(m[1], learnScore, `${where}:learn`);
+      }
     };
 
-    const learn = blob.match(/learn more about\s+([^\n]+)/i);
-    if (learn?.[1]) {
-      const name = learn[1].replace(/\s*\.+$/, "").trim();
-      if (!reject(name)) return name;
+    cues(header, ZIP_COMPANY_SCORE.headerCue, ZIP_COMPANY_SCORE.headerLearn, "header");
+    cues(body, ZIP_COMPANY_SCORE.bodyCue, ZIP_COMPANY_SCORE.bodyLearn, "body");
+
+    const emp = header.match(
+      /([A-Za-z0-9][A-Za-z0-9 .,&'\u2019-]{1,70}?)\s*[\u2022\u00b7]\s*[^\n\u2022\u00b7]{2,120}?\s*[\u2022\u00b7]\s*\d+\s*[-\u2013]\s*\d+\s+employees/i
+    );
+    if (emp?.[1]) add(emp[1], ZIP_COMPANY_SCORE.headerEmployees, "header:employees");
+    const stacked = header.match(
+      /(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9 .,&'\u2019-]{1,70})\s*\n\s*[\u2022\u00b7]\s*[^\n]{8,160}?employees/i
+    );
+    if (stacked?.[1]) add(stacked[1], ZIP_COMPANY_SCORE.headerEmployees, "header:employees");
+
+    for (const line of header.split(/\n+/).map((l) => l.trim()).filter(Boolean)) {
+      if (line.length > 60) continue;
+      if (zipLooksLikeJobTitle(line) || zipJunkTitle(line)) continue;
+      if (/^(or|remote|hybrid|full[- ]?time|part[- ]?time|contract|posted)\b/i.test(line)) continue;
+      add(line, ZIP_COMPANY_SCORE.headerLine, "header:line");
     }
 
-    const emp = blob.match(
-      /([A-Za-z0-9][A-Za-z0-9 .,&'’-]{1,70}?)\s*[•·]\s*[^\n•·]{2,120}?\s*[•·]\s*\d+\s*[-–]\s*\d+\s+employees/i
-    );
-    if (emp?.[1] && !reject(emp[1])) return emp[1].trim();
+    return out;
+  }
 
-    const stacked = blob.match(
-      /(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9 .,&'’-]{1,70})\s*\n\s*[•·]\s*[^\n]{8,160}?employees/i
-    );
-    if (stacked?.[1] && !reject(stacked[1])) return stacked[1].trim();
-
-    return "";
+  /** Highest-confidence candidate; ties keep the one found first (closest to the title). */
+  function zipBestCompanyCandidate(candidates) {
+    let best = null;
+    for (const c of candidates || []) {
+      if (!c?.name) continue;
+      if (!best || c.score > best.score) best = c;
+    }
+    return best;
   }
 
   function zipListingKeyFromUrl(href = location.href) {
@@ -8930,40 +8996,81 @@
     return pool.find((t) => zipTitleScore(t) > 0 && zipLooksLikeJobTitle(t)) || "";
   }
 
-  function zipCompanyFromRoot(root, doc = document, jobTitle = "") {
+  /** The "Job description" heading that separates the poster header from related widgets. */
+  function zipJdBoundary(root) {
+    if (!root?.querySelectorAll) return null;
+    for (const el of root.querySelectorAll("h1, h2, h3, h4, h5, p, div, span, strong")) {
+      if (/^job\s*description$/i.test(elementText(el))) return el;
+    }
+    return null;
+  }
+
+  /** True when el sits above the JD heading (the poster block), not in the trailing widgets. */
+  function zipAboveJd(el, boundary) {
+    if (!el || !boundary) return true;
+    try {
+      const pos = boundary.compareDocumentPosition(el);
+      // A wrapper that contains the heading spans both halves: treat it as below.
+      if (pos & Node.DOCUMENT_POSITION_CONTAINS) return false;
+      return Boolean(pos & Node.DOCUMENT_POSITION_PRECEDING);
+    } catch {
+      return true;
+    }
+  }
+
+  const ZIP_COMPANY_SELECTORS = [
+    '[data-testid*="company"]',
+    '[class*="company_name"]',
+    '[class*="companyName"]',
+    '[class*="CompanyName"]',
+    '[class*="hiringOrganization"]',
+    '[class*="company"] a',
+    '[itemprop="hiringOrganization"]',
+    'a[href*="/co/"]',
+    'a[href*="/c/"]',
+    'a[href*="/company/"]',
+    'a[href*="learn-more"]'
+  ];
+
+  /** Does this listing card belong to the job the detail panel is showing? */
+  function zipCardMatchesTitle(card, jobTitle = "") {
+    const hint = String(jobTitle || "").trim().slice(0, 18).toLowerCase();
+    if (!card) return false;
+    if (hint.length < 8) return true;
+    return String(card.innerText || card.textContent || "")
+      .toLowerCase()
+      .includes(hint);
+  }
+
+  /**
+   * Collect every company candidate the page offers with a confidence score, so the
+   * visible poster ("See more jobs at TMS LLC") outranks the related-company card
+   * ("Learn more about NVS") that ZipRecruiter renders below the job description.
+   */
+  function zipCompanyCandidatesFromRoot(root, doc = document, jobTitle = "") {
     const title = String(jobTitle || "").trim().toLowerCase();
-    const reject = (t) => {
-      const s = String(t || "").trim();
-      if (!zipLooksLikeCompanyName(s)) return true;
-      if (title && s.toLowerCase() === title) return true;
-      if (title && title.includes(s.toLowerCase()) && s.length < 8) return false; // allow NVS when title is longer
-      return false;
+    const cands = [];
+    const addEl = (el, score, source) => {
+      const name = zipCompanyFromCueText(elementText(el));
+      if (!name || name.length > 80) return;
+      if (!zipLooksLikeCompanyName(name)) return;
+      if (title && name.toLowerCase() === title) return;
+      cands.push({ name, score, source });
     };
 
     if (root) {
-      const pageText = String(root.innerText || root.textContent || "");
-      const fromCopy = zipCompanyFromPageText(pageText, jobTitle);
-      if (fromCopy) return fromCopy;
+      cands.push(
+        ...zipCompanyCandidatesFromText(
+          String(root.innerText || root.textContent || ""),
+          jobTitle
+        )
+      );
 
-      const scoped = [
-        '[data-testid*="company"]',
-        '[class*="company_name"]',
-        '[class*="companyName"]',
-        '[class*="CompanyName"]',
-        '[class*="hiringOrganization"]',
-        '[class*="company"] a',
-        '[itemprop="hiringOrganization"]',
-        'a[href*="/co/"]',
-        'a[href*="/c/"]',
-        'a[href*="/company/"]',
-        'a[href*="learn-more"]'
-      ];
-      for (const sel of scoped) {
+      const boundary = zipJdBoundary(root);
+      for (const sel of ZIP_COMPANY_SELECTORS) {
         for (const el of root.querySelectorAll(sel)) {
-          let t = elementText(el);
-          const about = t.match(/^learn more about\s+(.+)$/i);
-          if (about) t = about[1].trim();
-          if (!reject(t) && t.length <= 80) return t;
+          const above = zipAboveJd(el, boundary);
+          addEl(el, above ? ZIP_COMPANY_SCORE.headerLink : ZIP_COMPANY_SCORE.bodyLink, "el");
         }
       }
 
@@ -8975,28 +9082,39 @@
           label.nextElementSibling ||
           label.parentElement?.nextElementSibling ||
           label.parentElement?.querySelector("dd, span, a, p");
-        const t = elementText(sib);
-        if (t && !reject(t)) return t;
+        addEl(sib, ZIP_COMPANY_SCORE.headerLink, "label");
       }
     }
 
     const card = zipSelectedCard(doc, jobTitle);
-    if (card) {
-      const fromCardCopy = zipCompanyFromPageText(String(card.innerText || card.textContent || ""), jobTitle);
-      if (fromCardCopy) return fromCardCopy;
-      const t = elementText(
-        card.querySelector('[class*="company"], [data-testid*="company"], a[href*="/co/"], a[href*="/c/"]')
-      );
-      if (t && !reject(t)) return t;
-      const lines = String(card.innerText || "")
-        .split(/\n+/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-      for (const line of lines) {
-        if (!reject(line) && line.length <= 60) return line;
+    if (card && zipCardMatchesTitle(card, jobTitle)) {
+      const cardText = String(card.innerText || card.textContent || "");
+      for (const c of zipCompanyCandidatesFromText(cardText, jobTitle)) {
+        cands.push({
+          name: c.name,
+          score: /:cue$/.test(c.source) ? ZIP_COMPANY_SCORE.cardCue : ZIP_COMPANY_SCORE.card,
+          source: `card:${c.source}`
+        });
       }
+      const el = card.querySelector(
+        '[class*="company"], [data-testid*="company"], a[href*="/co/"], a[href*="/c/"]'
+      );
+      addEl(el, ZIP_COMPANY_SCORE.card, "card:el");
     }
-    return zipCompanyFromPageText(String(doc.body?.innerText || doc.body?.textContent || ""), jobTitle);
+
+    if (!cands.length) {
+      cands.push(
+        ...zipCompanyCandidatesFromText(
+          String(doc?.body?.innerText || doc?.body?.textContent || ""),
+          jobTitle
+        )
+      );
+    }
+    return cands;
+  }
+
+  function zipCompanyFromRoot(root, doc = document, jobTitle = "") {
+    return zipBestCompanyCandidate(zipCompanyCandidatesFromRoot(root, doc, jobTitle));
   }
 
   function zipTitleFromJd(jdText) {
@@ -9090,24 +9208,20 @@
       if (fromJd) jobTitle = fromJd;
     }
 
-    const card = zipSelectedCard(doc, jobTitle);
-    let companyName = zipCompanyFromRoot(root, doc, jobTitle);
-    if (!companyName && card) {
-      const t = elementText(
-        card.querySelector('[class*="company"], [data-testid*="company"], a[href*="/co/"]')
-      );
-      if (t && zipLooksLikeCompanyName(t) && t.toLowerCase() !== jobTitle.toLowerCase()) {
-        companyName = t;
-      }
-    }
+    const best = zipCompanyFromRoot(root, doc, jobTitle);
+    let companyName = best?.name || "";
+    let companyScore = companyName ? best.score : 0;
     // Mis-assigned short title → company (e.g. title was "NVS").
     if (!companyName && jobTitle && !zipLooksLikeJobTitle(jobTitle) && zipLooksLikeCompanyName(jobTitle)) {
       companyName = jobTitle;
+      companyScore = ZIP_COMPANY_SCORE.headerLine;
       jobTitle = zipTitleFromJd(jdText) || zipTitleFromRoot(root, doc) || "";
       if (companyName && companyName.toLowerCase() === String(jobTitle).toLowerCase()) {
         companyName = "";
+        companyScore = 0;
       }
     }
+    const card = zipSelectedCard(doc, jobTitle);
 
     const text = (selector) => (root ? elementText(root.querySelector(selector)) : "");
     const link =
@@ -9131,6 +9245,7 @@
     return {
       jobTitle: zipLooksLikeJobTitle(jobTitle) ? jobTitle : "",
       companyName,
+      companyScore,
       jobLocation: location,
       jdText,
       jdLink: link,
@@ -9178,15 +9293,23 @@
       dom.salaryRaw ||
       [schema.salaryMin, schema.salaryMax].filter(Boolean).join(" - ") ||
       "";
-    const companyName = String(
-      dom.companyName || (!onSearch ? schema.companyName : "") || ""
-    ).trim();
+    const domCompany = String(dom.companyName || "").trim();
+    const schemaCompany = String((!onSearch ? schema.companyName : "") || "").trim();
+    const companyName = domCompany || schemaCompany;
+    // Keep the confidence so a later canonical-page fetch cannot overwrite the visible poster.
+    const companyScore = domCompany
+      ? Number(dom.companyScore) || ZIP_COMPANY_SCORE.headerLine
+      : companyName
+        ? ZIP_COMPANY_SCORE.schema
+        : 0;
     return {
       ...(!onSearch ? schema : {}),
       ...dom,
       jobTitle,
       companyName:
         companyName && companyName.toLowerCase() !== jobTitle.toLowerCase() ? companyName : "",
+      companyScore:
+        companyName && companyName.toLowerCase() !== jobTitle.toLowerCase() ? companyScore : 0,
       jdLink: link || (!onSearch ? String(schema.jdLink || "").trim() : "") || "",
       jdText,
       applyLink: link || (!onSearch ? String(schema.applyLink || "").trim() : "") || link,
@@ -9199,6 +9322,15 @@
       datePosted: dom.datePosted || (!onSearch ? schema.datePosted : "") || "",
       jobLocation: dom.jobLocation || (!onSearch ? schema.jobLocation : "") || ""
     };
+  }
+
+  /** Keep the higher-confidence company when two scrapes of the same job disagree. */
+  function zipPickCompany(current, next) {
+    const a = { name: String(current?.companyName || "").trim(), score: Number(current?.companyScore) || 0 };
+    const b = { name: String(next?.companyName || "").trim(), score: Number(next?.companyScore) || 0 };
+    if (!b.name) return a;
+    if (!a.name) return b;
+    return b.score > a.score ? b : a;
   }
 
   function zipScrapeComplete(data) {
@@ -9233,7 +9365,8 @@
             : data?.jobTitle && zipLooksLikeJobTitle(data.jobTitle)
               ? data.jobTitle
               : next?.jobTitle || data?.jobTitle || "",
-        companyName: next?.companyName || data?.companyName || "",
+        companyName: zipPickCompany(data, next).name,
+        companyScore: zipPickCompany(data, next).score,
         jdText: pickLongestText(data?.jdText, next?.jdText),
         jdLink:
           (next?.jdLink && !/jobs-search/i.test(next.jdLink) ? next.jdLink : "") ||
@@ -9304,7 +9437,8 @@
               detail?.jobTitle && !zipJunkTitle(detail.jobTitle)
                 ? detail.jobTitle
                 : data?.jobTitle || "",
-            companyName: detail?.companyName || data?.companyName || "",
+            companyName: zipPickCompany(data, detail).name,
+            companyScore: zipPickCompany(data, detail).score,
             jdText: pickLongestText(data?.jdText, detail?.jdText),
             jdLink: jobLink
           };
