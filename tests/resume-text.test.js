@@ -105,3 +105,150 @@ Mar 2013 – Aug 2017`)
   assert.match(html, /2013/);
   assert.match(html, /2017/);
 });
+
+function resumeWithSkills(skillsBody) {
+  return `STEVEN AVON
+SENIOR SALESFORCE ARCHITECT
+New York, NY | steven@example.com
+
+SUMMARY
+Salesforce architect with 12 years across Service Cloud and Genesys CTI.
+
+EXPERIENCE
+Acme Corp
+Salesforce Architect
+Jan 2020 – Present
+New York, NY | Remote
+Led the Genesys integration.
+
+TECHNICAL SKILLS
+${skillsBody}
+`;
+}
+
+function skillsOf(skillsBody) {
+  return plainTextToResumeData(resumeWithSkills(skillsBody)).skills;
+}
+
+const TWO_ROWS = [
+  ["Salesforce Clouds", "Service Cloud, Sales Cloud"],
+  ["Automation", "Record-Triggered Flows, Screen Flows"]
+];
+
+function assertTwoRows(skills) {
+  assert.deepEqual(
+    skills.map((r) => [r.category, r.items]),
+    TWO_ROWS
+  );
+}
+
+test("skills table copied out of a PDF re-pairs one-cell-per-line into categories", () => {
+  const skills = skillsOf(`Category
+Technologies / Skills
+Salesforce Clouds
+Service Cloud, Sales Cloud, Experience Cloud, Data Cloud
+Genesys & Contact Center
+Genesys Cloud CX, Open CTI, IVR, ACD, Skill-Based Routing
+DevOps & CI/CD
+Git, Salesforce CLI/SFDX, Change Sets`);
+
+  assert.deepEqual(
+    skills.map((r) => r.category),
+    ["Salesforce Clouds", "Genesys & Contact Center", "DevOps & CI/CD"]
+  );
+  // The "Category" / "Technologies / Skills" header cells never become data.
+  for (const row of skills) {
+    assert.doesNotMatch(row.items, /Technologies \/ Skills/i);
+    assert.doesNotMatch(row.items, /^Category,/i);
+  }
+  assert.match(skills[0].items, /^Service Cloud, Sales Cloud/);
+  assert.equal(skills[2].items, "Git, Salesforce CLI/SFDX, Change Sets");
+});
+
+test("cell-per-line skills separated by blank lines still pair up", () => {
+  assertTwoRows(
+    skillsOf(`Salesforce Clouds
+
+Service Cloud, Sales Cloud
+
+Automation
+
+Record-Triggered Flows, Screen Flows`)
+  );
+});
+
+test("skills parse the same from tab, markdown, colon, pipe, dash, and spaced columns", () => {
+  assertTwoRows(
+    skillsOf("Category\tTechnologies / Skills\nSalesforce Clouds\tService Cloud, Sales Cloud\nAutomation\tRecord-Triggered Flows, Screen Flows")
+  );
+  assertTwoRows(
+    skillsOf(`| Category | Technologies / Skills |
+| --- | --- |
+| Salesforce Clouds | Service Cloud, Sales Cloud |
+| Automation | Record-Triggered Flows, Screen Flows |`)
+  );
+  assertTwoRows(
+    skillsOf(`Salesforce Clouds: Service Cloud, Sales Cloud
+Automation: Record-Triggered Flows, Screen Flows`)
+  );
+  assertTwoRows(
+    skillsOf(`Salesforce Clouds | Service Cloud, Sales Cloud
+Automation | Record-Triggered Flows, Screen Flows`)
+  );
+  assertTwoRows(
+    skillsOf(`Salesforce Clouds – Service Cloud, Sales Cloud
+Automation - Record-Triggered Flows, Screen Flows`)
+  );
+  assertTwoRows(
+    skillsOf(`Salesforce Clouds    Service Cloud, Sales Cloud
+Automation          Record-Triggered Flows, Screen Flows`)
+  );
+  assertTwoRows(
+    skillsOf(`• Salesforce Clouds: Service Cloud, Sales Cloud
+- Automation: Record-Triggered Flows, Screen Flows`)
+  );
+});
+
+test("an items cell wrapped across lines knits back into one row", () => {
+  const skills = skillsOf(`Integration Technologies: REST/SOAP APIs, Apex Callouts, JSON/XML, Named
+Credentials, OAuth, Platform Events
+Security & Data: OWD, Role Hierarchies`);
+
+  assert.equal(skills.length, 2);
+  assert.equal(
+    skills[0].items,
+    "REST/SOAP APIs, Apex Callouts, JSON/XML, Named Credentials, OAuth, Platform Events"
+  );
+  assert.equal(skills[1].category, "Security & Data");
+});
+
+test("an uncategorized comma list stays one Skills row", () => {
+  const skills = skillsOf(`Apex, Lightning Web Components, SOQL, Flow Builder
+Genesys Cloud CX, Open CTI, IVR, ACD`);
+
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0].category, "Skills");
+  assert.equal(
+    skills[0].items,
+    "Apex, Lightning Web Components, SOQL, Flow Builder, Genesys Cloud CX, Open CTI, IVR, ACD"
+  );
+});
+
+test("cell-per-line skills render as real table rows, not one keyword dump", () => {
+  const data = plainTextToResumeData(
+    resumeWithSkills(`Salesforce Clouds
+Service Cloud, Sales Cloud
+Automation
+Record-Triggered Flows, Screen Flows`)
+  );
+  // Table templates get two real rows...
+  const table = resumeJsonToHtml(data, "ats-modern");
+  assert.match(table, /<td class="skill-cat">Salesforce Clouds<\/td>/);
+  assert.match(table, /<td class="skill-cat">Automation<\/td>/);
+  assert.doesNotMatch(table, /Technologies \/ Skills<\/td>/);
+
+  // ...and inline templates get two labelled lines.
+  const inline = resumeJsonToHtml(data, "harvard-rule");
+  assert.match(inline, /<span class="skill-cat">Salesforce Clouds:<\/span>/);
+  assert.match(inline, /<span class="skill-cat">Automation:<\/span>/);
+});

@@ -212,14 +212,96 @@ function isSkillsHeaderRow(category, items) {
   );
 }
 
+/** A lone header cell from a two-column skills table ("Category", "Technologies / Skills"). */
+function isSkillsHeaderCell(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return (
+    /^category$/i.test(t) ||
+    /^technolog(?:y|ies)\s*(?:\/|&|and|\|)?\s*skills?$/i.test(t) ||
+    /^skills?\s*(?:\/|&|and|\|)\s*technolog(?:y|ies)$/i.test(t)
+  );
+}
+
 const MAX_SKILL_ITEMS_LEN = 4000;
 const MAX_SKILL_CATEGORY_LEN = 96;
+const MAX_CATEGORY_CHARS = 56;
+const MAX_CATEGORY_WORDS = 7;
+// "Salesforce Clouds – Sales Cloud, Service Cloud" — spaced dash as a column break.
+const SKILL_DASH_RE = /^(.{2,72}?)\s+[-–—]\s+(.+)$/;
 
+/**
+ * A bare line shaped like a category cell ("Salesforce Clouds", "DevOps & CI/CD")
+ * rather than a list of technologies.
+ */
+function looksLikeSkillCategoryCell(text) {
+  const t = String(text || "").trim();
+  if (!t || t.length > MAX_CATEGORY_CHARS) return false;
+  if (/[,;:]/.test(t)) return false; // item lists carry separators; category labels do not
+  if (/[.!?]$/.test(t)) return false; // a sentence, not a label
+  if (!/^[A-Z0-9]/.test(t)) return false; // cells are Title Case or acronyms
+  return t.split(/\s+/).length <= MAX_CATEGORY_WORDS;
+}
+
+/** A bare line shaped like the technologies cell that belongs to a category. */
+function looksLikeSkillItemsCell(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  if (/[,;]/.test(t)) return true;
+  return t.length > MAX_CATEGORY_CHARS || t.split(/\s+/).length > MAX_CATEGORY_WORDS;
+}
+
+/**
+ * Classify one skills line: a resolved {category, items} pair, a bare table cell
+ * awaiting its partner, or null for separators and header cells.
+ */
+function skillLineToToken(line) {
+  const t = String(line).trim();
+  if (!t || isMarkdownTableSep(t)) return null;
+
+  if (isMarkdownTableRow(t)) {
+    const cells = splitTableCells(t);
+    if (cells.length < 2) return null;
+    return { kind: "pair", category: cells[0], items: cells.slice(1).join(", ") };
+  }
+
+  const tsv = splitTsvCells(t);
+  // Reject rows where "category" looks like a duty sentence.
+  if (tsv.length >= 2 && tsv[0].length <= 72 && !/[.]$/.test(tsv[0])) {
+    return { kind: "pair", category: tsv[0], items: tsv.slice(1).join(", ") };
+  }
+
+  const cleaned = stripBullet(t);
+  if (!cleaned) return null;
+
+  const colon = cleaned.match(/^([^:]{2,72}):\s*(.+)$/);
+  if (colon) return { kind: "pair", category: colon[1].trim(), items: colon[2].trim() };
+
+  const pipe = cleaned.match(/^([^|]{2,72})\|\s*(.+)$/);
+  if (pipe) return { kind: "pair", category: pipe[1].trim(), items: pipe[2].trim() };
+
+  const dash = cleaned.match(SKILL_DASH_RE);
+  if (dash && looksLikeSkillCategoryCell(dash[1]) && looksLikeSkillItemsCell(dash[2])) {
+    return { kind: "pair", category: dash[1].trim(), items: dash[2].trim() };
+  }
+
+  if (isSkillsHeaderCell(cleaned)) return null;
+  return { kind: "cell", text: cleaned };
+}
+
+/**
+ * Skills accept every shape a resume paste arrives in: Markdown or TSV table rows,
+ * "Category: items" lines, pipe/dash separators, a plain comma list — and tables
+ * copied out of a PDF, which land one cell per line and must be re-paired here.
+ */
 function parseSkills(lines) {
-  const out = [];
-  let sawStructured = false;
+  const tokens = [];
+  for (const line of lines || []) {
+    const token = skillLineToToken(line);
+    if (token) tokens.push(token);
+  }
 
-  const pushSkillRow = (category, items) => {
+  const out = [];
+  const pushSkillRow = (category, items, { anon = false } = {}) => {
     const cat = String(category || "").trim().slice(0, MAX_SKILL_CATEGORY_LEN);
     const rowItems = String(items || "")
       .replace(/\s+/g, " ")
@@ -227,58 +309,53 @@ function parseSkills(lines) {
       .slice(0, MAX_SKILL_ITEMS_LEN);
     if (!cat && !rowItems) return;
     if (isSkillsHeaderRow(cat, rowItems)) return;
-    sawStructured = true;
-    out.push({ category: cat || "Skills", items: rowItems });
+    out.push({ category: cat || "Skills", items: rowItems, anon });
   };
 
-  for (const line of lines || []) {
-    const t = String(line).trim();
-    if (!t || isMarkdownTableSep(t)) continue;
+  // Once one bare pair resolves, the paste is a cell-per-line table: pair the rest freely.
+  let cellPairing = false;
 
-    if (isMarkdownTableRow(t)) {
-      const cells = splitTableCells(t);
-      if (cells.length < 2) continue;
-      pushSkillRow(cells[0], cells.slice(1).join(", "));
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.kind === "pair") {
+      pushSkillRow(token.category, token.items);
       continue;
     }
 
-    const tsv = splitTsvCells(t);
-    if (tsv.length >= 2) {
-      const category = tsv[0];
-      const items = tsv.slice(1).join(", ");
-      // Reject rows where "category" looks like a duty sentence.
-      if (category.length > 72 || /[.]$/.test(category)) {
-        // fall through
-      } else {
-        pushSkillRow(category, items);
-        continue;
-      }
-    }
+    const next = tokens[i + 1];
+    const nextIsPartner =
+      next?.kind === "cell" &&
+      (cellPairing
+        ? !looksLikeSkillCategoryCell(next.text) || looksLikeSkillItemsCell(next.text)
+        : looksLikeSkillItemsCell(next.text) && !looksLikeSkillCategoryCell(next.text));
 
-    const cleaned = stripBullet(t);
-    if (!cleaned) continue;
-    const colon = cleaned.match(/^([^:]{2,72}):\s*(.+)$/);
-    if (colon) {
-      pushSkillRow(colon[1].trim(), colon[2].trim());
-      continue;
-    }
-    const pipe = cleaned.match(/^([^|]{2,72})\|\s*(.+)$/);
-    if (pipe) {
-      pushSkillRow(pipe[1].trim(), pipe[2].trim());
+    if (looksLikeSkillCategoryCell(token.text) && nextIsPartner) {
+      pushSkillRow(token.text, next.text);
+      cellPairing = true;
+      i += 1;
       continue;
     }
 
-    if (sawStructured) continue;
+    // A wrapped items cell continues the row above — join with a space so a list
+    // broken mid-item ("… Named" / "Credentials, OAuth") knits back together.
+    const prev = out[out.length - 1];
+    if (prev && !prev.anon && !looksLikeSkillCategoryCell(token.text)) {
+      prev.items = `${prev.items} ${token.text}`.replace(/\s+/g, " ").trim().slice(0, MAX_SKILL_ITEMS_LEN);
+      continue;
+    }
 
-    // Single-line leftovers: keep as one generic row only when nothing structured yet.
-    out.push({ category: "Skills", items: cleaned.slice(0, MAX_SKILL_ITEMS_LEN) });
+    pushSkillRow("", token.text, { anon: true });
   }
 
   // Merge only anonymous single-line leftovers — never collapse real category rows.
-  if (out.length > 1 && out.every((r) => /^Skills$/i.test(r.category))) {
-    return [{ category: "Skills", items: out.map((r) => r.items).join(", ") }];
-  }
-  return out.filter((r) => r.category || r.items);
+  const rows =
+    out.length > 1 && out.every((r) => r.anon)
+      ? [{ category: "Skills", items: out.map((r) => r.items).join(", ").slice(0, MAX_SKILL_ITEMS_LEN) }]
+      : out;
+
+  return rows
+    .filter((r) => r.category || r.items)
+    .map((r) => ({ category: r.category, items: r.items }));
 }
 
 const EDU_LOCATION_RE =
