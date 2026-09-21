@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-20.scrape4";
+  const SCRIPT_BUILD = "2026-09-21.workday-engine1";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1662,22 +1662,60 @@
         }
       }
     }
-    return best;
+    return workdayPolicyAllowsKey(best) ? best : null;
+  }
+
+  /** Workday: never auto-fill consequential/sensitive keys — leave for Q&A / user. */
+  function workdayPolicyAllowsKey(key) {
+    if (!key || !isWorkdayPage()) return true;
+    const eng = globalThis.BrightstarWorkdayEngine;
+    if (!eng?.evaluatePolicy) return true;
+    const categoryByKey = {
+      workAuthorized: "WORK_AUTHORIZATION",
+      needsSponsorship: "SPONSORSHIP",
+      citizenship: "WORK_AUTHORIZATION",
+      salaryExpectation: "SALARY",
+      hourlyRate: "SALARY",
+      gender: "DEMOGRAPHIC",
+      hispanicLatino: "DEMOGRAPHIC",
+      raceEthnicity: "DEMOGRAPHIC",
+      veteranStatus: "VOLUNTARY_DISCLOSURE",
+      disabilityStatus: "VOLUNTARY_DISCLOSURE",
+      felonyConviction: "LEGAL_ATTESTATION",
+      felonyExplanation: "LEGAL_ATTESTATION",
+      postEmploymentRestrictions: "LEGAL_ATTESTATION",
+      workedForCompanyBefore: "LEGAL_ATTESTATION",
+      relatedToEmployee: "CONFLICT_OF_INTEREST",
+      governmentEmployee: "CONFLICT_OF_INTEREST",
+      governmentEthicsRecusal: "LEGAL_ATTESTATION"
+    };
+    const category = categoryByKey[key];
+    if (!category) return true;
+    const decision = eng.evaluatePolicy(
+      { type: "FILL", category, confidence: 1, requiresApproval: true },
+      { submissionAuthorized: false, demographicPreference: "always_ask" }
+    );
+    return decision === "ALLOW";
   }
 
   function matchApplicantKeyFromControl(el) {
     const autocomplete = normalize(el.getAttribute("autocomplete") || "");
     if (autocomplete === "tel-extension") return null;
-    if (AUTOCOMPLETE_FIELD_MAP[autocomplete]) return AUTOCOMPLETE_FIELD_MAP[autocomplete];
+    if (AUTOCOMPLETE_FIELD_MAP[autocomplete]) {
+      const acKey = AUTOCOMPLETE_FIELD_MAP[autocomplete];
+      return workdayPolicyAllowsKey(acKey) ? acKey : null;
+    }
 
     const question = questionLabelForControl(el);
     const primary = normalize(question);
     const full = primary || labelTextForControl(el);
 
     if (/\bextension\b/.test(primary)) return null;
-    if (/\bdevice type\b/.test(primary)) return "phoneDeviceType";
+    if (/\bdevice type\b/.test(primary)) {
+      return workdayPolicyAllowsKey("phoneDeviceType") ? "phoneDeviceType" : null;
+    }
     if (/\b(country phone code|phone country code|phone code)\b/.test(primary)) {
-      return "phoneCountryCode";
+      return workdayPolicyAllowsKey("phoneCountryCode") ? "phoneCountryCode" : null;
     }
 
     // High-confidence Workday / ATS compliance questions (company name varies).
@@ -1686,38 +1724,41 @@
       /\b(experience|exp)\b/.test(primary) &&
       !/\b(describe|summary|tell us|detail|list)\b/.test(primary)
     ) {
-      return "yearsExperience";
+      return workdayPolicyAllowsKey("yearsExperience") ? "yearsExperience" : null;
     }
     if (/\bcurrent employer\b/.test(primary) || /\bpresent employer\b/.test(primary)) {
-      return "currentEmployer";
+      return workdayPolicyAllowsKey("currentEmployer") ? "currentEmployer" : null;
     }
     if (/\bcurrent (job )?title\b/.test(primary) || /\bcurrent position\b/.test(primary)) {
-      return "currentJobTitle";
+      return workdayPolicyAllowsKey("currentJobTitle") ? "currentJobTitle" : null;
     }
     if (/\bcitizen/.test(primary) || /\bcitizenship\b/.test(primary) || /\bimmigration status\b/.test(primary)) {
-      return "citizenship";
+      return workdayPolicyAllowsKey("citizenship") ? "citizenship" : null;
     }
     if (/\b(require|need)\b/.test(primary) && /\bsponsorship\b/.test(primary)) {
-      return "needsSponsorship";
+      return workdayPolicyAllowsKey("needsSponsorship") ? "needsSponsorship" : null;
     }
     if (/\b(eligible|legally authorized|authorized)\b/.test(primary) && /\bwork\b/.test(primary)) {
-      return "workAuthorized";
+      return workdayPolicyAllowsKey("workAuthorized") ? "workAuthorized" : null;
     }
     if (/\bcontinuing employment restrictions\b/.test(primary) || /\bemployment restrictions or obligations\b/.test(primary)) {
-      return "postEmploymentRestrictions";
+      return workdayPolicyAllowsKey("postEmploymentRestrictions") ? "postEmploymentRestrictions" : null;
     }
     if (/\bhave you worked for\b/.test(primary) && /\b(past|before|previously|subsidiary)\b/.test(primary)) {
-      return "workedForCompanyBefore";
+      return workdayPolicyAllowsKey("workedForCompanyBefore") ? "workedForCompanyBefore" : null;
     }
     if (/\bclosely related\b/.test(primary) || /\bpersonal relationship\b/.test(primary)) {
-      return "relatedToEmployee";
+      return workdayPolicyAllowsKey("relatedToEmployee") ? "relatedToEmployee" : null;
     }
-    if (/\bgovernment employee\b/.test(primary)) return "governmentEmployee";
+    if (/\bgovernment employee\b/.test(primary)) {
+      return workdayPolicyAllowsKey("governmentEmployee") ? "governmentEmployee" : null;
+    }
     if (/\bethics official\b/.test(primary) || /\brecused yourself\b/.test(primary)) {
-      return "governmentEthicsRecusal";
+      return workdayPolicyAllowsKey("governmentEthicsRecusal") ? "governmentEthicsRecusal" : null;
     }
 
-    return matchApplicantKey(full, primary);
+    const mapped = matchApplicantKey(full, primary);
+    return workdayPolicyAllowsKey(mapped) ? mapped : null;
   }
 
   /**
@@ -5260,6 +5301,17 @@
     const isEducation = current === "Education";
     const isMyInfo = current === "My Information";
 
+    const engine = globalThis.BrightstarWorkdayEngine;
+    let engineDetection = null;
+    if (engine?.classifyPageFromText) {
+      engineDetection = engine.classifyPageFromText({
+        url: location.href,
+        heading,
+        bodyText: (document.body?.innerText || "").slice(0, 2500),
+        progressLabels: steps
+      });
+    }
+
     return {
       current: current || headingStep || "",
       heading,
@@ -5271,7 +5323,10 @@
       isEducation,
       isMyInfo,
       // Short flows often jump to Review after My Information / Questions only.
-      isSimpleFlow: steps.length > 0 && steps.length <= 4
+      isSimpleFlow: steps.length > 0 && steps.length <= 4,
+      enginePageType: engineDetection?.pageType || null,
+      engineState: engineDetection?.applicationState || null,
+      engineConfidence: engineDetection?.confidence ?? null
     };
   }
 
@@ -5315,6 +5370,14 @@
     if (isWorkdayPage()) {
       if (hasActiveCaptchaChallenge()) {
         return "A CAPTCHA is on the page. Solve it, then retry.";
+      }
+      const eng = globalThis.BrightstarWorkdayEngine;
+      const sample = (document.body?.innerText || "").slice(0, 4000);
+      if (eng?.isSecurityChallengeText?.(sample) && /captcha|robot|verify you are human/i.test(sample)) {
+        return "A security challenge is on the page. Complete it, then retry.";
+      }
+      if (eng?.isSecurityChallengeText?.(sample) && /\bmfa\b|two[- ]factor|verification email|enter (the )?code/i.test(sample)) {
+        return "MFA or email verification is required. Complete it in this tab, then retry.";
       }
       return "";
     }
@@ -7141,6 +7204,15 @@
       summary.status = "unavailable";
       summary.detail = goneAtStart;
       return summary;
+    }
+
+    if (isWorkdayPage() || site === "workday") {
+      showAutofillToast(
+        autoSubmit
+          ? "Workday: filling known fields, then Submit (Allow auto submit is on)."
+          : "Workday: filling known fields; stops before Submit until you enable Allow auto submit.",
+        { variant: "info", ms: 4500 }
+      );
     }
     const successAtStart = detectApplySuccess();
     if (successAtStart.ok) {

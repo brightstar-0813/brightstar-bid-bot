@@ -69,7 +69,7 @@
         "https://app.usebraintrust.com/*",
         "https://*.usebraintrust.com/*"
       ],
-      "js": ["content/autofill.js"],
+      "js": ["content/workday-engine.js", "content/autofill.js"],
       "run_at": "document_idle",
       "all_frames": true
     },

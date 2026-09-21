@@ -243,6 +243,15 @@
     return "";
   }
 
+  function isWorkdayHost(url = location.href) {
+    try {
+      const host = new URL(String(url || location.href)).hostname.toLowerCase();
+      return /(^|\.)myworkdayjobs\.com$/.test(host) || /(^|\.)workdayjobs\.com$/.test(host);
+    } catch {
+      return false;
+    }
+  }
+
   function updateUi() {
     const shell = qs("#panelShell");
     const tab = qs("#panelTab");
@@ -392,7 +401,7 @@
             <button type="button" class="autofill-btn" id="autofillBtn">Autofill</button>
             <label class="toggle-row">
               <span>Allow auto submit</span>
-              <input type="checkbox" id="allowSubmitToggle" checked />
+              <input type="checkbox" id="allowSubmitToggle" />
             </label>
             <div class="progress-block" id="progressBlock" hidden>
               <div class="progress-head">
@@ -439,7 +448,9 @@
     });
     qs("#allowSubmitToggle")?.addEventListener("change", (e) => {
       state.allowSubmit = Boolean(e.target.checked);
-      chrome.storage.local.set({ allowSubmitOnAssist: state.allowSubmit }).catch(() => {});
+      const payload = { allowSubmitOnAssist: state.allowSubmit };
+      if (isWorkdayHost()) payload.workdayAllowSubmit = state.allowSubmit;
+      chrome.storage.local.set(payload).catch(() => {});
       updateUi();
     });
     qs("#fieldList")?.addEventListener("click", (e) => {
@@ -477,12 +488,18 @@
       if (fieldId) applyPanelAnswer(fieldId).catch(() => {});
     });
 
-    chrome.storage.local.get(["allowSubmitOnAssist", "last_job_title", "last_job_company"], (data) => {
-      state.allowSubmit = data.allowSubmitOnAssist !== false;
-      state.jobTitle = data.last_job_title || "";
-      state.jobCompany = data.last_job_company || "";
-      updateUi();
-    });
+    chrome.storage.local.get(
+      ["allowSubmitOnAssist", "workdayAllowSubmit", "last_job_title", "last_job_company"],
+      (data) => {
+        // Workday defaults to review-first (submit off) unless user explicitly enabled it.
+        state.allowSubmit = isWorkdayHost()
+          ? data.workdayAllowSubmit === true
+          : data.allowSubmitOnAssist !== false;
+        state.jobTitle = data.last_job_title || "";
+        state.jobCompany = data.last_job_company || "";
+        updateUi();
+      }
+    );
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
@@ -497,8 +514,12 @@
       if (changes.last_job_title) state.jobTitle = changes.last_job_title.newValue || "";
       if (changes.last_job_company) state.jobCompany = changes.last_job_company.newValue || "";
       if (changes.last_job_title || changes.last_job_company) updateUi();
-      if (changes.allowSubmitOnAssist) {
+      if (changes.allowSubmitOnAssist && !isWorkdayHost()) {
         state.allowSubmit = changes.allowSubmitOnAssist.newValue !== false;
+        updateUi();
+      }
+      if (changes.workdayAllowSubmit && isWorkdayHost()) {
+        state.allowSubmit = changes.workdayAllowSubmit.newValue === true;
         updateUi();
       }
     });

@@ -5,3 +5,14 @@
 __pycache__/
 *.py[cod]
 
+# Node
+node_modules/
+
+# Leftover tooling artifacts (if any)
+dist/
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+.next/
+.storage/
