@@ -1089,7 +1089,7 @@ async function loadEmailBidPendingAiChats() {
 
 /**
  * Sidebar leftovers from Email Bid (contacts + outreach draft). ChatGPT titles
- * often look like "Find hiring contacts" / "Write hiring outreach email".
+ * often look like "Find hiring contacts" / "Find Salesforce Recruiters".
  */
 async function collectEmailBidChatIdsFromSidebar(tabId, provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
@@ -1099,7 +1099,7 @@ async function collectEmailBidChatIdsFromSidebar(tabId, provider) {
       args: [p],
       func: (site) => {
         const re =
-          /find hiring contacts|hiring outreach email|write hiring outreach|hiring contact search|research contacts|outreach contacts|email bid|contact research/i;
+          /find\s+(hiring\s+)?contacts|find\s+.+\s+recruiters|hiring\s+outreach|write\s+hiring\s+outreach|hiring\s+contact\s+search|research\s+contacts|outreach\s+contacts|email\s+bid|contact\s+research|salesforce\s+recruiters/i;
         const out = [];
         const seen = new Set();
         const hrefRe = site === "claude" ? /\/chat\/([a-f0-9-]+)/i : /\/c\/([a-zA-Z0-9_-]+)/;
@@ -1159,6 +1159,15 @@ async function cleanupEmailBidAiChats(tracked = {}, { sweepSidebar = true, quiet
   pending.chatIds.forEach(pushId);
 
   if (sweepSidebar) {
+    try {
+      const fromApi = await collectBotChatIdsFromConversationsApi(tabId, provider, {
+        includeEmailBid: true,
+        limit: 20
+      });
+      fromApi.forEach(pushId);
+    } catch {
+      /* ignore */
+    }
     try {
       const fromSidebar = await collectEmailBidChatIdsFromSidebar(tabId, provider);
       fromSidebar.forEach(pushId);
@@ -1255,6 +1264,45 @@ async function cleanupEmailBidAiChats(tracked = {}, { sweepSidebar = true, quiet
   }
   if (!quiet) await setStatus("Email Bid · AI chat history cleared.");
   return { ok: true, via: "ok", chatIds: ids };
+}
+
+/**
+ * One-shot sweep of leftover bot + Email Bid AI chats (popup "Clean leftover AI chats").
+ * Uses the same gather + delete + verify path as post-job cooldown.
+ */
+async function cleanupLeftoverAiChats({ quiet = false } = {}) {
+  const provider = await getStoredAiProvider();
+  const label = aiProviderLabel(provider);
+  const tabId = await resolveAiTabForCleanup(null);
+  if (typeof tabId !== "number") {
+    return { ok: false, error: `no-${label.toLowerCase()}-tab`, via: "no-tab" };
+  }
+  if (!(await isDeleteAiChatHistoryEnabled())) {
+    if (!quiet) {
+      await setStatus("Keeping AI chat history (Delete AI chat after job is off).");
+    }
+    return { ok: true, via: "skipped-toggle-off" };
+  }
+  if (!quiet) await setStatus(`Cleaning leftover ${label} chats…`);
+  try {
+    const detail = await deleteCurrentAiConversation(tabId, {
+      chatId: "",
+      skipExtras: false,
+      leaveBlank: true
+    });
+    if (!quiet) {
+      await setStatus(
+        detail?.via === "skipped-toggle-off"
+          ? "Keeping AI chat history (Delete AI chat after job is off)."
+          : `Leftover ${label} chats cleaned (${detail?.via || "ok"}).`
+      );
+    }
+    return { ok: true, via: detail?.via || "ok", chatId: detail?.chatId || "" };
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (!quiet) await setStatus(`Leftover chat cleanup: ${msg}`);
+    return { ok: false, error: msg, via: "failed" };
+  }
 }
 
 async function runEmailBidAi(prompt, opts = {}) {
@@ -1580,6 +1628,14 @@ async function markQueueJobAppliedOnSheet(jobMeta = {}, statusOverride = "") {
   } catch (err) {
     return { skipped: false, error: String(err?.message || err) };
   }
+}
+
+/** Status fragment after markApplied — empty when sheet was skipped (no config / no link). */
+function describeSheetAppliedResult(sheet, appliedDate = "") {
+  if (sheet?.error) return `Sheet Applied failed: ${sheet.error}`;
+  if (sheet?.skipped) return "";
+  const date = String(sheet?.appliedDate || appliedDate || "").trim();
+  return `Sheet: ${sheet?.status || (date ? `Applied ${date}` : "Applied")}`;
 }
 
 const MAX_HOSTED_APPLY_ATTEMPTS = 3;
@@ -3623,6 +3679,21 @@ async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {
           ? "https://chat.openai.com"
           : "https://chatgpt.com";
 
+        const readCookie = (name) => {
+          const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+          return m ? decodeURIComponent(m[1]) : "";
+        };
+
+        const fetchWithTimeout = async (url, opts = {}, ms = 30000) => {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), ms);
+          try {
+            return await fetch(url, { ...opts, signal: ctrl.signal });
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
         const stubIds = [];
         const seen = new Set();
         for (const a of document.querySelectorAll('a[href*="/c/"]')) {
@@ -3643,9 +3714,11 @@ async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {
         let token = "";
         let accountId = "";
         try {
-          const session = await fetch(`${origin}/api/auth/session`, {
-            credentials: "include"
-          }).then((r) => r.json());
+          const session = await fetchWithTimeout(
+            `${origin}/api/auth/session`,
+            { credentials: "include" },
+            8000
+          ).then((r) => r.json());
           token = session?.accessToken || session?.access_token || "";
           accountId =
             session?.account?.id ||
@@ -3658,22 +3731,44 @@ async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {
         }
         if (!token) return { removed: 0, ids: stubIds, error: "no-token" };
 
+        const deviceId = readCookie("oai-did") || "";
         const headers = {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
           Accept: "application/json"
         };
-        if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
+        if (accountId) {
+          headers["ChatGPT-Account-ID"] = String(accountId);
+          headers["Chatgpt-Account-Id"] = String(accountId);
+        }
+        if (deviceId) headers["OAI-Device-Id"] = deviceId;
 
         let removed = 0;
         for (const id of stubIds) {
           try {
-            const patch = await fetch(`${origin}/backend-api/conversation/${id}`, {
-              method: "PATCH",
-              credentials: "include",
-              headers,
-              body: JSON.stringify({ is_visible: false })
-            });
+            let patch = await fetchWithTimeout(
+              `${origin}/backend-api/conversation/${id}`,
+              {
+                method: "PATCH",
+                credentials: "include",
+                headers,
+                body: JSON.stringify({ is_visible: false })
+              },
+              30000
+            );
+            if (patch.status === 429 || (patch.status >= 500 && patch.status <= 599)) {
+              await sleep(800);
+              patch = await fetchWithTimeout(
+                `${origin}/backend-api/conversation/${id}`,
+                {
+                  method: "PATCH",
+                  credentials: "include",
+                  headers,
+                  body: JSON.stringify({ is_visible: false })
+                },
+                30000
+              );
+            }
             if (patch.ok || patch.status === 204 || patch.status === 404) {
               removed += 1;
               const link =
@@ -4936,8 +5031,7 @@ function attachAiContextToError(err, { aiTabId = null, aiChatId = "", aiProvider
 
 /**
  * Collect ChatGPT sidebar conversation ids that look like bot resume-generation
- * leftovers (e.g. "Rewrite Salesforce Resume…"). Used during cleanup so failed
- * prior deletes do not keep piling up in Recents.
+ * leftovers (e.g. "Resume rewrite JSON", "Rewrite Salesforce Resume").
  */
 async function collectBotResumeChatIdsFromSidebar(tabId, provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
@@ -4947,7 +5041,7 @@ async function collectBotResumeChatIdsFromSidebar(tabId, provider) {
       target: { tabId },
       func: () => {
         const re =
-          /^(resume\s+rewrite|rewrite\b.+\bresum|salesforce\b.+\bresum)/i;
+          /^(resume\s+rewrite|rewrite\b.+\bresum|salesforce\b.+\bresum)|resume\s+rewrite(\s+(json|request))?|rewrite\s+salesforce|salesforce\s+resume/i;
         const out = [];
         const seen = new Set();
         for (const a of document.querySelectorAll('a[href*="/c/"]')) {
@@ -4960,12 +5054,143 @@ async function collectBotResumeChatIdsFromSidebar(tabId, provider) {
           if (!title || !re.test(title)) continue;
           seen.add(id);
           out.push(id);
-          if (out.length >= 12) break;
+          if (out.length >= 20) break;
         }
         return out;
       }
     });
     return (Array.isArray(results?.[0]?.result) ? results[0].result : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Primary leftover discovery: list conversations via ChatGPT backend API and
+ * filter bot resume + Email Bid titles. More reliable than DOM-only sweeps.
+ */
+async function collectBotChatIdsFromConversationsApi(
+  tabId,
+  provider,
+  { includeEmailBid = true, limit = 20 } = {}
+) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  if (p !== AI_PROVIDERS.CHATGPT) return [];
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [Boolean(includeEmailBid), Math.min(40, Math.max(1, Number(limit) || 20))],
+      func: async (withEmailBid, maxIds) => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const origin = location.origin.includes("openai.com")
+          ? "https://chat.openai.com"
+          : "https://chatgpt.com";
+        const resumeRe =
+          /^(resume\s+rewrite|rewrite\b.+\bresum|salesforce\b.+\bresum)|resume\s+rewrite(\s+(json|request))?|rewrite\s+salesforce|salesforce\s+resume/i;
+        const emailRe =
+          /find\s+(hiring\s+)?contacts|find\s+.+\s+recruiters|hiring\s+outreach|write\s+hiring\s+outreach|hiring\s+contact\s+search|research\s+contacts|outreach\s+contacts|email\s+bid|contact\s+research|salesforce\s+recruiters/i;
+        const titleMatches = (title) => {
+          const t = String(title || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (!t) return false;
+          if (resumeRe.test(t)) return true;
+          if (withEmailBid && emailRe.test(t)) return true;
+          return false;
+        };
+
+        const readCookie = (name) => {
+          const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+          return m ? decodeURIComponent(m[1]) : "";
+        };
+
+        const fetchWithTimeout = async (url, opts = {}, ms = 30000) => {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), ms);
+          try {
+            return await fetch(url, { ...opts, signal: ctrl.signal });
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
+        let token = "";
+        let accountId = "";
+        for (const sessionUrl of [`${origin}/api/auth/session`, "/api/auth/session"]) {
+          try {
+            const session = await fetchWithTimeout(sessionUrl, { credentials: "include" }, 8000).then(
+              (r) => r.json()
+            );
+            token = session?.accessToken || session?.access_token || "";
+            accountId =
+              session?.account?.id ||
+              session?.user?.id ||
+              session?.chatgpt_account_id ||
+              session?.account?.account_id ||
+              "";
+            if (token) break;
+          } catch {
+            /* try next */
+          }
+        }
+        if (!token) return { ids: [], error: "no-token" };
+
+        const deviceId = readCookie("oai-did") || "";
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json"
+        };
+        if (accountId) {
+          headers["ChatGPT-Account-ID"] = String(accountId);
+          headers["Chatgpt-Account-Id"] = String(accountId);
+        }
+        if (deviceId) headers["OAI-Device-Id"] = deviceId;
+
+        let items = [];
+        try {
+          let res = await fetchWithTimeout(
+            `${origin}/backend-api/conversations?offset=0&limit=100&order=updated`,
+            { credentials: "include", headers },
+            30000
+          );
+          if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+            await sleep(800);
+            res = await fetchWithTimeout(
+              `${origin}/backend-api/conversations?offset=0&limit=100&order=updated`,
+              { credentials: "include", headers },
+              30000
+            );
+          }
+          if (!res.ok) return { ids: [], error: `list-status-${res.status}` };
+          const data = await res.json();
+          items = Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data)
+                ? data
+                : [];
+        } catch (err) {
+          return { ids: [], error: String(err?.message || err || "list-failed") };
+        }
+
+        const out = [];
+        const seen = new Set();
+        for (const item of items) {
+          const id = String(item?.id || item?.conversation_id || "").trim();
+          const title = item?.title || item?.name || "";
+          if (!id || seen.has(id) || !titleMatches(title)) continue;
+          seen.add(id);
+          out.push(id);
+          if (out.length >= maxIds) break;
+        }
+        return { ids: out };
+      }
+    });
+    const payload = results?.[0]?.result;
+    return (Array.isArray(payload?.ids) ? payload.ids : [])
       .map((id) => String(id || "").trim())
       .filter(Boolean);
   } catch {
@@ -5023,10 +5248,25 @@ async function deleteCurrentAiConversation(
     } catch {
       /* ignore */
     }
-    // Sweep leftover bot "Rewrite … Resume" rows from earlier failed cleanups.
+    // API list first (authoritative), then DOM sidebar as secondary.
+    try {
+      const fromApi = await collectBotChatIdsFromConversationsApi(tabId, provider, {
+        includeEmailBid: true,
+        limit: 20
+      });
+      fromApi.forEach(pushId);
+    } catch {
+      /* ignore */
+    }
     try {
       const leftovers = await collectBotResumeChatIdsFromSidebar(tabId, provider);
       leftovers.forEach(pushId);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const emailLeft = await collectEmailBidChatIdsFromSidebar(tabId, provider);
+      emailLeft.forEach(pushId);
     } catch {
       /* ignore */
     }
@@ -5235,7 +5475,7 @@ async function deleteCurrentAiConversation(
         return { ok: !stillThere || Boolean(chatId), via: "ui", chatId };
       }
 
-      // ChatGPT — hide/delete via backend API, then verify sidebar (UI is last resort).
+      // ChatGPT — hide/delete via backend API, verify via conversations list (UI last resort).
       const origin = location.origin.includes("openai.com")
         ? "https://chat.openai.com"
         : "https://chatgpt.com";
@@ -5243,6 +5483,11 @@ async function deleteCurrentAiConversation(
         String(knownChatId || "").trim() ||
         (location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/) || [])[1] ||
         "";
+
+      const readCookie = (name) => {
+        const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+        return m ? decodeURIComponent(m[1]) : "";
+      };
 
       const sidebarLink = (id) => {
         if (!id) return null;
@@ -5262,13 +5507,11 @@ async function deleteCurrentAiConversation(
         if (!id) return pageSaysAlreadyDeleted();
         // Sidebar row still present → not gone, regardless of banners.
         if (sidebarLink(id)) return false;
-        // No sidebar row: gone, or never listed. Banner on this /c/<id> confirms it.
         const onThisChat = new RegExp(`/c/${id}(?:[/?#]|$)`).test(
           `${location.pathname}${location.search}`
         );
         if (onThisChat && pageSaysAlreadyDeleted()) return true;
         if (!onThisChat) return true;
-        // Still on /c/<id> URL with no sidebar row and empty composer → treat as gone.
         const hasComposer =
           Boolean(document.querySelector("#prompt-textarea")) ||
           Boolean(document.querySelector('[data-testid="composer"]')) ||
@@ -5292,7 +5535,7 @@ async function deleteCurrentAiConversation(
         return true;
       };
 
-      const fetchWithTimeout = async (url, opts = {}, ms = 8000) => {
+      const fetchWithTimeout = async (url, opts = {}, ms = 30000) => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), ms);
         try {
@@ -5302,16 +5545,14 @@ async function deleteCurrentAiConversation(
         }
       };
 
-      const chatgptDeleteViaApi = async (id) => {
-        if (!id) return { ok: false, error: "missing-id" };
-        if (conversationAlreadyGone(id)) {
-          return { ok: true, via: "already-gone" };
-        }
+      let cachedAuth = null;
+      const resolveAuth = async () => {
+        if (cachedAuth?.token) return cachedAuth;
         let token = "";
         let accountId = "";
         for (const sessionUrl of [`${origin}/api/auth/session`, "/api/auth/session"]) {
           try {
-            const session = await fetchWithTimeout(sessionUrl, { credentials: "include" }, 6000).then(
+            const session = await fetchWithTimeout(sessionUrl, { credentials: "include" }, 8000).then(
               (r) => r.json()
             );
             token = session?.accessToken || session?.access_token || "";
@@ -5323,10 +5564,9 @@ async function deleteCurrentAiConversation(
               "";
             if (token) break;
           } catch {
-            // try next
+            /* try next */
           }
         }
-        // Fallback: some builds stash the bearer in local/session storage.
         if (!token) {
           try {
             for (const store of [localStorage, sessionStorage]) {
@@ -5356,36 +5596,127 @@ async function deleteCurrentAiConversation(
               if (token) break;
             }
           } catch {
-            // ignore
+            /* ignore */
           }
         }
-        if (!token) return { ok: false, error: "no-token" };
+        const deviceId = readCookie("oai-did") || "";
+        cachedAuth = { token, accountId, deviceId };
+        return cachedAuth;
+      };
+
+      const authHeaders = async (extra = {}) => {
+        const auth = await resolveAuth();
+        if (!auth.token) return null;
         const headers = {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Accept: "application/json"
+          Authorization: `Bearer ${auth.token}`,
+          Accept: "application/json",
+          ...extra
         };
-        if (accountId) headers["ChatGPT-Account-ID"] = String(accountId);
+        if (auth.accountId) {
+          headers["ChatGPT-Account-ID"] = String(auth.accountId);
+          headers["Chatgpt-Account-Id"] = String(auth.accountId);
+        }
+        if (auth.deviceId) headers["OAI-Device-Id"] = auth.deviceId;
+        return headers;
+      };
 
-        // Soft-delete: PATCH is_visible=false (official ChatGPT web behavior).
-        // Trust HTTP success even if the React sidebar has not re-rendered yet.
-        const dropSidebarRow = () => {
-          const link = sidebarLink(id);
-          if (!(link instanceof HTMLElement)) return;
-          const row =
-            link.closest("li") ||
-            link.closest('[data-testid*="history"]') ||
-            link.closest("div.group") ||
-            link.parentElement;
-          try {
-            (row || link).remove();
-          } catch {
-            // ignore
-          }
-        };
-
+      const listConversationIds = async () => {
+        const headers = await authHeaders();
+        if (!headers) return { ids: null, error: "no-token" };
         try {
-          const patch = await fetchWithTimeout(
+          let res = await fetchWithTimeout(
+            `${origin}/backend-api/conversations?offset=0&limit=100&order=updated`,
+            { credentials: "include", headers },
+            30000
+          );
+          if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+            await sleep(900);
+            res = await fetchWithTimeout(
+              `${origin}/backend-api/conversations?offset=0&limit=100&order=updated`,
+              { credentials: "include", headers },
+              30000
+            );
+          }
+          if (!res.ok) return { ids: null, error: `list-${res.status}` };
+          const data = await res.json();
+          const items = Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data)
+                ? data
+                : [];
+          const ids = new Set(
+            items
+              .map((item) => String(item?.id || item?.conversation_id || "").trim())
+              .filter(Boolean)
+          );
+          return { ids, error: "" };
+        } catch (err) {
+          return { ids: null, error: String(err?.message || err || "list-failed") };
+        }
+      };
+
+      const verifyDeleted = async (id, { polls = 5 } = {}) => {
+        if (!id) return false;
+        for (let i = 0; i < polls; i += 1) {
+          if (i > 0) await sleep(400 * i);
+          // Prefer API list when available.
+          const listed = await listConversationIds();
+          if (listed.ids && !listed.ids.has(id)) {
+            // Drop stale DOM row after server confirms gone.
+            const link = sidebarLink(id);
+            if (link instanceof HTMLElement) {
+              const row =
+                link.closest("li") ||
+                link.closest('[data-testid*="history"]') ||
+                link.closest("div.group") ||
+                link.parentElement;
+              try {
+                (row || link).remove();
+              } catch {
+                /* ignore */
+              }
+            }
+            return true;
+          }
+          if (listed.ids === null) {
+            // List unavailable — fall back to DOM/banner signals.
+            if (conversationAlreadyGone(id) || pageSaysAlreadyDeleted()) return true;
+          }
+        }
+        // Final DOM check: gone from sidebar + not regenerating.
+        if (!sidebarLink(id) && (conversationAlreadyGone(id) || pageSaysAlreadyDeleted())) {
+          return true;
+        }
+        return false;
+      };
+
+      const dropSidebarRow = (id) => {
+        const link = sidebarLink(id);
+        if (!(link instanceof HTMLElement)) return;
+        const row =
+          link.closest("li") ||
+          link.closest('[data-testid*="history"]') ||
+          link.closest("div.group") ||
+          link.parentElement;
+        try {
+          (row || link).remove();
+        } catch {
+          /* ignore */
+        }
+      };
+
+      const chatgptDeleteViaApi = async (id) => {
+        if (!id) return { ok: false, error: "missing-id" };
+        if (await verifyDeleted(id, { polls: 1 })) {
+          return { ok: true, via: "already-gone" };
+        }
+        const headers = await authHeaders({ "Content-Type": "application/json" });
+        if (!headers) return { ok: false, error: "no-token" };
+
+        const patchOnce = async () =>
+          fetchWithTimeout(
             `${origin}/backend-api/conversation/${id}`,
             {
               method: "PATCH",
@@ -5393,14 +5724,28 @@ async function deleteCurrentAiConversation(
               headers,
               body: JSON.stringify({ is_visible: false })
             },
-            8000
+            30000
           );
+
+        try {
+          let patch = await patchOnce();
+          if (patch.status === 429 || (patch.status >= 500 && patch.status <= 599)) {
+            await sleep(1000);
+            patch = await patchOnce();
+          }
           if (patch.ok || patch.status === 204 || patch.status === 404) {
-            dropSidebarRow();
-            return { ok: true, via: "api-patch", status: patch.status };
+            if (await verifyDeleted(id, { polls: 5 })) {
+              return { ok: true, via: "api-patch", status: patch.status };
+            }
+            // HTTP ok but still listed — wait once more then treat as soft success only
+            // if DOM is also clear (avoid false ok that leaves Recents piles).
+            await sleep(800);
+            if (await verifyDeleted(id, { polls: 3 })) {
+              return { ok: true, via: "api-patch-delayed", status: patch.status };
+            }
+            return { ok: false, error: "api-ok-still-listed", status: patch.status };
           }
 
-          // Rare accounts: hard DELETE when PATCH is rejected.
           const del = await fetchWithTimeout(
             `${origin}/backend-api/conversation/${id}`,
             {
@@ -5408,14 +5753,15 @@ async function deleteCurrentAiConversation(
               credentials: "include",
               headers
             },
-            8000
+            30000
           );
           if (del.ok || del.status === 204 || del.status === 404) {
-            dropSidebarRow();
-            return { ok: true, via: "api-delete", status: del.status };
+            if (await verifyDeleted(id, { polls: 5 })) {
+              return { ok: true, via: "api-delete", status: del.status };
+            }
+            return { ok: false, error: "api-delete-still-listed", status: del.status };
           }
-          // PATCH/DELETE rejected, but chat may already be gone (race / prior attempt).
-          if (conversationAlreadyGone(id)) {
+          if (await verifyDeleted(id, { polls: 2 })) {
             return { ok: true, via: "already-gone-after-api", status: del.status || patch.status };
           }
           return {
@@ -5424,7 +5770,7 @@ async function deleteCurrentAiConversation(
             status: del.status || patch.status
           };
         } catch (err) {
-          if (conversationAlreadyGone(id)) {
+          if (await verifyDeleted(id, { polls: 2 })) {
             return { ok: true, via: "already-gone-on-error" };
           }
           return { ok: false, error: String(err?.message || err || "api-failed") };
@@ -5434,11 +5780,15 @@ async function deleteCurrentAiConversation(
       const chatgptDeleteViaUi = async (id) => {
         // Never UI-delete a chat that is already gone — that produces the red
         // "Failed to delete chat… Conversation has been deleted" banner and stalls.
-        if (id && conversationAlreadyGone(id)) {
+        if (id && (await verifyDeleted(id, { polls: 1 }))) {
           return { ok: true, via: "already-gone" };
         }
         if (id && !sidebarLink(id)) {
-          return { ok: true, via: "no-sidebar-row" };
+          // No row to click; wait for API list to confirm rather than opening wrong menus.
+          if (await verifyDeleted(id, { polls: 3 })) {
+            return { ok: true, via: "no-sidebar-row" };
+          }
+          return { ok: false, error: "no-sidebar-row-still-listed" };
         }
         let opened = false;
         if (id) {
@@ -5496,11 +5846,10 @@ async function deleteCurrentAiConversation(
         const clickedDelete =
           clickMatching(/delete chat|delete conversation|^delete$/i) || clickMatching(/delete/i);
         if (!clickedDelete) {
-          if (conversationAlreadyGone(id)) return { ok: true, via: "already-gone" };
+          if (await verifyDeleted(id, { polls: 2 })) return { ok: true, via: "already-gone" };
           return { ok: false, error: "no-delete-menu" };
         }
         await sleep(550);
-        // Confirm in modal / alert dialog (ChatGPT uses role=alertdialog).
         const dialog =
           document.querySelector('[role="alertdialog"]') ||
           document.querySelector('[role="dialog"]') ||
@@ -5513,38 +5862,57 @@ async function deleteCurrentAiConversation(
             clickMatching(/delete chat|confirm|yes,?\s*delete/i) ||
             clickMatching(/^confirm$/i);
         }
-        await sleep(800);
-        if (conversationAlreadyGone(id) || pageSaysAlreadyDeleted()) {
-          return { ok: true, via: "ui-or-already-gone" };
+        // Poll until row gone or timeout — do not report ok while spinner/row remains.
+        for (let i = 0; i < 8; i += 1) {
+          await sleep(400 + i * 150);
+          if (await verifyDeleted(id, { polls: 1 })) {
+            dropSidebarRow(id);
+            return { ok: true, via: "ui" };
+          }
+          if (pageSaysAlreadyDeleted() && !sidebarLink(id)) {
+            return { ok: true, via: "ui-or-already-gone" };
+          }
         }
         const stillThere = id ? Boolean(sidebarLink(id)) : true;
-        if (id && !stillThere) return { ok: true, via: "ui" };
         return {
-          ok: Boolean(opened && clickedDelete && !stillThere),
-          error: stillThere && id ? "still-in-sidebar" : ""
+          ok: false,
+          error: stillThere && id ? "still-in-sidebar" : "ui-unconfirmed"
         };
       };
 
       if (convId) {
-        if (conversationAlreadyGone(convId)) {
+        if (await verifyDeleted(convId, { polls: 1 })) {
           return { ok: true, via: "already-gone", chatId: convId };
         }
         let lastErr = "";
-        // Prefer API; UI only when the sidebar row is still present after API failure.
+        // Prefer API; UI only when still listed after API failure.
         for (let attempt = 0; attempt < 2; attempt += 1) {
-          if (attempt > 0) await sleep(500 * attempt);
+          if (attempt > 0) await sleep(600 * attempt);
           const api = await chatgptDeleteViaApi(convId);
           if (api.ok) {
             return { ok: true, via: api.via || "api", chatId: convId, attempt: attempt + 1 };
           }
           lastErr = api.error || lastErr;
-          if (!sidebarLink(convId) || conversationAlreadyGone(convId)) {
+          if (await verifyDeleted(convId, { polls: 2 })) {
             return { ok: true, via: "already-gone-after-api-fail", chatId: convId };
+          }
+          // Skip UI when API said ok-but-still-listed and we're still hydrating —
+          // retry API on next attempt first.
+          if (api.error === "api-ok-still-listed" && attempt === 0) {
+            continue;
+          }
+          if (!sidebarLink(convId)) {
+            // No DOM target — another API wait, then fail if still listed.
+            if (await verifyDeleted(convId, { polls: 4 })) {
+              return { ok: true, via: "already-gone-no-row", chatId: convId };
+            }
+            lastErr = lastErr || "listed-no-sidebar-row";
+            continue;
           }
           const ui = await chatgptDeleteViaUi(convId);
           if (ui.ok) return { ok: true, via: ui.via || "ui", chatId: convId, attempt: attempt + 1 };
           lastErr = ui.error || api.error || lastErr;
-          if (conversationAlreadyGone(convId)) {
+          if (await verifyDeleted(convId, { polls: 2 })) {
             return { ok: true, via: "already-gone", chatId: convId };
           }
         }
@@ -9729,8 +10097,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        // Non-Dice (Greenhouse, Workday, …): mark Applied, open job, show Autofill panel.
-        // Dice with autofill off: same open-only path.
+        // Non-Dice (Greenhouse, Workday, …): open job first, mark Applied on sheet in parallel.
+        // Dice with autofill off: same open-only path. Sheet failure must not block the tab.
         if (!diceAutoApply || !(await isAutofillEnabled())) {
           const href = String(message.url || jobMeta.jdLink || "").trim();
           if (!href) {
@@ -9752,15 +10120,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           await persistJobContextForAutofill(jobMeta);
-          const sheet = await markQueueJobAppliedOnSheet(jobMeta);
-          const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
-          const sheetFailed = Boolean(sheet?.error);
-          const sheetLabel = sheetFailed
-            ? `Sheet Applied failed: ${sheet.error}`
-            : sheet?.skipped
-              ? ""
-              : `Sheet: ${sheet.status || (appliedDate ? `Applied ${appliedDate}` : "Applied")}`;
-          if (!sheetFailed && jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+          const appliedDate = formatApplicationDateTime();
+          if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
             await updateQueueJob(jobMeta.csvRow, {
               applied: true,
               appliedDate,
@@ -9769,47 +10130,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }).catch(() => {});
           }
           const openHint = diceAutoApply
-            ? "Opening job link…"
-            : "Opening job — use the Autofill panel to fill (Q&A bank, uploads)…";
-          const sheetStatus = sheetFailed
-            ? sheetLabel || "Sheet update failed."
-            : sheetLabel
-              ? `${sheetLabel}. ${openHint}`
-              : `Marked Applied. ${openHint}`;
+            ? "Opening job — recording Applied on sheet…"
+            : "Opening job — recording Applied on sheet. Use the Autofill panel to fill (Q&A bank, uploads)…";
+          await setStatus(openHint);
           reply({
-            ok: !sheetFailed,
-            applied: !sheetFailed,
+            ok: true,
+            applied: true,
             started: false,
             openedOnly: true,
             autofillSkipped: !diceAutoApply ? false : true,
             panelOnly: !diceAutoApply,
-            appliedDate: sheetFailed ? "" : appliedDate,
+            appliedDate,
             jobDir: jobMeta.jobDir || "",
-            status: sheetStatus
+            status: openHint
           });
-          if (sheetFailed) {
-            await setStatus(sheetStatus);
-            return;
-          }
-          await setStatus(sheetStatus);
-          try {
-            const result = await openJobAndApply(href, {
-              openOnly: true,
-              csvRow: jobMeta.csvRow,
-              jobDir: jobMeta.jobDir || "",
-              jdLink: jobMeta.jdLink || href
-            });
-            await setStatus(
-              sheetLabel
-                ? `${sheetLabel}. ${result?.detail || (diceAutoApply ? "Opened job link." : "Autofill panel ready.")}`
-                : result?.detail ||
-                  `Row ${jobMeta.csvRow}: marked Applied and opened job.`
-            );
-          } catch (err) {
-            await setStatus(
-              `${sheetLabel || "Marked Applied"}. Job link failed: ${String(err?.message || err)}`
-            );
-          }
+          const openPromise = openJobAndApply(href, {
+            openOnly: true,
+            csvRow: jobMeta.csvRow,
+            jobDir: jobMeta.jobDir || "",
+            jdLink: jobMeta.jdLink || href
+          }).then(
+            (opened) => opened,
+            (err) => ({
+              status: "error",
+              detail: `Job link failed: ${String(err?.message || err)}`,
+              openError: true
+            })
+          );
+          const sheetPromise = markQueueJobAppliedOnSheet(jobMeta);
+          const [result, sheet] = await Promise.all([openPromise, sheetPromise]);
+          const sheetLabel = describeSheetAppliedResult(sheet, sheet?.appliedDate || appliedDate);
+          const openedDetail =
+            result?.detail || (diceAutoApply ? "Opened job link." : "Autofill panel ready.");
+          await setStatus(sheetLabel ? `${openedDetail} ${sheetLabel}.` : openedDetail);
           return;
         }
         const folderPromise = locateJobFolder({
@@ -9825,37 +10178,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           message.autoSubmit === true ||
             (message.autoSubmit !== false && storedAssist.allowSubmitOnAssist !== false)
         );
-        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
-        const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
-        const sheetFailed = Boolean(sheet?.error);
-        const sheetLabel = sheetFailed
-          ? `Sheet Applied failed: ${sheet.error}`
-          : sheet?.skipped
-            ? ""
-            : `Sheet: ${sheet.status || (appliedDate ? `Applied ${appliedDate}` : "Applied")}`;
-        if (!sheetFailed && jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-          await updateQueueJob(jobMeta.csvRow, {
-            applied: true,
-            appliedDate,
-            jobDir: jobMeta.jobDir || "",
-            hasFiles: Boolean(jobMeta.jobDir)
-          }).catch(() => {});
-        }
-        await setStatus(
-          sheetLabel
-            ? `${sheetLabel}. Opening job and running Dice Auto Apply…`
-            : "Sheet marked Applied. Opening job and running Dice Auto Apply…"
-        );
-        reply({
-          ok: !sheetFailed,
-          started: true,
-          applied: !sheetFailed,
-          appliedDate: sheetFailed ? "" : appliedDate,
-          jobDir: jobMeta.jobDir || "",
-          status: sheetLabel
-            ? `${sheetLabel}. Opening job and running Dice Auto Apply…`
-            : "Sheet marked Applied. Opening job and running Dice Auto Apply…"
-        });
 
         const located = await folderPromise;
         if (located?.jobDir) {
@@ -9870,13 +10192,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         await persistJobContextForAutofill(jobMeta);
 
-        const result = await openJobAndApply(message.url, {
+        const appliedDate = formatApplicationDateTime();
+        if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+          await updateQueueJob(jobMeta.csvRow, {
+            applied: true,
+            appliedDate,
+            jobDir: jobMeta.jobDir || "",
+            hasFiles: Boolean(jobMeta.jobDir)
+          }).catch(() => {});
+        }
+        const openingStatus = "Opening job and running Dice Auto Apply — recording Applied on sheet…";
+        await setStatus(openingStatus);
+        reply({
+          ok: true,
+          started: true,
+          applied: true,
+          appliedDate,
+          jobDir: jobMeta.jobDir || "",
+          status: openingStatus
+        });
+
+        const openPromise = openJobAndApply(message.url, {
           multiStep: message.multiStep !== false,
           autoSubmit: allowSubmit,
           csvRow: jobMeta.csvRow,
           jobDir: jobMeta.jobDir || "",
           jdLink: jobMeta.jdLink || message.url || ""
-        });
+        }).then(
+          (opened) => opened,
+          (err) => ({
+            status: "error",
+            detail: `Apply assist failed: ${String(err?.message || err)}`,
+            openError: true
+          })
+        );
+        const sheetPromise = markQueueJobAppliedOnSheet(jobMeta);
+        const [result, sheet] = await Promise.all([openPromise, sheetPromise]);
+        const sheetLabel = describeSheetAppliedResult(sheet, sheet?.appliedDate || appliedDate);
         if (result?.status === "submitted" && result?.tabId) {
           await closeApplyTab(result.tabId).catch(() => false);
         }
@@ -10806,6 +11158,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await setStatus(`Email Bid chat cleanup skipped: ${msg}`);
         chrome.runtime
           .sendMessage({ type: "email_bid_cleanup_chats_done", ok: false, error: msg })
+          .catch(() => {});
+      }
+    })();
+    return false;
+  }
+
+  if (type === "cleanup_leftover_ai_chats") {
+    safeSendResponse(sendResponse, { ok: true, started: true });
+    (async () => {
+      try {
+        if (isRunning) {
+          await setStatus("Leftover chat cleanup deferred — batch still running.");
+          chrome.runtime
+            .sendMessage({
+              type: "cleanup_leftover_ai_chats_done",
+              ok: false,
+              deferred: true,
+              error: "busy"
+            })
+            .catch(() => {});
+          return;
+        }
+        const detail = await cleanupLeftoverAiChats({ quiet: Boolean(message.quiet) });
+        chrome.runtime
+          .sendMessage({
+            type: "cleanup_leftover_ai_chats_done",
+            ok: Boolean(detail?.ok !== false),
+            via: detail?.via || "",
+            error: detail?.error || ""
+          })
+          .catch(() => {});
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Leftover chat cleanup skipped: ${msg}`);
+        chrome.runtime
+          .sendMessage({ type: "cleanup_leftover_ai_chats_done", ok: false, error: msg })
           .catch(() => {});
       }
     })();

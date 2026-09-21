@@ -307,6 +307,7 @@ const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const allowSubmitToggleEl = document.getElementById("allowSubmitToggle");
 const openaiQaToggleEl = document.getElementById("openaiQaToggle");
 const deleteAiChatToggleEl = document.getElementById("deleteAiChatToggle");
+const cleanLeftoverAiChatsBtn = document.getElementById("cleanLeftoverAiChatsBtn");
 const autofillEnabledToggleEl = document.getElementById("autofillEnabledToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
@@ -2440,7 +2441,7 @@ async function applyAssist(job) {
     return;
   }
 
-  setStatus("Starting apply…");
+  setStatus("Opening job…");
   const res = await chrome.runtime.sendMessage({
     type: "apply_job_url",
     url: job.jdLink,
@@ -2493,7 +2494,7 @@ async function applyAssist(job) {
     return;
   }
   if (res?.autofillSkipped || res?.openedOnly) {
-    setStatus(res.status || "Marked Applied and opened job link.");
+    setStatus(res.status || "Opening job — recording Applied on sheet…");
     return;
   }
   setStatus(res.status || "Apply started.");
@@ -3902,6 +3903,48 @@ deleteAiChatToggleEl?.addEventListener("change", () => {
       ? "Delete AI chat after job: on."
       : "Delete AI chat after job: off — shared AI accounts keep history."
   );
+});
+cleanLeftoverAiChatsBtn?.addEventListener("click", () => {
+  if (!deleteAiChatToggleEl?.checked) {
+    setStatus("Turn on Delete AI chat after job first.");
+    return;
+  }
+  cleanLeftoverAiChatsBtn.disabled = true;
+  setStatus("Cleaning leftover AI chats…");
+  chrome.runtime
+    .sendMessage({ type: "cleanup_leftover_ai_chats" })
+    .then((res) => {
+      if (res?.ok === false) {
+        setStatus(`Clean leftover chats failed: ${String(res.error || "unknown")}`);
+        cleanLeftoverAiChatsBtn.disabled = false;
+      }
+    })
+    .catch((err) => {
+      setStatus(`Clean leftover chats failed: ${String(err?.message || err)}`);
+      cleanLeftoverAiChatsBtn.disabled = false;
+    });
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "cleanup_leftover_ai_chats_done") return;
+  if (cleanLeftoverAiChatsBtn) cleanLeftoverAiChatsBtn.disabled = false;
+  if (message.deferred) {
+    setStatus("Leftover chat cleanup deferred — batch still running.");
+    return;
+  }
+  if (message.via === "no-tab" || /no-.*-tab/i.test(String(message.error || ""))) {
+    setStatus("Open a ChatGPT or Claude tab, then try Clean leftover AI chats again.");
+    return;
+  }
+  if (message.via === "skipped-toggle-off") {
+    setStatus("Keeping AI chat history (Delete AI chat after job is off).");
+    return;
+  }
+  if (message.ok === false) {
+    setStatus(`Clean leftover chats failed: ${String(message.error || "unknown")}`);
+    return;
+  }
+  setStatus("Leftover AI chats cleaned.");
 });
 autofillEnabledToggleEl?.addEventListener("change", () => {
   const enabled = Boolean(autofillEnabledToggleEl.checked);
