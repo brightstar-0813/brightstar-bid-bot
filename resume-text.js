@@ -281,6 +281,36 @@ function parseSkills(lines) {
   return out.filter((r) => r.category || r.items);
 }
 
+const EDU_LOCATION_RE =
+  /,\s*[A-Z]{2}\b|united states|\busa\b|brazil|philippines|hong kong|michigan|california|texas|illinois|pernambuco|recife|colorado|new york|cavite/i;
+const EDU_PLACE_LINE_RE = /^[A-Z][A-Za-z .'-]+(?:,\s*[A-Z][A-Za-z .'-]+)+$/;
+const EDU_YEAR_RANGE_RE =
+  /(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}\s*[-–—]\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:(?:19|20)\d{2}|present)/i;
+
+function isSchoolLine(p) {
+  return /university|college|school|institute|academy/i.test(p);
+}
+
+function isDegreeLine(p) {
+  const t = String(p || "").trim();
+  if (!t) return false;
+  // "Cambridge, MA" / "Jackson, MS" are city-state lines, not M.A. / M.S. degrees.
+  if (/,\s*[A-Z]{2}\b/.test(t) && !/\b(bachelor|master|diploma|mba|ph\.?d\.?)\b/i.test(t)) return false;
+  return /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|ph\.?d\.?|mba|bachelor|master|diploma)\b/i.test(t);
+}
+
+function isEduCityLine(p) {
+  const t = String(p || "").trim();
+  if (!t || isSchoolLine(t) || isDegreeLine(t)) return false;
+  return EDU_LOCATION_RE.test(t) || (EDU_PLACE_LINE_RE.test(t) && t.length < 60);
+}
+
+function isEduDateLine(p) {
+  const t = String(p || "").trim();
+  if (!t) return false;
+  return DATE_RANGE_RE.test(t) || EDU_YEAR_RANGE_RE.test(t) || /^(?:19|20)\d{2}$/.test(t);
+}
+
 function parseEducation(lines) {
   const blocks = [];
   let buf = [];
@@ -296,10 +326,6 @@ function parseEducation(lines) {
   }
   if (buf.length) blocks.push(buf);
   if (!blocks.length) return [];
-
-  const isSchoolLine = (p) => /university|college|school|institute|academy/i.test(p);
-  const isDegreeLine = (p) =>
-    /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|ph\.?d\.?|mba|bachelor|master|diploma)\b/i.test(p);
 
   // Merge split school / degree blocks separated by blank lines.
   const merged = [];
@@ -321,63 +347,73 @@ function parseEducation(lines) {
     merged.push(cur);
   }
 
-  return merged.map((parts) => {
-    const joined = parts.join(" | ");
-    const year =
-      (joined.match(
-        /(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}\s*[-–—]\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:(?:19|20)\d{2}|present)/i
-      ) ||
-        joined.match(/\b((?:19|20)\d{2})\b/) ||
-        [])[0] || "";
-    const degree = parts.find((p) => isDegreeLine(p)) || "";
-    let school =
-      parts.find((p) => isSchoolLine(p) && p !== degree) ||
-      // Degree-first blocks: school is usually the next non-degree, non-date, non-city line
-      parts.find(
-        (p) =>
-          p !== degree &&
-          p !== year &&
-          !DATE_RANGE_RE.test(p) &&
-          !/^(remote|hybrid|on-?site)$/i.test(p) &&
-          p.length < 80 &&
-          !/[.]$/.test(p) &&
-          !/\b(bachelor|master|diploma|computer science|honou?rs?|upper division|lower division)\b/i.test(p)
-      ) ||
-      "";
-    // Never mirror the degree into school (causes duplicate bold/regular lines on PDF).
-    if (school && degree && school.toLowerCase() === degree.toLowerCase()) school = "";
-    if (!school && parts[0] && parts[0] !== degree && !DATE_RANGE_RE.test(parts[0]) && !isDegreeLine(parts[0])) {
-      school = parts[0];
+  // Word/PDF pastes often blank-line school, city, and dates into separate blocks.
+  // Fold location/date-only leftovers into the preceding school/degree entry.
+  const folded = [];
+  for (const cur of merged) {
+    const hasIdentity = cur.some((p) => isSchoolLine(p) || isDegreeLine(p));
+    const metaOnly = cur.length > 0 && !hasIdentity && cur.every((p) => isEduCityLine(p) || isEduDateLine(p));
+    if (metaOnly && folded.length) {
+      folded[folded.length - 1].push(...cur);
+      continue;
     }
-    const honours =
-      parts.find(
-        (p) =>
-          p !== school &&
-          p !== degree &&
-          p !== year &&
-          /\b(honou?rs?|cum laude|distinction|upper division|lower division)\b/i.test(p)
-      ) || "";
-    const details =
-      parts.find(
-        (p) =>
-          p !== school &&
-          p !== degree &&
-          p !== year &&
-          p !== honours &&
-          (/,\s*[A-Z]{2}\b|united states|usa|brazil|philippines|hong kong|michigan|california|texas|illinois|pernambuco|recife|colorado|new york|cavite/i.test(
-            p
-          ) ||
-            (/^[A-Z][A-Za-z .'-]+(?:,\s*[A-Z][A-Za-z .'-]+)+$/.test(p) && p.length < 60))
-      ) ||
-      honours ||
-      "";
-    return {
-      school: String(school).slice(0, 120),
-      degree: String(degree).slice(0, 120),
-      year: String(year).slice(0, 40),
-      details: String(details).slice(0, 80)
-    };
-  });
+    folded.push([...cur]);
+  }
+
+  return folded
+    .map((parts) => {
+      const joined = parts.join(" | ");
+      const year = (joined.match(EDU_YEAR_RANGE_RE) || joined.match(/\b((?:19|20)\d{2})\b/) || [])[0] || "";
+      const degree = parts.find((p) => isDegreeLine(p)) || "";
+      let school =
+        parts.find((p) => isSchoolLine(p) && p !== degree) ||
+        // Degree-first blocks: school is usually the next non-degree, non-date, non-city line
+        parts.find(
+          (p) =>
+            p !== degree &&
+            p !== year &&
+            !isEduDateLine(p) &&
+            !isEduCityLine(p) &&
+            !/^(remote|hybrid|on-?site)$/i.test(p) &&
+            p.length < 80 &&
+            !/[.]$/.test(p) &&
+            !/\b(bachelor|master|diploma|computer science|honou?rs?|upper division|lower division)\b/i.test(p)
+        ) ||
+        "";
+      // Never mirror the degree into school (causes duplicate bold/regular lines on PDF).
+      if (school && degree && school.toLowerCase() === degree.toLowerCase()) school = "";
+      if (
+        !school &&
+        parts[0] &&
+        parts[0] !== degree &&
+        !isEduDateLine(parts[0]) &&
+        !isEduCityLine(parts[0]) &&
+        !isDegreeLine(parts[0])
+      ) {
+        school = parts[0];
+      }
+      const honours =
+        parts.find(
+          (p) =>
+            p !== school &&
+            p !== degree &&
+            p !== year &&
+            /\b(honou?rs?|cum laude|distinction|upper division|lower division)\b/i.test(p)
+        ) || "";
+      const details =
+        parts.find(
+          (p) => p !== school && p !== degree && p !== year && p !== honours && isEduCityLine(p)
+        ) ||
+        honours ||
+        "";
+      return {
+        school: String(school).slice(0, 120),
+        degree: String(degree).slice(0, 120),
+        year: String(year).slice(0, 40),
+        details: String(details).slice(0, 80)
+      };
+    })
+    .filter((edu) => edu.school || edu.degree);
 }
 
 function parseCerts(lines) {
