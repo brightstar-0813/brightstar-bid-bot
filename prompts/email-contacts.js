@@ -30,10 +30,11 @@ TARGET ROLES (priority order — do NOT chase CEOs/founders unless no hiring con
 
 Rules:
 - Return only these fields per contact: name, email, role, phone (phone only when publicly listed).
-- Prefer publicly listed work emails. Never invent a random address or phone number.
+- Include every real email already written in the JD or job-poster hint (recruiter signature, "Email:" line). Do not drop those.
+- Search the web when you can. Prefer publicly listed work emails. Never invent a random address or phone number.
 - If email is only inferred from a corporate pattern, still include it but leave phone empty unless verified.
-- Return 3–6 best contacts max.
-- Output JSON only, no markdown fences:
+- Return 3–6 best contacts max. If you cannot verify any email, return an empty list — do not stall or reply with punctuation.
+- Always end with one JSON object (a short sentence before it is fine):
 
 {"contacts":[{"name":"","email":"","role":"","phone":""}]}`;
 }

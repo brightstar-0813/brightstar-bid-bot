@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildEmailContactsPrompt } from "../prompts/email-contacts.js";
-import { harvestContactsFromAiText, normalizeContacts } from "../email-contacts.js";
+import { harvestContactsFromAiText, normalizeContacts, extractContactsFromJobText, mergeContacts } from "../email-contacts.js";
 import { composeEmailBid, harvestEmailDraftFromAiText } from "../email-compose.js";
 import { pickTemplateVariant, selectTemplateForRole } from "../prompts/email-templates.js";
 import { buildEmailComposePrompt } from "../prompts/email-compose.js";
@@ -27,6 +27,8 @@ describe("email contacts prompt", () => {
     assert.match(prompt, /do NOT chase CEOs/i);
     assert.match(prompt, /"phone"/);
     assert.match(prompt, /name.*email.*role.*phone/i);
+    assert.match(prompt, /already written in the JD/i);
+    assert.match(prompt, /empty list/i);
   });
 });
 
@@ -74,6 +76,27 @@ describe("harvestContactsFromAiText", () => {
     });
     assert.deepEqual(Object.keys(contacts[0]).sort(), ["email", "name", "phone", "role"]);
     assert.equal(contacts[0].phone, "(415) 555-0199");
+  });
+
+  it("reads a recruiter signature already in the JD", () => {
+    const contacts = extractContactsFromJobText(
+      "Thanks, Anjali Jaiswal, Raas Infotek, Newark, DE - 19702, Email: anjali.jaiswal@raasinfotek.com"
+    );
+    assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].email, "anjali.jaiswal@raasinfotek.com");
+    assert.equal(contacts[0].name, "Anjali Jaiswal");
+    assert.equal(contacts[0].role, "Hiring contact");
+  });
+
+  it("merges JD contacts when the AI reply is empty", () => {
+    const fromJob = extractContactsFromJobText(
+      "Thanks, Anjali Jaiswal, Email: anjali.jaiswal@raasinfotek.com"
+    );
+    const fromAi = harvestContactsFromAiText(",");
+    const contacts = mergeContacts(fromJob, fromAi);
+    assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].email, "anjali.jaiswal@raasinfotek.com");
+    assert.equal(contacts[0].name, "Anjali Jaiswal");
   });
 });
 

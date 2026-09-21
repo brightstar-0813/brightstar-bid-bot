@@ -1275,6 +1275,11 @@ async function runEmailBidAi(prompt, opts = {}) {
   const start = Date.now();
   const timeoutMs = 3 * 60 * 1000;
   let lastText = "";
+  let retriedShortReply = false;
+  const replyIsUseful = (text) => {
+    if (harvest === "draft") return Boolean(harvestEmailDraftFromAiText(text)?.subject);
+    return harvestContactsFromAiText(text, { company: opts.company }).length > 0;
+  };
   while (Date.now() - start < timeoutMs) {
     await sleep(2000);
     if (batchControl.stop) break;
@@ -1283,18 +1288,21 @@ async function runEmailBidAi(prompt, opts = {}) {
       chatId = await rememberAiChatFromTab(tabId, provider).catch(() => "");
       trackEmailBidAiChat(opts.trackedChats, tabId, chatId);
     }
+    // Latest assistant turn only — do not reuse resume-JSON scoring from chatgptPollState.
     const plain = await readLatestAssistantPlainText(tabId).catch(() => "");
-    if (plain && plain.length > 40) lastText = plain;
-    const state = await chatgptPollState(tabId, { harvestJson: true }).catch(() => null);
-    if (state?.text && String(state.text).length > 40) lastText = String(state.text);
-    if (!lastText) continue;
-    if (harvest === "draft") {
-      if (harvestEmailDraftFromAiText(lastText)?.subject) return lastText;
-    } else if (harvestContactsFromAiText(lastText, { company: opts.company }).length) {
-      return lastText;
+    const state = await chatgptPollState(tabId, { harvestJson: false }).catch(() => null);
+    const generating = Boolean(state?.generating);
+    if (plain) lastText = plain;
+    if (replyIsUseful(lastText)) return lastText;
+    const shortReply = String(lastText || "").trim().length < 40;
+    if (!generating && shortReply && !retriedShortReply) {
+      retriedShortReply = true;
+      await setStatus("Email Bid · AI reply was empty — asking again…");
+      await aiSendPrompt(tabId, prompt, false);
+      lastText = "";
     }
   }
-  if (lastText) return lastText;
+  if (replyIsUseful(lastText) || String(lastText || "").trim().length >= 40) return lastText;
   throw new Error(
     harvest === "draft"
       ? "Timed out waiting for email draft JSON from the AI tab."

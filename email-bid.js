@@ -3,7 +3,11 @@
  */
 
 import { buildEmailContactsPrompt } from "./prompts/email-contacts.js";
-import { harvestContactsFromAiText } from "./email-contacts.js";
+import {
+  extractContactsFromJobText,
+  harvestContactsFromAiText,
+  mergeContacts
+} from "./email-contacts.js";
 import { composeEmailBidSmart } from "./email-compose.js";
 import { EMAIL_BID_CUSTOM_RESUME_KEY, sendEmailBidMessage } from "./email-send.js";
 
@@ -62,20 +66,34 @@ export async function prepareEmailBidDraft(person, jobMeta, resumeJson, deps) {
     posterHint: jobMeta?.posterHint || jobMeta?.poster || ""
   });
 
-  let contacts = [];
+  const jobBlob = [
+    jobMeta?.jdText || jobMeta?.description || "",
+    jobMeta?.posterHint || jobMeta?.poster || ""
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join("\n");
+  const fromJob = extractContactsFromJobText(jobBlob, { role: title });
+
+  let aiContacts = [];
   try {
     const aiText = await deps.runAiPrompt(contactPrompt, {
       statusLabel: "Email Bid · contacts",
       expectJson: true
     });
-    contacts = harvestContactsFromAiText(aiText, { company });
+    aiContacts = harvestContactsFromAiText(aiText, { company });
   } catch (err) {
-    await status(
-      `Email Bid contacts failed — ${String(err?.message || err).slice(0, 80)}`,
-      "err"
-    );
-    return { ok: false, reason: "contacts-failed", error: String(err?.message || err) };
+    if (!fromJob.length) {
+      await status(
+        `Email Bid contacts failed — ${String(err?.message || err).slice(0, 80)}`,
+        "err"
+      );
+      return { ok: false, reason: "contacts-failed", error: String(err?.message || err) };
+    }
+    await status("Email Bid · AI contact search failed — using emails listed on the job.", "info");
   }
+
+  const contacts = mergeContacts(fromJob, aiContacts);
 
   if (!contacts.length) {
     await status(`Email Bid — no hiring contacts found for ${label}`, "info");
