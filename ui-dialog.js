@@ -132,7 +132,7 @@ export function jobDetailsDialog({
             </label>
             <label class="field">
               <span>Company</span>
-              <input name="companyName" type="text" placeholder="Acme Inc." />
+              <input name="companyName" type="text" placeholder="Company" />
             </label>
           </div>
           <label class="field">

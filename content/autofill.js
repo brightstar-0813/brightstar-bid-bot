@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-21.workday-fill2";
+  const SCRIPT_BUILD = "2026-09-21.zip-title1";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -8553,10 +8553,25 @@
     return data && (data.jobTitle || data.jdText) ? data : null;
   }
 
+  /** JD openers like "WE ARE HIRING: SALESFORCE DATA ARCHITECT…" are not titles.
+   * Heuristics also live in zip-title.js (unit tests). */
+  function isZipHiringBanner(title) {
+    const t = String(title || "").trim();
+    if (!t) return false;
+    if (/^(we(?:\s+are|'re)|now|currently)\s+hiring\b/i.test(t)) return true;
+    if (/^hiring\s*[:\-–]/i.test(t)) return true;
+    return false;
+  }
+
   function zipJunkTitle(title) {
     const t = String(title || "").trim();
     if (!t || t.length < 3) return true;
+    if (isZipHiringBanner(t)) return true;
     if (/\d+\s+jobs?\s+in\b/i.test(t)) return true;
+    if (/^job\s*description\b/i.test(t)) return true;
+    if (/^(see more jobs|find your next|1[- ]?click apply|quick apply|easy apply)\b/i.test(t)) {
+      return true;
+    }
     if (/^(jobs?|search|results?|ziprecruiter|filter|sign\s*in|log\s*in)\b/i.test(t)) return true;
     return false;
   }
@@ -8574,16 +8589,59 @@
     ) {
       return true;
     }
-    return t.length >= 16 && /\s/.test(t);
+    return t.length >= 16 && /\s/.test(t) && !/\b(must|eligible|investigation|candidates)\b/i.test(t);
+  }
+
+  function zipCleanDocumentTitle(raw) {
+    return String(raw || "")
+      .replace(/\s*[|\-–—]\s*ZipRecruiter\b.*$/i, "")
+      .trim();
   }
 
   function zipLooksLikeCompanyName(name) {
     const t = String(name || "").trim();
     if (!t || t.length > 80) return false;
     if (zipLooksLikeJobTitle(t) && t.length > 24) return false;
-    if (/^(view|company|about|apply|save|remote|full[- ]?time|part[- ]?time)\b/i.test(t)) return false;
+    if (
+      /^(view|company|about|apply|save|remote|hybrid|on-?site|full[- ]?time|part[- ]?time|new|hot|featured|easy apply|1[- ]?click apply|quick apply|be seen first|learn more)\b/i.test(
+        t
+      )
+    ) {
+      return false;
+    }
     if (/\d+\s+jobs?\b/i.test(t)) return false;
+    if (/,\s*[A-Z]{2}\b/.test(t) && t.length < 48) return false;
     return true;
+  }
+
+  /** ZipRecruiter detail pane: "Learn more about YO AI Labs" and industry • size lines. */
+  function zipCompanyFromPageText(pageText, jobTitle = "") {
+    const blob = String(pageText || "");
+    const title = String(jobTitle || "").trim().toLowerCase();
+    const reject = (raw) => {
+      const s = String(raw || "").trim();
+      if (!zipLooksLikeCompanyName(s)) return true;
+      if (title && s.toLowerCase() === title) return true;
+      return false;
+    };
+
+    const learn = blob.match(/learn more about\s+([^\n]+)/i);
+    if (learn?.[1]) {
+      const name = learn[1].replace(/\s*\.+$/, "").trim();
+      if (!reject(name)) return name;
+    }
+
+    const emp = blob.match(
+      /([A-Za-z0-9][A-Za-z0-9 .,&'’-]{1,70}?)\s*[•·]\s*[^\n•·]{2,120}?\s*[•·]\s*\d+\s*[-–]\s*\d+\s+employees/i
+    );
+    if (emp?.[1] && !reject(emp[1])) return emp[1].trim();
+
+    const stacked = blob.match(
+      /(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9 .,&'’-]{1,70})\s*\n\s*[•·]\s*[^\n]{8,160}?employees/i
+    );
+    if (stacked?.[1] && !reject(stacked[1])) return stacked[1].trim();
+
+    return "";
   }
 
   function zipListingKeyFromUrl(href = location.href) {
@@ -8709,11 +8767,21 @@
       const label = elementText(h);
       if (!/^job\s*description$/i.test(label)) continue;
       let p = h.parentElement;
-      for (let i = 0; i < 8 && p; i++) {
+      for (let i = 0; i < 12 && p; i++) {
         const t = elementText(p);
         if (t.length > 350 && /job\s*description/i.test(t)) {
-          push(p, 40 + Math.min(20, Math.floor(t.length / 500)));
-          break;
+          let score = 40 + Math.min(20, Math.floor(t.length / 500));
+          const hasTitleHeading = Array.from(
+            p.querySelectorAll(
+              "h1, h2, h3, [data-testid*='job-title'], [data-testid*='jobTitle'], [class*='job_title'], [class*='jobTitle']"
+            )
+          ).some((el) => {
+            if (el === h) return false;
+            const ht = elementText(el);
+            return zipLooksLikeJobTitle(ht) && ht.length < 180;
+          });
+          if (hasTitleHeading) score += 80;
+          push(p, score);
         }
         p = p.parentElement;
       }
@@ -8744,34 +8812,122 @@
     let score = Math.min(t.length, 80);
     if (zipLooksLikeJobTitle(t)) score += 80;
     if (t.length <= 8 && !/\s/.test(t)) score -= 120;
-    if (/[•·|]/.test(t)) score -= 40;
+    if (t === t.toUpperCase() && t.length >= 20) score -= 25;
+    if (/[•·|]/.test(t)) {
+      const first = t.split(/\s*[•·|]\s*/)[0] || "";
+      // ZipRecruiter listing titles: "Role | Remote USA | Federal Program | …"
+      if (zipLooksLikeJobTitle(first)) score += 20;
+      else score -= 40;
+    }
     if (/^\d/.test(t)) score -= 20;
     return score;
   }
 
-  function zipTitleFromRoot(root, doc = document) {
-    const pool = [];
-    if (root) {
-      for (const el of root.querySelectorAll(
-        'h1, h2, h3, [data-testid*="job-title"], [data-testid*="jobTitle"], [class*="job_title"], [class*="jobTitle"], [class*="JobTitle"], [itemprop="title"]'
-      )) {
-        const t = elementText(el);
-        if (t && t.length < 180) pool.push(t);
+  function zipHeadingBeforeJobDescription(doc, root) {
+    const labels = [];
+    const collect = (scope) => {
+      if (!scope?.querySelectorAll) return;
+      for (const el of scope.querySelectorAll("h1, h2, h3, h4, h5, p, div, span, strong")) {
+        if (/^job\s*description$/i.test(elementText(el))) labels.push(el);
+      }
+    };
+    collect(root);
+    if (!labels.length) collect(doc);
+
+    const titleSels =
+      "h1, h2, h3, [data-testid*='job-title'], [data-testid*='jobTitle'], [class*='job_title'], [class*='jobTitle'], [class*='JobTitle'], [itemprop='title']";
+
+    for (const label of labels) {
+      let node = label;
+      for (let up = 0; up < 8 && node; up++) {
+        let prev = node.previousElementSibling;
+        while (prev) {
+          const prevText = elementText(prev);
+          const listLike =
+            /\d+\s+jobs?\s+in\b/i.test(prevText.slice(0, 200)) ||
+            (prev.querySelectorAll?.('article, [class*="job_result"], [class*="JobCard"]').length || 0) >= 3;
+          if (listLike) {
+            prev = prev.previousElementSibling;
+            continue;
+          }
+          const headings = [];
+          if (/^H[1-4]$/i.test(prev.tagName || "")) headings.push(prev);
+          try {
+            if (prev.matches?.(titleSels)) headings.push(prev);
+          } catch {
+            /* invalid for this node */
+          }
+          if (prev.querySelectorAll) headings.push(...prev.querySelectorAll(titleSels));
+          for (const h of headings) {
+            const t = elementText(h);
+            if (zipLooksLikeJobTitle(t) && t.length < 180) return t;
+          }
+          const attr =
+            prev.getAttribute?.("title") ||
+            prev.getAttribute?.("aria-label") ||
+            "";
+          if (zipLooksLikeJobTitle(attr) && attr.length < 180) return attr.trim();
+          prev = prev.previousElementSibling;
+        }
+        node = node.parentElement;
       }
     }
-    const card = zipSelectedCard(doc);
-    if (card) {
-      const t =
-        elementText(card.querySelector("h2, h3, a, [class*='title']")) ||
-        String(elementText(card) || "")
-          .split("\n")
-          .map((x) => x.trim())
-          .find((x) => x && !zipJunkTitle(x) && x.length < 160) ||
-        "";
-      if (t) pool.push(t);
+    return "";
+  }
+
+  function zipCardTitle(card) {
+    if (!card) return "";
+    const nodes = [];
+    if (card.matches?.("a, h1, h2, h3")) nodes.push(card);
+    if (card.querySelectorAll) {
+      nodes.push(
+        ...card.querySelectorAll(
+          "h2, h3, a[href*='/jobs/'], a[href*='lvk='], a[href*='lk='], [class*='title'], [data-testid*='job-title']"
+        )
+      );
     }
+    for (const el of nodes) {
+      const attr = String(el.getAttribute?.("title") || el.getAttribute?.("aria-label") || "").trim();
+      if (zipLooksLikeJobTitle(attr) && attr.length < 180) return attr;
+      const t = elementText(el);
+      if (zipLooksLikeJobTitle(t) && t.length < 180) return t;
+    }
+    const line = String(elementText(card) || "")
+      .split("\n")
+      .map((x) => x.trim())
+      .find((x) => zipLooksLikeJobTitle(x) && x.length < 160);
+    return line || "";
+  }
+
+  function zipTitleFromRoot(root, doc = document) {
+    const h1s = Array.from(doc.querySelectorAll("h1"))
+      .map((el) => elementText(el))
+      .filter((t) => zipLooksLikeJobTitle(t) && t.length < 180);
+    if (h1s.length === 1) return h1s[0];
+
+    const pool = [];
+    const push = (t) => {
+      const s = String(t || "").trim();
+      if (s && s.length < 180) pool.push(s);
+    };
+
+    for (const t of h1s) push(t);
+    push(zipHeadingBeforeJobDescription(doc, root));
+
+    const titleSels =
+      'h1, h2, h3, [data-testid*="job-title"], [data-testid*="jobTitle"], [class*="job_title"], [class*="jobTitle"], [class*="JobTitle"], [itemprop="title"]';
+    if (root) {
+      for (const el of root.querySelectorAll(titleSels)) push(elementText(el));
+    }
+
+    const card = zipSelectedCard(doc);
+    push(zipCardTitle(card));
+
+    const og = doc.querySelector?.('meta[property="og:title"]')?.getAttribute("content");
+    push(zipCleanDocumentTitle(og || doc.title || ""));
+
     pool.sort((a, b) => zipTitleScore(b) - zipTitleScore(a));
-    return pool.find((t) => zipTitleScore(t) > 0) || "";
+    return pool.find((t) => zipTitleScore(t) > 0 && zipLooksLikeJobTitle(t)) || "";
   }
 
   function zipCompanyFromRoot(root, doc = document, jobTitle = "") {
@@ -8785,29 +8941,31 @@
     };
 
     if (root) {
+      const pageText = String(root.innerText || root.textContent || "");
+      const fromCopy = zipCompanyFromPageText(pageText, jobTitle);
+      if (fromCopy) return fromCopy;
+
       const scoped = [
         '[data-testid*="company"]',
         '[class*="company_name"]',
         '[class*="companyName"]',
         '[class*="CompanyName"]',
+        '[class*="hiringOrganization"]',
         '[class*="company"] a',
         '[itemprop="hiringOrganization"]',
         'a[href*="/co/"]',
-        'a[href*="/company/"]'
+        'a[href*="/c/"]',
+        'a[href*="/company/"]',
+        'a[href*="learn-more"]'
       ];
       for (const sel of scoped) {
         for (const el of root.querySelectorAll(sel)) {
-          const t = elementText(el);
+          let t = elementText(el);
+          const about = t.match(/^learn more about\s+(.+)$/i);
+          if (about) t = about[1].trim();
           if (!reject(t) && t.length <= 80) return t;
         }
       }
-
-      // "NVS • Real Estate • 1 - 10 employees"
-      const pageText = String(root.innerText || root.textContent || "");
-      const emp = pageText.match(
-        /([A-Za-z0-9][A-Za-z0-9 .,&'’-]{0,50}?)\s*[•·]\s*[^\n•·]{2,40}\s*[•·]\s*\d+\s*[-–]\s*\d+\s+employees/i
-      );
-      if (emp?.[1] && !reject(emp[1])) return emp[1].trim();
 
       const labels = Array.from(root.querySelectorAll("div, span, dt, th, p")).filter((el) =>
         /^company(\s*name)?$/i.test(elementText(el))
@@ -8824,20 +8982,48 @@
 
     const card = zipSelectedCard(doc, jobTitle);
     if (card) {
+      const fromCardCopy = zipCompanyFromPageText(String(card.innerText || card.textContent || ""), jobTitle);
+      if (fromCardCopy) return fromCardCopy;
       const t = elementText(
-        card.querySelector('[class*="company"], [data-testid*="company"], a[href*="/co/"]')
+        card.querySelector('[class*="company"], [data-testid*="company"], a[href*="/co/"], a[href*="/c/"]')
       );
       if (t && !reject(t)) return t;
+      const lines = String(card.innerText || "")
+        .split(/\n+/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      for (const line of lines) {
+        if (!reject(line) && line.length <= 60) return line;
+      }
     }
-    return "";
+    return zipCompanyFromPageText(String(doc.body?.innerText || doc.body?.textContent || ""), jobTitle);
   }
 
   function zipTitleFromJd(jdText) {
-    const first = String(jdText || "")
+    const lines = String(jdText || "")
       .split(/\n+/)
       .map((l) => l.trim())
-      .find((l) => l && !/^job\s*description$/i.test(l));
-    if (first && zipLooksLikeJobTitle(first) && first.length < 160) return first;
+      .filter(Boolean);
+    for (const line of lines.slice(0, 10)) {
+      if (/^job\s*description$/i.test(line)) continue;
+      if (isZipHiringBanner(line)) continue;
+      if (/^(location|eligibility|project|about|company|salary|compensation|posted)\s*:/i.test(line)) {
+        continue;
+      }
+      if (/\b(must|should|eligible|investigation|looking for|we are seeking)\b/i.test(line)) {
+        continue;
+      }
+      if (line.split(/\s+/).length > 14) continue;
+      if (
+        zipLooksLikeJobTitle(line) &&
+        line.length < 120 &&
+        /\b(developer|engineer|administrator|manager|analyst|architect|lead|consultant|specialist|director)\b/i.test(
+          line
+        )
+      ) {
+        return line;
+      }
+    }
     return "";
   }
 
@@ -8898,7 +9084,7 @@
     const root = zipDetailRoot(doc);
     const jdText = zipJdFromRoot(root);
     let jobTitle = zipTitleFromRoot(root, doc);
-    // If we grabbed a company acronym as title, recover from JD / better heading.
+    // If we grabbed a company acronym as title, recover from a real heading — never the JD banner.
     if (!zipLooksLikeJobTitle(jobTitle)) {
       const fromJd = zipTitleFromJd(jdText);
       if (fromJd) jobTitle = fromJd;
@@ -9024,7 +9210,7 @@
     if (!zipLooksLikeJobTitle(title)) return false;
     if (isThinJobDescription(jd)) return false;
     if (!link || /jobs-search/i.test(link)) return false;
-    if (/jobs-search/i.test(location.pathname || "") && !company) return false;
+    if (!company) return false;
     return true;
   }
 
@@ -9128,7 +9314,7 @@
       }
     }
 
-    return data && (data.jobTitle || data.jdText) && !zipJunkTitle(data.jobTitle)
+    return data && (data.jobTitle || data.jdText) && (!data.jobTitle || !zipJunkTitle(data.jobTitle))
       ? data
       : null;
   }

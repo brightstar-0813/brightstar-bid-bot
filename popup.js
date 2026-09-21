@@ -3021,7 +3021,8 @@ async function fillFromOpenTab() {
     const jdNote = jdLen
       ? ` · ${jdLen >= 1000 ? `${(jdLen / 1000).toFixed(1)}k` : jdLen} chars`
       : " · JD empty";
-    setStatus(`Filled from tab${site}${jdNote}.`);
+    const companyNote = String(res.companyName || "").trim() ? "" : " · no company";
+    setStatus(`Filled from tab${site}${jdNote}${companyNote}.`);
     syncOneOffActionButtons();
   } catch (err) {
     setStatus(`Scrape failed: ${String(err?.message || err)}`);
