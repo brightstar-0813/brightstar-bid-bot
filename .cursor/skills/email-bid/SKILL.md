@@ -34,20 +34,22 @@ Priority:
 3. Hiring manager / team lead  
 4. CTO / VP Eng / functional director  
 
-Label each email: **verified** | **public** | **inferred** (corporate pattern).
-Never invent addresses; never present inferred as confirmed.
+Discover **only**: `name`, `email`, `role`, and `phone` when publicly listed.  
+Never invent addresses or phone numbers.
 
 ## UX (comfortable + complete)
 
-Independent **Email Bid** panel in the popup/side panel:
+Lives inside the **Manual bid** panel (shared job fields — no duplicate title/company/link/JD):
 
-1. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
-2. Job fields (title, company, link, JD) + Fill from tab  
-3. **Find contacts** via AI engine → To checklist (check/uncheck)  
+1. Shared job fields + Fill from tab / Clear  
+2. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
+3. **Find contacts** (search icon next to Generate Draft) via AI engine → **Email Bid modal** with To checklist (check/uncheck)  
 4. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block.  
 5. Attachments: last generated resume/cover **or** custom PDF  
 6. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
 7. Progress on **bottom status bar**; sheet **Applied** + **Bid mode = Email bid** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row)  
+
+To-list rows: checkbox left; **name**, **email**, then **role · phone** on one detail line (left-aligned, scannable).
 
 Does **not** auto-run after batch/manual generate.
 
@@ -57,7 +59,7 @@ Does **not** auto-run after batch/manual generate.
 - Do not claim JD buzzwords absent from resume  
 - Prefer personalized copy per primary contact; To list may include several checked recipients  
 - End with a short closing greeting (Warm regards / Thank you / Best regards) — no name/phone/LinkedIn block  
-- Status reports who was emailed + confidence  
+- Status reports who was emailed  
 
 ## AI chat cleanup
 

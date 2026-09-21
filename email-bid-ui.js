@@ -19,6 +19,7 @@ import {
  *   setStatus: (msg: string) => void,
  *   setBusy: (busy: boolean) => void,
  *   setIconButton?: (button: HTMLElement, icon: string, label: string) => void,
+ *   setManualPanelOpen?: (open: boolean) => void,
  *   DEFAULT_TEMPLATE_ID: string,
  *   templateSelectEl: HTMLSelectElement|null,
  *   spreadsheetUrlEl: HTMLInputElement|null,
@@ -31,27 +32,28 @@ export function initEmailBidUi(deps) {
     setStatus,
     setBusy,
     setIconButton,
+    setManualPanelOpen,
     DEFAULT_TEMPLATE_ID,
     templateSelectEl,
     spreadsheetUrlEl,
     sheetsWebAppUrlEl
   } = deps;
 
-  const toggleBtn = document.getElementById("toggleEmailBidPanel");
-  const panelBody = document.getElementById("emailBidPanelBody");
-  const titleEl = document.getElementById("emailBidTitle");
-  const companyEl = document.getElementById("emailBidCompany");
-  const jdLinkEl = document.getElementById("emailBidJdLink");
-  const jdTextEl = document.getElementById("emailBidJdText");
-  const fillTabBtn = document.getElementById("emailBidFillTab");
-  const clearJobBtn = document.getElementById("emailBidClearJob");
+  // Shared job fields with Manual bid (single source of truth).
+  const titleEl = document.getElementById("jobTitle");
+  const companyEl = document.getElementById("companyName");
+  const jdLinkEl = document.getElementById("jdLink");
+  const jdTextEl = document.getElementById("jdText");
   const prepareBtn = document.getElementById("emailBidPrepare");
   const emailEl = document.getElementById("emailBidMailboxEmail");
   const passwordEl = document.getElementById("emailBidMailboxPassword");
   const mailboxSaveBtn = document.getElementById("emailBidMailboxSave");
   const mailboxDisconnectBtn = document.getElementById("emailBidMailboxDisconnect");
+  const draftHost = document.getElementById("emailBidDraftHost");
   const draftBlock = document.getElementById("emailBidDraftBlock");
+  const draftCloseBtn = document.getElementById("emailBidDraftClose");
   const toListEl = document.getElementById("emailBidToList");
+  const toHintEl = document.getElementById("emailBidToHint");
   const subjectEl = document.getElementById("emailBidSubject");
   const bodyEl = document.getElementById("emailBidBody");
   const customResumeEl = document.getElementById("emailBidCustomResume");
@@ -59,13 +61,9 @@ export function initEmailBidUi(deps) {
   const openWebBtn = document.getElementById("emailBidOpenWeb");
 
   if (typeof setIconButton === "function") {
-    if (fillTabBtn) setIconButton(fillTabBtn, "scrape", "Fill from tab");
-    if (clearJobBtn) setIconButton(clearJobBtn, "remove", "Clear job fields");
-    if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts & draft");
+    if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts & draft (Email Bid)");
     if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect mailbox");
     if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect mailbox");
-    if (confirmBtn) setIconButton(confirmBtn, "apply", "Confirm & Send (SMTP)");
-    if (openWebBtn) setIconButton(openWebBtn, "mail", "Open in Outlook / Gmail");
   }
 
   /** @type {null|object} */
@@ -79,12 +77,25 @@ export function initEmailBidUi(deps) {
       .replace(/"/g, "&quot;");
   }
 
-  function setPanelOpen(open) {
-    if (!panelBody || !toggleBtn) return;
-    panelBody.hidden = !open;
-    toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    toggleBtn.textContent = open ? "Hide Email Bid" : "Expand Email Bid";
+  function ensureBidPanelOpen() {
+    if (typeof setManualPanelOpen === "function") setManualPanelOpen(true);
   }
+
+  function setDraftModalOpen(open) {
+    if (!draftHost) return;
+    draftHost.hidden = !open;
+    if (open) {
+      subjectEl?.focus?.();
+    }
+  }
+
+  function onDraftModalKey(e) {
+    if (e.key === "Escape" && draftHost && !draftHost.hidden) {
+      e.preventDefault();
+      setDraftModalOpen(false);
+    }
+  }
+  document.addEventListener("keydown", onDraftModalKey);
 
   async function refreshFromAndMailbox() {
     const person = await getActivePerson().catch(() => null);
@@ -101,6 +112,25 @@ export function initEmailBidUi(deps) {
     }
   }
 
+  function updateToHint() {
+    if (!toHintEl || !toListEl) return;
+    const boxes = toListEl.querySelectorAll('input[type="checkbox"][data-email]');
+    const checked = toListEl.querySelectorAll('input[type="checkbox"][data-email]:checked');
+    const total = boxes.length;
+    const n = checked.length;
+    if (!total) {
+      toHintEl.textContent = "";
+      return;
+    }
+    toHintEl.textContent = n === total ? `${n} selected` : `${n} of ${total} selected`;
+  }
+
+  function syncToRowSelected(row) {
+    if (!row) return;
+    const input = row.querySelector('input[type="checkbox"]');
+    row.classList.toggle("is-selected", !!(input && input.checked));
+  }
+
   function renderToList(contacts = [], selectedEmails = null) {
     if (!toListEl) return;
     const selected = selectedEmails
@@ -110,21 +140,26 @@ export function initEmailBidUi(deps) {
       .filter((c) => c?.email)
       .map((c) => {
         const email = String(c.email).trim().toLowerCase();
+        const name = String(c.name || "").trim() || email;
+        const role = String(c.role || "").trim();
+        const phone = String(c.phone || "").trim();
+        const detail = [role, phone].filter(Boolean).join(" · ");
         const checked = selected ? selected.has(email) : true;
-        const conf =
-          c.confidence != null && Number.isFinite(Number(c.confidence))
-            ? ` · ${Math.round(Number(c.confidence) * 100)}%`
-            : "";
-        return `<label class="email-bid-to-row">
+        return `<label class="email-bid-to-row${checked ? " is-selected" : ""}">
           <input type="checkbox" data-email="${escapeHtml(email)}" ${checked ? "checked" : ""} />
           <span class="email-bid-to-meta">
-            <strong>${escapeHtml(c.name || email)}</strong>
-            <span class="email-bid-to-email">${escapeHtml(email)}</span>
-            <span class="email-bid-to-role">${escapeHtml(c.role || "")}${conf}</span>
+            <span class="email-bid-to-name">${escapeHtml(name)}</span>
+            ${
+              name !== email
+                ? `<span class="email-bid-to-email">${escapeHtml(email)}</span>`
+                : ""
+            }
+            ${detail ? `<span class="email-bid-to-detail">${escapeHtml(detail)}</span>` : ""}
           </span>
         </label>`;
       })
       .join("");
+    updateToHint();
   }
 
   function selectedRecipients() {
@@ -136,28 +171,25 @@ export function initEmailBidUi(deps) {
 
   function applyDraft(draft) {
     draftCache = draft || null;
-    if (!draft || !draftBlock) {
-      if (draftBlock) draftBlock.hidden = true;
+    if (!draft) {
+      setDraftModalOpen(false);
       return;
     }
-    draftBlock.hidden = false;
     renderToList(draft.contacts || [], draft.toEmails || []);
     if (subjectEl) subjectEl.value = draft.subject || "";
     if (bodyEl) bodyEl.value = draft.body || "";
+    setDraftModalOpen(true);
   }
 
-  function clearJobFields() {
-    if (titleEl) titleEl.value = "";
-    if (companyEl) companyEl.value = "";
-    if (jdLinkEl) jdLinkEl.value = "";
-    if (jdTextEl) jdTextEl.value = "";
+  /** Clear Email Bid draft UI only (shared job fields cleared by Manual Bid Clear). */
+  function clearEmailDraft() {
     if (subjectEl) subjectEl.value = "";
     if (bodyEl) bodyEl.value = "";
     if (toListEl) toListEl.innerHTML = "";
+    if (toHintEl) toHintEl.textContent = "";
     if (customResumeEl) customResumeEl.value = "";
     draftCache = null;
-    if (draftBlock) draftBlock.hidden = true;
-    setStatus("Cleared Email Bid job fields.");
+    setDraftModalOpen(false);
   }
 
   function collectJobMeta(person) {
@@ -505,6 +537,7 @@ export function initEmailBidUi(deps) {
           ? `Email Bid · resume in Downloads/EmailBid/${downloadedName} — use Attach file (paperclip), not Pictures`
           : "Email Bid · opened compose (no resume PDF)"
     );
+    setDraftModalOpen(false);
 
     const jobMeta = draftCache?.jobMeta || collectJobMeta(person);
     // Treat web-compose handoff as the Email Bid "send" for sheet purposes (SMTP often blocked).
@@ -557,34 +590,6 @@ export function initEmailBidUi(deps) {
     }
   }
 
-  async function fillFromTab() {
-    setStatus("Scraping active tab for Email Bid…");
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "scrape_active_job_tab" });
-      if (!res?.ok) {
-        setStatus(res?.error || "Could not scrape this tab.");
-        return;
-      }
-      if (titleEl && (res.jobTitle || res.title)) titleEl.value = res.jobTitle || res.title;
-      if (companyEl && (res.companyName || res.company)) {
-        companyEl.value = res.companyName || res.company;
-      }
-      if (jdLinkEl && res.jdLink) jdLinkEl.value = res.jdLink;
-      if (jdTextEl && (res.jdText || res.description)) {
-        jdTextEl.value = res.jdText || res.description;
-      }
-      setStatus("Email Bid fields filled from tab.");
-    } catch (err) {
-      setStatus(`Scrape failed: ${String(err?.message || err)}`);
-    }
-  }
-
-  toggleBtn?.addEventListener("click", () => {
-    setPanelOpen(Boolean(panelBody?.hidden));
-    if (panelBody && !panelBody.hidden) refreshFromAndMailbox().catch(() => {});
-  });
-  fillTabBtn?.addEventListener("click", () => fillFromTab().catch((e) => setStatus(String(e.message || e))));
-  clearJobBtn?.addEventListener("click", () => clearJobFields());
   prepareBtn?.addEventListener("click", () => prepare().catch((e) => setStatus(String(e.message || e))));
   confirmBtn?.addEventListener("click", () => confirmSend().catch((e) => setStatus(String(e.message || e))));
   openWebBtn?.addEventListener("click", () => openWebCompose().catch((e) => setStatus(String(e.message || e))));
@@ -592,6 +597,14 @@ export function initEmailBidUi(deps) {
   mailboxDisconnectBtn?.addEventListener("click", () =>
     disconnectMailbox().catch((e) => setStatus(String(e.message || e)))
   );
+  draftCloseBtn?.addEventListener("click", () => setDraftModalOpen(false));
+  draftHost?.querySelector("[data-email-bid-dismiss]")?.addEventListener("click", () => setDraftModalOpen(false));
+  toListEl?.addEventListener("change", (ev) => {
+    const input = ev.target;
+    if (!(input instanceof HTMLInputElement) || input.type !== "checkbox") return;
+    syncToRowSelected(input.closest(".email-bid-to-row"));
+    updateToHint();
+  });
   emailEl?.addEventListener("input", () => {
     if (emailEl) emailEl.dataset.touched = "1";
   });
@@ -616,13 +629,14 @@ export function initEmailBidUi(deps) {
       setStatus(
         `Email Bid draft ready — ${(message.draft?.toEmails || []).length} recipient(s)`
       );
-      setPanelOpen(true);
+      ensureBidPanelOpen();
     }
     if (message?.type === "email_bid_send_done") {
       setBusy(false);
       setStatus(
         message.ok ? message.status || "Email Bid sent" : message.error || "Email Bid send failed"
       );
+      if (message.ok) setDraftModalOpen(false);
     }
     if (message?.type === "email_bid_record_sheet_done") {
       if (message.status) setStatus(String(message.status));
@@ -642,5 +656,5 @@ export function initEmailBidUi(deps) {
 
   refreshFromAndMailbox().catch(() => {});
 
-  return { refreshFromAndMailbox, setPanelOpen };
+  return { refreshFromAndMailbox, clearEmailDraft, ensureBidPanelOpen, setDraftModalOpen };
 }

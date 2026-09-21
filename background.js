@@ -8203,26 +8203,76 @@ async function scrapeActiveJobTab() {
   } catch {
     // Already injected or host not injectable.
   }
-  await sleep(200);
-  let result;
+
+  let isDice = false;
   try {
-    result = await chrome.tabs.sendMessage(tab.id, { type: "scrape_job_page" });
-  } catch (err) {
-    throw new Error(
-      `Could not scrape this tab (${String(err?.message || err)}). Open a Greenhouse, Workday, Indeed, Dice, Jobright, or similar job page.`
-    );
+    isDice = /(^|\.)dice\.com$/i.test(new URL(url).hostname);
+  } catch {
+    isDice = false;
   }
+
+  const isThinJd = (text) => {
+    const t = String(text || "").trim();
+    if (!t) return true;
+    if (t.length < 160) return true;
+    const lines = t
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length <= 5) {
+      return lines.every((line) =>
+        /^(role|title|location|employment(\s*type)?|job\s*type|type|company|posted|salary|compensation|workplace|work\s*arrangement|remote|hybrid|on-?site)\b/i.test(
+          line
+        )
+      );
+    }
+    return false;
+  };
+
+  let result = null;
+  let lastErr = "";
+  const attempts = isDice ? 4 : 3;
+  for (let i = 0; i < attempts; i++) {
+    await sleep(i === 0 ? 250 : isDice ? 900 : 600);
+    try {
+      result = await chrome.tabs.sendMessage(tab.id, { type: "scrape_job_page" });
+    } catch (err) {
+      lastErr = String(err?.message || err);
+      result = null;
+      continue;
+    }
+    if (!result?.ok || !result.jobData) {
+      lastErr = result?.error || "No job details found";
+      continue;
+    }
+    const probe = result.jobData || {};
+    const title = String(probe.jobTitle || probe.title || "").trim();
+    const text = String(probe.jdText || "").trim();
+    // SPA boards hydrate late — retry while JD is still a stub / header-only.
+    if (title && isThinJd(text) && i < attempts - 1) continue;
+    if (title || text) break;
+  }
+
   if (!result?.ok || !result.jobData) {
     throw new Error(
-      result?.error ||
-        "No job details found on this page. Open a supported job listing, or paste the JD manually."
+      lastErr
+        ? `Could not scrape this tab (${lastErr}). Open a Greenhouse, Workday, Indeed, Dice, Jobright, or similar job page.`
+        : "No job details found on this page. Open a supported job listing, or paste the JD manually."
     );
   }
   const d = result.jobData || {};
   const jobTitle = String(d.jobTitle || d.title || "").trim();
   const companyName = String(d.companyName || d.company || "").trim();
   const jdText = String(d.jdText || "").trim();
-  const jdLink = String(d.jdLink || d.applyLink || url).trim();
+  let jdLink = String(d.jdLink || d.applyLink || url).trim();
+  if (isDice) {
+    try {
+      const selected = new URL(url).searchParams.get("selectedJobId");
+      if (selected) jdLink = `https://www.dice.com/job-detail/${selected}`;
+    } catch {
+      /* keep scraped link */
+    }
+  }
   if (!jdText && !jobTitle) {
     throw new Error(
       "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, or similar job listing."

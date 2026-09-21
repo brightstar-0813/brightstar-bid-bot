@@ -52,7 +52,7 @@ Prefer short control labels and live status text over long instructional hints i
 | Indeed hosted vs external | `indeed.js` |
 | Popup / queue UI | `popup.js` |
 | Profile apply (1-click log) | Manual Bid **Log apply** → `log_profile_apply` in `background.js` (`jd.txt` + sheet `Profile apply`) |
-| Email Bid (hiring outreach) | `email-bid.js`, `email-bid-ui.js`, `email-compose.js`, `email-contacts.js`, `email-send.js`, `prompts/email-*` |
+| Email Bid (hiring outreach) | Inside Manual bid panel (`email-bid-ui.js` + shared `#jobTitle`/`#jdText`); SW: `email-bid.js`, `email-compose.js`, `email-contacts.js`, `email-send.js`, `prompts/email-*` |
 | Profiles | `profiles.js`, `person-profile-form.js`, `profile-editor.js` |
 | Q&A bank | `qa-store.js`, `qa-editor.js` |
 | OpenAI leftover / Custom Q&A | `ai-answers.js`, `openai.js`, `autofill-runner.js` (`answerCustomQaAsk`, `runCustomOpenAiQaOnTab`), popup Ask panel |

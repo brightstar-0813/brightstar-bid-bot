@@ -1,5 +1,6 @@
 /**
  * Contact research prompt — hiring roles only (recruiter, HR, CTO, lead, HM).
+ * Discover: name, email, role, phone (optional).
  */
 
 export function buildEmailContactsPrompt({ company, title, jdLink, jdText, posterHint } = {}) {
@@ -28,10 +29,11 @@ TARGET ROLES (priority order — do NOT chase CEOs/founders unless no hiring con
 5. CTO / VP Engineering / relevant technical director (for engineering roles)
 
 Rules:
-- Prefer publicly listed work emails. If you only infer from a known corporate pattern, set confidence lower and note "inferred" in evidence.
-- Never invent a random address.
+- Return only these fields per contact: name, email, role, phone (phone only when publicly listed).
+- Prefer publicly listed work emails. Never invent a random address or phone number.
+- If email is only inferred from a corporate pattern, still include it but leave phone empty unless verified.
 - Return 3–6 best contacts max.
 - Output JSON only, no markdown fences:
 
-{"contacts":[{"name":"","role":"","email":"","source":"company_site|linkedin|job_post|inferred_pattern|other","confidence":0.0,"evidence":""}]}`;
+{"contacts":[{"name":"","email":"","role":"","phone":""}]}`;
 }

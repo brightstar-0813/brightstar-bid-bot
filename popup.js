@@ -270,6 +270,7 @@ const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
 const clearOneOffFieldsBtn = document.getElementById("clearOneOffFields");
 const runOneOffBtn = document.getElementById("runOneOff");
 const logProfileApplyBtn = document.getElementById("logProfileApply");
+const emailBidPrepareBtn = document.getElementById("emailBidPrepare");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
 const confirmOneOffBtn = document.getElementById("confirmOneOff");
 const discardOneOffBtn = document.getElementById("discardOneOff");
@@ -286,6 +287,7 @@ const LAST_ONE_OFF_ATS_KEY = "last_one_off_ats";
 const ONE_OFF_DRAFT_KEY = "one_off_draft";
 let lastOneOffAtsCache = null;
 let oneOffDraftCache = null;
+let emailBidUi = null;
 const autofillPageBtn = document.getElementById("autofillPage");
 const autoApplyPageBtn = document.getElementById("autoApplyPage");
 const customQaPageBtn = document.getElementById("customQaPage");
@@ -1308,6 +1310,8 @@ const ACTION_ICON_PATHS = {
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h6"/>',
   sheet:
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h3"/><path d="M13 13h3"/><path d="M8 17h3"/><path d="M13 17h3"/>',
+  profileApply:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/>',
   autofill:
     '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   qa: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>',
@@ -1602,7 +1606,11 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
   }
   if (logProfileApplyBtn) {
     logProfileApplyBtn.disabled = busy;
-    setIconButton(logProfileApplyBtn, "sheet", "Log apply — save JD and mark Applied");
+    setIconButton(logProfileApplyBtn, "profileApply", "Log apply — save JD and mark Applied");
+  }
+  if (emailBidPrepareBtn) {
+    emailBidPrepareBtn.disabled = busy;
+    setIconButton(emailBidPrepareBtn, "search", "Find contacts & draft (Email Bid)");
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
@@ -2947,10 +2955,10 @@ function renderAllowBatch(value, { expandManual = false } = {}) {
   }
 
   if (jobsStepNumEl) jobsStepNumEl.textContent = "4";
-  if (manualStepNumEl) manualStepNumEl.textContent = batchOff ? "4" : "5";
-  if (applyStepNumEl) applyStepNumEl.textContent = batchOff ? "5" : "6";
+  if (applyStepNumEl) applyStepNumEl.textContent = batchOff ? "4" : "5";
+  if (manualStepNumEl) manualStepNumEl.textContent = batchOff ? "5" : "6";
   if (manualSectionTitleEl) {
-    manualSectionTitleEl.textContent = batchOff ? "Manual bid" : "Manual one-off";
+    manualSectionTitleEl.textContent = "Manual bid";
   }
   if (manualSectionEl) {
     manualSectionEl.classList.toggle("section-hero", batchOff);
@@ -2988,6 +2996,7 @@ async function clearOneOffJobFields() {
   if (jdLinkEl) jdLinkEl.value = "";
   if (jdTextEl) jdTextEl.value = "";
   if (oneOffExtraPromptEl) oneOffExtraPromptEl.value = "";
+  emailBidUi?.clearEmailDraft?.();
   await persistJobFields().catch(() => {});
   setStatus("Cleared job fields.");
 }
@@ -3007,7 +3016,11 @@ async function fillFromOpenTab() {
     await persistJobFields();
     setManualPanelOpen(true);
     const site = res.site ? ` (${res.site})` : "";
-    setStatus(`Filled from tab${site}.`);
+    const jdLen = String(res.jdText || "").trim().length;
+    const jdNote = jdLen
+      ? ` · ${jdLen >= 1000 ? `${(jdLen / 1000).toFixed(1)}k` : jdLen} chars`
+      : " · JD empty";
+    setStatus(`Filled from tab${site}${jdNote}.`);
     syncOneOffActionButtons();
   } catch (err) {
     setStatus(`Scrape failed: ${String(err?.message || err)}`);
@@ -3615,7 +3628,8 @@ function setManualPanelOpen(open, { persist = true } = {}) {
   const isOpen = Boolean(open);
   manualPanelBody.hidden = !isOpen;
   toggleManualPanelBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
-  toggleManualPanelBtn.textContent = isOpen ? "Collapse" : "Expand";
+  toggleManualPanelBtn.textContent = isOpen ? "Collapse" : "Expand bid form";
+  if (isOpen) emailBidUi?.refreshFromAndMailbox?.().catch(() => {});
   if (persist) {
     chrome.storage.local.set({ [MANUAL_PANEL_OPEN_KEY]: isOpen }).catch(() => {});
   }
@@ -3966,7 +3980,10 @@ if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from 
 if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear job fields");
 if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate Draft Version");
 if (logProfileApplyBtn) {
-  setIconButton(logProfileApplyBtn, "sheet", "Log apply — save JD and mark Applied");
+  setIconButton(logProfileApplyBtn, "profileApply", "Log apply — save JD and mark Applied");
+}
+if (emailBidPrepareBtn) {
+  setIconButton(emailBidPrepareBtn, "search", "Find contacts & draft (Email Bid)");
 }
 if (autofillPageBtn) {
   setIconButton(autofillPageBtn, "autofill", "Autofill (Ctrl+Shift+Y)");
@@ -4007,11 +4024,12 @@ if (qaImportBtn) setIconButton(qaImportBtn, "import", "Import JSON");
 if (qaExportBtn) setIconButton(qaExportBtn, "export", "Export JSON");
 
 initThemePicker();
-initEmailBidUi({
+emailBidUi = initEmailBidUi({
   getActivePerson,
   setStatus,
   setBusy,
   setIconButton,
+  setManualPanelOpen,
   DEFAULT_TEMPLATE_ID,
   templateSelectEl,
   spreadsheetUrlEl,

@@ -1,8 +1,10 @@
 /**
  * Parse AI contact JSON for Email Bid.
+ * Fields: name, email, role, phone (optional).
  */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const PHONE_RE = /[\d+().\-\s]{7,}/;
 
 /**
  * @param {string} text
@@ -22,6 +24,17 @@ export function extractContactsJson(text) {
 }
 
 /**
+ * @param {unknown} value
+ */
+function normalizePhone(value) {
+  const raw = String(value || "").trim();
+  if (!raw || !PHONE_RE.test(raw)) return "";
+  // Reject obvious non-phones / placeholders
+  if (/^(n\/?a|none|unknown|null)$/i.test(raw)) return "";
+  return raw.replace(/\s+/g, " ").slice(0, 40);
+}
+
+/**
  * @param {object|null} parsed
  */
 export function normalizeContacts(parsed) {
@@ -33,16 +46,15 @@ export function normalizeContacts(parsed) {
       .trim()
       .toLowerCase();
     if (!EMAIL_RE.test(email) || seen.has(email)) continue;
+    // Legacy AI replies may still include confidence — drop weak guesses.
     const confidence = Number(c?.confidence);
     if (Number.isFinite(confidence) && confidence < 0.35) continue;
     seen.add(email);
     out.push({
       name: String(c?.name || "").trim(),
-      role: String(c?.role || "").trim(),
       email,
-      source: String(c?.source || "").trim(),
-      confidence: Number.isFinite(confidence) ? confidence : 0.5,
-      evidence: String(c?.evidence || "").trim()
+      role: String(c?.role || "").trim(),
+      phone: normalizePhone(c?.phone)
     });
   }
   return out.slice(0, 8);

@@ -25,6 +25,8 @@ describe("email contacts prompt", () => {
     assert.match(prompt, /CTO/i);
     assert.match(prompt, /lead/i);
     assert.match(prompt, /do NOT chase CEOs/i);
+    assert.match(prompt, /"phone"/);
+    assert.match(prompt, /name.*email.*role.*phone/i);
   });
 });
 
@@ -33,24 +35,45 @@ describe("harvestContactsFromAiText", () => {
     const text = `Here you go:
 \`\`\`json
 {"contacts":[
-  {"name":"Pat Recruiter","role":"Recruiter","email":"pat@acme.com","source":"linkedin","confidence":0.9},
-  {"name":"Low","role":"Intern","email":"low@acme.com","source":"inferred_pattern","confidence":0.1}
+  {"name":"Pat Recruiter","role":"Recruiter","email":"pat@acme.com","phone":"+1 555-0100","confidence":0.9},
+  {"name":"Low","role":"Intern","email":"low@acme.com","confidence":0.1}
 ]}
 \`\`\``;
     const contacts = harvestContactsFromAiText(text);
     assert.equal(contacts.length, 1);
     assert.equal(contacts[0].email, "pat@acme.com");
     assert.equal(contacts[0].role, "Recruiter");
+    assert.equal(contacts[0].phone, "+1 555-0100");
+    assert.equal(contacts[0].name, "Pat Recruiter");
   });
 
   it("dedupes emails", () => {
     const contacts = normalizeContacts({
       contacts: [
-        { name: "A", email: "a@x.com", confidence: 0.8 },
-        { name: "B", email: "A@x.com", confidence: 0.9 }
+        { name: "A", email: "a@x.com", role: "HR", phone: "" },
+        { name: "B", email: "A@x.com", role: "Recruiter", phone: "555-1212" }
       ]
     });
     assert.equal(contacts.length, 1);
+    assert.equal(contacts[0].phone, "");
+  });
+
+  it("keeps name email role phone only", () => {
+    const contacts = normalizeContacts({
+      contacts: [
+        {
+          name: "Sam",
+          email: "sam@acme.com",
+          role: "Hiring Manager",
+          phone: "(415) 555-0199",
+          source: "linkedin",
+          confidence: 0.9,
+          evidence: "noise"
+        }
+      ]
+    });
+    assert.deepEqual(Object.keys(contacts[0]).sort(), ["email", "name", "phone", "role"]);
+    assert.equal(contacts[0].phone, "(415) 555-0199");
   });
 });
 
