@@ -104,7 +104,7 @@ import { formatRequiredEmployersList } from "./experience-rules.js";
 import { openProfileEditor } from "./open-profile-editor.js";
 import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
-import { buildJobFolderName, folderSegment, isLegacyRowPrefixedFolder } from "./job-folder.js";
+import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
 import {
   parseJobsCsv,
   filterJobsByChannel,
@@ -1548,11 +1548,9 @@ async function persistJobContextForAutofill(job = {}) {
     const hist = (await chrome.storage.local.get(APPLY_HISTORY_KEY))[APPLY_HISTORY_KEY] || {};
     jobDir = String(row?.jobDir || hist[String(csvRow)]?.jobDir || "").trim();
   }
-  if (jobDir && csvRow !== "") {
-    const folder = folderSegment(jobDir);
-    if (isLegacyRowPrefixedFolder(folder) && !new RegExp(`^${Number(csvRow)}\\s+-\\s+`).test(folder)) {
-      jobDir = "";
-    }
+  // A folder that names a different row belongs to another job — drop it.
+  if (jobDir && csvRow !== "" && !jobDirMatchesCsvRow(jobDir, csvRow)) {
+    jobDir = "";
   }
   // Prefer explicit jdText; otherwise keep prior storage / queue JD so Custom Q&A
   // still gets the posting when Apply opens the panel without re-passing jdText.
