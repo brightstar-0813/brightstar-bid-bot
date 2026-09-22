@@ -7811,9 +7811,22 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   // Local ATS cleanup (strip keyword-dump rows / light headline), then project-bank AI retries.
   const atsJd = jobMeta.jdText || "";
   const atsTitle = jobMeta.jobTitle || jobMeta.title || "";
-  let atsEvaluation = evaluateAtsScore(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
+  // The employer's own name is never a matchable keyword — hand it to the
+  // extractor so it can be stripped from the JD before terms are ranked.
+  const atsCompany = jobMeta.companyName || jobMeta.company || "";
+  let atsEvaluation = evaluateAtsScore(resumeData, {
+    jdText: atsJd,
+    jobTitle: atsTitle,
+    roleTrack,
+    companyName: atsCompany
+  });
   {
-    const boosted = boostResumeForAts(resumeData, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
+    const boosted = boostResumeForAts(resumeData, {
+      jdText: atsJd,
+      jobTitle: atsTitle,
+      roleTrack,
+      companyName: atsCompany
+    });
     if (boosted.changed) {
       resumeData = boosted.data;
       atsEvaluation = boosted.evaluation;
@@ -7848,7 +7861,8 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
         buildAtsScoreRetryPrompt(resumeData, atsEvaluation, {
           jdText: atsJd,
           jobTitle: atsTitle,
-          roleTrack
+          roleTrack,
+          companyName: atsCompany
         }),
         {
           newChat: false,
@@ -7857,7 +7871,12 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
         }
       );
       let improved = enforceJdSkills(extractResumeJson(atsRaw), atsJd, roleTrack);
-      const improvedBoost = boostResumeForAts(improved, { jdText: atsJd, jobTitle: atsTitle, roleTrack });
+      const improvedBoost = boostResumeForAts(improved, {
+        jdText: atsJd,
+        jobTitle: atsTitle,
+        roleTrack,
+        companyName: atsCompany
+      });
       if (improvedBoost.changed) improved = improvedBoost.data;
       const improvedEval = improvedBoost.evaluation;
       const nextScore = Number(improvedEval.score) || 0;

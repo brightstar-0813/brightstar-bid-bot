@@ -1012,7 +1012,9 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
       sfProjectBank: sfProjectBank || SF_ENTERPRISE_PROJECT_BANK
     }
   );
-  const mustProve = buildMustProveBlock(jdText, roleTrack);
+  const mustProve = buildMustProveBlock(jdText, roleTrack, {
+    companyName: extras.companyName || ""
+  });
   const atsAppendix = getTrackAtsAppendix(roleTrack);
   let prompt = mustProve ? `${body}\n\n${mustProve}\n\n${atsAppendix}` : `${body}\n\n${atsAppendix}`;
 

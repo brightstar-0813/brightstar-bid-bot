@@ -234,20 +234,21 @@ Genesys Cloud CX, Open CTI, IVR, ACD`);
   );
 });
 
-test("cell-per-line skills render as real table rows, not one keyword dump", () => {
+test("cell-per-line skills render as separate labelled rows, not one keyword dump", () => {
   const data = plainTextToResumeData(
     resumeWithSkills(`Salesforce Clouds
 Service Cloud, Sales Cloud
 Automation
 Record-Triggered Flows, Screen Flows`)
   );
-  // Table templates get two real rows...
-  const table = resumeJsonToHtml(data, "ats-modern");
-  assert.match(table, /<td class="skill-cat">Salesforce Clouds<\/td>/);
-  assert.match(table, /<td class="skill-cat">Automation<\/td>/);
-  assert.doesNotMatch(table, /Technologies \/ Skills<\/td>/);
+  // The default template keeps each category on its own single-column line.
+  const modern = resumeJsonToHtml(data, "ats-modern");
+  assert.match(modern, /<span class="skill-cat">Salesforce Clouds:<\/span> Service Cloud, Sales Cloud/);
+  assert.match(modern, /<span class="skill-cat">Automation:<\/span> Record-Triggered Flows/);
+  // No table markup — Workday and Taleo cannot rebuild table rows.
+  assert.doesNotMatch(modern, /<table/);
 
-  // ...and inline templates get two labelled lines.
+  // ...and inline templates get the same two labelled lines.
   const inline = resumeJsonToHtml(data, "harvard-rule");
   assert.match(inline, /<span class="skill-cat">Salesforce Clouds:<\/span>/);
   assert.match(inline, /<span class="skill-cat">Automation:<\/span>/);

@@ -4,7 +4,7 @@ import {
   renderCerts,
   renderEducationRows,
   renderJobsStacked,
-  renderSkills,
+  renderSkillsInline,
   renderTechnicalSummary,
   wrapHtmlDocument
 } from "./shared.js";
@@ -98,27 +98,16 @@ const CSS = `
     ul { margin: 2px 0 0; padding-left: 18px; }
     li { margin: 0 0 2px; }
 
-    .skills-table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-      font-size: 10pt;
-    }
+    /*
+     * Skills render as plain single-column lines, not a table.
+     * Workday and Taleo read table cells linearly and cannot rebuild the
+     * row/column pairing, which garbled the most keyword-dense section.
+     */
+    .skills-inline { font-size: 10pt; }
 
-    .skills-table th, .skills-table td {
-      border: 1px solid #1f4e79;
-      padding: 3px 6px;
-      vertical-align: top;
-      text-align: left;
-    }
+    .skill-inline { margin: 0 0 3px; }
 
-    .skills-table th {
-      background: #e7eef5;
-      font-weight: 700;
-      color: #1f4e79;
-    }
-
-    .skills-table .skill-cat { width: 30%; font-weight: 700; }
+    .skill-inline .skill-cat { font-weight: 700; color: #1f4e79; }
 
     .edu-row {
       display: flex;
@@ -142,7 +131,7 @@ export const atsModernTemplate = {
     const headline = escapeHtml(data.headline || "");
     const profile = String(data.profile || "").trim();
     const tech = renderTechnicalSummary(data.technicalSummary);
-    const skills = renderSkills(data.skills);
+    const skills = renderSkillsInline(data.skills);
     const jobs = renderJobsStacked(data.experience);
     const edu = renderEducationRows(data.education);
     const certs = (data.certifications || []).length ? renderCerts(data.certifications) : "";

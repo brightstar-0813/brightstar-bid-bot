@@ -464,9 +464,12 @@ export function renderSkillsStacked(skills) {
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
       if (isKeywordDumpSkillsCategory(category)) return "";
+      // Keep a literal space between the spans: .skill-cat is display:block, so
+      // this is invisible, but PDF text extraction would otherwise glue the
+      // category onto the first skill ("IntegrationREST, SOAP").
       return `<div class="skill-row"><span class="skill-cat">${escapeHtml(
         category
-      )}</span><span class="skill-items">${escapeHtml(items)}</span></div>`;
+      )}</span> <span class="skill-items">${escapeHtml(items)}</span></div>`;
     })
     .filter(Boolean);
   if (!rows.length) return "";

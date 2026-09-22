@@ -1,16 +1,14 @@
 import { getRoleTrack, jdRequiredSkills, normalizeRoleTrackId } from "./role-tracks.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
 import { stripClearanceFromTitle } from "./resume-json.js";
+import {
+  coverTerms,
+  extractJdTerms,
+  normalizeAtsText,
+  topKeywords
+} from "./ats-keywords.js";
 
-const STOP_WORDS = new Set(
-  [
-    "about", "after", "also", "and", "any", "are", "based", "been", "being", "but",
-    "can", "company", "day", "for", "from", "have", "into", "job", "more", "must",
-    "our", "role", "should", "team", "that", "the", "their", "them", "they", "this",
-    "through", "using", "will", "with", "work", "you", "your", "years", "year",
-    "preferred", "required", "requirements", "responsibilities", "including", "strong"
-  ]
-);
+export { topKeywords } from "./ats-keywords.js";
 
 /** Local ATS badge target — builds re-prompt / boost until this is cleared. */
 export const ATS_TARGET_SCORE = 90;
@@ -47,14 +45,6 @@ export function stripKeywordDumpSkills(resumeData) {
   return { ...resumeData, skills: next };
 }
 
-function normalizeText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9+#.]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function collectStrings(value, out = []) {
   if (value == null) return out;
   if (typeof value === "string" || typeof value === "number") {
@@ -69,40 +59,6 @@ function collectStrings(value, out = []) {
     Object.values(value).forEach((item) => collectStrings(item, out));
   }
   return out;
-}
-
-function keywordFrequency(text) {
-  const counts = new Map();
-  for (const token of normalizeText(text).split(" ")) {
-    if (
-      token.length < 3 ||
-      STOP_WORDS.has(token) ||
-      /^\d+$/.test(token) ||
-      /^(?:http|www|com)$/.test(token)
-    ) {
-      continue;
-    }
-    counts.set(token, (counts.get(token) || 0) + 1);
-  }
-  return counts;
-}
-
-export function topKeywords(text, limit = 35) {
-  return [...keywordFrequency(text).entries()]
-    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length || a[0].localeCompare(b[0]))
-    .slice(0, limit)
-    .map(([word]) => word);
-}
-
-function coverage(words, haystack) {
-  if (!words.length) return { ratio: 1, matched: [], missing: [] };
-  const normalized = ` ${normalizeText(haystack)} `;
-  const matched = words.filter((word) => normalized.includes(` ${word} `));
-  return {
-    ratio: matched.length / words.length,
-    matched,
-    missing: words.filter((word) => !matched.includes(word))
-  };
 }
 
 function round(value) {
@@ -133,7 +89,11 @@ function jobBulletsText(job) {
  * Products that appear in skills AND in at least `minBullets` experience bullets.
  * Skills-only listings score 0 for that product.
  */
-export function scoreProductBulletProof(resumeData, requiredProducts, { minBullets = 2 } = {}) {
+export function scoreProductBulletProof(
+  resumeData,
+  requiredProducts,
+  { minBullets = 2, coreCount = Infinity, relaxedMinBullets = 1 } = {}
+) {
   const products = Array.isArray(requiredProducts) ? requiredProducts : [];
   if (!products.length) {
     return { score: 0, max: 0, matched: 0, total: 0, skillsOnly: [], proved: [] };
@@ -143,7 +103,10 @@ export function scoreProductBulletProof(resumeData, requiredProducts, { minBulle
   const proved = [];
   const skillsOnly = [];
 
-  for (const product of products) {
+  // Only the JD's headline tools need two bullets. A long catalog tail cannot
+  // fit two bullets each on a two-page resume, so demanding it capped the score.
+  products.forEach((product, index) => {
+    const need = index < coreCount ? minBullets : relaxedMinBullets;
     const inSkills = product.re.test(skillsText);
     let bulletHits = 0;
     for (const job of jobs) {
@@ -152,15 +115,15 @@ export function scoreProductBulletProof(resumeData, requiredProducts, { minBulle
         if (product.re.test(String(b || ""))) bulletHits += 1;
       }
     }
-    if (inSkills && bulletHits >= minBullets) {
+    if (inSkills && bulletHits >= need) {
       proved.push(product.name);
-    } else if (inSkills && bulletHits < minBullets) {
+    } else if (inSkills && bulletHits < need) {
       skillsOnly.push(product.name);
-    } else if (bulletHits >= minBullets) {
+    } else if (bulletHits >= need) {
       // Named in bullets but missing from skills — still partial credit via proved-adjacent
       proved.push(product.name);
     }
-  }
+  });
 
   const matched = proved.length;
   const max = 15;
@@ -197,9 +160,15 @@ export function scoreRecentRoleProof(resumeData, requiredProducts, { minPerRole 
   });
   const rolesMet = roleHits.filter((r) => r.met).length;
   // Always score against two recent roles so a single-role resume cannot max out.
+  // The current role carries more weight — every major ATS favours recent experience.
   const max = 12;
+  const recencyWeights = [0.6, 0.4];
+  const earned = roleHits.reduce(
+    (sum, r, i) => sum + (r.met ? recencyWeights[i] || 0 : 0),
+    0
+  );
   return {
-    score: round((rolesMet / 2) * max),
+    score: round(earned * max),
     max,
     matched: rolesMet,
     total: 2,
@@ -213,11 +182,14 @@ export function scoreRecentRoleProof(resumeData, requiredProducts, { minPerRole 
  * clearance notes from the headline. Never paste the JD job title into headline —
  * ATS title coverage comes from AI-chosen resume identities + profile/bullets.
  */
-export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "", roleTrack = "sf" } = {}) {
+export function boostResumeForAts(
+  resumeData,
+  { jdText = "", jobTitle = "", roleTrack = "sf", companyName = "" } = {}
+) {
   if (!resumeData || typeof resumeData !== "object") {
     return {
       data: resumeData,
-      evaluation: evaluateAtsScore(resumeData, { jdText, jobTitle, roleTrack }),
+      evaluation: evaluateAtsScore(resumeData, { jdText, jobTitle, roleTrack, companyName }),
       changed: false
     };
   }
@@ -232,7 +204,7 @@ export function boostResumeForAts(resumeData, { jdText = "", jobTitle = "", role
     changed = true;
   }
 
-  const evaluation = evaluateAtsScore(cleaned, { jdText, jobTitle, roleTrack });
+  const evaluation = evaluateAtsScore(cleaned, { jdText, jobTitle, roleTrack, companyName });
   return { data: cleaned, evaluation, changed };
 }
 
@@ -287,12 +259,12 @@ export function selectProjectBankExcerpts({
  * Short first-pass block so the model targets evidence before any ATS retry.
  * Products use catalog spellings; keywords are distinctive JD tokens.
  */
-export function buildMustProveBlock(jdText = "", roleTrack = "sf") {
+export function buildMustProveBlock(jdText = "", roleTrack = "sf", { companyName = "" } = {}) {
   const trackId = normalizeRoleTrackId(roleTrack);
   const track = getRoleTrack(trackId);
   const required = jdRequiredSkills(jdText, trackId);
   const products = required.map((p) => p.name).slice(0, 12);
-  const keywords = topKeywords(jdText, 10);
+  const keywords = topKeywords(jdText, 10, { companyName, roleTrack: trackId });
   if (!products.length && !keywords.length) return "";
   const lines = [
     "==================================================",
@@ -315,7 +287,7 @@ export function buildMustProveBlock(jdText = "", roleTrack = "sf") {
 export function buildAtsScoreRetryPrompt(
   resumeData,
   evaluation,
-  { jdText = "", jobTitle = "", roleTrack = "sf", projectBank = "" } = {}
+  { jdText = "", jobTitle = "", roleTrack = "sf", projectBank = "", companyName = "" } = {}
 ) {
   const track = getRoleTrack(roleTrack);
   const trackId = normalizeRoleTrackId(roleTrack);
@@ -408,7 +380,10 @@ export function buildAtsScoreRetryPrompt(
     .join("\n");
 }
 
-export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleTrack = "sf" } = {}) {
+export function evaluateAtsScore(
+  resumeData,
+  { jdText = "", jobTitle = "", roleTrack = "sf", companyName = "" } = {}
+) {
   const trackId = normalizeRoleTrackId(roleTrack);
   const resumeText = collectStrings(resumeData).join(" ");
   const experienceText = collectStrings(resumeData?.experience).join(" ");
@@ -418,16 +393,30 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
     ...(Array.isArray(resumeData?.technicalSummary) ? resumeData.technicalSummary : [])
   ].join(" ");
 
-  const keywords = topKeywords(jdText);
-  const keywordCoverage = coverage(keywords, resumeText);
-  const experienceCoverage = coverage(keywords, experienceText);
-  const titleKeywords = topKeywords(jobTitle, 8);
-  const titleCoverage = coverage(titleKeywords, headlineText);
-  const requiredProducts = jdRequiredSkills(jdText, trackId);
+  const keywords = extractJdTerms(jdText, { companyName, roleTrack: trackId, jobTitle });
+  const keywordCoverage = coverTerms(keywords, resumeText);
+  const experienceCoverage = coverTerms(keywords, experienceText);
+  const titleKeywords = extractJdTerms(jobTitle, { roleTrack: trackId, limit: 8, phraseLimit: 0 });
+  const titleCoverage = coverTerms(titleKeywords, headlineText);
+
+  // Rank required products by how insistently the JD names them, so the
+  // headline tools are the ones held to the stricter two-bullet proof.
+  const jdNormalized = normalizeAtsText(jdText);
+  const requiredProducts = jdRequiredSkills(jdText, trackId)
+    .map((product) => ({
+      product,
+      mentions: (jdNormalized.match(new RegExp(product.re.source, "gi")) || []).length
+    }))
+    .sort((a, b) => b.mentions - a.mentions)
+    .map((entry) => entry.product);
   const productMatches = requiredProducts.filter((product) => product.re.test(resumeText));
   const missingProducts = requiredProducts.filter((product) => !product.re.test(resumeText));
 
-  const productProof = scoreProductBulletProof(resumeData, requiredProducts, { minBullets: 2 });
+  const productProof = scoreProductBulletProof(resumeData, requiredProducts, {
+    minBullets: 2,
+    coreCount: 3,
+    relaxedMinBullets: 1
+  });
   const recentProof = scoreRecentRoleProof(resumeData, requiredProducts, { minPerRole: 3 });
 
   // Lexical catalog presence — lower weight; proof components carry recruiter fit.
@@ -435,10 +424,16 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
     ? round((productMatches.length / requiredProducts.length) * 12)
     : 0;
 
-  const keywordExpScore = round(experienceCoverage.ratio * 8);
+  const keywordExpMax = keywords.length ? 8 : 0;
+  const keywordExpScore = round(experienceCoverage.ratio * keywordExpMax);
   const recentRoleScore = recentProof.max ? recentProof.score : 0;
-  const experienceEvidenceScore = Math.min(20, keywordExpScore + recentRoleScore);
-  const experienceEvidenceMax = requiredProducts.length || keywords.length ? 20 : 8;
+  // Max is the sum of the parts that can actually be earned. The old flat 20
+  // was unreachable whenever the JD produced no catalog products.
+  const experienceEvidenceMax = keywordExpMax + (recentProof.max || 0);
+  const experienceEvidenceScore = Math.min(
+    experienceEvidenceMax,
+    keywordExpScore + recentRoleScore
+  );
 
   const components = {
     keywordMatch: {
@@ -512,8 +507,13 @@ export function evaluateAtsScore(resumeData, { jdText = "", jobTitle = "", roleT
     score,
     grade,
     components,
-    matchedKeywords: keywordCoverage.matched,
-    missingKeywords: keywordCoverage.missing.slice(0, 15),
+    matchedKeywords: keywordCoverage.matched.map((t) => t.term),
+    // Soft terms are dropped: the retry prompt used to order the model to weave
+    // "collaboration" (and the employer's own name) into experience bullets.
+    missingKeywords: keywordCoverage.missing
+      .filter((t) => t.kind !== "soft")
+      .map((t) => t.term)
+      .slice(0, 15),
     requiredProducts: requiredProducts.map((product) => product.name),
     missingProducts: missingProducts.map((product) => product.name),
     skillsOnlyProducts: productProof.skillsOnly || [],
