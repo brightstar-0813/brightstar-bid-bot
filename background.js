@@ -3722,10 +3722,19 @@ async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {
           token = session?.accessToken || session?.access_token || "";
           accountId =
             session?.account?.id ||
-            session?.user?.id ||
-            session?.chatgpt_account_id ||
             session?.account?.account_id ||
+            session?.chatgpt_account_id ||
             "";
+          if (!accountId && token) {
+            try {
+              const part = token.split(".")[1] || "";
+              const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+              const auth = json?.["https://api.openai.com/auth"] || {};
+              accountId = String(auth.chatgpt_account_id || auth.account_id || "").trim();
+            } catch {
+              /* ignore */
+            }
+          }
         } catch {
           /* ignore */
         }
@@ -3770,6 +3779,16 @@ async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {
               );
             }
             if (patch.ok || patch.status === 204 || patch.status === 404) {
+              let gone = patch.status === 404;
+              if (!gone) {
+                const check = await fetchWithTimeout(
+                  `${origin}/backend-api/conversation/${id}`,
+                  { credentials: "include", headers },
+                  15000
+                );
+                gone = check.status === 404;
+              }
+              if (!gone) continue;
               removed += 1;
               const link =
                 document.querySelector(`a[href="/c/${id}"]`) ||
@@ -5126,10 +5145,19 @@ async function collectBotChatIdsFromConversationsApi(
             token = session?.accessToken || session?.access_token || "";
             accountId =
               session?.account?.id ||
-              session?.user?.id ||
-              session?.chatgpt_account_id ||
               session?.account?.account_id ||
+              session?.chatgpt_account_id ||
               "";
+            if (!accountId && token) {
+              try {
+                const part = token.split(".")[1] || "";
+                const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+                const auth = json?.["https://api.openai.com/auth"] || {};
+                accountId = String(auth.chatgpt_account_id || auth.account_id || "").trim();
+              } catch {
+                /* ignore */
+              }
+            }
             if (token) break;
           } catch {
             /* try next */
@@ -5167,11 +5195,14 @@ async function collectBotChatIdsFromConversationsApi(
           const data = await res.json();
           items = Array.isArray(data?.items)
             ? data.items
-            : Array.isArray(data?.data)
-              ? data.data
-              : Array.isArray(data)
-                ? data
-                : [];
+            : Array.isArray(data?.conversations)
+              ? data.conversations
+              : Array.isArray(data?.data)
+                ? data.data
+                : Array.isArray(data)
+                  ? data
+                  : null;
+          if (!items) return { ids: [], error: "list-unparsed" };
         } catch (err) {
           return { ids: [], error: String(err?.message || err || "list-failed") };
         }
@@ -5425,12 +5456,20 @@ async function deleteCurrentAiConversation(
             for (const org of orgs) {
               const orgId = org?.uuid || org?.id;
               if (!orgId) continue;
-              // Claude web expects DELETE body = JSON string of the conversation uuid.
-              const del = await apiJson(`/organizations/${orgId}/chat_conversations/${chatId}`, {
+              const path = `/organizations/${orgId}/chat_conversations/${chatId}`;
+              const plain = await apiJson(path, { method: "DELETE" });
+              if (plain.ok) return { ok: true, via: "api", chatId };
+              // Older Claude builds want the uuid JSON string as the body.
+              const withBody = await apiJson(path, {
                 method: "DELETE",
                 body: JSON.stringify(chatId)
               });
-              if (del.ok) return { ok: true, via: "api", chatId };
+              if (withBody.ok) return { ok: true, via: "api-body", chatId };
+              const many = await apiJson(`/organizations/${orgId}/chat_conversations/delete_many`, {
+                method: "POST",
+                body: JSON.stringify({ conversation_uuids: [chatId] })
+              });
+              if (many.ok) return { ok: true, via: "api-many", chatId };
             }
           } catch {
             // fall through to UI
@@ -5472,7 +5511,12 @@ async function deleteCurrentAiConversation(
         clickMatching(/^delete$/i);
         await sleep(500);
         const stillThere = chatId ? Boolean(document.querySelector(`a[href*="/chat/${chatId}"]`)) : true;
-        return { ok: !stillThere || Boolean(chatId), via: "ui", chatId };
+        return {
+          ok: Boolean(chatId) && !stillThere,
+          via: "ui",
+          chatId,
+          error: stillThere ? "still-in-sidebar" : ""
+        };
       }
 
       // ChatGPT — hide/delete via backend API, verify via conversations list (UI last resort).
@@ -5510,8 +5554,10 @@ async function deleteCurrentAiConversation(
         const onThisChat = new RegExp(`/c/${id}(?:[/?#]|$)`).test(
           `${location.pathname}${location.search}`
         );
-        if (onThisChat && pageSaysAlreadyDeleted()) return true;
-        if (!onThisChat) return true;
+        // A missing sidebar row is not proof of deletion — Recents is virtualized,
+        // and cooldown often leaves this tab on a different chat.
+        if (!onThisChat) return false;
+        if (pageSaysAlreadyDeleted()) return true;
         const hasComposer =
           Boolean(document.querySelector("#prompt-textarea")) ||
           Boolean(document.querySelector('[data-testid="composer"]')) ||
@@ -5558,10 +5604,19 @@ async function deleteCurrentAiConversation(
             token = session?.accessToken || session?.access_token || "";
             accountId =
               session?.account?.id ||
-              session?.user?.id ||
-              session?.chatgpt_account_id ||
               session?.account?.account_id ||
+              session?.chatgpt_account_id ||
               "";
+            if (!accountId && token) {
+              try {
+                const part = token.split(".")[1] || "";
+                const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+                const auth = json?.["https://api.openai.com/auth"] || {};
+                accountId = String(auth.chatgpt_account_id || auth.account_id || "").trim();
+              } catch {
+                /* ignore */
+              }
+            }
             if (token) break;
           } catch {
             /* try next */
@@ -5585,7 +5640,7 @@ async function deleteCurrentAiConversation(
                   accountId =
                     accountId ||
                     parsed?.account?.id ||
-                    parsed?.user?.id ||
+                    parsed?.account?.account_id ||
                     parsed?.chatgpt_account_id ||
                     "";
                 } catch {
@@ -5600,6 +5655,37 @@ async function deleteCurrentAiConversation(
           }
         }
         const deviceId = readCookie("oai-did") || "";
+        if (token && !accountId) {
+          try {
+            const part = token.split(".")[1] || "";
+            const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+            const auth = json?.["https://api.openai.com/auth"] || {};
+            accountId = String(auth.chatgpt_account_id || auth.account_id || "").trim();
+          } catch {
+            /* ignore */
+          }
+        }
+        if (token && !accountId) {
+          try {
+            const checked = await fetchWithTimeout(
+              `${origin}/backend-api/accounts/check/v4-2023-04-27`,
+              {
+                credentials: "include",
+                headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }
+              },
+              8000
+            );
+            if (checked.ok) {
+              const data = await checked.json();
+              const ordering = Array.isArray(data?.account_ordering) ? data.account_ordering : [];
+              accountId = String(
+                ordering[0] || Object.keys(data?.accounts || {})[0] || ""
+              ).trim();
+            }
+          } catch {
+            /* omit account header rather than send the user id */
+          }
+        }
         cachedAuth = { token, accountId, deviceId };
         return cachedAuth;
       };
@@ -5610,6 +5696,7 @@ async function deleteCurrentAiConversation(
         const headers = {
           Authorization: `Bearer ${auth.token}`,
           Accept: "application/json",
+          "oai-language": "en-US",
           ...extra
         };
         if (auth.accountId) {
@@ -5641,11 +5728,14 @@ async function deleteCurrentAiConversation(
           const data = await res.json();
           const items = Array.isArray(data?.items)
             ? data.items
-            : Array.isArray(data?.data)
-              ? data.data
-              : Array.isArray(data)
-                ? data
-                : [];
+            : Array.isArray(data?.conversations)
+              ? data.conversations
+              : Array.isArray(data?.data)
+                ? data.data
+                : Array.isArray(data)
+                  ? data
+                  : null;
+          if (!items) return { ids: null, error: "list-unparsed" };
           const ids = new Set(
             items
               .map((item) => String(item?.id || item?.conversation_id || "").trim())
@@ -5657,37 +5747,49 @@ async function deleteCurrentAiConversation(
         }
       };
 
+      const conversationServerStatus = async (id) => {
+        const headers = await authHeaders();
+        if (!headers) return "unknown";
+        try {
+          const res = await fetchWithTimeout(
+            `${origin}/backend-api/conversation/${id}`,
+            { credentials: "include", headers },
+            20000
+          );
+          if (res.status === 404) return "gone";
+          if (res.ok) {
+            try {
+              const data = await res.json();
+              if (data && data.is_visible === false) return "gone";
+            } catch {
+              /* non-json 200 still means the conversation exists */
+            }
+            return "present";
+          }
+          return "unknown";
+        } catch {
+          return "unknown";
+        }
+      };
+
       const verifyDeleted = async (id, { polls = 5 } = {}) => {
         if (!id) return false;
         for (let i = 0; i < polls; i += 1) {
           if (i > 0) await sleep(400 * i);
-          // Prefer API list when available.
-          const listed = await listConversationIds();
-          if (listed.ids && !listed.ids.has(id)) {
-            // Drop stale DOM row after server confirms gone.
-            const link = sidebarLink(id);
-            if (link instanceof HTMLElement) {
-              const row =
-                link.closest("li") ||
-                link.closest('[data-testid*="history"]') ||
-                link.closest("div.group") ||
-                link.parentElement;
-              try {
-                (row || link).remove();
-              } catch {
-                /* ignore */
-              }
-            }
+          // Server state only. A missing Recents row is not confirmation.
+          const status = await conversationServerStatus(id);
+          if (status === "gone") {
+            dropSidebarRow(id);
             return true;
           }
-          if (listed.ids === null) {
-            // List unavailable — fall back to DOM/banner signals.
-            if (conversationAlreadyGone(id) || pageSaysAlreadyDeleted()) return true;
+          if (status === "present") continue;
+          const listed = await listConversationIds();
+          if (listed.ids && !listed.ids.has(id)) {
+            dropSidebarRow(id);
+            return true;
           }
-        }
-        // Final DOM check: gone from sidebar + not regenerating.
-        if (!sidebarLink(id) && (conversationAlreadyGone(id) || pageSaysAlreadyDeleted())) {
-          return true;
+          if (listed.ids && listed.ids.has(id)) continue;
+          if (conversationAlreadyGone(id)) return true;
         }
         return false;
       };
