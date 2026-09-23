@@ -569,6 +569,8 @@ let batchControl = {
   stop: false,
   forceProceed: false
 };
+/** Next job's active/inactive probe, started during the previous job's chat reset. */
+let inflightInactiveProbe = null;
 
 function startKeepAlive() {
   stopKeepAlive();
@@ -5985,8 +5987,125 @@ async function deleteCurrentAiConversation(
 }
 
 /**
+ * Open the job page, read inactive / already-applied, then close the tab.
+ * Safe to run beside AI chat cleanup — it uses its own background tab.
+ */
+async function probeJobLinkInactiveAndClose(url) {
+  let probe = null;
+  try {
+    probe = await probeJobLinkInactive(url);
+    return probe;
+  } finally {
+    if (probe?.tabId) await closeApplyTab(probe.tabId).catch(() => false);
+  }
+}
+
+function discardInflightInactiveProbe() {
+  const slot = inflightInactiveProbe;
+  inflightInactiveProbe = null;
+  if (!slot?.promise) return;
+  void slot.promise.catch(() => {});
+}
+
+function takeInflightInactiveProbe(jobMeta = {}) {
+  const slot = inflightInactiveProbe;
+  if (!slot?.promise) return null;
+  const sameRow = jobMeta.csvRow != null && Number(slot.csvRow) === Number(jobMeta.csvRow);
+  const sameLink =
+    normalizeJobLink(slot.jdLink || "") === normalizeJobLink(jobMeta.jdLink || "");
+  inflightInactiveProbe = null;
+  if (!sameRow && !sameLink) {
+    void slot.promise.catch(() => {});
+    return null;
+  }
+  return slot.promise;
+}
+
+/**
+ * Start the next queued job's inactive check now, so it overlaps chat delete,
+ * new-chat open, and the inter-job gap. The result is used only if that same
+ * job is generated next — a Dice backlog apply drops it and rechecks later.
+ */
+async function armInactiveProbeForNextGenerateJob() {
+  if (batchControl?.stop) return;
+  let queue = [];
+  try {
+    queue = await getQueue();
+  } catch {
+    return;
+  }
+  const eligible = (j) =>
+    j &&
+    !isJobMarkedInactive(j) &&
+    String(j.jdLink || "").trim() &&
+    String(j.jdText || "").trim();
+  const next =
+    queue.find((j) => j.status === "pending" && eligible(j)) ||
+    queue.find(
+      (j) => j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS && eligible(j)
+    );
+  if (!next) {
+    discardInflightInactiveProbe();
+    return;
+  }
+  const jdLink = String(next.jdLink || "").trim();
+  const same =
+    inflightInactiveProbe &&
+    Number(inflightInactiveProbe.csvRow) === Number(next.csvRow) &&
+    normalizeJobLink(inflightInactiveProbe.jdLink) === normalizeJobLink(jdLink);
+  if (same) return;
+  discardInflightInactiveProbe();
+  const promise = probeJobLinkInactiveAndClose(jdLink);
+  void promise.catch(() => {});
+  inflightInactiveProbe = { csvRow: next.csvRow, jdLink, promise };
+}
+
+/**
+ * Delete the finished conversation and leave one blank chat.
+ * No-op when cooldown already left a blank composer — a second navigate
+ * creates a twin empty "New chat".
+ */
+async function prepareBlankAiChatAlongsideProbe(tabId, provider) {
+  try {
+    if (await isBlankFreshAiChat(tabId, provider)) return { blank: true, navigated: false };
+  } catch {
+    /* fall through */
+  }
+
+  let chatId = "";
+  try {
+    const stored = await chrome.storage.local.get(["last_ai_chat_id"]);
+    chatId = String(stored.last_ai_chat_id || "").trim();
+  } catch {
+    /* ignore */
+  }
+
+  const stillOnPrior = await aiTabStillOnPriorConversation(tabId, provider).catch(() => false);
+  if (stillOnPrior && (await isDeleteAiChatHistoryEnabled())) {
+    try {
+      await deleteCurrentAiConversation(tabId, { chatId });
+      const blank = await isBlankFreshAiChat(tabId, provider).catch(() => false);
+      return { blank, navigated: true };
+    } catch (err) {
+      await setStatus(
+        `Chat cleanup skipped while checking job: ${String(err?.message || err)}`
+      );
+    }
+  }
+
+  try {
+    const fresh = await ensureFreshChat(tabId, provider);
+    const blank = await isBlankFreshAiChat(tabId, provider).catch(() => false);
+    return { blank, navigated: Boolean(fresh?.navigated) };
+  } catch {
+    return { blank: false, navigated: false };
+  }
+}
+
+/**
  * Inter-job cooldown: delete the finished AI chat first, then wait out the rest
  * of the configured gap. Keeps cleanup off the critical save/apply path.
+ * The next job's inactive check may already be running in another tab.
  */
 async function resolveAiTabForCleanup(preferredTabId = null) {
   if (typeof preferredTabId === "number") {
@@ -6023,10 +6142,15 @@ async function cooldownBeforeNextJob({
       // ignore
     }
   }
+  const jobCheckRunning = Boolean(inflightInactiveProbe);
   if (typeof tabId === "number") {
     try {
       if (await isDeleteAiChatHistoryEnabled()) {
-        await setStatus("Cooling down — removing finished AI chat…");
+        await setStatus(
+          jobCheckRunning
+            ? "Cooling down — removing finished AI chat while the next job is checked…"
+            : "Cooling down — removing finished AI chat…"
+        );
       }
       await deleteCurrentAiConversation(tabId, { chatId });
     } catch (err) {
@@ -6037,7 +6161,11 @@ async function cooldownBeforeNextJob({
   }
   const left = Math.max(0, gapMs - (Date.now() - started));
   if (left <= 0) return;
-  await setStatus(`Cooling down ${Math.round(left / 1000)}s before ${reason}…`);
+  await setStatus(
+    jobCheckRunning
+      ? `Cooling down ${Math.round(left / 1000)}s before ${reason} (job check running)…`
+      : `Cooling down ${Math.round(left / 1000)}s before ${reason}…`
+  );
   const end = Date.now() + left;
   while (Date.now() < end) {
     if (batchControl?.stop) break;
@@ -7505,26 +7633,50 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
 
   const jdLink = String(jobMeta.jdLink || "").trim();
   // Manual bid / one-off: user already verified the posting — skip live active/inactive probe.
-  if (jdLink && !isManualOneOffJob(jobMeta)) {
-    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+  const shouldProbe = Boolean(jdLink) && !isManualOneOffJob(jobMeta);
+  if (shouldProbe && (batchControl.skipCurrent || batchControl.stop)) {
+    throw new Error("__SKIP__");
+  }
+
+  const inflightProbe = shouldProbe ? takeInflightInactiveProbe(jobMeta) : null;
+  const probePromise = shouldProbe
+    ? inflightProbe || probeJobLinkInactiveAndClose(jdLink)
+    : Promise.resolve(null);
+  if (shouldProbe && !inflightProbe) void probePromise.catch(() => {});
+
+  const rowPrefix = jobMeta.csvRow != null ? `Row ${jobMeta.csvRow}: ` : "";
+  if (shouldProbe) {
     await setStatus(
-      `Row ${jobMeta.csvRow != null ? `${jobMeta.csvRow}: ` : ""}checking if job is active / already applied…`
+      inflightProbe
+        ? `${rowPrefix}finishing active/inactive check — AI chat is resetting alongside it…`
+        : `${rowPrefix}checking if job is active — deleting the last AI chat and opening a new one…`
     );
-    const inactiveProbe = await probeJobLinkInactive(jdLink);
-    await closeApplyTab(inactiveProbe.tabId).catch(() => false);
-    if (inactiveProbe.unavailable) {
+  }
+
+  const provider = await getStoredAiProvider();
+  const providerLabel = aiProviderLabel(provider);
+  let reusePreparedChat = false;
+  const [inactiveProbe, tab] = await Promise.all([
+    probePromise,
+    ensureAiTab(provider).then(async (aiTab) => {
+      if (shouldProbe && typeof aiTab?.id === "number") {
+        const prepared = await prepareBlankAiChatAlongsideProbe(aiTab.id, provider);
+        reusePreparedChat = Boolean(prepared?.blank);
+      }
+      return aiTab;
+    })
+  ]);
+  if (shouldProbe) {
+    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+    if (inactiveProbe?.unavailable) {
       throw new Error(`__INACTIVE_SKIP__:${inactiveProbe.detail || "inactive job"}`);
     }
-    if (inactiveProbe.alreadyApplied) {
+    if (inactiveProbe?.alreadyApplied) {
       throw new Error(
         `__ALREADY_APPLIED_SKIP__:${inactiveProbe.detail || "You've already applied to this job"}`
       );
     }
   }
-
-  const provider = await getStoredAiProvider();
-  const providerLabel = aiProviderLabel(provider);
-  const tab = await ensureAiTab(provider);
   if (!tab || typeof tab.id !== "number") {
     throw new Error(`Open ${providerLabel} in a browser tab first.`);
   }
@@ -7571,7 +7723,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   await setStatus(
     `Row ${jobMeta.csvRow != null ? jobMeta.csvRow + " · " : ""}${jobMeta.companyName}: Track ${trackStatus}${
       strongHumanize ? " · strong humanize" : ""
-    } · opening ONE new ${providerLabel} chat…`
+    } · ${reusePreparedChat ? "using the fresh" : "opening ONE new"} ${providerLabel} chat…`
   );
 
   if (batchControl.skipCurrent || batchControl.stop) {
@@ -7622,7 +7774,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     const retryPrompt = isFirst ? prompt : buildJsonRetryPrompt(resumeData);
     // Cooldown often already left a blank chat — reusing it avoids a second
     // "Rewrite … Resume" sidebar entry for the same job.
-    let openNewChat = isFirst;
+    let openNewChat = isFirst && !reusePreparedChat;
     if (isFirst && (await isBlankFreshAiChat(tab.id, provider))) {
       openNewChat = false;
       await setStatus(
@@ -8079,6 +8231,8 @@ async function runBatchLoop(outputDir) {
         ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson))
         : null;
       if (backlog) {
+        // Apply can take long enough that a check started during cooldown goes stale.
+        discardInflightInactiveProbe();
         const backlogBoard = resolveHostedApplyBoard(backlog) || "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
@@ -8321,6 +8475,7 @@ async function runBatchLoop(outputDir) {
           break;
         }
 
+        await armInactiveProbeForNextGenerateJob();
         await cooldownBeforeNextJob({
           aiTabId: result?.aiTabId,
           aiChatId: result?.aiChatId || "",
@@ -8426,6 +8581,7 @@ async function runBatchLoop(outputDir) {
           await setStatus(
             `Row ${next.csvRow}: ChatGPT rate limit. Removing chat, then waiting before retry…`
           );
+          await armInactiveProbeForNextGenerateJob();
           await cooldownBeforeNextJob({
             aiTabId: err?.aiTabId ?? null,
             aiChatId: err?.aiChatId || "",
@@ -8458,6 +8614,8 @@ async function runBatchLoop(outputDir) {
           progress: await queueSlackProgress()
         });
         // Delete the failed attempt's chat before retry so Recents don't show twins.
+        // Inactive check for the next row runs during that cleanup.
+        await armInactiveProbeForNextGenerateJob();
         await cooldownBeforeNextJob({
           aiTabId: err?.aiTabId ?? null,
           aiChatId: err?.aiChatId || "",
@@ -8478,6 +8636,7 @@ async function runBatchLoop(outputDir) {
     await setBatchState("idle");
     await setStatus("Batch stopped.");
   } finally {
+    discardInflightInactiveProbe();
     isRunning = false;
     stopKeepAlive();
     await chrome.storage.local.set({ generation_running: false });
