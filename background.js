@@ -135,9 +135,7 @@ import {
 } from "./indeed.js";
 import {
   evaluateAtsScore,
-  boostResumeForAts,
-  buildAtsScoreRetryPrompt,
-  ATS_TARGET_SCORE
+  boostResumeForAts
 } from "./ats-score.js";
 import {
   AI_PROVIDER_KEY,
@@ -6276,11 +6274,11 @@ async function cooldownBeforeNextJob({
   }
 }
 
-async function chatgptPollState(tabId, { harvestJson = false, minAssistantBlocks = 0 } = {}) {
+async function chatgptPollState(tabId, { harvestJson = false } = {}) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    args: [Boolean(harvestJson), Math.max(0, Number(minAssistantBlocks) || 0)],
-    func: (shouldHarvestJson, minAssistantBlocks) => {
+    args: [Boolean(harvestJson)],
+    func: (shouldHarvestJson) => {
       const isGenerating = () => {
         const stopBtn =
           document.querySelector("button[data-testid='stop-button']") ||
@@ -6652,27 +6650,9 @@ async function chatgptPollState(tabId, { harvestJson = false, minAssistantBlocks
         blocks[blocks.length - 1].scrollIntoView({ block: "end", inline: "nearest" });
       }
 
-      // Same-chat re-prompt: the previous resume is still on the page. Do not
-      // parse or persist it until a new assistant turn exists.
-      if (minAssistantBlocks > 0 && blocks.length < minAssistantBlocks) {
-        return {
-          blockCount: blocks.length,
-          latest: "",
-          resumeData: null,
-          jobCount: 0,
-          generating: isGenerating(),
-          harvestedJson: shouldHarvestJson,
-          recognizedWell: false,
-          awaitingNewTurn: true
-        };
-      }
-
-      const latestTurnOnly = minAssistantBlocks > 0;
       let latest = "";
       if (blocks.length) {
-        if (shouldHarvestJson && latestTurnOnly) {
-          latest = readAssistantBlock(blocks[blocks.length - 1]);
-        } else if (shouldHarvestJson) {
+        if (shouldHarvestJson) {
           // Resume mode: score many assistant blocks — retries push the good JSON out of last-3.
           const start = Math.max(0, blocks.length - 20);
           for (let bi = start; bi < blocks.length; bi += 1) {
@@ -6684,7 +6664,7 @@ async function chatgptPollState(tabId, { harvestJson = false, minAssistantBlocks
           latest = (blocks[blocks.length - 1].innerText || blocks[blocks.length - 1].textContent || "").trim();
         }
       }
-      if (shouldHarvestJson && !latestTurnOnly) {
+      if (shouldHarvestJson) {
         const harvested = harvestBestJsonText();
         if (scorePayload(harvested) > scorePayload(latest)) {
           latest = harvested;
@@ -6696,22 +6676,18 @@ async function chatgptPollState(tabId, { harvestJson = false, minAssistantBlocks
       // A schema stub can parse first while the full resume JSON is still in the reply.
       let resumeData = null;
       if (shouldHarvestJson && latest) {
-        if (latestTurnOnly) {
-          resumeData = parseBestObject(latest);
-        } else {
-          let bestObj = null;
-          let bestObjScore = -1;
-          for (const raw of [latest, ...collectTextCandidates()].filter(Boolean)) {
-            const obj = parseBestObject(raw);
-            if (!obj) continue;
-            const s = scoreObj(obj);
-            if (s > bestObjScore) {
-              bestObj = obj;
-              bestObjScore = s;
-            }
+        let bestObj = null;
+        let bestObjScore = -1;
+        for (const raw of [latest, ...collectTextCandidates()].filter(Boolean)) {
+          const obj = parseBestObject(raw);
+          if (!obj) continue;
+          const s = scoreObj(obj);
+          if (s > bestObjScore) {
+            bestObj = obj;
+            bestObjScore = s;
           }
-          resumeData = bestObj;
         }
+        resumeData = bestObj;
       }
 
       // Large tailored resumes are ~15–30KB JSON. Shipping 200KB of raw page
@@ -6828,7 +6804,6 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   const startNewChat = options.newChat !== false;
   const label = options.statusLabel || `Waiting for ${providerLabel} response...`;
   const expectResumeJson = Boolean(options.expectResumeJson);
-  const requireNewTurn = Boolean(options.requireNewTurn);
 
   const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat);
 
@@ -6856,12 +6831,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   let lastLen = 0;
   let lastJobCount = 0;
   let postStreamDelayDone = false;
-  let freshAssistantTurn = !requireNewTurn;
-  const pollHarvest = () =>
-    chatgptPollState(tabId, {
-      harvestJson: expectResumeJson,
-      minAssistantBlocks: requireNewTurn ? blocksBefore + 1 : 0
-    });
+  const pollHarvest = () => chatgptPollState(tabId, { harvestJson: expectResumeJson });
 
   // Ignore any previous job's harvested JSON / ready flag.
   if (expectResumeJson) {
@@ -6915,8 +6885,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     // Ready flag from content.js = JSON complete on page → generate files now.
-    // Same-chat re-prompts ignore this: the flag is still the previous resume.
-    if (expectResumeJson && !requireNewTurn) {
+    if (expectResumeJson) {
       try {
         const stored = await chrome.storage.local.get([
           "chatgpt_json_ready",
@@ -6938,12 +6907,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       }
     }
 
-    if (
-      expectResumeJson &&
-      !requireNewTurn &&
-      batchControl.forceProceed &&
-      isUsableResumeJson(lastUsableResumeData)
-    ) {
+    if (expectResumeJson && batchControl.forceProceed && isUsableResumeJson(lastUsableResumeData)) {
       batchControl.forceProceed = false;
       await setStatus(`Force-save: using harvested JSON. Saving…`);
       return JSON.stringify(lastUsableResumeData);
@@ -6965,26 +6929,16 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       sawGeneration = true;
       postStreamDelayDone = false;
     }
-    freshAssistantTurn = !requireNewTurn || state.blockCount > blocksBefore;
 
     // Stream just finished → wait for DOM settle, then harvest (user's requested delay).
-    // A same-chat retry must see a new assistant turn before that settle counts.
-    if (
-      expectResumeJson &&
-      freshAssistantTurn &&
-      sawGeneration &&
-      !state.generating &&
-      !postStreamDelayDone
-    ) {
+    if (expectResumeJson && sawGeneration && !state.generating && !postStreamDelayDone) {
       postStreamDelayDone = true;
       await setStatus(`${label} — stream finished, waiting ${POST_STREAM_DELAY_MS / 1000}s for JSON to settle…`);
       const settlePauseStart = Date.now();
       await new Promise((r) => setTimeout(r, POST_STREAM_DELAY_MS));
       pausedMs += Date.now() - settlePauseStart;
       await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
-      const settled = requireNewTurn
-        ? null
-        : await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 8000 });
+      const settled = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 8000 });
       if (isUsableResumeJson(settled) || isMinimallySaveableResume(settled)) {
         await setStatus(
           `Resume JSON recognized after settle (${settled.experience?.length || 0} jobs). Saving jd.txt + resume + cover letter…`
@@ -7001,7 +6955,6 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       } catch {
         // keep previous state
       }
-      freshAssistantTurn = !requireNewTurn || state.blockCount > blocksBefore;
     }
 
     // Keep the richest raw text seen for resume JSON — never shrink away a full reply.
@@ -7029,8 +6982,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     // Structured object already harvested — prefer it over any stale lastText.
-    // Same-chat retries only accept the new assistant turn (poll already scoped).
-    if (expectResumeJson && freshAssistantTurn && state.recognizedWell && state.resumeData) {
+    if (expectResumeJson && state.recognizedWell && state.resumeData) {
       lastUsableResumeData = state.resumeData;
       if (
         isUsableResumeJson(state.resumeData) ||
@@ -7058,28 +7010,25 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       // The page often contains a small schema example AND the real resume JSON;
       // taking only the first object used to miss the complete reply the user can see.
       const fromPoll = state.resumeData && typeof state.resumeData === "object" ? state.resumeData : null;
-      const fromText = freshAssistantTurn ? extractResumeJson(lastText) : null;
+      const fromText = extractResumeJson(lastText);
       let fromStorage = null;
-      let fromHarvest = null;
-      if (!requireNewTurn) {
-        try {
-          const stored = await chrome.storage.local.get([
-            "chatgpt_harvested_resume",
-            "chatgpt_harvested_at"
-          ]);
-          const stamp = Number(stored.chatgpt_harvested_at || 0);
-          if (stamp >= start && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
-            fromStorage = stored.chatgpt_harvested_resume;
-          } else if (stamp >= start) {
-            const person = await getActivePerson().catch(() => null);
-            const scoped = await getStoredResumeJson(person?.id || "");
-            if (isUsableResumeJson(scoped)) fromStorage = scoped;
-          }
-        } catch {
-          // ignore
+      try {
+        const stored = await chrome.storage.local.get([
+          "chatgpt_harvested_resume",
+          "chatgpt_harvested_at"
+        ]);
+        const stamp = Number(stored.chatgpt_harvested_at || 0);
+        if (stamp >= start && isUsableResumeJson(stored.chatgpt_harvested_resume)) {
+          fromStorage = stored.chatgpt_harvested_resume;
+        } else if (stamp >= start) {
+          const person = await getActivePerson().catch(() => null);
+          const scoped = await getStoredResumeJson(person?.id || "");
+          if (isUsableResumeJson(scoped)) fromStorage = scoped;
         }
-        fromHarvest = isUsableResumeJson(lastUsableResumeData) ? lastUsableResumeData : null;
+      } catch {
+        // ignore
       }
+      const fromHarvest = isUsableResumeJson(lastUsableResumeData) ? lastUsableResumeData : null;
       const rank = (obj) => {
         if (!obj || typeof obj !== "object") return -1;
         const jobs = Array.isArray(obj.experience) ? obj.experience.length : 0;
@@ -7102,13 +7051,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         (best, cur) => (rank(cur) > rank(best) ? cur : best),
         null
       );
-      if (requireNewTurn && !freshAssistantTurn) parsed = null;
     }
     const usable = expectResumeJson && isUsableResumeJson(parsed);
     const softOk = expectResumeJson && !usable && isMinimallySaveableResume(parsed);
     const rich = usable && isRichResumeJson(parsed);
     const looksComplete = usable && resumeJsonLooksComplete(parsed);
-    if ((usable || softOk) && freshAssistantTurn) {
+    if (usable || softOk) {
       lastUsableResumeData = parsed;
       await persistActiveResumeJson(parsed, {
         chatgpt_harvested_resume: parsed,
@@ -7120,9 +7068,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     if (elapsedSec > 0 && elapsedSec % 2 === 0) {
       const waitHint = expectResumeJson
-        ? requireNewTurn && !freshAssistantTurn
-          ? ", waiting for the new reply"
-          : usable || softOk
+        ? usable || softOk
           ? `, JSON ready (${parsed?.experience?.length || "?"} jobs)${
               state.generating ? " — GPT still busy, saving anyway" : " — saving files"
             }`
@@ -7217,22 +7163,19 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         return JSON.stringify(parsed);
       }
       // Settled without a usable parse — deep harvest, never stub-trigger a retry loop.
-      // Same-chat retries must not treat the previous resume still in storage as this reply.
       if (stableHits >= SETTLE_HITS) {
-        if (!requireNewTurn) {
-          const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 10000 });
-          if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
-            await setStatus(
-              `Resume JSON rescued from page (${rescued.experience?.length || 0} jobs). Saving files…`
-            );
-            return JSON.stringify(rescued);
-          }
-          if (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData)) {
-            return JSON.stringify(lastUsableResumeData);
-          }
+        const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 10000 });
+        if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
+          await setStatus(
+            `Resume JSON rescued from page (${rescued.experience?.length || 0} jobs). Saving files…`
+          );
+          return JSON.stringify(rescued);
+        }
+        if (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData)) {
+          return JSON.stringify(lastUsableResumeData);
         }
         const repaired = extractResumeJson(lastText);
-        if (freshAssistantTurn && (isUsableResumeJson(repaired) || isMinimallySaveableResume(repaired))) {
+        if (isUsableResumeJson(repaired) || isMinimallySaveableResume(repaired)) {
           return JSON.stringify(repaired);
         }
         // Truncated mid-stream text looks like JSON in the preview but will not
@@ -7249,7 +7192,6 @@ async function automateChatGpt(tabId, prompt, options = {}) {
           );
           continue;
         }
-        if (requireNewTurn) continue;
         return lastText;
       }
       continue;
@@ -7293,11 +7235,11 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
   }
 
-  if (expectResumeJson && freshAssistantTurn && isUsableResumeJson(extractResumeJson(lastText))) {
+  if (expectResumeJson && isUsableResumeJson(extractResumeJson(lastText))) {
     lastUsableResumeData = extractResumeJson(lastText);
     return lastText;
   }
-  if (expectResumeJson && !requireNewTurn) {
+  if (expectResumeJson) {
     const rescued = await waitForJsonReadyFlag(tabId, { since: start, timeoutMs: 10000 });
     if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
       return JSON.stringify(rescued);
@@ -7310,11 +7252,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       await sleep(1200);
     }
   }
-  if (
-    expectResumeJson &&
-    !requireNewTurn &&
-    (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData))
-  ) {
+  if (expectResumeJson && (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData))) {
     return JSON.stringify(lastUsableResumeData);
   }
 
@@ -8146,66 +8084,6 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
     }
   }
-  const maxAtsRetries = 1;
-  let lastAtsScore = Number(atsEvaluation.score) || 0;
-  for (
-    let atsAttempt = 1;
-    atsAttempt <= maxAtsRetries &&
-    atsEvaluation.score < ATS_TARGET_SCORE &&
-    !batchControl.skipCurrent &&
-    !batchControl.stop;
-    atsAttempt += 1
-  ) {
-    await setStatus(
-      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — project re-prompt ${atsAttempt}/${maxAtsRetries} for ${ATS_TARGET_SCORE}+…`
-    );
-    try {
-      const atsRaw = await automateChatGpt(
-        tab.id,
-        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, {
-          jdText: atsJd,
-          jobTitle: atsTitle,
-          roleTrack,
-          companyName: atsCompany
-        }),
-        {
-          newChat: false,
-          expectResumeJson: true,
-          requireNewTurn: true,
-          statusLabel: `Same chat · ATS project boost (${jobMeta.companyName || "job"})…`
-        }
-      );
-      let improved = enforceJdSkills(extractResumeJson(atsRaw), atsJd, roleTrack);
-      const improvedBoost = boostResumeForAts(improved, {
-        jdText: atsJd,
-        jobTitle: atsTitle,
-        roleTrack,
-        companyName: atsCompany
-      });
-      if (improvedBoost.changed) improved = improvedBoost.data;
-      const improvedEval = improvedBoost.evaluation;
-      const nextScore = Number(improvedEval.score) || 0;
-      if (
-        (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) &&
-        nextScore > lastAtsScore
-      ) {
-        resumeData = improved;
-        atsEvaluation = improvedEval;
-        lastAtsScore = nextScore;
-        await setStatus(
-          `ATS project re-prompt ${atsAttempt} → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`
-        );
-      } else {
-        await setStatus(
-          `ATS re-prompt ${atsAttempt} did not raise score (${lastAtsScore} → ${nextScore}).`
-        );
-      }
-    } catch (err) {
-      await setStatus(`ATS re-prompt skipped (${err?.message || "failed"}). Keeping resume.`);
-      break;
-    }
-  }
-  const atsBelowTarget = Number(atsEvaluation.score) < ATS_TARGET_SCORE;
   if (jobMeta.csvRow != null) {
     const atsPatch = {
       atsScore: atsEvaluation.score,
@@ -8213,9 +8091,6 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       atsEvaluation
     };
     if (draftOnly) atsPatch.status = "draft";
-    if (atsBelowTarget && draftOnly) {
-      atsPatch.error = `ATS ${atsEvaluation.score}/100 is below ${ATS_TARGET_SCORE}. Files not saved.`;
-    }
     await updateQueueJob(jobMeta.csvRow, atsPatch);
   }
 
@@ -8240,9 +8115,6 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   const aiChatId = jobAiChatId;
 
   if (draftOnly) {
-    const belowNote = atsBelowTarget
-      ? `ATS ${atsEvaluation.score}/100 is below ${ATS_TARGET_SCORE} after re-prompts. Files not saved. Rebuild until the score clears ${ATS_TARGET_SCORE}, then Confirm.`
-      : "";
     await persistOneOffDraft({
       resumeData,
       jobMeta: enrichedMeta,
@@ -8262,8 +8134,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       atsEvaluation
     });
     await setStatus(
-      belowNote ||
-        `Draft ready (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Review preview, then Confirm.`
+      `Draft ready (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Review preview, then Confirm.`
     );
     try {
       const jobKey = buildCustomQaJobKey(profileId || person?.id || "", {
@@ -8279,21 +8150,18 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     }
     return {
       draft: true,
-      atsBelowTarget,
       resumeData,
       atsEvaluation,
       enrichedMeta,
       aiTabId: tab.id,
       aiChatId,
       aiProvider: provider,
-      status: belowNote || `Draft ready · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade})`
+      status: `Draft ready · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade})`
     };
   }
 
   await setStatus(
-    atsBelowTarget
-      ? `ATS ${atsEvaluation.score}/100 still below ${ATS_TARGET_SCORE} after 1 re-prompt. Saving jd.txt + PDF…`
-      : `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
+    `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
   );
 
   // Save JD + resume; cover letter only for CSV/batch (not Manual one-off).
@@ -11170,13 +11038,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (typeof tabId !== "number") {
           throw new Error(`Open ${aiProviderLabel(provider)} in a browser tab first.`);
-        }
-
-        const confirmScore = Number(draft.atsEvaluation?.score);
-        if (!Number.isFinite(confirmScore) || confirmScore < ATS_TARGET_SCORE) {
-          throw new Error(
-            `ATS ${Number.isFinite(confirmScore) ? confirmScore : "?"}/100 is below ${ATS_TARGET_SCORE}. Files not saved until the score clears ${ATS_TARGET_SCORE}.`
-          );
         }
 
         await setStatus("Confirming draft — saving jd.txt + resume…");

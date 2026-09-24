@@ -1677,15 +1677,7 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
       ? "Rebuild using Gaps and Additional prompt"
       : "Re-run AI with current fields and additional prompt";
   }
-  if (confirmOneOffBtn) {
-    const atsScore = Number(lastOneOffAtsCache?.atsScore);
-    const atsMeetsTarget = Number.isFinite(atsScore) && atsScore >= ATS_TARGET_SCORE;
-    confirmOneOffBtn.disabled = busy || !draftReady || !atsMeetsTarget;
-    confirmOneOffBtn.title =
-      draftReady && !atsMeetsTarget
-        ? `ATS is below ${ATS_TARGET_SCORE}. Files stay unsaved until the score clears ${ATS_TARGET_SCORE}.`
-        : "Save resume PDF and update Google Sheet";
-  }
+  if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
   if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
   if (openOneOffPreviewBtn) openOneOffPreviewBtn.disabled = busy || !draftReady;
 }
