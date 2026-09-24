@@ -224,6 +224,7 @@ test("buildAtsScoreRetryPrompt uses project bank and forbids JD Keywords", () =>
   assert.ok(/HARD FORBIDDEN/i.test(prompt));
   assert.ok(/JD Keywords/i.test(prompt));
   assert.ok(!/MISSING JD KEYWORD TOKENS/i.test(prompt));
+  assert.ok(/Target is 85\+/.test(prompt));
 });
 
 test("JD Keywords dump does not prop up ATS after boost", () => {

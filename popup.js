@@ -35,7 +35,7 @@ import {
 import {
   requiredExperienceToText
 } from "./experience-rules.js";
-import { describeAtsGaps } from "./ats-score.js";
+import { ATS_TARGET_SCORE, describeAtsGaps } from "./ats-score.js";
 import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import {
@@ -1486,7 +1486,7 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
   const needsRebuild =
     rebuild &&
     detail.rebuildPrompt &&
-    (!(Number.isFinite(Number(detail.score)) && Number(detail.score) >= 90) ||
+    (!(Number.isFinite(Number(detail.score)) && Number(detail.score) >= ATS_TARGET_SCORE) ||
       (detail.findings || []).some((f) => f.kind !== "score" && f.kind !== "ok"));
 
   if (needsRebuild) {
@@ -1671,13 +1671,21 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
     const score = Number(lastOneOffAtsCache?.atsScore);
-    const needsGaps = draftReady && Number.isFinite(score) && score < 90;
+    const needsGaps = draftReady && Number.isFinite(score) && score < ATS_TARGET_SCORE;
     regenerateOneOffBtn.textContent = needsGaps ? "Regenerate for gaps" : "Regenerate";
     regenerateOneOffBtn.title = needsGaps
       ? "Rebuild using Gaps and Additional prompt"
       : "Re-run AI with current fields and additional prompt";
   }
-  if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
+  if (confirmOneOffBtn) {
+    const atsScore = Number(lastOneOffAtsCache?.atsScore);
+    const atsMeetsTarget = Number.isFinite(atsScore) && atsScore >= ATS_TARGET_SCORE;
+    confirmOneOffBtn.disabled = busy || !draftReady || !atsMeetsTarget;
+    confirmOneOffBtn.title =
+      draftReady && !atsMeetsTarget
+        ? `ATS is below ${ATS_TARGET_SCORE}. Files stay unsaved until the score clears ${ATS_TARGET_SCORE}.`
+        : "Save resume PDF and update Google Sheet";
+  }
   if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
   if (openOneOffPreviewBtn) openOneOffPreviewBtn.disabled = busy || !draftReady;
 }
@@ -1730,7 +1738,7 @@ function renderOneOffAts(payload) {
     `<span class="ats-score-meter" aria-hidden="true"><span class="ats-score-fill"></span></span>`;
   if (oneOffAtsGapsEl) {
     oneOffAtsGapsEl.innerHTML = atsGapsHtml(payload.atsEvaluation || {}, { rebuild: true });
-    const openGaps = score < 90;
+    const openGaps = score < ATS_TARGET_SCORE;
     oneOffAtsGapsEl.hidden = !openGaps;
     wireAtsGapsActions(oneOffAtsGapsEl, {
       oneOff: true,
@@ -1738,7 +1746,7 @@ function renderOneOffAts(payload) {
     });
   }
   if (oneOffViewGapsBtn) {
-    const openGaps = score < 90;
+    const openGaps = score < ATS_TARGET_SCORE;
     oneOffViewGapsBtn.setAttribute("aria-expanded", openGaps ? "true" : "false");
     oneOffViewGapsBtn.textContent = openGaps ? "Hide" : "Gaps";
   }
@@ -3863,7 +3871,7 @@ logProfileApplyBtn?.addEventListener("click", () => {
 });
 regenerateOneOffBtn?.addEventListener("click", () => {
   const score = Number(lastOneOffAtsCache?.atsScore);
-  const needsGaps = Number.isFinite(score) && score < 90 && lastOneOffAtsCache?.atsEvaluation;
+  const needsGaps = Number.isFinite(score) && score < ATS_TARGET_SCORE && lastOneOffAtsCache?.atsEvaluation;
   if (needsGaps) {
     rebuildFromGaps({
       evaluation: lastOneOffAtsCache.atsEvaluation,

@@ -121,7 +121,7 @@ A recruiter skims the summary and the first two jobs. The scorer fails the resum
 
 const SF_ATS_APPENDIX = `
 ==================================================
-ATS EVIDENCE MATCH (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 85/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
@@ -131,11 +131,11 @@ Raise ATS by proving JD terms inside real resume sections — never via a keywor
 - technicalSummary: 6–10 full-sentence highlights that naturally include the JD's top tools — not a one-word tool list.
 ${ATS_RECRUITER_PASS}
 HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.
-A resume that covers fewer than ~90% of the JD's distinctive tokens will be cleaned and may be re-prompted with project evidence until it clears 90.`.trim();
+A resume that covers fewer than ~85% of the JD's distinctive tokens will be cleaned and may be re-prompted with project evidence until it clears 85.`.trim();
 
 const DE_ATS_APPENDIX = `
 ==================================================
-ATS EVIDENCE MATCH (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 85/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
@@ -148,7 +148,7 @@ HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", 
 
 const FS_ATS_APPENDIX = `
 ==================================================
-ATS EVIDENCE MATCH (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 85/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.
@@ -161,7 +161,7 @@ HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", 
 
 const AI_ATS_APPENDIX = `
 ==================================================
-ATS EVIDENCE MATCH (local match target ≥ 90/100)
+ATS EVIDENCE MATCH (local match target ≥ 85/100)
 ==================================================
 Raise ATS by proving JD terms inside real resume sections — never via a keyword-dump skills row.
 - Put a short resume-identity headline in "headline" that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never include clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording in the headline.

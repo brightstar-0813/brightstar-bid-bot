@@ -11,7 +11,7 @@ import {
 export { topKeywords } from "./ats-keywords.js";
 
 /** Local ATS badge target — builds re-prompt / boost until this is cleared. */
-export const ATS_TARGET_SCORE = 90;
+export const ATS_TARGET_SCORE = 85;
 
 /**
  * Skills-table categories that must never appear on a resume PDF.
