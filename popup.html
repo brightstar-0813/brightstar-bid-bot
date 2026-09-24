@@ -548,6 +548,15 @@
           <div class="channel-toggle" role="group" aria-label="Job source filter">
             <span class="channel-label">Source filter</span>
             <div class="channel-grid">
+              <button type="button" class="channel-btn" id="filterBuiltin" data-filter="builtin" title="Built In jobs — build files; apply via Autofill panel">
+                Builtin
+              </button>
+              <button type="button" class="channel-btn" id="filterHimalayas" data-filter="himalayas" title="Himalayas jobs — build files; apply via Autofill panel">
+                Himalayas
+              </button>
+              <button type="button" class="channel-btn" id="filterGreenhouse" data-filter="greenhouse" title="Greenhouse jobs — build files; apply via Autofill panel">
+                Greenhouse
+              </button>
               <button type="button" class="channel-btn active" id="filterDice" data-filter="dice" title="Dice only — generate then auto-apply+submit">
                 Dice
               </button>
@@ -560,20 +569,11 @@
               <button type="button" class="channel-btn" id="filterWorkday" data-filter="workday" title="MyWorkday jobs — build files, then Autofill on the open Workday tab (Allow auto submit only when ready)">
                 Workday
               </button>
-              <button type="button" class="channel-btn" id="filterGreenhouse" data-filter="greenhouse" title="Greenhouse jobs — build files; apply via Autofill panel">
-                Greenhouse
-              </button>
-              <button type="button" class="channel-btn" id="filterAshby" data-filter="ashby" title="Ashby jobs — build files; apply via Autofill panel">
-                Ashby
-              </button>
-              <button type="button" class="channel-btn" id="filterLever" data-filter="lever" title="Lever jobs — build files; apply via Autofill panel">
-                Lever
-              </button>
               <!-- Indeed filter kept in DOM but hidden — auto-apply not supported right now -->
               <button type="button" class="channel-btn" id="filterIndeed" data-filter="indeed" title="Indeed / Apply-on-Indeed" hidden>
                 Indeed
               </button>
-              <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards (not Dice, LinkedIn, Jobright, Workday, Greenhouse, Ashby, or Lever)">
+              <button type="button" class="channel-btn" id="filterEtc" data-filter="etc" title="Other boards, including Ashby and Lever">
                 Other
               </button>
               <button type="button" class="channel-btn" id="filterAll" data-filter="all" title="All US jobs — build resume and cover letter only (no auto-apply)">

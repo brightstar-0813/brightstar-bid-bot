@@ -13,7 +13,9 @@ import {
 import {
   filterJobsByChannel,
   isAshbyJob,
+  isBuiltinJob,
   isGreenhouseJob,
+  isHimalayasJob,
   isLeverJob,
   normalizeChannelFilter
 } from "../csv.js";
@@ -45,25 +47,33 @@ test("adapter registry maps hosts and policies", () => {
   assert.ok(getAdapter("greenhouse")?.emailOtp);
 });
 
-test("Ashby and Lever channel filters", () => {
+test("Ashby and Lever jobs belong to Other; Builtin and Himalayas have their own filters", () => {
   assert.equal(isAshbyJob({ jdLink: "https://jobs.ashbyhq.com/acme/role" }), true);
   assert.equal(isLeverJob({ jdLink: "https://jobs.lever.co/acme/abc" }), true);
+  assert.equal(isBuiltinJob({ jdLink: "https://builtin.com/job/senior-engineer/1" }), true);
+  assert.equal(isHimalayasJob({ jdLink: "https://himalayas.app/companies/acme/jobs/1" }), true);
   assert.equal(isAshbyJob({ jdLink: "https://boards.greenhouse.io/acme/1" }), false);
-  assert.equal(normalizeChannelFilter("ashby"), "ashby");
-  assert.equal(normalizeChannelFilter("lever"), "lever");
+  assert.equal(normalizeChannelFilter("ashby"), "etc");
+  assert.equal(normalizeChannelFilter("lever"), "etc");
+  assert.equal(normalizeChannelFilter("builtin"), "builtin");
+  assert.equal(normalizeChannelFilter("himalayas"), "himalayas");
 
   const jobs = [
     { jdLink: "https://boards.greenhouse.io/acme/1" },
     { jdLink: "https://jobs.ashbyhq.com/acme/1" },
     { jdLink: "https://jobs.lever.co/acme/1" },
     { jdLink: "https://www.dice.com/job-detail/1" },
+    { jdLink: "https://builtin.com/job/1" },
+    { jdLink: "https://himalayas.app/companies/acme/jobs/1" },
     { jdLink: "https://careers.example.com/1" }
   ];
-  assert.equal(filterJobsByChannel(jobs, "ashby").length, 1);
-  assert.equal(filterJobsByChannel(jobs, "lever").length, 1);
+  assert.equal(filterJobsByChannel(jobs, "ashby").length, 3);
+  assert.equal(filterJobsByChannel(jobs, "lever").length, 3);
   assert.equal(filterJobsByChannel(jobs, "greenhouse").length, 1);
-  // Etc excludes Ashby / Lever / Greenhouse / Dice
-  assert.equal(filterJobsByChannel(jobs, "etc").length, 1);
+  assert.equal(filterJobsByChannel(jobs, "builtin").length, 1);
+  assert.equal(filterJobsByChannel(jobs, "himalayas").length, 1);
+  // Other includes Ashby, Lever, and unknown boards — not Builtin, Himalayas, Greenhouse, or Dice
+  assert.equal(filterJobsByChannel(jobs, "etc").length, 3);
   assert.equal(
     isGreenhouseJob({ jdLink: "https://boards.greenhouse.io/acme/1" }) &&
       !isAshbyJob({ jdLink: "https://boards.greenhouse.io/acme/1" }),

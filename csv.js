@@ -477,6 +477,16 @@ export function isGreenhouseJob({ jdLink = "" } = {}) {
   return /(^|\.)greenhouse\.io$/i.test(jobLinkHost(jdLink));
 }
 
+/** Built In job board (builtin.com). */
+export function isBuiltinJob({ jdLink = "" } = {}) {
+  return /(^|\.)builtin\.com$/i.test(jobLinkHost(jdLink));
+}
+
+/** Himalayas job board (himalayas.app). */
+export function isHimalayasJob({ jdLink = "" } = {}) {
+  return /(^|\.)himalayas\.app$/i.test(jobLinkHost(jdLink));
+}
+
 /**
  * Ashby-hosted career pages.
  */
@@ -502,7 +512,7 @@ export function isJobgetherJob({ jdLink = "" } = {}) {
 /**
  * Normalize legacy channel keys (e.g. "general" → "etc").
  * @param {string} filter
- * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"ashby"|"lever"|"etc"}
+ * @returns {"all"|"dice"|"linkedin"|"indeed"|"jobright"|"workday"|"builtin"|"himalayas"|"greenhouse"|"etc"}
  */
 export function normalizeChannelFilter(filter) {
   const mode = String(filter || "dice").toLowerCase();
@@ -511,10 +521,12 @@ export function normalizeChannelFilter(filter) {
   if (mode === "indeed") return "indeed";
   if (mode === "jobright" || mode === "jr") return "jobright";
   if (mode === "workday" || mode === "wd") return "workday";
+  if (mode === "builtin" || mode === "built-in" || mode === "builtin.com") return "builtin";
+  if (mode === "himalayas" || mode === "himalaya") return "himalayas";
   if (mode === "greenhouse" || mode === "gh") return "greenhouse";
-  if (mode === "ashby") return "ashby";
-  if (mode === "lever") return "lever";
   if (mode === "dice") return "dice";
+  // Ashby and Lever no longer have their own filter — they live under Other.
+  if (mode === "ashby" || mode === "lever") return "etc";
   // Legacy "general" and unknown → Etc (not known ATS channels)
   if (mode === "etc" || mode === "general" || mode === "other") return "etc";
   return "dice";
@@ -522,7 +534,7 @@ export function normalizeChannelFilter(filter) {
 
 /**
  * @param {Array} jobs
- * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"greenhouse"|"ashby"|"lever"|"dice"|"etc"} filter
+ * @param {"all"|"general"|"linkedin"|"indeed"|"jobright"|"workday"|"builtin"|"himalayas"|"greenhouse"|"dice"|"etc"} filter
  */
 export function filterJobsByChannel(jobs, filter = "dice") {
   const list = Array.isArray(jobs) ? jobs : [];
@@ -543,26 +555,30 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   if (mode === "workday") {
     return list.filter((j) => isWorkdayJob(j));
   }
+  if (mode === "builtin") {
+    return list.filter((j) => isBuiltinJob(j));
+  }
+  if (mode === "himalayas") {
+    return list.filter((j) => isHimalayasJob(j));
+  }
   if (mode === "greenhouse") {
     return list.filter((j) => isGreenhouseJob(j));
   }
-  if (mode === "ashby") {
-    return list.filter((j) => isAshbyJob(j));
-  }
-  if (mode === "lever") {
-    return list.filter((j) => isLeverJob(j));
-  }
-  // etc = not Dice, LinkedIn, Indeed, Jobright, Workday, Greenhouse, Ashby, or Lever by URL
-  return list.filter(
-    (j) =>
-      !isDiceJob(j) &&
-      !isLinkedInJob(j) &&
-      !isIndeedJob(j) &&
-      !isJobrightJob(j) &&
-      !isWorkdayJob(j) &&
-      !isGreenhouseJob(j) &&
-      !isAshbyJob(j) &&
-      !isLeverJob(j)
+  // etc = everything without its own button. Ashby and Lever live here.
+  return list.filter((j) => isOtherChannelJob(j));
+}
+
+/** True when the job has no dedicated source button (includes Ashby and Lever). */
+function isOtherChannelJob(job) {
+  return (
+    !isDiceJob(job) &&
+    !isLinkedInJob(job) &&
+    !isIndeedJob(job) &&
+    !isJobrightJob(job) &&
+    !isWorkdayJob(job) &&
+    !isBuiltinJob(job) &&
+    !isHimalayasJob(job) &&
+    !isGreenhouseJob(job)
   );
 }
 
@@ -646,6 +662,8 @@ export function parseJobsCsv(csvText) {
     const indeed = isIndeedJob({ jdLink });
     const jobright = isJobrightJob({ jdLink });
     const workday = isWorkdayJob({ jdLink });
+    const builtin = isBuiltinJob({ jdLink });
+    const himalayas = isHimalayasJob({ jdLink });
     const greenhouse = isGreenhouseJob({ jdLink });
     const ashby = isAshbyJob({ jdLink });
     const lever = isLeverJob({ jdLink });
@@ -672,20 +690,26 @@ export function parseJobsCsv(csvText) {
                 ? "jobright"
                 : workday
                   ? "workday"
-                  : greenhouse
-                    ? "greenhouse"
-                    : ashby
-                      ? "ashby"
-                      : lever
-                        ? "lever"
-                        : jobgether
-                          ? "jobgether"
-                          : "general"),
+                  : builtin
+                    ? "builtin"
+                    : himalayas
+                      ? "himalayas"
+                      : greenhouse
+                        ? "greenhouse"
+                        : ashby
+                          ? "ashby"
+                          : lever
+                            ? "lever"
+                            : jobgether
+                              ? "jobgether"
+                              : "general"),
       isLinkedIn: linkedIn,
       isDice: dice,
       isIndeed: indeed,
       isJobright: jobright,
       isWorkday: workday,
+      isBuiltin: builtin,
+      isHimalayas: himalayas,
       isGreenhouse: greenhouse,
       isAshby: ashby,
       isLever: lever,
@@ -701,9 +725,9 @@ export function parseJobsCsv(csvText) {
       !j.isIndeed &&
       !j.isJobright &&
       !j.isWorkday &&
-      !j.isGreenhouse &&
-      !j.isAshby &&
-      !j.isLever
+      !j.isBuiltin &&
+      !j.isHimalayas &&
+      !j.isGreenhouse
   );
 
   return {
@@ -715,9 +739,9 @@ export function parseJobsCsv(csvText) {
     indeedCount: usJobs.filter((j) => j.isIndeed).length,
     jobrightCount: usJobs.filter((j) => j.isJobright).length,
     workdayCount: usJobs.filter((j) => j.isWorkday).length,
+    builtinCount: usJobs.filter((j) => j.isBuiltin).length,
+    himalayasCount: usJobs.filter((j) => j.isHimalayas).length,
     greenhouseCount: usJobs.filter((j) => j.isGreenhouse).length,
-    ashbyCount: usJobs.filter((j) => j.isAshby).length,
-    leverCount: usJobs.filter((j) => j.isLever).length,
     etcCount: etcJobs.length,
     /** @deprecated use etcCount — kept for older UI strings */
     generalCount: etcJobs.length
