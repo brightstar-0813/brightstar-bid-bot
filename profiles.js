@@ -41,6 +41,7 @@ import {
   normalizeSfPromptVersion
 } from "./prompts/sf-test.js";
 import { PROMPT as aiV2Prompt } from "./prompts/ai-v2.js";
+import { PROMPT as resumeV3Prompt } from "./prompts/resume-v3.js";
 import { buildMustProveBlock, selectProjectBankExcerpts } from "./ats-score.js";
 import {
   normalizeResumeFilePrefix,
@@ -954,14 +955,16 @@ export function resolvePromptTemplateForTrack(person, roleTrack) {
 }
 
 /**
- * Resume prompt after the v1 / test / v2 switch.
+ * Resume prompt after the v1 / test / v2 / v3 switch.
  * Test replaces the person's stored prompt on the SF track only.
- * v2 is the shared AI prompt for any person and any track.
+ * v2 is the shared AI prompt. v3 is the shared ATS resume prompt.
+ * Both apply for any person and any track.
  * Employer checks still read person.promptTemplate, not this result.
  */
 export function resolveResumePromptForVersion(person, roleTrack, sfPromptVersion = "v1") {
   const version = normalizeSfPromptVersion(sfPromptVersion);
   if (version === "v2") return aiV2Prompt;
+  if (version === "v3") return resumeV3Prompt;
   const track = normalizeRoleTrackId(roleTrack);
   if (track === "sf" && version === "test") return sfTestPrompt;
   return resolvePromptTemplateForTrack(person, roleTrack);

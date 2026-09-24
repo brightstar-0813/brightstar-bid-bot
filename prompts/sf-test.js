@@ -5,17 +5,18 @@
 
 export const SF_PROMPT_VERSION_KEY = "sf_prompt_version";
 
-/** @typedef {"v1"|"test"|"v2"} SfPromptVersion */
+/** @typedef {"v1"|"test"|"v2"|"v3"} SfPromptVersion */
 
 export const SF_PROMPT_VERSIONS = Object.freeze({
   V1: "v1",
   TEST: "test",
-  V2: "v2"
+  V2: "v2",
+  V3: "v3"
 });
 
 export function normalizeSfPromptVersion(value) {
   const version = String(value || "").trim().toLowerCase();
-  if (version === "test" || version === "v2") return version;
+  if (version === "test" || version === "v2" || version === "v3") return version;
   return "v1";
 }
 
@@ -23,6 +24,7 @@ export function sfPromptVersionLabel(value) {
   const version = normalizeSfPromptVersion(value);
   if (version === "test") return "Test";
   if (version === "v2") return "v2";
+  if (version === "v3") return "v3";
   return "v1";
 }
 

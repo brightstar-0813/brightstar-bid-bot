@@ -22,6 +22,7 @@ import { PROMPT as davidDePrompt } from "../prompts/david-oliveira-de.js";
 import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
 import { PROMPT as aiV2Prompt } from "../prompts/ai-v2.js";
+import { PROMPT as resumeV3Prompt } from "../prompts/resume-v3.js";
 import { ATS_RECRUITER_PASS } from "../role-tracks.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
@@ -176,6 +177,23 @@ test("resolveResumePromptForVersion uses the shared v2 prompt for any person", (
   assert.match(aiV2Prompt, /\{MASTER_RESUME\}/);
   assert.match(aiV2Prompt, /\{NAME\}/);
   assert.doesNotMatch(aiV2Prompt, /Jos[eé]|Azumo|Accenture|Let's Delivery|ADVERSE|Florian[oó]polis|silvajoser/i);
+});
+
+test("resolveResumePromptForVersion uses the shared v3 prompt for any person", () => {
+  const builtin = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
+  const dePerson = {
+    id: "david-oliveira-de",
+    promptTemplate: davidDePrompt,
+    roleTrack: "de"
+  };
+  assert.equal(resolveResumePromptForVersion(builtin, "sf", "v3"), resumeV3Prompt);
+  assert.equal(resolveResumePromptForVersion(dePerson, "de", "v3"), resumeV3Prompt);
+  assert.match(resumeV3Prompt, /\{JD\}/);
+  assert.match(resumeV3Prompt, /\{MASTER_RESUME\}/);
+  assert.doesNotMatch(
+    resumeV3Prompt,
+    /Becton|Cognizant|Secure Haven|EPAM|Centre Technologies/i
+  );
 });
 
 test("ATS recruiter pass requires exact JD spellings in recent-role bullets", () => {
