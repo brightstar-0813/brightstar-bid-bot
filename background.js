@@ -8146,7 +8146,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
     }
   }
-  const maxAtsRetries = 2;
+  const maxAtsRetries = 1;
   let lastAtsScore = Number(atsEvaluation.score) || 0;
   for (
     let atsAttempt = 1;
@@ -8292,7 +8292,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
 
   await setStatus(
     atsBelowTarget
-      ? `ATS ${atsEvaluation.score}/100 still below ${ATS_TARGET_SCORE} after ${maxAtsRetries} re-prompts. Saving jd.txt + PDF…`
+      ? `ATS ${atsEvaluation.score}/100 still below ${ATS_TARGET_SCORE} after 1 re-prompt. Saving jd.txt + PDF…`
       : `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
   );
 
