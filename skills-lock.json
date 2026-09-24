@@ -12,6 +12,12 @@
       "sourceType": "github",
       "skillPath": "agentmail-mcp/SKILL.md",
       "computedHash": "231ea8963aecbf9ee762545acc9409669378887543b8956f3103bb2d8749b015"
+    },
+    "workday": {
+      "source": "membranedev/application-skills",
+      "sourceType": "github",
+      "skillPath": "skills/workday/SKILL.md",
+      "computedHash": "536bd594ff71ceb7c67b4bbc336a4502a924c3d633cf3415c3f472ce7a7cc06b"
     }
   }
 }
