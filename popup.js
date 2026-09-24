@@ -75,6 +75,13 @@ import {
   strongHumanizeModeLabel
 } from "./prompts/humanize-resume.js";
 import {
+  SF_PROMPT_VERSION_KEY,
+  SF_PROMPT_VERSIONS,
+  normalizeSfPromptVersion,
+  setSfPromptVersion,
+  sfPromptVersionLabel
+} from "./prompts/sf-test.js";
+import {
   extractProfileFromResumeText,
   parseEmployersFromResume,
   resumeFilePrefixFromName,
@@ -258,6 +265,8 @@ const humanizeOffBtn = document.getElementById("humanizeOff");
 const humanizeAutoBtn = document.getElementById("humanizeAuto");
 const humanizeOnBtn = document.getElementById("humanizeOn");
 let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
+const sfPromptVersionEl = document.getElementById("sfPromptVersion");
+let sfPromptVersionCache = SF_PROMPT_VERSIONS.V1;
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const keepOpenBtn = document.getElementById("keepOpen");
@@ -873,6 +882,18 @@ async function setHumanizeMode(mode) {
   setStatus(`Strong humanize: ${strongHumanizeModeLabel(next)}.`);
 }
 
+function renderSfPromptVersion(version) {
+  sfPromptVersionCache = normalizeSfPromptVersion(version);
+  if (sfPromptVersionEl) sfPromptVersionEl.value = sfPromptVersionCache;
+}
+
+async function setSfPromptVersionUi(version) {
+  const next = normalizeSfPromptVersion(version);
+  await setSfPromptVersion(next);
+  renderSfPromptVersion(next);
+  setStatus(`SF prompt: ${sfPromptVersionLabel(next)}.`);
+}
+
 function renderIndeedGrabState(state) {
   const current = state && typeof state === "object" ? state : {};
   const status = String(current.status || "idle");
@@ -939,6 +960,7 @@ async function loadSettings() {
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
     STRONG_HUMANIZE_MODE_KEY,
+    SF_PROMPT_VERSION_KEY,
     MANUAL_PANEL_OPEN_KEY,
     PROFILE_EDITOR_PANEL_OPEN_KEY,
     ALLOW_BATCH_KEY,
@@ -995,6 +1017,7 @@ async function loadSettings() {
   }
   renderAiProvider(data[AI_PROVIDER_KEY]);
   renderHumanizeMode(data[STRONG_HUMANIZE_MODE_KEY]);
+  renderSfPromptVersion(data[SF_PROMPT_VERSION_KEY]);
   const allowBatch = resolveAllowBatch(data);
   renderAllowBatch(allowBatch, { expandManual: false });
   setManualPanelOpen(
@@ -3968,6 +3991,9 @@ humanizeAutoBtn?.addEventListener("click", () => {
 humanizeOnBtn?.addEventListener("click", () => {
   setHumanizeMode(STRONG_HUMANIZE_MODES.ON).catch((e) => setStatus(String(e.message || e)));
 });
+sfPromptVersionEl?.addEventListener("change", () => {
+  setSfPromptVersionUi(sfPromptVersionEl.value).catch((e) => setStatus(String(e.message || e)));
+});
 
 allowBatchYesBtn?.addEventListener("click", () => {
   setAllowBatch(ALLOW_BATCH.YES).catch((e) => setStatus(String(e.message || e)));
@@ -4116,6 +4142,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[STRONG_HUMANIZE_MODE_KEY] && changes[STRONG_HUMANIZE_MODE_KEY].newValue !== undefined) {
     renderHumanizeMode(changes[STRONG_HUMANIZE_MODE_KEY].newValue);
+  }
+  if (changes[SF_PROMPT_VERSION_KEY] && changes[SF_PROMPT_VERSION_KEY].newValue !== undefined) {
+    renderSfPromptVersion(changes[SF_PROMPT_VERSION_KEY].newValue);
   }
   if (changes[SESSION_ROLE_TRACK_KEY]) {
     syncActiveTrackUi().catch(() => {});

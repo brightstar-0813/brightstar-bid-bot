@@ -13,12 +13,14 @@ import {
 import { enforceJdSkills, rolesMissingJdSkills } from "../resume-json.js";
 import {
   resolvePromptTemplateForTrack,
-  resolveCoverLetterTemplateForTrack
+  resolveCoverLetterTemplateForTrack,
+  resolveResumePromptForVersion
 } from "../profiles.js";
 import { PROMPT as dmarioPrompt } from "../prompts/dmario-lewis.js";
 import { PROMPT as deSeniorPrompt } from "../prompts/de-senior.js";
 import { PROMPT as davidDePrompt } from "../prompts/david-oliveira-de.js";
 import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
+import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
   assert.equal(normalizeRoleTrackId(""), "sf");
@@ -133,6 +135,34 @@ test("resolvePromptTemplateForTrack keeps custom non-default prompt on matching 
   const custom = "Custom resume prompt {JD} {NAME} {MASTER_RESUME} with unique xyz123 content";
   const person = { id: "custom-jane", promptTemplate: custom, roleTrack: "de" };
   assert.equal(resolvePromptTemplateForTrack(person, "de"), custom);
+});
+
+test("resolveResumePromptForVersion keeps built-in SF prompt on v1", () => {
+  const person = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
+  assert.equal(resolveResumePromptForVersion(person, "sf", "v1"), dmarioPrompt);
+  assert.equal(resolveResumePromptForVersion(person, "sf"), dmarioPrompt);
+});
+
+test("resolveResumePromptForVersion uses the shared test prompt for built-in and custom SF", () => {
+  const builtin = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
+  const customPrompt = "Custom SF prompt {JD} {NAME} {MASTER_RESUME} unique xyz123";
+  const custom = { id: "custom-sf", promptTemplate: customPrompt, roleTrack: "sf" };
+  assert.equal(resolveResumePromptForVersion(builtin, "sf", "test"), sfTestPrompt);
+  assert.equal(resolveResumePromptForVersion(custom, "sf", "test"), sfTestPrompt);
+  assert.equal(resolveResumePromptForVersion(custom, "sf", "v1"), customPrompt);
+  assert.doesNotMatch(sfTestPrompt, /ChowNow|Bluebeam|Hilmar/);
+  assert.match(sfTestPrompt, /\{JD\}/);
+  assert.match(sfTestPrompt, /\{MASTER_RESUME\}/);
+});
+
+test("resolveResumePromptForVersion ignores the SF test setting on a non-SF track", () => {
+  const person = {
+    id: "david-oliveira-de",
+    promptTemplate: davidDePrompt,
+    roleTrack: "de"
+  };
+  assert.equal(resolveResumePromptForVersion(person, "de", "test"), davidDePrompt);
+  assert.equal(resolveResumePromptForVersion(person, "de", "v1"), davidDePrompt);
 });
 
 test("resolveCoverLetterTemplateForTrack switches when session track differs", () => {

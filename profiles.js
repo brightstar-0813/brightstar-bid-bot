@@ -33,6 +33,12 @@ import {
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
+import {
+  PROMPT as sfTestPrompt,
+  SF_TEST_HEADLINE_OVERRIDE,
+  getSfPromptVersion,
+  normalizeSfPromptVersion
+} from "./prompts/sf-test.js";
 import { buildMustProveBlock, selectProjectBankExcerpts } from "./ats-score.js";
 import {
   normalizeResumeFilePrefix,
@@ -945,6 +951,19 @@ export function resolvePromptTemplateForTrack(person, roleTrack) {
   return getTrackPromptTemplate(track);
 }
 
+/**
+ * Resume prompt after the SF v1 / test switch.
+ * Test replaces the person's stored SF prompt. Other tracks ignore the setting.
+ * Employer checks still read person.promptTemplate, not this result.
+ */
+export function resolveResumePromptForVersion(person, roleTrack, sfPromptVersion = "v1") {
+  const track = normalizeRoleTrackId(roleTrack);
+  if (track === "sf" && normalizeSfPromptVersion(sfPromptVersion) === "test") {
+    return sfTestPrompt;
+  }
+  return resolvePromptTemplateForTrack(person, roleTrack);
+}
+
 /** Cover letter prompt for the active engineering track. */
 export function resolveCoverLetterTemplateForTrack(person, roleTrack) {
   const track = normalizeRoleTrackId(roleTrack);
@@ -983,8 +1002,11 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
     extras.roleTrack ||
       resolveEffectiveRoleTrack(person, extras.sessionRoleTrack || "")
   );
+  const sfPromptVersion = normalizeSfPromptVersion(
+    extras.sfPromptVersion != null ? extras.sfPromptVersion : await getSfPromptVersion()
+  );
   const promptTemplate = ensureSfProjectBankInTemplate(
-    resolvePromptTemplateForTrack(person, roleTrack),
+    resolveResumePromptForVersion(person, roleTrack, sfPromptVersion),
     roleTrack
   );
   if (!promptTemplate) {
@@ -1039,6 +1061,9 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   const additional = String(extras.additionalPrompt || "").trim();
   if (additional) {
     prompt = `${prompt}\n\n---\nAdditional instructions for this job only (follow in addition to the rules above):\n${additional}`;
+  }
+  if (roleTrack === "sf" && sfPromptVersion === "test") {
+    prompt = `${prompt}\n\n${SF_TEST_HEADLINE_OVERRIDE}`;
   }
   return trimPromptToBudget(prompt, {
     maxChars: Number(extras.maxPromptChars) > 0 ? Number(extras.maxPromptChars) : MAX_RESUME_PROMPT_CHARS
