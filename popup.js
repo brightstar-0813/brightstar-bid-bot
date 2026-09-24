@@ -265,7 +265,8 @@ const humanizeOffBtn = document.getElementById("humanizeOff");
 const humanizeAutoBtn = document.getElementById("humanizeAuto");
 const humanizeOnBtn = document.getElementById("humanizeOn");
 let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
-const sfPromptVersionEl = document.getElementById("sfPromptVersion");
+const sfPromptVersionTrigger = document.getElementById("sfPromptVersionTrigger");
+const sfPromptVersionMenu = document.getElementById("sfPromptVersionMenu");
 let sfPromptVersionCache = SF_PROMPT_VERSIONS.V1;
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
@@ -884,7 +885,38 @@ async function setHumanizeMode(mode) {
 
 function renderSfPromptVersion(version) {
   sfPromptVersionCache = normalizeSfPromptVersion(version);
-  if (sfPromptVersionEl) sfPromptVersionEl.value = sfPromptVersionCache;
+  if (sfPromptVersionTrigger) {
+    sfPromptVersionTrigger.textContent = sfPromptVersionLabel(sfPromptVersionCache);
+  }
+  for (const btn of sfPromptVersionMenu?.querySelectorAll("[data-sf-prompt]") || []) {
+    const active = btn.dataset.sfPrompt === sfPromptVersionCache;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  }
+}
+
+function closeSfPromptMenu() {
+  if (!sfPromptVersionMenu || sfPromptVersionMenu.hidden) return;
+  sfPromptVersionMenu.hidden = true;
+  sfPromptVersionTrigger?.setAttribute("aria-expanded", "false");
+}
+
+function openSfPromptMenu() {
+  if (!sfPromptVersionMenu || !sfPromptVersionTrigger) return;
+  if (sfPromptVersionMenu.parentElement !== document.body) {
+    document.body.appendChild(sfPromptVersionMenu);
+  }
+  sfPromptVersionMenu.hidden = false;
+  const rect = sfPromptVersionTrigger.getBoundingClientRect();
+  const menuHeight = sfPromptVersionMenu.offsetHeight;
+  const top =
+    window.innerHeight - rect.bottom < menuHeight + 8 && rect.top > menuHeight + 8
+      ? rect.top - menuHeight - 4
+      : rect.bottom + 4;
+  sfPromptVersionMenu.style.left = `${rect.left}px`;
+  sfPromptVersionMenu.style.width = `${rect.width}px`;
+  sfPromptVersionMenu.style.top = `${top}px`;
+  sfPromptVersionTrigger.setAttribute("aria-expanded", "true");
 }
 
 async function setSfPromptVersionUi(version) {
@@ -3991,9 +4023,24 @@ humanizeAutoBtn?.addEventListener("click", () => {
 humanizeOnBtn?.addEventListener("click", () => {
   setHumanizeMode(STRONG_HUMANIZE_MODES.ON).catch((e) => setStatus(String(e.message || e)));
 });
-sfPromptVersionEl?.addEventListener("change", () => {
-  setSfPromptVersionUi(sfPromptVersionEl.value).catch((e) => setStatus(String(e.message || e)));
+sfPromptVersionTrigger?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (sfPromptVersionMenu?.hidden) openSfPromptMenu();
+  else closeSfPromptMenu();
 });
+sfPromptVersionMenu?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-sf-prompt]");
+  if (!btn) return;
+  setSfPromptVersionUi(btn.dataset.sfPrompt)
+    .catch((e) => setStatus(String(e.message || e)))
+    .finally(closeSfPromptMenu);
+});
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".prompt-version") || event.target.closest?.("#sfPromptVersionMenu")) return;
+  closeSfPromptMenu();
+});
+window.addEventListener("resize", closeSfPromptMenu);
+document.querySelector(".app-body")?.addEventListener("scroll", closeSfPromptMenu, { passive: true });
 
 allowBatchYesBtn?.addEventListener("click", () => {
   setAllowBatch(ALLOW_BATCH.YES).catch((e) => setStatus(String(e.message || e)));

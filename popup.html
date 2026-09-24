@@ -121,15 +121,31 @@
               </button>
             </div>
           </div>
-          <label class="field">
+          <div class="field prompt-version">
             <span>Prompt</span>
-            <select id="sfPromptVersion" aria-label="Resume prompt version">
-              <option value="v1" title="Each person's current prompt">v1</option>
-              <option value="test" title="Shared Salesforce test prompt">Test</option>
-              <option value="v2" title="Shared AI prompt. Uses the active person's resume.">v2</option>
-              <option value="v3" title="Shared ATS resume prompt. Uses the active person's employers.">v3</option>
-            </select>
-          </label>
+            <button
+              type="button"
+              class="prompt-version-trigger"
+              id="sfPromptVersionTrigger"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-controls="sfPromptVersionMenu"
+            >v1</button>
+            <ul class="prompt-version-menu" id="sfPromptVersionMenu" role="listbox" aria-label="Resume prompt version" hidden>
+              <li role="none">
+                <button type="button" role="option" data-sf-prompt="v1" title="Each person's current prompt">v1</button>
+              </li>
+              <li role="none">
+                <button type="button" role="option" data-sf-prompt="test" title="Shared Salesforce test prompt">Test</button>
+              </li>
+              <li role="none">
+                <button type="button" role="option" data-sf-prompt="v2" title="Shared AI prompt. Uses the active person's resume.">v2</button>
+              </li>
+              <li role="none">
+                <button type="button" role="option" data-sf-prompt="v3" title="Shared ATS resume prompt. Uses the active person's employers.">v3</button>
+              </li>
+            </ul>
+          </div>
           <label class="field file-field">
             <span>Add or update from resume file</span>
             <input id="personResumeFile" type="file" accept=".txt,.md,.rtf,.pdf,.docx,text/plain,application/pdf" />
