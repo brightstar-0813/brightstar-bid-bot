@@ -22,6 +22,7 @@ import { PROMPT as davidDePrompt } from "../prompts/david-oliveira-de.js";
 import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
 import { PROMPT as aiV2Prompt } from "../prompts/ai-v2.js";
+import { ATS_RECRUITER_PASS } from "../role-tracks.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
   assert.equal(normalizeRoleTrackId(""), "sf");
@@ -175,6 +176,15 @@ test("resolveResumePromptForVersion uses the shared v2 prompt for any person", (
   assert.match(aiV2Prompt, /\{MASTER_RESUME\}/);
   assert.match(aiV2Prompt, /\{NAME\}/);
   assert.doesNotMatch(aiV2Prompt, /Jos[eé]|Azumo|Accenture|Let's Delivery|ADVERSE|Florian[oó]polis|silvajoser/i);
+});
+
+test("ATS recruiter pass requires exact JD spellings in recent-role bullets", () => {
+  assert.match(ATS_RECRUITER_PASS, /exact spelling/i);
+  assert.match(ATS_RECRUITER_PASS, /two most recent roles/i);
+  assert.match(ATS_RECRUITER_PASS, /6–7 sentences/);
+  for (const id of ["sf", "de", "fs", "ai"]) {
+    assert.match(getRoleTrack(id).atsAppendix, /ATS \+ RECRUITER PASS/);
+  }
 });
 
 test("resolveResumePromptForVersion ignores the SF test setting on a non-SF track", () => {

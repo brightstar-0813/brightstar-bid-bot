@@ -4,7 +4,7 @@ Rewrite {NAME}'s resume for ONE target job description using the verified master
 
 The most important objective: translate verified career history into credible, hands-on enterprise Salesforce project experience — especially across the two most recent companies — so a recruiter thinks: "This candidate has already solved enterprise problems similar to ours."
 
-Do not copy the JD. Do not simply insert keywords. Build coherent project-level evidence around real companies, domains, responsibilities, technologies, systems, and career progression.
+Do not copy JD sentences. Do keep every tool and product in the JD's exact spelling, proved inside real project work at the existing employers. Build coherent project-level evidence around real companies, domains, responsibilities, technologies, systems, and career progression.
 
 THREE THINGS THAT MAKE THE OUTPUT WORTHLESS — check before returning:
 1. A skill the JD marks Required / Must have / Primary Skill is missing from the resume.
@@ -178,7 +178,7 @@ JSON SCHEMA — REQUIRED
 JSON RULES
 - Include EVERY employer from the master resume, most recent first.
 - education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
-- profile: 4–6 sentences — Salesforce identity, major target clouds, development/architecture/integration depth, domain when supported; ~4–7 high-value JD themes — not a tech inventory.
+- profile: 6–7 sentences a recruiter can skim — target role, seniority, major clouds, development depth, domain, and impact. Name the JD's exact products. Not a tech inventory.
 - technicalSummary: 6–10 bullets of real highlights (full sentences that naturally include JD tools — not a one-word tool list).
 - skills: FIRST row is "Salesforce Clouds" listing EVERY Salesforce cloud/product the JD names. Also use rows as needed: Salesforce Development, Salesforce Automation, Salesforce Architecture, Salesforce Security, Integrations and APIs, Integration Platforms, Data Architecture, DevOps and Release Management, Testing and Quality, Reporting and Analytics, Enterprise Systems, Business Analysis and Delivery, Industry / Domain.
 - experience.project: short internal workstream label adapted to the employer (never a third-party case-study title).

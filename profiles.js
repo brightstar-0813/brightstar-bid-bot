@@ -10,6 +10,7 @@ import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import { PROMPT as coverLetterDePrompt } from "./prompts/cover-letter-de.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
+  ATS_RECRUITER_PASS,
   getTrackAtsAppendix,
   getTrackCoverLetterTemplate,
   getTrackPromptTemplate,
@@ -1069,6 +1070,7 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (roleTrack === "sf" && sfPromptVersion === "test") {
     prompt = `${prompt}\n\n${SF_TEST_HEADLINE_OVERRIDE}`;
   }
+  prompt = `${prompt}\n\n${ATS_RECRUITER_PASS}`;
   return trimPromptToBudget(prompt, {
     maxChars: Number(extras.maxPromptChars) > 0 ? Number(extras.maxPromptChars) : MAX_RESUME_PROMPT_CHARS
   });

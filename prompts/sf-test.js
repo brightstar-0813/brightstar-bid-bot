@@ -115,7 +115,7 @@ JSON SCHEMA — REQUIRED
 
 JSON RULES
 - Include EVERY employer from the master resume, most recent first.
-- profile: 4–6 sentences, JD-aligned, naming the top skills the history supports.
+- profile: 6–7 sentences a recruiter can skim, naming the JD's exact tools the history supports.
 - technicalSummary: 6–10 bullets of real highlights from the master resume.
 - skills: FIRST row is "Salesforce Clouds" listing EVERY Salesforce cloud/product the JD names that the master resume can support. Platform and development tools go in Salesforce Platform and Salesforce Development rows.
 - Return valid JSON only. No double quotes inside string values.

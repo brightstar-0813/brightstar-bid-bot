@@ -97,6 +97,28 @@ const AI_SKILL_CATALOG = [
   { name: "Regression testing", re: /\bregression test\b/i, group: "evaluation" }
 ];
 
+/**
+ * Closing pass for every resume prompt. The local scorer is mostly exact-term
+ * coverage: keywords anywhere, title words in headline/profile/summary, and
+ * must-have tools proved inside the two most recent roles' bullets.
+ */
+export const ATS_RECRUITER_PASS = `
+==================================================
+ATS + RECRUITER PASS (overrides earlier lines that say to avoid JD wording)
+==================================================
+A recruiter skims the summary and the first two jobs. The scorer fails the resume when a JD tool is paraphrased or listed only in Skills.
+
+- profile is 6–7 sentences: target role, seniority, domain, core technologies, and impact. No gap disclaimers, clearance, citizenship, or visa notes.
+- Headline is a resume identity. Do NOT paste the JD job title verbatim, and do not include a requisition id. Profile and technicalSummary MUST still contain the distinctive words from that job title.
+- Keep every tool, product, platform, method, and repeated responsibility noun in the JD's exact spelling. Do not swap Lightning Web Components for "UI", Snowflake for "warehouse", or RAG for "search".
+- Those exact terms go in real skills categories AND in experience bullets. Skills alone do not count as proof.
+- Each of the two most recent roles names at least 3 JD must-have tools inside real bullets. The 3 most important tools each appear in at least 2 bullets anywhere in experience.
+- Skills: 5–7 real categories. Matching rows carry about 8–15 items, JD terms first, then related tools the master resume already supports. Never a category named JD Keywords, Keywords, or ATS Keywords.
+- Bullets are 20–25 words: action, the system, the exact tool, and a result. Vary the opening verb. Reframe work the master resume already shows. Do not invent employers, titles, dates, degrees, certifications, or metrics.
+- Most recent role: at least 9 bullets. The role before it: at least 8. Older roles can be shorter. If an earlier quota is lower, these floors win so the must-have tools fit.
+- Certifications: only entries already on the master resume that match this JD.
+`.trim();
+
 const SF_ATS_APPENDIX = `
 ==================================================
 ATS EVIDENCE MATCH (local match target ≥ 90/100)
@@ -107,6 +129,7 @@ Raise ATS by proving JD terms inside real resume sections — never via a keywor
 - Skills rows stay exact product/tool spellings from the JD; profile and bullets stay natural recruiter voice (no stuffed token lists).
 - Prefer JD spellings: "Lightning Web Components", "Service Cloud", "SOQL", "Apex", "MuleSoft", "integration", "architecture", etc.
 - technicalSummary: 6–10 full-sentence highlights that naturally include the JD's top tools — not a one-word tool list.
+${ATS_RECRUITER_PASS}
 HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.
 A resume that covers fewer than ~90% of the JD's distinctive tokens will be cleaned and may be re-prompted with project evidence until it clears 90.`.trim();
 
@@ -120,6 +143,7 @@ Raise ATS by proving JD terms inside real resume sections — never via a keywor
 - Skills rows stay exact tool spellings from the JD; profile and bullets stay natural recruiter voice.
 - Prefer JD spellings for warehouses, orchestrators, and cloud platforms.
 - technicalSummary: full-sentence highlights that naturally include the JD's top data stack — not a one-word tool list.
+${ATS_RECRUITER_PASS}
 HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.`.trim();
 
 const FS_ATS_APPENDIX = `
@@ -132,6 +156,7 @@ Raise ATS by proving JD terms inside real resume sections — never via a keywor
 - Skills rows stay exact stack spellings from the JD; profile and bullets stay natural recruiter voice.
 - Prefer JD spellings: "React", "TypeScript", "Node.js", "Kubernetes", "CI/CD", etc.
 - technicalSummary: full-sentence highlights that naturally include the JD's top stack — not a one-word tool list.
+${ATS_RECRUITER_PASS}
 HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.`.trim();
 
 const AI_ATS_APPENDIX = `
@@ -144,7 +169,8 @@ Raise ATS by proving JD terms inside real resume sections — never via a keywor
 - Skills rows stay exact tool spellings from the JD; profile and bullets stay natural recruiter voice.
 - Prefer JD spellings: "LLM evaluation", "RAG", "Python", "experimentation", "regression testing", etc.
 - technicalSummary: full-sentence highlights that naturally include supportable JD terms — not a one-word tool list.
-- Never invent AI experience to satisfy keywords — use adjacent engineering language when needed.
+- Never invent AI experience to satisfy keywords — use adjacent engineering language when needed, and keep the JD's exact tool spelling when the history can support that tool.
+${ATS_RECRUITER_PASS}
 HARD FORBIDDEN: never create skills categories named "JD Keywords", "Keywords", "ATS Keywords", or any keyword-dump / word-salad row. Never append a comma-separated JD token list to skills, profile, or bullets.`.trim();
 
 /** @type {Record<string, object>} */

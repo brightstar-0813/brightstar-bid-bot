@@ -110,6 +110,7 @@ This job board screens for AI-generated / fake resumes. Apply the rules below to
 Do NOT "humanize" away exact skill spellings — skills category items must keep JD/product spellings (e.g. "Lightning Web Components", "Service Cloud", "Snowflake", "React").
 Never add clearance, citizenship, visa, or immigration language — including in the headline.
 Never paste the JD job title verbatim into headline.
+Vary the prose, but do not replace a JD tool or product with a synonym. Profile and technicalSummary still carry the job title's distinctive words, and experience bullets still name the must-have tools.
 
 ${US_RESUME_STYLE_RULES}
 

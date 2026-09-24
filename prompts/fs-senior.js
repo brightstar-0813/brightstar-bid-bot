@@ -40,7 +40,7 @@ ROLE POSITIONING
 ==================================================
 Choose ONE headline fitting the JD and master resume:
 Senior Full Stack Engineer | Senior Software Engineer | Backend Engineer | Frontend Engineer | Platform Engineer
-Put that identity in JSON "headline" — do NOT paste the JD job title verbatim.
+Put that identity in JSON "headline" — do NOT paste the JD job title verbatim. Profile and technicalSummary still use the job title's distinctive words, and skills plus bullets keep every framework and cloud name in the JD's exact spelling.
 
 ==================================================
 SKILLS FORMAT
@@ -77,7 +77,7 @@ JSON SCHEMA
 }
 
 JSON RULES
-- Include EVERY employer from master resume. profile: 4–6 lines on engineering expertise, cloud/platform, production systems.
+- Include EVERY employer from master resume. profile: 6–7 sentences on the target role, seniority, stack, and impact, using the JD's exact framework and cloud names.
 - education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
 - technicalSummary: full-sentence highlights that naturally include the JD's top stack — not a one-word tool list.
 - skills: use real categories only (Programming Languages, Frontend, Backend & APIs, Cloud & DevOps, Databases).

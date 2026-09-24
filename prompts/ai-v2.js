@@ -98,7 +98,7 @@ Avoid Architected, Spearheaded, Leveraged, Utilized, Optimized, Revolutionized, 
 ==================================================
 SKILLS AND PROFILE
 ==================================================
-profile: 4–6 sentences on the JD domains the master resume supports.
+profile: 6–7 sentences a recruiter can skim: target role, seniority, domain, exact tools the history supports, and impact.
 technicalSummary: 6–10 full-sentence highlights from the master resume, not a tool list.
 skills: about 7–9 categories when the history supports them. Choose only relevant rows from: Artificial Intelligence & LLMs, Machine Learning & NLP, AI Frameworks & Libraries, Programming Languages, Backend Engineering, Cloud Platforms, MLOps & DevOps, Data & Retrieval, Testing & Evaluation, Software Engineering & Observability. Group each technology once. No category named JD Keywords, Keywords, or ATS Keywords.
 

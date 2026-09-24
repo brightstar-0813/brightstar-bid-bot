@@ -47,7 +47,7 @@ ROLE POSITIONING
 ==================================================
 Choose ONE headline fitting the JD and master resume:
 Senior AI Evaluation Engineer | AI Quality Engineer | LLM Evaluation Engineer | Applied AI Engineer | ML Engineer
-Put that identity in JSON "headline" — do NOT paste the JD job title verbatim. Senior IC — no fake management.
+Put that identity in JSON "headline" — do NOT paste the JD job title verbatim. Profile and technicalSummary still use the job title's distinctive words. Senior IC — no fake management. Keep every supportable JD tool in its exact spelling inside skills and bullets.
 
 ==================================================
 SKILLS FORMAT
@@ -84,7 +84,7 @@ JSON SCHEMA
 }
 
 JSON RULES
-- Include EVERY employer from master resume. profile: 3–5 sentences, technically credible, no clichés.
+- Include EVERY employer from master resume. profile: 6–7 sentences on the target role, seniority, evaluation or AI stack, and impact. No clichés.
 - education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
 - technicalSummary: full-sentence highlights that naturally include supportable JD terms — not a one-word tool list.
 - skills: use real categories only (AI & Evaluation, Programming & Data, Data & Experimentation, Backend & APIs, Cloud & Infrastructure, etc.).
