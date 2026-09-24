@@ -39,6 +39,7 @@ import {
   getSfPromptVersion,
   normalizeSfPromptVersion
 } from "./prompts/sf-test.js";
+import { PROMPT as aiV2Prompt } from "./prompts/ai-v2.js";
 import { buildMustProveBlock, selectProjectBankExcerpts } from "./ats-score.js";
 import {
   normalizeResumeFilePrefix,
@@ -952,15 +953,16 @@ export function resolvePromptTemplateForTrack(person, roleTrack) {
 }
 
 /**
- * Resume prompt after the SF v1 / test switch.
- * Test replaces the person's stored SF prompt. Other tracks ignore the setting.
+ * Resume prompt after the v1 / test / v2 switch.
+ * Test replaces the person's stored prompt on the SF track only.
+ * v2 is the shared AI prompt for any person and any track.
  * Employer checks still read person.promptTemplate, not this result.
  */
 export function resolveResumePromptForVersion(person, roleTrack, sfPromptVersion = "v1") {
+  const version = normalizeSfPromptVersion(sfPromptVersion);
+  if (version === "v2") return aiV2Prompt;
   const track = normalizeRoleTrackId(roleTrack);
-  if (track === "sf" && normalizeSfPromptVersion(sfPromptVersion) === "test") {
-    return sfTestPrompt;
-  }
+  if (track === "sf" && version === "test") return sfTestPrompt;
   return resolvePromptTemplateForTrack(person, roleTrack);
 }
 
@@ -1005,10 +1007,11 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   const sfPromptVersion = normalizeSfPromptVersion(
     extras.sfPromptVersion != null ? extras.sfPromptVersion : await getSfPromptVersion()
   );
-  const promptTemplate = ensureSfProjectBankInTemplate(
-    resolveResumePromptForVersion(person, roleTrack, sfPromptVersion),
-    roleTrack
-  );
+  const resolvedTemplate = resolveResumePromptForVersion(person, roleTrack, sfPromptVersion);
+  const promptTemplate =
+    sfPromptVersion === "v2"
+      ? resolvedTemplate
+      : ensureSfProjectBankInTemplate(resolvedTemplate, roleTrack);
   if (!promptTemplate) {
     throw new Error("Selected profile has no prompt content.");
   }
@@ -1034,10 +1037,11 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
       sfProjectBank: sfProjectBank || SF_ENTERPRISE_PROJECT_BANK
     }
   );
-  const mustProve = buildMustProveBlock(jdText, roleTrack, {
+  const instructionTrack = sfPromptVersion === "v2" ? "ai" : roleTrack;
+  const mustProve = buildMustProveBlock(jdText, instructionTrack, {
     companyName: extras.companyName || ""
   });
-  const atsAppendix = getTrackAtsAppendix(roleTrack);
+  const atsAppendix = getTrackAtsAppendix(instructionTrack);
   let prompt = mustProve ? `${body}\n\n${mustProve}\n\n${atsAppendix}` : `${body}\n\n${atsAppendix}`;
 
   const humanizeMode = normalizeStrongHumanizeMode(
@@ -1056,7 +1060,7 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
       site: extras.site || ""
     });
   if (applyHumanize) {
-    prompt = `${prompt}\n\n${buildStrongHumanizeAppendix(roleTrack)}`;
+    prompt = `${prompt}\n\n${buildStrongHumanizeAppendix(instructionTrack)}`;
   }
   const additional = String(extras.additionalPrompt || "").trim();
   if (additional) {

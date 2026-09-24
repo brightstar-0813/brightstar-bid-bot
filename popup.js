@@ -891,7 +891,7 @@ async function setSfPromptVersionUi(version) {
   const next = normalizeSfPromptVersion(version);
   await setSfPromptVersion(next);
   renderSfPromptVersion(next);
-  setStatus(`SF prompt: ${sfPromptVersionLabel(next)}.`);
+  setStatus(`Prompt: ${sfPromptVersionLabel(next)}.`);
 }
 
 function renderIndeedGrabState(state) {
