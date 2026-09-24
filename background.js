@@ -154,6 +154,11 @@ import {
 } from "./email-bid.js";
 import { harvestContactsFromAiText } from "./email-contacts.js";
 import { harvestEmailDraftFromAiText } from "./prompts/email-compose.js";
+import {
+  extractCoverLetterText,
+  looksLikeCoverLetterBody,
+  readNewestAssistantProseInPage
+} from "./cover-letter-harvest.js";
 
 const QUEUE_KEY = "job_queue";
 const BATCH_STATE_KEY = "batch_state";
@@ -3113,42 +3118,13 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
   });
 }
 
-function looksLikeCoverLetterBody(text) {
-  const s = String(text || "").trim();
-  if (s.length < 80) return false;
-  // Resume JSON dumped into the "letter" slot.
-  if (/"experience"\s*:/.test(s) && /"technicalSummary"|"certifications"\s*:/.test(s)) return false;
-  if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
-  if (/dear\s+/i.test(s) || /hiring\s+(manager|team)/i.test(s)) return true;
-  // Plain multi-paragraph letter without salutation still OK if long enough.
-  const paras = s.split(/\n\s*\n+/).filter((p) => p.trim().length > 40);
-  if (paras.length >= 2 && s.length >= 180) return true;
-  return s.length >= 220 && !/"experience"\s*:/.test(s);
-}
-
 /** Read only the newest assistant turn — used so cover letters are not the prior JSON. */
 async function readLatestAssistantPlainText(tabId) {
   if (typeof tabId !== "number") return "";
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const blocks = document.querySelectorAll(
-          [
-            "[data-message-author-role='assistant']",
-            "[data-message-author-role=assistant]",
-            "[data-turn='assistant']",
-            "section[data-turn='assistant']",
-            '[data-testid="assistant-message"]',
-            '[data-testid="assistant"]',
-            '[class*="assistant-message"]',
-            '[class*="font-claude-message"]'
-          ].join(", ")
-        );
-        if (!blocks.length) return "";
-        const last = blocks[blocks.length - 1];
-        return (last.innerText || last.textContent || "").trim().slice(0, 20000);
-      }
+      func: readNewestAssistantProseInPage
     });
     return String(results?.[0]?.result || "").trim();
   } catch {
@@ -4317,7 +4293,6 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
           document.querySelector("button[data-testid='stop-button']") ||
           document.querySelector("button[aria-label='Stop streaming']") ||
           document.querySelector("button[aria-label='Stop generating']") ||
-          document.querySelector("button[aria-label*='Stop']") ||
           document.querySelector('[data-is-streaming="true"]');
         return Boolean(
           (stopBtn && stopBtn.offsetParent !== null) ||
@@ -6284,7 +6259,6 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
           document.querySelector("button[data-testid='stop-button']") ||
           document.querySelector("button[aria-label='Stop streaming']") ||
           document.querySelector("button[aria-label='Stop generating']") ||
-          document.querySelector('button[aria-label*="Stop"]') ||
           document.querySelector('[data-is-streaming="true"]');
         if (stopBtn && (stopBtn.offsetParent !== null || stopBtn.getAttribute?.("data-is-streaming") === "true")) {
           return true;
@@ -6660,8 +6634,31 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
             if (scorePayload(text) > scorePayload(latest)) latest = text;
           }
         } else {
-          // Cover-letter mode: ALWAYS take the newest assistant turn (never prefer older JSON).
-          latest = (blocks[blocks.length - 1].innerText || blocks[blocks.length - 1].textContent || "").trim();
+          // Cover-letter mode: newest assistant message root. A nested
+          // [data-is-streaming] node is often last in document order and is not the letter.
+          const roots = blocks.filter((el) => {
+            if (el.matches?.("[data-is-streaming], button")) return false;
+            return !blocks.some((other) => other !== el && other.contains(el));
+          });
+          const turnNodes = Array.from(
+            document.querySelectorAll('[data-testid^="conversation-turn"]')
+          ).filter(
+            (turn) =>
+              !turn.querySelector(
+                "[data-message-author-role='user'], [data-turn='user'], [data-testid*='user-message']"
+              )
+          );
+          const pool = roots.length ? roots : turnNodes;
+          const message = pool[pool.length - 1] || null;
+          if (message) {
+            const clone = message.cloneNode(true);
+            clone.querySelectorAll("pre, code, button, [data-is-streaming]").forEach((node) => {
+              node.remove();
+            });
+            latest = String(clone.innerText || clone.textContent || "")
+              .replace(/\n{3,}/g, "\n\n")
+              .trim();
+          }
         }
       }
       if (shouldHarvestJson) {
@@ -6766,7 +6763,12 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
   if (results[0].result === undefined && results[0].error) {
     throw new Error(String(results[0].error.message || results[0].error));
   }
-  return results[0].result || { blockCount: 0, latest: "", resumeData: null, generating: false };
+  const polled = results[0].result || { blockCount: 0, latest: "", resumeData: null, generating: false };
+  if (!harvestJson) {
+    const prose = await readLatestAssistantPlainText(tabId);
+    if (prose) polled.latest = prose;
+  }
+  return polled;
 }
 
 function looksSettledAssistantText(text, { expectResumeJson = false } = {}) {
@@ -6928,6 +6930,18 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     if (state.generating) {
       sawGeneration = true;
       postStreamDelayDone = false;
+    }
+
+    // A finished letter counts even while a stop control is still up, and even
+    // when the reply does not start with "Dear". Ignore prose that was already
+    // on the page before this send (the resume turn). Do this before the
+    // send-fail timeout so a visible letter is not thrown away.
+    if (!expectResumeJson) {
+      const letterNow =
+        extractCoverLetterText(state.latest) || extractCoverLetterText(lastText);
+      const alreadyThere =
+        letterNow && String(latestBefore || "").includes(letterNow.slice(0, 80));
+      if (letterNow && !alreadyThere) return letterNow;
     }
 
     // Stream just finished → wait for DOM settle, then harvest (user's requested delay).
@@ -7200,7 +7214,10 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     if (!expectResumeJson) {
       // Prefer the newest assistant turn — poller used to keep returning resume JSON.
       const plain = await readLatestAssistantPlainText(tabId);
-      if (plain && looksLikeCoverLetterBody(plain)) return plain;
+      const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
+      const letterAlreadyThere =
+        letter && String(latestBefore || "").includes(letter.slice(0, 80));
+      if (letter && !letterAlreadyThere) return letter;
       if (
         plain &&
         plain.length > 120 &&
@@ -7214,7 +7231,10 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
       // Still stuck on the previous resume JSON turn — keep waiting for the letter.
       if (/"experience"\s*:/.test(lastText) && /"name"\s*:/.test(lastText)) {
-        if (state.blockCount > blocksBefore && plain && looksLikeCoverLetterBody(plain)) return plain;
+        const rescued = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
+        const rescuedAlreadyThere =
+          rescued && String(latestBefore || "").includes(rescued.slice(0, 80));
+        if (rescued && !rescuedAlreadyThere) return rescued;
         if (elapsedSec > 90 && !state.generating) {
           throw new Error(
             "Cover letter reply did not appear after the resume JSON. Prompt may still be sitting in the composer — focus the AI tab and click Send, or Skip/Retry."
@@ -7258,8 +7278,10 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
   if (!expectResumeJson) {
     const plain = await readLatestAssistantPlainText(tabId);
-    if (looksLikeCoverLetterBody(plain)) return plain;
-    if (looksLikeCoverLetterBody(lastText)) return lastText;
+    const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
+    const letterAlreadyThere =
+      letter && String(latestBefore || "").includes(letter.slice(0, 80));
+    if (letter && !letterAlreadyThere) return letter;
     if (plain && plain.length > 80 && !/"experience"\s*:/.test(plain)) return plain;
   }
 
@@ -7330,15 +7352,24 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       // IMPORTANT: same chat as resume (one chat per position).
       let coverOutput = "";
       const pickCover = async (reply) => {
-        let text = String(reply || "").trim();
-        if (looksLikeCoverLetterBody(text)) return text;
+        const fromReply = extractCoverLetterText(reply);
+        if (fromReply) return fromReply;
         // Stale JSON often comes back from the poller — read the newest turn only.
         const latest = await readLatestAssistantPlainText(tabId);
-        if (looksLikeCoverLetterBody(latest)) return latest;
-        return text;
+        const fromPage = extractCoverLetterText(latest);
+        if (fromPage) return fromPage;
+        return String(reply || "").trim();
       };
 
       for (let attempt = 1; attempt <= 3; attempt += 1) {
+        if (attempt > 1) {
+          const already = await pickCover("");
+          if (looksLikeCoverLetterBody(already)) {
+            coverOutput = already;
+            await setStatus("Cover letter already on the page — saving it.");
+            break;
+          }
+        }
         try {
           const prompt =
             attempt === 1
