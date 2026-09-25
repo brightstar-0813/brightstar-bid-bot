@@ -33,7 +33,7 @@
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["content.js"],
+      "js": ["chatgpt-dom-harvest.js", "content.js"],
       "run_at": "document_idle"
     },
     {

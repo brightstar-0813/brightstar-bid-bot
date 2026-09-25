@@ -357,7 +357,7 @@
    * last 3. Retry prompts create new messages that push the good JSON out of a
    * narrow window, which is why the user can see JSON while the bot re-prompts.
    */
-  function harvestResumeFromPage() {
+  async function harvestResumeFromPage() {
     const texts = [];
     const seen = new Set();
     const push = (t) => {
@@ -641,6 +641,23 @@
       return bestLocalObj;
     };
 
+    // Canvas / virtualized code panel. Skip when idle, and when the assistant
+    // turn already contains both resume keys — scrolling then only delays the poll.
+    const assistantReady = texts.some(
+      (s) =>
+        (s.includes('"name"') || s.includes('"Name"')) &&
+        (s.includes('"experience"') || s.includes('"Experience"'))
+    );
+    const panelApi = globalThis.__brightstarDomHarvest;
+    if (generationRunning && !assistantReady && panelApi?.collectFullResumeDomText) {
+      try {
+        const panel = await panelApi.collectFullResumeDomText();
+        if (panel?.text) push(panel.text);
+      } catch {
+        // panel read is best-effort
+      }
+    }
+
     let best = null;
     let bestScore = -1;
     for (const raw of texts) {
@@ -690,7 +707,7 @@
 
   async function persistHarvest({ allowStreaming = false } = {}) {
     const streaming = isStreaming();
-    let best = harvestResumeFromPage();
+    let best = await harvestResumeFromPage();
     // Never click Copy during background polls — that steals focus and triggers
     // ChatGPT's "Copy failed because document lost focus" toast. Only try on
     // explicit manual save when the tab is focused and DOM harvest looks thin.
@@ -909,7 +926,9 @@
   removeLegacySaveButton();
 
   // Fast harvest while a batch/one-off is running so recognition → file save is snappy.
+  // Idle ticks keep the DOM scan and do not walk canvas scrollers.
   let harvestTimer = null;
+  let generationRunning = false;
   const scheduleHarvest = (ms) => {
     if (harvestTimer) clearInterval(harvestTimer);
     harvestTimer = setInterval(() => {
@@ -920,12 +939,14 @@
   };
   scheduleHarvest(4000);
   chrome.storage.local.get(["generation_running"], (data) => {
+    generationRunning = Boolean(data.generation_running);
     if (data.generation_running) scheduleHarvest(1000);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.generation_running) {
-      scheduleHarvest(changes.generation_running.newValue ? 1000 : 4000);
+      generationRunning = Boolean(changes.generation_running.newValue);
+      scheduleHarvest(generationRunning ? 1000 : 4000);
     }
   });
   const bodyWatch = new MutationObserver(() => removeLegacySaveButton());

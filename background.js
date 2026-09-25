@@ -6249,11 +6249,31 @@ async function cooldownBeforeNextJob({
   }
 }
 
+async function ensureChatGptDomHarvest(tabId) {
+  try {
+    const check = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () =>
+        typeof globalThis.__brightstarDomHarvest?.collectFullResumeDomText === "function"
+    });
+    if (check?.[0]?.result) return;
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["chatgpt-dom-harvest.js"]
+    });
+  } catch {
+    // Tab may not be ready; the poller still reads assistant turns.
+  }
+}
+
 async function chatgptPollState(tabId, { harvestJson = false } = {}) {
+  if (harvestJson) await ensureChatGptDomHarvest(tabId);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     args: [Boolean(harvestJson)],
-    func: (shouldHarvestJson) => {
+    func: async (shouldHarvestJson) => {
+      let panel = { text: "", scrolled: false, incomplete: false };
+
       const isGenerating = () => {
         const stopBtn =
           document.querySelector("button[data-testid='stop-button']") ||
@@ -6321,8 +6341,27 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
           const t = el.innerText || el.textContent || "";
           if (t.includes('"experience"') || t.includes('"name"')) push(t);
         }
+        if (panel?.text) push(panel.text);
         return out;
       };
+
+      // Assistant text first. Scroll the canvas only when that text is still a fragment.
+      if (shouldHarvestJson && globalThis.__brightstarDomHarvest?.collectFullResumeDomText) {
+        const preview = collectTextCandidates();
+        const assistantReady = preview.some(
+          (t) =>
+            globalThis.__brightstarDomHarvest.domTextLooksIncomplete &&
+            !globalThis.__brightstarDomHarvest.domTextLooksIncomplete(t)
+        );
+        if (!assistantReady) {
+          try {
+            const read = await globalThis.__brightstarDomHarvest.collectFullResumeDomText();
+            if (read && typeof read === "object") panel = read;
+          } catch {
+            // canvas read is best-effort
+          }
+        }
+      }
 
       const extractBalancedObjects = (str) => {
         const objects = [];
@@ -6754,7 +6793,9 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         jobCount: Array.isArray(resumeData?.experience) ? resumeData.experience.length : 0,
         generating: isGenerating(),
         harvestedJson: shouldHarvestJson,
-        recognizedWell: Boolean(recognizedWell)
+        recognizedWell: Boolean(recognizedWell),
+        panelScrolled: Boolean(panel.scrolled),
+        panelIncomplete: Boolean(panel.incomplete)
       };
     }
   });
@@ -7090,7 +7131,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
             ? `, waiting: ${describeResumeGaps(parsed) || "almost ready"} (jobs=${state.jobCount || 0})`
             : lastText.includes('"experience"')
               ? ", JSON visible — settling…"
-              : ", waiting for JSON"
+              : state.panelScrolled && state.panelIncomplete
+                ? ", JSON panel open but not fully readable — focus the ChatGPT tab"
+                : ", waiting for JSON"
         : "";
       await setStatus(
         `${label} (${elapsedSec}s${state.generating ? ", streaming" : ""}${waitHint})`
