@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Brightstar · Resume style preview</title>
+    <script src="theme-boot.js"></script>
+    <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="ui-toast.css" />
+    <link rel="stylesheet" href="preview.css" />
+  </head>
+  <body>
+    <header class="preview-bar">
+      <div class="brand">
+        <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
+        <div class="brand-copy">
+          <h1>Style preview</h1>
+          <p class="hype hype-muted" id="previewLede" hidden></p>
+        </div>
+      </div>
+      <div class="preview-controls">
+        <label class="field">
+          <span>Template</span>
+          <select id="templateSelect" aria-label="Resume template"></select>
+        </label>
+        <button type="button" id="useStyle" class="primary">Use this style</button>
+      </div>
+    </header>
+    <div class="stage" id="stage">
+      <div class="paper">
+        <iframe id="page" title="Resume style preview"></iframe>
+      </div>
+    </div>
+    <p class="status-bar is-empty" id="status" role="status"></p>
+    <script type="module" src="preview.js"></script>
+  </body>
+</html>
