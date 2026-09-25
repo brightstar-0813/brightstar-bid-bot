@@ -71,26 +71,63 @@ function stripResumeJsonObjects(raw) {
 
 /** The cover prompt itself contains "Dear Hiring Manager" plus these instructions. */
 function isCoverPromptEcho(text) {
-  return /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i.test(String(text || ""));
+  return /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON|Ignore the resume JSON above/i.test(
+    String(text || "")
+  );
 }
 
+/**
+ * The cover prompt says "Start with: Dear Hiring Manager" before the real letter.
+ * Keep scanning later salutations instead of rejecting everything after that first Dear.
+ */
 function sliceFromDear(raw) {
-  const idx = String(raw || "").search(/\bDear\s+/i);
-  if (idx < 0) return "";
-  const body = String(raw).slice(idx).trim();
-  if (isCoverPromptEcho(body)) return "";
-  return looksLikeCoverLetterBody(body) ? body : "";
+  let rest = String(raw || "");
+  let best = "";
+  while (rest.length > 40) {
+    const idx = rest.search(/\bDear\s+/i);
+    if (idx < 0) break;
+    const body = rest.slice(idx).trim();
+    const later = body.slice(5).search(/\bDear\s+/i);
+    const segment = (later >= 0 ? body.slice(0, later + 5) : body).trim();
+    if (!isCoverPromptEcho(segment) && looksLikeCoverLetterBody(segment) && segment.length >= best.length) {
+      best = segment;
+    }
+    rest = rest.slice(idx + 5);
+  }
+  return best;
 }
 
-/** Pull a letter out of a turn that also contains the earlier resume JSON. */
+/** Drop instruction paragraphs so a letter that follows the cover prompt can be read. */
+function dropPromptParagraphs(text) {
+  const kept = [];
+  for (const part of String(text || "").split(/\n\s*\n+/)) {
+    const t = part.trim();
+    if (!t) continue;
+    if (
+      isCoverPromptEcho(t) ||
+      /^(IMPORTANT:|Stop\. Do NOT|You are an expert career writer|CANDIDATE\b|ROLE POSITIONING|JOB TITLE\b|COMPANY\b|- )/i.test(
+        t
+      )
+    ) {
+      kept.length = 0;
+      continue;
+    }
+    kept.push(t);
+  }
+  return kept.join("\n\n").trim();
+}
+
+/** Pull a letter out of a turn that also contains the earlier resume JSON or the cover prompt. */
 export function extractCoverLetterText(text) {
   const raw = String(text || "");
   const fromDear = sliceFromDear(raw);
   if (fromDear) return fromDear;
   const stripped = stripResumeJsonObjects(raw).trim();
-  if (isCoverPromptEcho(stripped)) return "";
   const fromStrippedDear = sliceFromDear(stripped);
   if (fromStrippedDear) return fromStrippedDear;
+  const afterPrompt = dropPromptParagraphs(stripped);
+  if (looksLikeCoverLetterBody(afterPrompt)) return afterPrompt;
+  if (isCoverPromptEcho(stripped)) return "";
   return looksLikeCoverLetterBody(stripped) ? stripped : "";
 }
 
@@ -103,7 +140,12 @@ export function extractCoverLetterText(text) {
 export function readNewestAssistantProseInPage() {
   const api = globalThis.__brightstarDomHarvest;
   if (typeof api?.readNewestAssistantProse === "function") {
-    return String(api.readNewestAssistantProse(typeof document !== "undefined" ? document : undefined) || "");
+    const fromApi = String(api.readNewestAssistantProse(typeof document !== "undefined" ? document : undefined) || "").trim();
+    if (fromApi) return fromApi;
   }
-  return "";
+  const root =
+    (typeof document !== "undefined" && (document.querySelector("main") || document.body)) || null;
+  const text = String(root?.innerText || "");
+  if (text.length <= 20000) return text;
+  return text.slice(-60000);
 }

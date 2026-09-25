@@ -6279,7 +6279,7 @@ async function ensureChatGptDomHarvest(tabId) {
     const check = await chrome.scripting.executeScript({
       target: { tabId },
       func: () =>
-        typeof globalThis.__brightstarDomHarvest?.collectFullResumeDomText === "function"
+        typeof globalThis.__brightstarDomHarvest?.readNewestAssistantProse === "function"
     });
     if (check?.[0]?.result) return;
     await chrome.scripting.executeScript({

@@ -171,6 +171,30 @@ test("keeps a finished letter on a turn that also contains the user prompt", () 
   assert.equal(looksLikeCoverLetterBody(letter), true);
 });
 
+test("keeps the real letter that follows the cover prompt's Dear Hiring Manager line", () => {
+  const page = [
+    "OUTPUT RULES",
+    "- Return PLAIN TEXT only. No HTML, Markdown, code fences, tables, or tags.",
+    "- Start with: Dear Hiring Manager,",
+    "- Do NOT return JSON, resume content, code fences, or markdown links.",
+    "",
+    "IMPORTANT: Ignore the resume JSON above. Reply with ONLY the cover letter plain text starting with Dear Hiring Manager, — nothing else.",
+    "",
+    "Dear Hiring Manager,",
+    "",
+    "The Sr. Salesforce Marketing Cloud Technical Business Analyst role at Smart Caliber Technology aligns closely with the work I have built across Data Cloud, customer architecture, and hands-on delivery.",
+    "",
+    "At Culligan International, I work as a Senior Salesforce Engineer and Technical Architect supporting customer acquisition, sales, service, and operational processes.",
+    "",
+    "Thank you for your time and consideration."
+  ].join("\n");
+  const letter = extractCoverLetterText(page);
+  assert.match(letter, /^Dear Hiring Manager,\n\nThe Sr\. Salesforce Marketing Cloud/);
+  assert.equal(/OUTPUT RULES/.test(letter), false);
+  assert.equal(/Ignore the resume JSON above/.test(letter), false);
+  assert.equal(looksLikeCoverLetterBody(letter), true);
+});
+
 test("rejects resume JSON that has no letter after it", () => {
   assert.equal(extractCoverLetterText(resumeJson), "");
   assert.equal(looksLikeCoverLetterBody(resumeJson), false);

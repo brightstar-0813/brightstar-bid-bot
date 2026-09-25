@@ -506,15 +506,27 @@
       const mainText = mainTextExcludingUser(doc);
       if (mainText) pieces.push(mainText);
     }
+    const tailOf = (text) => {
+      const t = tidyChunk(text);
+      if (t.length <= 20000) return t;
+      return t.slice(-60000);
+    };
     let bestLetter = "";
     let newest = "";
     for (const raw of pieces) {
       const text = tidyChunk(raw);
-      if (!text || promptEcho.test(text)) continue;
+      if (!text) continue;
+      // A turn that also contains the cover prompt still has the letter at the end.
+      // Do not drop that whole turn.
+      if (promptEcho.test(text)) {
+        newest = tailOf(text);
+        continue;
+      }
       newest = text;
       if (proseLooksLikeLetter(text) && text.length >= bestLetter.length) bestLetter = text;
     }
-    return (bestLetter || newest).slice(0, 20000);
+    if (bestLetter) return bestLetter.slice(0, 20000);
+    return tailOf(newest);
   }
 
   const api = {
