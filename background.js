@@ -3121,6 +3121,7 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
 /** Read only the newest assistant turn — used so cover letters are not the prior JSON. */
 async function readLatestAssistantPlainText(tabId) {
   if (typeof tabId !== "number") return "";
+  await ensureChatGptDomHarvest(tabId);
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
@@ -3601,6 +3602,7 @@ async function focusTabForInput(tabId) {
 /** True when the tab shows an empty composer and zero assistant messages. */
 async function readChatReadiness(tabId, provider) {
   const p = normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT);
+  if (p === AI_PROVIDERS.CHATGPT) await ensureChatGptDomHarvest(tabId);
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
@@ -3613,15 +3615,26 @@ async function readChatReadiness(tabId, provider) {
             document.querySelector('div[contenteditable="true"]')
           : document.querySelector("#prompt-textarea") ||
             document.querySelector("div.ProseMirror[contenteditable='true']") ||
-            document.querySelector("textarea[placeholder*='Message']");
-        const assistantBlocks = claude
-          ? document.querySelectorAll(
-              '[data-testid="assistant-message"], [data-testid="assistant"], [data-is-streaming="true"]'
-            ).length
-          : document.querySelectorAll("[data-message-author-role='assistant']").length;
-        const userBlocks = claude
-          ? document.querySelectorAll('[data-testid="user-message"], [data-testid="user"]').length
-          : document.querySelectorAll("[data-message-author-role='user']").length;
+            document.querySelector("textarea[placeholder*='Message']") ||
+            document.querySelector("textarea[placeholder*='Ask']") ||
+            document.querySelector("div[contenteditable='true']");
+        const shared = !claude ? globalThis.__brightstarDomHarvest?.countChatBlocks?.(document) : null;
+        const assistantBlocks = shared
+          ? Number(shared.assistantBlocks) || 0
+          : claude
+            ? document.querySelectorAll(
+                '[data-testid="assistant-message"], [data-testid="assistant"], [data-is-streaming="true"]'
+              ).length
+            : document.querySelectorAll(
+                "[data-message-author-role='assistant'], [data-message-role='assistant'], [data-turn='assistant']"
+              ).length;
+        const userBlocks = shared
+          ? Number(shared.userBlocks) || 0
+          : claude
+            ? document.querySelectorAll('[data-testid="user-message"], [data-testid="user"]').length
+            : document.querySelectorAll(
+                "[data-message-author-role='user'], [data-message-role='user'], [data-turn='user']"
+              ).length;
         return {
           hasInput: Boolean(input && input.offsetParent !== null),
           assistantBlocks,
@@ -3897,6 +3910,7 @@ async function shouldUseInPageNewChat(tabId, provider, freshResult) {
 }
 
 async function chatgptSendPrompt(tabId, prompt, startNewChat) {
+  await ensureChatGptDomHarvest(tabId);
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
@@ -4278,15 +4292,19 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         return clickSendButton({ force });
       };
 
-      const countUserBlocks = () =>
-        document.querySelectorAll(
+      const countUserBlocks = () => {
+        const shared = globalThis.__brightstarDomHarvest?.countChatBlocks?.(document);
+        if (shared && Number.isFinite(Number(shared.userBlocks))) return Number(shared.userBlocks);
+        return document.querySelectorAll(
           [
             "[data-message-author-role='user']",
             "[data-message-author-role=user]",
+            "[data-message-role='user']",
             "[data-turn='user']",
             '[data-testid*="user-message"]'
           ].join(", ")
         ).length;
+      };
 
       const isGenerating = () => {
         const stopBtn =
@@ -4311,16 +4329,23 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         return text.length < 40;
       };
 
-      const getAssistantBlocks = () =>
-        Array.from(
+      const getAssistantBlocks = () => {
+        const shared = globalThis.__brightstarDomHarvest?.countChatBlocks?.(document);
+        if (shared && Number(shared.assistantBlocks) > 0) {
+          return Array.from({ length: Number(shared.assistantBlocks) });
+        }
+        return Array.from(
           document.querySelectorAll(
             [
               "[data-message-author-role='assistant']",
+              "[data-message-role='assistant']",
               "[data-turn='assistant']",
-              '[data-testid="assistant-message"]'
+              '[data-testid="assistant-message"]',
+              "[data-testid^='conversation-turn']"
             ].join(", ")
           )
         );
+      };
 
       const scorePayload = (text) => {
         const t = String(text || "");
@@ -6267,7 +6292,7 @@ async function ensureChatGptDomHarvest(tabId) {
 }
 
 async function chatgptPollState(tabId, { harvestJson = false } = {}) {
-  if (harvestJson) await ensureChatGptDomHarvest(tabId);
+  await ensureChatGptDomHarvest(tabId);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     args: [Boolean(harvestJson)],
@@ -6318,8 +6343,17 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
 
         // Deep scan: last 20 assistant turns (retries push good JSON out of last-3).
         // Includes ChatGPT + Claude message roots.
+        const harvestApi = globalThis.__brightstarDomHarvest;
+        if (harvestApi?.collectAssistantTexts) {
+          try {
+            for (const t of harvestApi.collectAssistantTexts(document)) push(t);
+          } catch {
+            /* turn finder is best-effort */
+          }
+        }
+
         const blocks = document.querySelectorAll(
-          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [data-is-streaming], [class*='assistant-message'], [class*='font-claude-message']"
+          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-message-role='assistant'], [data-message-role=assistant], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [data-is-streaming], [class*='assistant-message'], [class*='font-claude-message']"
         );
         if (blocks.length) {
           const start = Math.max(0, blocks.length - 20);
@@ -6649,6 +6683,7 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         document.querySelectorAll(
           [
             "[data-message-author-role='assistant']",
+            "[data-message-role='assistant']",
             "[data-turn='assistant']",
             "section[data-turn='assistant']",
             '[data-testid="assistant-message"]',
@@ -6659,10 +6694,6 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
           ].join(", ")
         )
       );
-      if (blocks.length) {
-        blocks[blocks.length - 1].scrollIntoView({ block: "end", inline: "nearest" });
-      }
-
       let latest = "";
       if (blocks.length) {
         if (shouldHarvestJson) {
@@ -6705,6 +6736,11 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         if (scorePayload(harvested) > scorePayload(latest)) {
           latest = harvested;
         }
+      } else if (globalThis.__brightstarDomHarvest?.readNewestAssistantProse) {
+        const prose = String(
+          globalThis.__brightstarDomHarvest.readNewestAssistantProse(document) || ""
+        ).trim();
+        if (prose) latest = prose;
       }
 
       // Parse on-page so background gets a structured object (avoids huge-string IPC issues).
@@ -6762,13 +6798,16 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
               edu >= 1 ||
               (jobs >= 3 && bullets >= 8 && profile.length >= 60) ||
               (jobs >= 2 && bullets >= 10));
-          persistActiveResumeJson(resumeData, {
+          const payload = {
             chatgpt_harvested_resume: resumeData,
             chatgpt_harvested_at: Date.now(),
             chatgpt_harvested_jobs: jobs,
             chatgpt_json_ready: Boolean(looksComplete),
             chatgpt_json_ready_at: looksComplete ? Date.now() : 0
-          });
+          };
+          if (typeof chrome !== "undefined" && chrome.storage?.local?.set) {
+            chrome.storage.local.set(payload);
+          }
         } catch {
           // storage may be temporarily unavailable
         }
@@ -6839,6 +6878,20 @@ function looksSettledAssistantText(text, { expectResumeJson = false } = {}) {
   if (end < 0) return false;
   const after = t.slice(end + 1).replace(/```/g, "").trim();
   return after.length === 0;
+}
+
+async function pageShowsResumeMarkers(tabId) {
+  if (typeof tabId !== "number") return false;
+  await ensureChatGptDomHarvest(tabId);
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => Boolean(globalThis.__brightstarDomHarvest?.pageHasResumeMarkers?.(document))
+    });
+    return Boolean(results?.[0]?.result);
+  } catch {
+    return false;
+  }
 }
 
 async function automateChatGpt(tabId, prompt, options = {}) {
@@ -7145,6 +7198,26 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     // Cover letters should fail even sooner (same-chat follow-up).
     const sendFailSec = expectResumeJson ? 120 : 45;
     if (!sawGeneration && !state.generating && state.blockCount <= blocksBefore && elapsedSec > sendFailSec) {
+      if (expectResumeJson) {
+        const rescuedNow = await tryRecognizeResumeOnPage(tabId);
+        if (isUsableResumeJson(rescuedNow) || isMinimallySaveableResume(rescuedNow)) {
+          await setStatus(
+            `Resume JSON was already on screen (${rescuedNow.experience?.length || 0} jobs). Saving files…`
+          );
+          return JSON.stringify(rescuedNow);
+        }
+        const markers =
+          /"experience"|"name"|"bullets"/.test(lastText) || (await pageShowsResumeMarkers(tabId));
+        if (markers) {
+          await setStatus(`${label} — JSON is on screen; harvesting instead of treating Send as failed…`);
+          continue;
+        }
+      } else {
+        const plain = await readLatestAssistantPlainText(tabId);
+        const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
+        if (letter && looksLikeCoverLetterBody(letter)) return letter;
+        if (looksLikeCoverLetterBody(plain)) return plain;
+      }
       throw new Error(
         `${providerLabel} never started a reply (Send did not register). Keep that tab focused and retry.`
       );
@@ -7278,7 +7351,13 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         const rescuedAlreadyThere =
           rescued && String(latestBefore || "").includes(rescued.slice(0, 80));
         if (rescued && !rescuedAlreadyThere) return rescued;
+        if (looksLikeCoverLetterBody(plain) && !(plain && String(latestBefore || "").includes(plain.slice(0, 80)))) {
+          return plain;
+        }
         if (elapsedSec > 90 && !state.generating) {
+          const late = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
+          if (late && !String(latestBefore || "").includes(late.slice(0, 80))) return late;
+          if (looksLikeCoverLetterBody(plain)) return plain;
           throw new Error(
             "Cover letter reply did not appear after the resume JSON. Prompt may still be sitting in the composer — focus the AI tab and click Send, or Skip/Retry."
           );
@@ -7396,11 +7475,13 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
       let coverOutput = "";
       const pickCover = async (reply) => {
         const fromReply = extractCoverLetterText(reply);
-        if (fromReply) return fromReply;
+        if (fromReply && looksLikeCoverLetterBody(fromReply)) return fromReply;
         // Stale JSON often comes back from the poller — read the newest turn only.
         const latest = await readLatestAssistantPlainText(tabId);
         const fromPage = extractCoverLetterText(latest);
-        if (fromPage) return fromPage;
+        if (fromPage && looksLikeCoverLetterBody(fromPage)) return fromPage;
+        if (looksLikeCoverLetterBody(latest)) return String(latest).trim();
+        if (fromReply) return fromReply;
         return String(reply || "").trim();
       };
 
@@ -7912,10 +7993,20 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   lastUsableResumeData = null;
   const rowLabel = jobMeta.csvRow != null ? `${jobMeta.csvRow} · ` : "";
   let rawOutput = "";
-  let resumeData = null;
+  let resumeData =
+    isUsableResumeJson(jobMeta.harvestedResume) || isMinimallySaveableResume(jobMeta.harvestedResume)
+      ? jobMeta.harvestedResume
+      : null;
   const promptStartedAt = Date.now();
 
-  for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt += 1) {
+  if (resumeData) {
+    rawOutput = JSON.stringify(resumeData);
+    await setStatus(
+      `Row ${rowLabel}${jobMeta.companyName}: resume JSON already on screen (${resumeData.experience?.length || 0} jobs). Saving files…`
+    );
+  }
+
+  for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS && !isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData); attempt += 1) {
     const isFirst = attempt === 1;
 
     // Before any follow-up prompt: settle + harvest. Never re-prompt if ready.
@@ -8695,6 +8786,86 @@ async function runBatchLoop(outputDir) {
             reason: "rate limit retry"
           });
           continue;
+        }
+
+        const rescuedTab = typeof err?.aiTabId === "number" ? err.aiTabId : null;
+        if (
+          rescuedTab != null &&
+          /resume JSON|never started a reply|recognize complete resume/i.test(msg)
+        ) {
+          const rescued = await tryRecognizeResumeOnPage(rescuedTab).catch(() => null);
+          if (isUsableResumeJson(rescued) || isMinimallySaveableResume(rescued)) {
+            try {
+              await setStatus(
+                `Row ${next.csvRow}: resume JSON was already on screen — saving instead of skipping…`
+              );
+              const result = await runAutoJob({ ...jobMeta, harvestedResume: rescued });
+              if (batchControl.skipCurrent) {
+                batchControl.skipCurrent = false;
+                await updateQueueJob(next.csvRow, { status: "skipped", error: "Skipped during run" });
+                continue;
+              }
+              await updateQueueJob(next.csvRow, {
+                status: "done",
+                jobDir: result.savedDir,
+                profileId: activePerson?.id || next.profileId || "",
+                atsScore: result.atsEvaluation?.score ?? null,
+                atsGrade: result.atsEvaluation?.grade || "",
+                atsEvaluation: result.atsEvaluation || null,
+                forceRebuild: false,
+                error: result.coverLetterSaved
+                  ? ""
+                  : "Cover letter not created — auto-apply deferred until cover PDF exists"
+              });
+              await rememberApplyHistory(next.csvRow, {
+                jobDir: result.savedDir,
+                jdLink: next.jdLink || "",
+                status: "done",
+                title: next.title,
+                company: next.company
+              });
+              await setStatus(`Done row ${next.csvRow}. ${result.status}`);
+              const hostedApplyBoard = batchAutoApply && isDiceJob(next) ? "Dice" : "";
+              if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
+                const applyRes = await runHostedInterleavedApply(
+                  {
+                    csvRow: next.csvRow,
+                    jobTitle: next.title,
+                    companyName: next.company,
+                    company: next.company,
+                    title: next.title,
+                    jdLink: next.jdLink || "",
+                    salary: next.salary || "",
+                    jobDir: result.savedDir || "",
+                    profileId: activePerson?.id || next.profileId || "",
+                    applyAttempts: hostedApplyAttemptCount(next)
+                  },
+                  hostedApplyBoard
+                );
+                if (applyRes?.needsPause) {
+                  await pauseAfterFailedHostedApply(applyRes, next.csvRow);
+                  return;
+                }
+              }
+              if (batchControl.stop) {
+                await cooldownBeforeNextJob({
+                  aiTabId: result?.aiTabId,
+                  aiChatId: result?.aiChatId || "",
+                  reason: "stop"
+                });
+                break;
+              }
+              await armInactiveProbeForNextGenerateJob();
+              await cooldownBeforeNextJob({
+                aiTabId: result?.aiTabId,
+                aiChatId: result?.aiChatId || "",
+                reason: "next job (rate-limit protection)"
+              });
+              continue;
+            } catch {
+              // Recognition succeeded but save failed — record the original error below.
+            }
+          }
         }
 
         const attempts = Number(next.attempts || 0) + 1;

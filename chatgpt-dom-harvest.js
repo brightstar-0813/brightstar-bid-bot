@@ -7,14 +7,34 @@
   const TEXT_CAP = 400000;
   const MAX_SCROLL_STEPS = 20;
   const MAX_OVERLAP_LINES = 200;
+  const USER_SELECTOR = [
+    "[data-message-author-role='user']",
+    "[data-message-author-role=user]",
+    "[data-message-role='user']",
+    "[data-message-role=user]",
+    "[data-turn='user']",
+    "[data-testid*='user-message']"
+  ].join(", ");
+  const ASSISTANT_SELECTOR = [
+    "[data-message-author-role='assistant']",
+    "[data-message-author-role=assistant]",
+    "[data-message-role='assistant']",
+    "[data-message-role=assistant]",
+    "[data-turn='assistant']",
+    "section[data-turn='assistant']",
+    "[data-testid='assistant-message']",
+    "[data-testid='assistant']",
+    "[data-is-streaming]",
+    "[class*='assistant-message']",
+    "[class*='font-claude-message']"
+  ].join(", ");
+  const TURN_SELECTOR = "article[data-testid^='conversation-turn'], [data-testid^='conversation-turn']";
   const SKIP_SELECTOR = [
     "#prompt-textarea",
     "textarea",
     "[data-testid='composer']",
     "[data-testid*='composer']",
-    "[data-message-author-role='user']",
-    "[data-turn='user']",
-    "[data-testid*='user-message']"
+    USER_SELECTOR
   ].join(", ");
   const PANEL_SELECTOR = [
     "[data-testid*='canvas']",
@@ -153,18 +173,38 @@
     const tag = String(el.tagName || "").toUpperCase();
     if (tag === "MAIN" || tag === "BODY" || tag === "HTML") return true;
     if (typeof el.querySelectorAll === "function") {
-      const turns = el.querySelectorAll(
-        "[data-message-author-role='assistant'], [data-turn='assistant']"
-      );
+      const turns = el.querySelectorAll(ASSISTANT_SELECTOR);
       if (turns.length > 1) return true;
     }
     return false;
   }
 
+  function looksLikeJsonFragment(text) {
+    const t = String(text || "");
+    if (!t.includes("{") && !t.includes('"')) return false;
+    const complete =
+      (t.includes('"name"') || t.includes('"Name"')) &&
+      (t.includes('"experience"') || t.includes('"Experience"'));
+    if (complete) return false;
+    return (
+      t.includes('"bullets"') ||
+      t.includes('"Bullets"') ||
+      t.includes('"company"') ||
+      t.includes('"title"') ||
+      /^\s*\{/.test(t)
+    );
+  }
+
   function looksLikeCodeScroller(el) {
     if (!el || isPageScroller(el) || isComposerOrUserNode(el)) return false;
     const cls = `${el.className || ""} ${el.getAttribute?.("data-testid") || ""}`;
-    return /monaco-scrollable|cm-scroller|view-lines|cm-content|canvas|Canvas|ProseMirror/i.test(cls);
+    if (/monaco-scrollable|cm-scroller|view-lines|cm-content|canvas|Canvas|ProseMirror/i.test(cls)) {
+      return true;
+    }
+    const sh = Number(el.scrollHeight) || 0;
+    const ch = Number(el.clientHeight) || 0;
+    if (sh <= ch + 80 || ch < 40) return false;
+    return looksLikeJsonFragment(elementText(el));
   }
 
   function findScrollers() {
@@ -275,12 +315,221 @@
     return inflight;
   }
 
+  function docRoot(doc) {
+    if (doc && typeof doc.querySelectorAll === "function") return doc;
+    if (typeof document !== "undefined") return document;
+    return null;
+  }
+
+  function queryAll(doc, selector) {
+    const root = docRoot(doc);
+    if (!root) return [];
+    try {
+      return Array.from(root.querySelectorAll(selector));
+    } catch {
+      return [];
+    }
+  }
+
+  function isUserElement(el) {
+    if (!el || typeof el.getAttribute !== "function") return false;
+    const role = `${el.getAttribute("data-message-author-role") || ""} ${el.getAttribute("data-message-role") || ""} ${el.getAttribute("data-turn") || ""}`.toLowerCase();
+    if (/\buser\b/.test(role)) return true;
+    const testid = String(el.getAttribute("data-testid") || "").toLowerCase();
+    return testid.includes("user-message") || testid === "user";
+  }
+
+  function plainText(el) {
+    if (!el) return "";
+    return tidyChunk(el.innerText || el.textContent || "");
+  }
+
+  function readElementProse(el, { stripCode = false } = {}) {
+    if (!el || typeof el.cloneNode !== "function") return plainText(el);
+    let clone;
+    try {
+      clone = el.cloneNode(true);
+    } catch {
+      return elementText(el);
+    }
+    if (clone && typeof clone.querySelectorAll === "function") {
+      clone.querySelectorAll(USER_SELECTOR).forEach((node) => {
+        try {
+          node.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+      clone.querySelectorAll("#prompt-textarea, textarea, [data-testid*='composer']").forEach((node) => {
+        try {
+          node.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+      if (stripCode) {
+        clone.querySelectorAll("pre, code, button, [data-is-streaming]").forEach((node) => {
+          try {
+            node.remove();
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+    }
+    return plainText(clone);
+  }
+
+  function proseLooksLikeLetter(text) {
+    const s = String(text || "").trim();
+    if (s.length < 80) return false;
+    if (/"experience"\s*:/.test(s) && /"technicalSummary"|"certifications"\s*:/.test(s)) return false;
+    if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
+    if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i.test(s)) return false;
+    if (/dear\s+/i.test(s) || /hiring\s+(manager|team)/i.test(s)) return true;
+    const paras = s.split(/\n\s*\n+/).filter((p) => p.trim().length > 40);
+    if (paras.length >= 2 && s.length >= 180) return true;
+    return s.length >= 220 && !/"experience"\s*:/.test(s);
+  }
+
+  function remainderAfterKnownTurns(turn) {
+    if (!turn || typeof turn.cloneNode !== "function") return "";
+    let clone;
+    try {
+      clone = turn.cloneNode(true);
+    } catch {
+      return "";
+    }
+    if (!clone || typeof clone.querySelectorAll !== "function") return "";
+    clone.querySelectorAll(`${USER_SELECTOR}, ${ASSISTANT_SELECTOR}`).forEach((node) => {
+      try {
+        node.remove();
+      } catch {
+        /* ignore */
+      }
+    });
+    return readElementProse(clone, { stripCode: false });
+  }
+
+  /**
+   * Assistant turns on the current ChatGPT UI.
+   * A conversation turn that also contains the user prompt is kept:
+   * the user bubble is stripped when the text is read.
+   */
+  function assistantTurnNodes(doc) {
+    const seen = new Set();
+    const out = [];
+    const add = (el) => {
+      if (!el || seen.has(el) || isUserElement(el)) return;
+      seen.add(el);
+      out.push(el);
+    };
+    for (const el of queryAll(doc, ASSISTANT_SELECTOR)) add(el);
+    for (const turn of queryAll(doc, TURN_SELECTOR)) {
+      const assistant = typeof turn.querySelector === "function" ? turn.querySelector(ASSISTANT_SELECTOR) : null;
+      if (assistant) add(assistant);
+      else add(turn);
+    }
+    return out;
+  }
+
+  function collectAssistantTexts(doc) {
+    const texts = [];
+    const push = (raw) => {
+      const t = tidyChunk(raw);
+      if (t.length > 40) texts.push(t.slice(0, 400000));
+    };
+    const assistants = queryAll(doc, ASSISTANT_SELECTOR).filter((el) => !isUserElement(el));
+    for (const el of assistants) push(readElementProse(el, { stripCode: false }));
+    for (const turn of queryAll(doc, TURN_SELECTOR)) {
+      const assistant =
+        typeof turn.querySelector === "function" ? turn.querySelector(ASSISTANT_SELECTOR) : null;
+      if (!assistant) push(readElementProse(turn, { stripCode: false }));
+      else push(remainderAfterKnownTurns(turn));
+    }
+    const hasResume = texts.some(
+      (t) => t.includes('"experience"') || t.includes('"Experience"') || t.includes('"name"') || t.includes('"Name"')
+    );
+    if (!hasResume) push(mainTextExcludingUser(doc));
+    return texts;
+  }
+
+  function mainTextExcludingUser(doc) {
+    const root = docRoot(doc);
+    if (!root) return "";
+    const main =
+      (typeof root.querySelector === "function" && root.querySelector("main")) || root.body || root;
+    return readElementProse(main, { stripCode: false });
+  }
+
+  function pageHasResumeMarkers(doc) {
+    return collectAssistantTexts(doc).some((t) =>
+      /"experience"|"Experience"|"name"|"Name"|"bullets"|"Bullets"/.test(t)
+    );
+  }
+
+  function countChatBlocks(doc) {
+    const root = docRoot(doc);
+    if (!root) return { assistantBlocks: 0, userBlocks: 0 };
+    let assistantBlocks = queryAll(root, ASSISTANT_SELECTOR).filter((el) => !isUserElement(el)).length;
+    const userBlocks = queryAll(root, USER_SELECTOR).length;
+    if (assistantBlocks < 1) {
+      assistantBlocks = assistantTurnNodes(root).filter(
+        (el) => readElementProse(el, { stripCode: false }).length > 40
+      ).length;
+    }
+    return { assistantBlocks, userBlocks };
+  }
+
+  /**
+   * Newest letter-like assistant prose, else the newest non-empty reply.
+   * Prefers a finished letter over a shorter retry that is still streaming,
+   * and over the resume JSON turn.
+   */
+  function readNewestAssistantProse(doc) {
+    const promptEcho = /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i;
+    const pieces = [];
+    const turns = queryAll(doc, TURN_SELECTOR);
+    if (turns.length) {
+      for (const turn of turns) {
+        const assistant =
+          typeof turn.querySelector === "function" ? turn.querySelector(ASSISTANT_SELECTOR) : null;
+        if (assistant) pieces.push(readElementProse(assistant, { stripCode: true }));
+        const rest = remainderAfterKnownTurns(turn);
+        if (rest) pieces.push(rest);
+        if (!assistant) pieces.push(readElementProse(turn, { stripCode: true }));
+      }
+    } else {
+      for (const el of assistantTurnNodes(doc)) pieces.push(readElementProse(el, { stripCode: true }));
+    }
+    if (!pieces.some((t) => proseLooksLikeLetter(t))) {
+      const mainText = mainTextExcludingUser(doc);
+      if (mainText) pieces.push(mainText);
+    }
+    let bestLetter = "";
+    let newest = "";
+    for (const raw of pieces) {
+      const text = tidyChunk(raw);
+      if (!text || promptEcho.test(text)) continue;
+      newest = text;
+      if (proseLooksLikeLetter(text) && text.length >= bestLetter.length) bestLetter = text;
+    }
+    return (bestLetter || newest).slice(0, 20000);
+  }
+
   const api = {
     domTextLooksIncomplete,
     shouldDeepScroll,
     stitchViewportChunks,
     isComposerOrUserNode,
-    collectFullResumeDomText
+    looksLikeCodeScroller,
+    looksLikeJsonFragment,
+    collectFullResumeDomText,
+    collectAssistantTexts,
+    pageHasResumeMarkers,
+    countChatBlocks,
+    readNewestAssistantProse,
+    proseLooksLikeLetter
   };
   root.__brightstarDomHarvest = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

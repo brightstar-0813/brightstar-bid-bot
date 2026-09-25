@@ -96,67 +96,14 @@ export function extractCoverLetterText(text) {
 
 /**
  * Newest assistant prose on a ChatGPT/Claude page.
- * Skips nested stream sentinels, toolbars, code-block JSON, and the cover-letter prompt echo.
- * Must stay self-contained: executeScript serializes this function alone.
+ * Delegates to chatgpt-dom-harvest.js (injected in the isolated world) so a
+ * conversation turn that also contains the user prompt is still readable.
+ * executeScript serializes this function alone; the harvest API must already be loaded.
  */
 export function readNewestAssistantProseInPage() {
-  const assistantSelector = [
-    "[data-message-author-role='assistant']",
-    "[data-message-author-role=assistant]",
-    "[data-turn='assistant']",
-    "section[data-turn='assistant']",
-    '[data-testid="assistant-message"]',
-    '[data-testid="assistant"]',
-    '[class*="assistant-message"]',
-    '[class*="font-claude-message"]'
-  ].join(", ");
-
-  const candidates = [];
-  const seen = new Set();
-  const add = (el) => {
-    if (!el || el.nodeType !== 1 || seen.has(el)) return;
-    if (el.matches("button, [data-is-streaming]")) return;
-    if (el.closest("button, #prompt-textarea")) return;
-    const role = `${el.getAttribute("data-message-author-role") || ""} ${el.getAttribute("data-turn") || ""}`.toLowerCase();
-    if (/\buser\b/.test(role)) return;
-    seen.add(el);
-    candidates.push(el);
-  };
-
-  for (const el of document.querySelectorAll(assistantSelector)) add(el);
-
-  for (const turn of document.querySelectorAll('[data-testid^="conversation-turn"]')) {
-    const userInside = turn.querySelector(
-      "[data-message-author-role='user'], [data-turn='user'], [data-testid*='user-message']"
-    );
-    const assistant = turn.querySelector(assistantSelector);
-    if (userInside && !assistant) continue;
-    if (assistant) add(assistant);
-    else if (!userInside) add(turn);
-  }
-
-  const roots = candidates.filter(
-    (el) => !candidates.some((other) => other !== el && other.contains(el))
-  );
-
-  const readProse = (block) => {
-    const clone = block.cloneNode(true);
-    clone.querySelectorAll("pre, code, button, [data-is-streaming]").forEach((node) => node.remove());
-    return String(clone.innerText || clone.textContent || "")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  };
-
-  const promptEcho = /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i;
-  for (let i = roots.length - 1; i >= 0; i -= 1) {
-    const text = readProse(roots[i]);
-    if (!text || promptEcho.test(text)) continue;
-    try {
-      roots[i].scrollIntoView({ block: "end", inline: "nearest" });
-    } catch {
-      /* ignore */
-    }
-    return text.slice(0, 20000);
+  const api = globalThis.__brightstarDomHarvest;
+  if (typeof api?.readNewestAssistantProse === "function") {
+    return String(api.readNewestAssistantProse(typeof document !== "undefined" ? document : undefined) || "");
   }
   return "";
 }

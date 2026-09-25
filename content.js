@@ -379,10 +379,14 @@
       (s.includes('"experience"') || s.includes('"Experience"')) &&
       (s.includes('"name"') || s.includes('"Name"') || s.includes('"profile"'));
 
+    // Shared turn finder: role attributes, conversation turns, and main-text fallback.
+    const sharedTexts = globalThis.__brightstarDomHarvest?.collectAssistantTexts?.(document) || [];
+    for (const t of sharedTexts) push(t);
+
     // 1) Every assistant message (cap at last 20 for performance).
     const blocks = Array.from(
       document.querySelectorAll(
-        "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
+        "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-message-role='assistant'], [data-message-role=assistant], [data-turn='assistant'], section[data-turn='assistant']"
       )
     );
     const start = Math.max(0, blocks.length - 20);
