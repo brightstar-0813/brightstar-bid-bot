@@ -3,17 +3,46 @@
  * The page reader is self-contained so chrome.scripting.executeScript can serialize it.
  */
 
+/** Footer and model chrome that sits under the composer, not part of the letter. */
+export function stripChatGptChrome(text) {
+  return String(text || "")
+    .replace(/The\s*ChatGPT can make mistakes\.?/gi, "")
+    .replace(/ChatGPT can make mistakes\.?/gi, "")
+    .replace(/Check important info\.?/gi, "")
+    .replace(/Latest\s*response/gi, "")
+    .replace(/Thinking\s*effort/gi, "")
+    .replace(/(^|[\s,])Instant\b/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function letterBodyChunks(text) {
+  const chunks = String(text || "")
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 40 && !/^dear\s+/i.test(p));
+  if (chunks.length >= 2) return chunks;
+  return String(text || "")
+    .split(/(?<=[.!?])\s+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 40 && !/^dear\s+/i.test(p));
+}
+
 export function looksLikeCoverLetterBody(text) {
-  const s = String(text || "").trim();
-  if (s.length < 80) return false;
+  const s = stripChatGptChrome(text);
   // Resume JSON dumped into the "letter" slot.
   if (/"experience"\s*:/.test(s) && /"technicalSummary"|"certifications"\s*:/.test(s)) return false;
   if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
-  if (/dear\s+/i.test(s) || /hiring\s+(manager|team)/i.test(s)) return true;
-  // Plain multi-paragraph letter without salutation still OK if long enough.
-  const paras = s.split(/\n\s*\n+/).filter((p) => p.trim().length > 40);
-  if (paras.length >= 2 && s.length >= 180) return true;
-  return s.length >= 220 && !/"experience"\s*:/.test(s);
+  // Salutation glued to the ChatGPT footer is not a finished letter.
+  if (/ChatGPT can make mistakes|Check important info|Latest response|Thinking effort/i.test(s)) return false;
+  const paras = letterBodyChunks(s);
+  const bodyLen = paras.reduce((n, p) => n + p.length, 0);
+  if (paras.length < 2 || bodyLen < 160) return false;
+  // The closing is the last thing ChatGPT writes. A salutation, or a letter
+  // that has not reached that line yet, is not ready to download.
+  const tail = s.slice(-600);
+  return /thank you|consideration|welcome the opportunity|i would welcome|happy to discuss/i.test(tail);
 }
 
 function findBalancedObjectEnd(input, start) {
@@ -89,8 +118,9 @@ function sliceFromDear(raw) {
     const body = rest.slice(idx).trim();
     const later = body.slice(5).search(/\bDear\s+/i);
     const segment = (later >= 0 ? body.slice(0, later + 5) : body).trim();
-    if (!isCoverPromptEcho(segment) && looksLikeCoverLetterBody(segment) && segment.length >= best.length) {
-      best = segment;
+    const cleaned = stripChatGptChrome(segment);
+    if (!isCoverPromptEcho(cleaned) && looksLikeCoverLetterBody(cleaned) && cleaned.length >= best.length) {
+      best = cleaned;
     }
     rest = rest.slice(idx + 5);
   }
@@ -125,10 +155,10 @@ export function extractCoverLetterText(text) {
   const stripped = stripResumeJsonObjects(raw).trim();
   const fromStrippedDear = sliceFromDear(stripped);
   if (fromStrippedDear) return fromStrippedDear;
-  const afterPrompt = dropPromptParagraphs(stripped);
+  const afterPrompt = stripChatGptChrome(dropPromptParagraphs(stripped));
   if (looksLikeCoverLetterBody(afterPrompt)) return afterPrompt;
   if (isCoverPromptEcho(stripped)) return "";
-  return looksLikeCoverLetterBody(stripped) ? stripped : "";
+  return looksLikeCoverLetterBody(stripped) ? stripChatGptChrome(stripped) : "";
 }
 
 /**

@@ -157,7 +157,8 @@ import { harvestEmailDraftFromAiText } from "./prompts/email-compose.js";
 import {
   extractCoverLetterText,
   looksLikeCoverLetterBody,
-  readNewestAssistantProseInPage
+  readNewestAssistantProseInPage,
+  stripChatGptChrome
 } from "./cover-letter-harvest.js";
 
 const QUEUE_KEY = "job_queue";
@@ -3053,7 +3054,7 @@ async function logProfileApply(jobMeta = {}) {
 }
 
 function coverLetterTextToParagraphs(raw) {
-  let s = String(raw || "");
+  let s = stripChatGptChrome(raw);
 
   // If ChatGPT returned HTML anyway, convert block boundaries to newlines, then strip tags.
   if (/<\/?[a-z][^>]*>/i.test(s)) {
@@ -3107,6 +3108,7 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
     const lc = p.toLowerCase().trim();
     if (!lc) return false;
     if (uiLabelRe.test(lc)) return false; // ChatGPT message-toolbar button labels
+    if (/chatgpt can make mistakes|check important info|latest response|thinking effort/i.test(lc)) return false;
     if (closingRe.test(lc)) return false; // local signature adds this
     if (nameLc && lc === nameLc) return false; // trailing full-name line
     if (firstNameLc && lc === firstNameLc) return false; // trailing first-name line
@@ -7035,7 +7037,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         extractCoverLetterText(state.latest) || extractCoverLetterText(lastText);
       const alreadyThere =
         letterNow && String(latestBefore || "").includes(letterNow.slice(0, 80));
-      if (letterNow && !alreadyThere) return letterNow;
+      if (letterNow && looksLikeCoverLetterBody(letterNow) && !alreadyThere) return letterNow;
     }
 
     // Stream just finished → wait for DOM settle, then harvest (user's requested delay).
@@ -7333,30 +7335,22 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
       const letterAlreadyThere =
         letter && String(latestBefore || "").includes(letter.slice(0, 80));
-      if (letter && !letterAlreadyThere) return letter;
-      if (
-        plain &&
-        plain.length > 120 &&
-        !/"experience"\s*:/.test(plain) &&
-        (sawGeneration || state.blockCount > blocksBefore || elapsedSec > 20)
-      ) {
-        if (stableHits >= 2 || looksSettledAssistantText(plain, { expectResumeJson: false })) {
-          return plain;
-        }
-      }
+      if (letter && looksLikeCoverLetterBody(letter) && !letterAlreadyThere) return letter;
 
       // Still stuck on the previous resume JSON turn — keep waiting for the letter.
       if (/"experience"\s*:/.test(lastText) && /"name"\s*:/.test(lastText)) {
         const rescued = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
         const rescuedAlreadyThere =
           rescued && String(latestBefore || "").includes(rescued.slice(0, 80));
-        if (rescued && !rescuedAlreadyThere) return rescued;
+        if (rescued && looksLikeCoverLetterBody(rescued) && !rescuedAlreadyThere) return rescued;
         if (looksLikeCoverLetterBody(plain) && !(plain && String(latestBefore || "").includes(plain.slice(0, 80)))) {
           return plain;
         }
         if (elapsedSec > 90 && !state.generating) {
           const late = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
-          if (late && !String(latestBefore || "").includes(late.slice(0, 80))) return late;
+          if (late && looksLikeCoverLetterBody(late) && !String(latestBefore || "").includes(late.slice(0, 80))) {
+            return late;
+          }
           if (looksLikeCoverLetterBody(plain)) return plain;
           throw new Error(
             "Cover letter reply did not appear after the resume JSON. Prompt may still be sitting in the composer — focus the AI tab and click Send, or Skip/Retry."
@@ -7364,14 +7358,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         }
         continue;
       }
-      if (stableHits >= 2 && looksSettledAssistantText(lastText, { expectResumeJson })) {
-        return lastText;
-      }
-      if (stableHits >= 5 && sawGeneration && looksLikeCoverLetterBody(lastText)) {
-        return lastText;
-      }
-      if (stableHits >= 8 && sawGeneration && lastText.length > 80) {
-        return lastText;
+      if (stableHits >= 2 && looksLikeCoverLetterBody(lastText)) {
+        const finished = extractCoverLetterText(lastText) || stripChatGptChrome(lastText);
+        if (looksLikeCoverLetterBody(finished)) return finished;
       }
       continue;
     }
@@ -7403,8 +7392,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
     const letterAlreadyThere =
       letter && String(latestBefore || "").includes(letter.slice(0, 80));
-    if (letter && !letterAlreadyThere) return letter;
-    if (plain && plain.length > 80 && !/"experience"\s*:/.test(plain)) return plain;
+    if (letter && looksLikeCoverLetterBody(letter) && !letterAlreadyThere) return letter;
   }
 
   throw new Error(

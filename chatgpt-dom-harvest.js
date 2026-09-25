@@ -381,15 +381,31 @@
   }
 
   function proseLooksLikeLetter(text) {
-    const s = String(text || "").trim();
-    if (s.length < 80) return false;
+    const s = String(text || "")
+      .replace(/The\s*ChatGPT can make mistakes\.?/gi, "")
+      .replace(/ChatGPT can make mistakes\.?/gi, "")
+      .replace(/Check important info\.?/gi, "")
+      .replace(/Latest\s*response/gi, "")
+      .replace(/Thinking\s*effort/gi, "")
+      .replace(/(^|[\s,])Instant\b/g, "$1")
+      .trim();
+    if (/ChatGPT can make mistakes|Check important info|Latest response|Thinking effort/i.test(s)) return false;
     if (/"experience"\s*:/.test(s) && /"technicalSummary"|"certifications"\s*:/.test(s)) return false;
     if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
     if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i.test(s)) return false;
-    if (/dear\s+/i.test(s) || /hiring\s+(manager|team)/i.test(s)) return true;
-    const paras = s.split(/\n\s*\n+/).filter((p) => p.trim().length > 40);
-    if (paras.length >= 2 && s.length >= 180) return true;
-    return s.length >= 220 && !/"experience"\s*:/.test(s);
+    let paras = s
+      .split(/\n+/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 40 && !/^dear\s+/i.test(p));
+    if (paras.length < 2) {
+      paras = s
+        .split(/(?<=[.!?])\s+/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 40 && !/^dear\s+/i.test(p));
+    }
+    const bodyLen = paras.reduce((n, p) => n + p.length, 0);
+    if (paras.length < 2 || bodyLen < 160) return false;
+    return /thank you|consideration|welcome the opportunity|i would welcome|happy to discuss/i.test(s.slice(-600));
   }
 
   function remainderAfterKnownTurns(turn) {

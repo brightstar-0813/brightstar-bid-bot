@@ -195,6 +195,29 @@ test("keeps the real letter that follows the cover prompt's Dear Hiring Manager 
   assert.equal(looksLikeCoverLetterBody(letter), true);
 });
 
+test("does not treat a salutation glued to ChatGPT footer chrome as a finished letter", () => {
+  const partial =
+    "Dear Shimento, Inc. Hiring Team,TheChatGPT can make mistakes. Check important info.Latest responseThinking effortInstant";
+  assert.equal(looksLikeCoverLetterBody(partial), false);
+  assert.equal(extractCoverLetterText(partial), "");
+});
+
+test("strips footer chrome from a finished letter instead of saving the salutation early", () => {
+  const finished = [
+    "Dear Shimento, Inc. Hiring Team,",
+    "The Salesforce CPQ role at Shimento aligns with the hands-on Sales Cloud, Apex, and Lightning work I have delivered across customer acquisition and quoting.",
+    "At Culligan International I design Sales Cloud processes, Apex, Lightning Web Components, and Revenue Cloud quoting workflows that keep opportunities and orders in sync.",
+    "I would welcome the opportunity to discuss how that experience could support Shimento, Inc. Thank you for your consideration.",
+    "ChatGPT can make mistakes. Check important info. Latest response Thinking effort Instant"
+  ].join("\n\n");
+  const letter = extractCoverLetterText(finished);
+  assert.match(letter, /^Dear Shimento, Inc\. Hiring Team,/);
+  assert.match(letter, /Thank you for your consideration/);
+  assert.equal(/ChatGPT can make mistakes/.test(letter), false);
+  assert.equal(/Thinking effort/.test(letter), false);
+  assert.equal(looksLikeCoverLetterBody(letter), true);
+});
+
 test("rejects resume JSON that has no letter after it", () => {
   assert.equal(extractCoverLetterText(resumeJson), "");
   assert.equal(looksLikeCoverLetterBody(resumeJson), false);
