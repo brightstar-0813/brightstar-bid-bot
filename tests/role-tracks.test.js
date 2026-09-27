@@ -76,6 +76,7 @@ test("isRoleTrackLockedForPerson locks built-ins and saved customs", () => {
 test("resolveRoleTrackForPerson infers sf for built-in Salesforce profiles", () => {
   assert.equal(resolveRoleTrackForPerson({ id: "dmario-lewis" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ id: "sandeep-mahankali" }), "sf");
+  assert.equal(resolveRoleTrackForPerson({ id: "sandeep-unnikrishnan" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ roleTrack: "de" }), "de");
 });
 
@@ -120,7 +121,7 @@ test("resolvePromptTemplateForTrack keeps built-in SF prompt on SF track", () =>
 });
 
 test("resolvePromptTemplateForTrack uses DE template for built-in when track is DE", () => {
-  const person = { id: "edrwin-revolorio", promptTemplate: dmarioPrompt, roleTrack: "sf" };
+  const person = { id: "sandeep-unnikrishnan", promptTemplate: dmarioPrompt, roleTrack: "sf" };
   assert.equal(resolvePromptTemplateForTrack(person, "de"), deSeniorPrompt);
 });
 

@@ -3150,10 +3150,6 @@ async function finalizeResumeData(resumeData) {
       linkedin: contact.linkedin || data.linkedin,
       location: contact.location || data.location
     };
-    // Hard rewrite known legacy Edrwin Houston number if it slipped into JSON.
-    if (/(?:\+?1[\s\-.]*)?\(?713\)?[\s\-.]*(?:659)[\s\-.]*(?:9480)/.test(String(data.phone || ""))) {
-      data.phone = contact.phone || "+1 (317) 563-1795";
-    }
   } catch {
     // keep sanitized data
   }

@@ -22,12 +22,14 @@ const EXPECTED_BULLET_COUNTS = [
   { match: /christian\s*reformed\s*church/i, count: 6 },
   { match: /bostwick\s*lake/i, count: 2 },
   { match: /wolverine\s*world\s*wide/i, count: 2 },
-  // Edrwin Revolorio
-  { match: /accenture/i, count: 10 },
-  { match: /capgemini/i, count: 9 },
-  { match: /appirio/i, count: 8 },
-  { match: /innoit|innodit/i, count: 4 },
-  { match: /serve\s*it/i, count: 2 },
+  // Sandeep Unnikrishnan
+  { match: /labcorp/i, count: 10 },
+  { match: /m\s*&\s*t/i, count: 9 },
+  { match: /^visa$/i, count: 10 },
+  { match: /activision/i, count: 6 },
+  { match: /vantiv/i, count: 4 },
+  { match: /schwab/i, count: 3 },
+  { match: /wipro/i, count: 6 },
   // Sandeep Mahankali
   { match: /taproot/i, count: 10 },
   { match: /deloitte/i, count: 10 },

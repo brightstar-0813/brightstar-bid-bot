@@ -1,5 +1,5 @@
 import { PROMPT as dmarioLewisPrompt } from "./prompts/dmario-lewis.js";
-import { PROMPT as edrwinRevolorioPrompt } from "./prompts/edrwin-revolorio.js";
+import { PROMPT as sandeepUnnikrishnanPrompt } from "./prompts/sandeep-unnikrishnan.js";
 import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
 import { PROMPT as michaelIbeaPrompt } from "./prompts/michael-ibea.js";
 import { PROMPT as carlosCapulongPrompt } from "./prompts/carlos-capulong.js";
@@ -117,25 +117,25 @@ export const BUILTIN_PROFILES = [
     ]
   },
   {
-    id: "edrwin-revolorio",
-    label: "Edrwin S Revolorio",
+    id: "sandeep-unnikrishnan",
+    label: "Sandeep Unnikrishnan",
     roleTrack: "sf",
-    promptTemplate: edrwinRevolorioPrompt,
+    promptTemplate: sandeepUnnikrishnanPrompt,
     templateId: "ats-modern",
-    resumeFilePrefix: "Revolorio_Resume",
-    sheetTabName: "Edrwin-SF",
-    outputDir: "Edrwin-SF",
+    resumeFilePrefix: "Unnikrishnan_Resume",
+    sheetTabName: "Unnikrishnan-SF",
+    outputDir: "Unnikrishnan-SF",
     builtin: true,
     kind: "resume",
-    name: "Edrwin S Revolorio",
-    email: "edrwin.revolorio1996@outlook.com",
+    name: "Sandeep Unnikrishnan",
+    email: "sandeep.unnikrishnan@outlook.com",
     phone: "+1 (317) 563-1795",
-    linkedin: "https://www.linkedin.com/in/edwin-revolorio/",
+    linkedin: "https://www.linkedin.com/in/sandeep-unnikrishnan-a5a68453/",
     portfolio: "",
     password: DEFAULT_ATS_PASSWORD,
-    location: "Indianapolis, Indiana, United States",
-    address: "1633 Deloss St",
-    zip: "46201",
+    location: "Round Rock, Texas, United States",
+    address: "3723 Castle Rock Dr",
+    zip: "78681",
     gender: "",
     ethnicity: "",
     disability: "No, I do not have a disability",
@@ -144,16 +144,18 @@ export const BUILTIN_PROFILES = [
     workAuthorized: "Yes",
     sponsorship: "No",
     hispanicLatino: "",
-    signatureTitle: "Senior Salesforce Engineer | Technical Lead",
+    signatureTitle: "Senior Salesforce Architect | Senior Salesforce Engineer",
     masterResume: "",
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
-      "Accenture",
-      "Capgemini",
-      "Appirio",
-      "Innoit",
-      "Indiana University Serve IT Clinic"
+      "Labcorp",
+      "M&T Bank",
+      "Visa",
+      "Activision Blizzard",
+      "Vantiv",
+      "Charles Schwab",
+      "Wipro Technologies"
     ]
   },
   {
@@ -598,33 +600,24 @@ export function trimPromptToBudget(prompt, { maxChars = MAX_RESUME_PROMPT_CHARS 
   return `${text.slice(0, Math.floor(maxChars * 0.35)).trimEnd()}\n\n[…prompt truncated…]\n\n${text.slice(-(Math.floor(maxChars * 0.6))).trimStart()}`;
 }
 
-const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman"]);
-const REMOVED_PERSON_NAME = /matthew\s+dale\s+hoffman/i;
-/** Legacy Edrwin Houston number — always rewrite to Indianapolis. */
-const EDRWIN_LEGACY_PHONE_RE = /(?:\+?1[\s\-.]*)?\(?713\)?[\s\-.]*(?:659)[\s\-.]*(?:9480)/;
-const EDRWIN_CURRENT_PHONE = "+1 (317) 563-1795";
+const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman", "edrwin-revolorio"]);
+const REMOVED_PERSON_NAME = /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio/i;
+
+function isRemovedPersonId(id) {
+  const raw = String(id || "");
+  const lower = raw.toLowerCase();
+  return (
+    REMOVED_PERSON_IDS.has(raw) ||
+    lower.startsWith("matthew-dale-hoffman") ||
+    lower.includes("edrwin") ||
+    lower.includes("revolorio")
+  );
+}
 
 function isRemovedPerson(p) {
   const id = String(p?.id || "");
   const name = String(p?.name || p?.label || "");
-  return (
-    REMOVED_PERSON_IDS.has(id) ||
-    id.startsWith("matthew-dale-hoffman") ||
-    REMOVED_PERSON_NAME.test(name)
-  );
-}
-
-function looksLikeEdrwinPerson(p) {
-  const id = String(p?.id || "").toLowerCase();
-  const name = String(p?.name || p?.label || "").toLowerCase();
-  return id.includes("edrwin") || id.includes("revolorio") || /edrwin|revolorio/.test(name);
-}
-
-function normalizeEdrwinPhone(phone) {
-  const raw = String(phone || "").trim();
-  if (!raw) return raw;
-  if (EDRWIN_LEGACY_PHONE_RE.test(raw)) return EDRWIN_CURRENT_PHONE;
-  return raw;
+  return isRemovedPersonId(id) || REMOVED_PERSON_NAME.test(name);
 }
 
 /** Drop retired built-in people (and saved copies) from this Chrome profile. */
@@ -632,22 +625,14 @@ async function purgeRemovedPeopleFromStorage() {
   const data = await chrome.storage.local.get([CUSTOM_PROFILES_KEY, ACTIVE_PERSON_ID_KEY, "selected_profile_id"]);
   const list = Array.isArray(data[CUSTOM_PROFILES_KEY]) ? data[CUSTOM_PROFILES_KEY] : [];
   const kept = list.filter((p) => !isRemovedPerson(p));
-  let phoneFixed = false;
-  const withPhones = kept.map((p) => {
-    if (!looksLikeEdrwinPerson(p)) return p;
-    const nextPhone = normalizeEdrwinPhone(p.phone) || EDRWIN_CURRENT_PHONE;
-    if (nextPhone === p.phone) return p;
-    phoneFixed = true;
-    return { ...p, phone: nextPhone };
-  });
   const patch = {};
-  if (kept.length !== list.length || phoneFixed) patch[CUSTOM_PROFILES_KEY] = withPhones;
+  if (kept.length !== list.length) patch[CUSTOM_PROFILES_KEY] = kept;
   const activeId = String(data[ACTIVE_PERSON_ID_KEY] || "");
   const selectedId = String(data.selected_profile_id || "");
-  if (REMOVED_PERSON_IDS.has(activeId) || activeId.startsWith("matthew-dale-hoffman")) {
+  if (isRemovedPersonId(activeId)) {
     patch[ACTIVE_PERSON_ID_KEY] = DEFAULT_PROFILE_ID;
   }
-  if (REMOVED_PERSON_IDS.has(selectedId) || selectedId.startsWith("matthew-dale-hoffman")) {
+  if (isRemovedPersonId(selectedId)) {
     patch.selected_profile_id = DEFAULT_PROFILE_ID;
   }
   if (Object.keys(patch).length) await chrome.storage.local.set(patch);
@@ -898,7 +883,7 @@ export async function getCoverLetterProfile() {
 
 const BUILTIN_SF_PROFILE_IDS = new Set([
   "dmario-lewis",
-  "edrwin-revolorio",
+  "sandeep-unnikrishnan",
   "sandeep-mahankali",
   "michael-ibea",
   "carlos-capulong",

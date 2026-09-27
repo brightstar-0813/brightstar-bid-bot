@@ -325,7 +325,7 @@ export function resolveRoleTrackForPerson(person) {
   if (id === "david-oliveira-de") return "de";
   if (
     id === "dmario-lewis" ||
-    id === "edrwin-revolorio" ||
+    id === "sandeep-unnikrishnan" ||
     id === "sandeep-mahankali" ||
     id === "michael-ibea" ||
     id === "carlos-capulong" ||
