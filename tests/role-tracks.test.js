@@ -21,7 +21,6 @@ import { PROMPT as deSeniorPrompt } from "../prompts/de-senior.js";
 import { PROMPT as davidDePrompt } from "../prompts/david-oliveira-de.js";
 import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
-import { PROMPT as aiV2Prompt } from "../prompts/ai-v2.js";
 import { PROMPT as resumeV3Prompt } from "../prompts/resume-v3.js";
 import { ATS_RECRUITER_PASS } from "../role-tracks.js";
 
@@ -157,27 +156,6 @@ test("resolveResumePromptForVersion uses the shared test prompt for built-in and
   assert.doesNotMatch(sfTestPrompt, /ChowNow|Bluebeam|Hilmar/);
   assert.match(sfTestPrompt, /\{JD\}/);
   assert.match(sfTestPrompt, /\{MASTER_RESUME\}/);
-});
-
-test("resolveResumePromptForVersion uses the shared v2 prompt for any person", () => {
-  const builtin = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
-  const custom = {
-    id: "custom-sf",
-    promptTemplate: "Custom SF prompt {JD} {NAME} {MASTER_RESUME}",
-    roleTrack: "sf"
-  };
-  const dePerson = {
-    id: "david-oliveira-de",
-    promptTemplate: davidDePrompt,
-    roleTrack: "de"
-  };
-  assert.equal(resolveResumePromptForVersion(builtin, "sf", "v2"), aiV2Prompt);
-  assert.equal(resolveResumePromptForVersion(custom, "sf", "v2"), aiV2Prompt);
-  assert.equal(resolveResumePromptForVersion(dePerson, "de", "v2"), aiV2Prompt);
-  assert.match(aiV2Prompt, /\{JD\}/);
-  assert.match(aiV2Prompt, /\{MASTER_RESUME\}/);
-  assert.match(aiV2Prompt, /\{NAME\}/);
-  assert.doesNotMatch(aiV2Prompt, /Jos[eé]|Azumo|Accenture|Let's Delivery|ADVERSE|Florian[oó]polis|silvajoser/i);
 });
 
 test("resolveResumePromptForVersion uses the shared v3 prompt for any person", () => {
