@@ -37,6 +37,36 @@ test("jobs with no sheet row keep the plain date form", () => {
   assert.equal(buildJobFolderName({ ...JOB, csvRow: 0 }), "9-21_Socium-Senior Salesforce Developer");
 });
 
+test("manual and profile-apply folders omit a synthetic queue row", () => {
+  assert.equal(
+    buildJobFolderName({ ...JOB, csvRow: 42, bidSource: "one-off" }),
+    "9-21_Socium-Senior Salesforce Developer"
+  );
+  assert.equal(
+    buildJobFolderName({ ...JOB, csvRow: 42, oneOff: true }),
+    "9-21_Socium-Senior Salesforce Developer"
+  );
+  assert.equal(
+    buildJobFolderName({ ...JOB, csvRow: 42, bidSource: "profile-apply" }),
+    "9-21_Socium-Senior Salesforce Developer"
+  );
+  assert.equal(
+    buildJobFolderName({
+      companyName: "Synthires",
+      jobTitle: "Salesforce Specialist",
+      csvRow: 8,
+      bidSource: "one-off",
+      savedAt: new Date(2026, 8, 29)
+    }),
+    "9-29_Synthires-Salesforce Specialist"
+  );
+  // Batch still keeps the row even with an unrelated source.
+  assert.equal(
+    buildJobFolderName({ ...JOB, csvRow: 16, bidSource: "batch" }),
+    "16_9-21_Socium-Senior Salesforce Developer"
+  );
+});
+
 test("normalizeCsvRow only accepts positive numbers", () => {
   assert.equal(normalizeCsvRow(16), 16);
   assert.equal(normalizeCsvRow(" 16 "), 16);

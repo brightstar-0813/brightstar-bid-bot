@@ -171,13 +171,21 @@ The **Manual one-off** form also remembers whether it was expanded, and collapse
 ## Output folder naming
 
 ```
-Downloads / Applications-Lewis / 12 - Acme Inc - Senior Salesforce Developer /
+Downloads / Lewis-SF / 16_9-29_Acme Inc-Senior Salesforce Developer /
   jd.txt
   Lewis_Resume.pdf
   Lewis_Cover Letter.pdf
 ```
 
-The output folder follows the active person (`Applications-{ResumePrefix}` from the PDF prefix, e.g. `Lewis_Resume` → `Applications-Lewis`). Legacy `Resume Applications` folders are still found for Apply.
+Manual bid / profile apply omit the row and use the date only:
+
+```
+Downloads / Lewis-SF / 9-29_Synthires-Salesforce Specialist /
+  jd.txt
+  Lewis_Resume.pdf
+```
+
+The output folder follows the active person (sheet tab / person folder, e.g. `Lewis-SF`). Legacy `Resume Applications` and `Applications-*` folders are still found for Apply.
 
 ## Notes
 

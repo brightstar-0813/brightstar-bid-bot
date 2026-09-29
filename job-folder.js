@@ -61,17 +61,35 @@ export function csvRowFromFolderName(jobDir) {
   return "";
 }
 
+/** Manual / profile-apply jobs may still carry a synthetic queue row — never put it in the folder name. */
+export function shouldOmitRowFromFolderName(jobMeta = {}) {
+  if (jobMeta.omitRowPrefix === true || jobMeta.oneOff === true) return true;
+  const src = String(jobMeta.bidSource || "").trim().toLowerCase().replace(/_/g, "-");
+  return (
+    src === "one-off" ||
+    src === "oneoff" ||
+    src === "manual" ||
+    src === "manual-bid" ||
+    src === "profile-apply" ||
+    src === "profile" ||
+    src === "one-click" ||
+    src === "1-click"
+  );
+}
+
 /**
- * e.g. 16_9-21_Socium-Senior Salesforce Developer
- * The sheet row leads so the job is identifiable at a glance; jobs with no row
- * (manual one-off, profile apply) keep the plain date form.
+ * Batch / CSV: 16_9-21_Socium-Senior Salesforce Developer
+ * Manual / profile apply: 9-21_Socium-Senior Salesforce Developer
+ * Manual jobs keep a synthetic queue row for UI, but the folder never includes it.
  */
 export function buildJobFolderName(jobMeta = {}) {
   const companyPart = sanitizeFolderToken(jobMeta.companyName || jobMeta.company, "Company");
   const titlePart = sanitizeFolderToken(jobMeta.jobTitle || jobMeta.title, "Job");
   const when = jobMeta.savedAt || jobMeta.createdAt || jobMeta.appliedAt || Date.now();
   const datePart = formatJobFolderDate(when);
-  const row = normalizeCsvRow(jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo);
+  const row = shouldOmitRowFromFolderName(jobMeta)
+    ? ""
+    : normalizeCsvRow(jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo);
   const prefix = row === "" ? datePart : `${row}_${datePart}`;
   return `${prefix}_${companyPart}-${titlePart}`.slice(0, 120);
 }
