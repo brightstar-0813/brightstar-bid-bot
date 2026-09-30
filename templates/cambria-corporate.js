@@ -1,6 +1,7 @@
 import {
   contactLine,
   escapeHtml,
+  pathAttr,
   renderCerts,
   renderEducationRows,
   renderJobsStacked,
@@ -139,8 +140,8 @@ export const cambriaCorporateTemplate = {
   label: "7 · Fortune 500 Cambria",
   description: "Cambria · corporate blue · US Fortune 500 / large-enterprise senior engineer.",
   render(data) {
-    const name = escapeHtml(data.name || "Resume");
-    const headline = escapeHtml(data.headline || "");
+    const name = String(data.name || "Resume").trim() || "Resume";
+    const headline = String(data.headline || "").trim();
     const profile = String(data.profile || "").trim();
     const tech = renderTechnicalSummary(data.technicalSummary);
     const skills = renderSkills(data.skills);
@@ -153,11 +154,11 @@ export const cambriaCorporateTemplate = {
       css: CSS,
       body: `<main class="resume">
   <header class="top">
-    <h1>${name}</h1>
-    ${headline ? `<p class="headline">${headline}</p>` : ""}
+    <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
+    ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
     <p class="contact">${contactLine(data, { linkColor: "#1f4e79" })}</p>
   </header>
-  ${profile ? `<section><h2>Professional Summary</h2><p>${escapeHtml(profile)}</p></section>` : ""}
+  ${profile ? `<section><h2>Professional Summary</h2><p${pathAttr("profile")}>${escapeHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2>Technical Summary</h2>${tech}</section>` : ""}
   ${jobs ? `<section><h2>Professional Experience</h2>${jobs}</section>` : ""}
   ${skills ? `<section><h2>Core Competencies</h2>${skills}</section>` : ""}

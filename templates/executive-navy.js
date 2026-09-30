@@ -1,5 +1,6 @@
 import {
   escapeHtml,
+  pathAttr,
   renderCerts,
   renderEducationRows,
   renderSkillsStacked,
@@ -214,41 +215,53 @@ const CSS = `
 
 function renderAsideContact(data) {
   const lines = [];
-  if (data.location) lines.push(`<div>${escapeHtml(data.location)}</div>`);
-  if (data.phone) lines.push(`<div>${escapeHtml(data.phone)}</div>`);
+  if (data.location) {
+    lines.push(`<div${pathAttr("location")}>${escapeHtml(data.location)}</div>`);
+  }
+  if (data.phone) {
+    lines.push(`<div${pathAttr("phone")}>${escapeHtml(data.phone)}</div>`);
+  }
   if (data.email) {
     const email = String(data.email).replace(/^mailto:/i, "").trim();
-    lines.push(`<div><a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></div>`);
+    lines.push(
+      `<div><a href="mailto:${escapeHtml(email)}"${pathAttr("email")}>${escapeHtml(email)}</a></div>`
+    );
   }
   if (data.linkedin) {
     const raw = String(data.linkedin).trim();
     const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     const label = href.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "");
-    lines.push(`<div><a href="${escapeHtml(href)}">${escapeHtml(label)}</a></div>`);
+    lines.push(
+      `<div><a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(label)}</a></div>`
+    );
   }
   return lines.length ? `<div class="aside-contact">${lines.join("")}</div>` : "";
 }
 
 function renderJobs(jobs) {
   return (jobs || [])
-    .map((job) => {
-      const company = escapeHtml(job.company || "");
-      const title = escapeHtml(job.title || "");
-      const dates = escapeHtml(job.dates || "");
-      const location = escapeHtml(job.location || "");
-      const project = escapeHtml(job.project || "");
+    .map((job, ji) => {
+      const company = String(job.company || "").trim();
+      const title = String(job.title || "").trim();
+      const dates = String(job.dates || "").trim();
+      const location = String(job.location || "").trim();
+      const project = String(job.project || "").trim();
       const bullets = (job.bullets || [])
+        .map((b, bi) => {
+          const text = String(b || "").trim();
+          if (!text) return "";
+          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${escapeHtml(text)}</li>`;
+        })
         .filter(Boolean)
-        .map((b) => `<li>${escapeHtml(b)}</li>`)
         .join("\n");
       return `<article class="job">
   <div class="job-top">
-    <h3 class="job-company">${company}</h3>
-    ${dates ? `<span class="job-dates">${dates}</span>` : ""}
+    <h3 class="job-company"${pathAttr(`experience.${ji}.company`)}>${escapeHtml(company)}</h3>
+    ${dates ? `<span class="job-dates"${pathAttr(`experience.${ji}.dates`)}>${escapeHtml(dates)}</span>` : ""}
   </div>
-  ${title ? `<p class="job-title">${title}</p>` : ""}
-  ${location ? `<p class="job-meta">${location}</p>` : ""}
-  ${project ? `<p class="project">${project}</p>` : ""}
+  ${title ? `<p class="job-title"${pathAttr(`experience.${ji}.title`)}>${escapeHtml(title)}</p>` : ""}
+  ${location ? `<p class="job-meta"${pathAttr(`experience.${ji}.location`)}>${escapeHtml(location)}</p>` : ""}
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${escapeHtml(project)}</p>` : ""}
   ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
 </article>`;
     })
@@ -260,8 +273,8 @@ export const executiveNavyTemplate = {
   label: "10 · Executive Navy",
   description: "Navy sidebar · gold accent · US Staff / Principal / engineering manager.",
   render(data) {
-    const name = escapeHtml(data.name || "Resume");
-    const headline = escapeHtml(data.headline || "");
+    const name = String(data.name || "Resume").trim() || "Resume";
+    const headline = String(data.headline || "").trim();
     const profile = String(data.profile || "").trim();
     const tech = renderTechnicalSummary(data.technicalSummary);
     const skills = renderSkillsStacked(data.skills);
@@ -274,8 +287,8 @@ export const executiveNavyTemplate = {
       css: CSS,
       body: `<main class="resume">
   <aside>
-    <p class="aside-name">${name}</p>
-    ${headline ? `<p class="aside-headline">${headline}</p>` : ""}
+    <p class="aside-name"${pathAttr("name")}>${escapeHtml(name)}</p>
+    ${headline ? `<p class="aside-headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
     <div class="aside-rule"></div>
     ${renderAsideContact(data)}
     ${skills ? `<h2>Skills</h2>${skills}` : ""}
@@ -285,7 +298,7 @@ export const executiveNavyTemplate = {
   <div class="main">
     ${
       profile
-        ? `<section><h2>Profile</h2><p class="summary">${escapeHtml(profile)}</p></section>`
+        ? `<section><h2>Profile</h2><p class="summary"${pathAttr("profile")}>${escapeHtml(profile)}</p></section>`
         : ""
     }
     ${tech ? `<section><h2>Highlights</h2>${tech}</section>` : ""}

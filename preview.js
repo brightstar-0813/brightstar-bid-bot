@@ -4,6 +4,7 @@ import {
   getTemplateById,
   resumeJsonToHtml
 } from "./templates/index.js";
+import { applyPathEdits } from "./templates/shared.js";
 import { getActivePerson } from "./profiles.js";
 import { isResumePreviewable, sampleResumeForPerson } from "./templates/preview-sample.js";
 import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
@@ -18,6 +19,10 @@ const useStyleBtn = document.getElementById("useStyle");
 const pageEl = document.getElementById("page");
 const ledeEl = document.getElementById("previewLede");
 const statusEl = document.getElementById("status");
+const editControlsEl = document.getElementById("editControls");
+const editBtn = document.getElementById("editResume");
+const saveBtn = document.getElementById("saveResume");
+const discardBtn = document.getElementById("discardEdits");
 
 const params = new URLSearchParams(location.search);
 let templateId = params.get("template") || DEFAULT_TEMPLATE_ID;
@@ -26,6 +31,13 @@ let hasLastResume = false;
 let hasDraft = false;
 let hasPaste = false;
 let draftTemplateId = "";
+
+/** Working copy of resume JSON for the current preview source. */
+let workingResumeData = null;
+let editMode = false;
+let dirty = false;
+/** When true, ignore storage-driven re-renders that would wipe mid-edit. */
+let skipStorageRefresh = false;
 
 function setStatus(message, tone = "") {
   const text = String(message || "").trim();
@@ -40,7 +52,86 @@ function setStatus(message, tone = "") {
   else statusEl.classList.add("is-ok");
 }
 
-pageEl.addEventListener("load", () => {
+function canEditSource(kind = source) {
+  return kind === "draft" || kind === "paste";
+}
+
+function cloneResume(data) {
+  if (!data || typeof data !== "object") return null;
+  try {
+    return typeof structuredClone === "function"
+      ? structuredClone(data)
+      : JSON.parse(JSON.stringify(data));
+  } catch {
+    return null;
+  }
+}
+
+function updateEditChrome() {
+  const editable = canEditSource();
+  if (editControlsEl) editControlsEl.hidden = !editable;
+  document.body.classList.toggle("is-editing", Boolean(editable && editMode));
+  if (!editable) {
+    editMode = false;
+    dirty = false;
+  }
+  if (editBtn) {
+    editBtn.disabled = !editable;
+    editBtn.textContent = editMode ? "Editing…" : "Edit";
+  }
+  if (saveBtn) saveBtn.disabled = !editable || !editMode || !dirty;
+  if (discardBtn) discardBtn.disabled = !editable || !editMode;
+}
+
+function collectPathEdits(doc) {
+  const edits = {};
+  if (!doc) return edits;
+  for (const el of doc.querySelectorAll("[data-bs-path]")) {
+    const path = String(el.getAttribute("data-bs-path") || "").trim();
+    if (!path) continue;
+    const text = String(el.innerText || el.textContent || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\r\n/g, "\n")
+      .trim();
+    edits[path] = text;
+  }
+  return edits;
+}
+
+function enableEditableFields(doc) {
+  if (!doc) return;
+  for (const el of doc.querySelectorAll("[data-bs-path]")) {
+    el.setAttribute("contenteditable", "true");
+    el.setAttribute("spellcheck", "true");
+  }
+  if (!doc.__bsEditBound) {
+    doc.__bsEditBound = true;
+    doc.addEventListener("input", () => {
+      if (!editMode) return;
+      dirty = true;
+      updateEditChrome();
+    });
+    doc.addEventListener("paste", (event) => {
+      if (!editMode) return;
+      const target = event.target?.closest?.("[data-bs-path]");
+      if (!target) return;
+      event.preventDefault();
+      const text = String(event.clipboardData?.getData("text/plain") || "").replace(/\r\n/g, "\n");
+      doc.execCommand("insertText", false, text);
+      dirty = true;
+      updateEditChrome();
+    });
+  }
+}
+
+function disableEditableFields(doc) {
+  if (!doc) return;
+  for (const el of doc.querySelectorAll("[data-bs-path]")) {
+    el.removeAttribute("contenteditable");
+  }
+}
+
+function syncIframeHeight() {
   try {
     const doc = pageEl.contentDocument;
     if (!doc) return;
@@ -48,6 +139,13 @@ pageEl.addEventListener("load", () => {
     pageEl.style.height = `${h + 16}px`;
   } catch {
     // ignore
+  }
+}
+
+pageEl.addEventListener("load", () => {
+  syncIframeHeight();
+  if (editMode && canEditSource()) {
+    enableEditableFields(pageEl.contentDocument);
   }
 });
 
@@ -106,10 +204,14 @@ async function loadResumeData() {
   return { data: sampleResumeForPerson(person || {}), kind: "sample" };
 }
 
-async function renderPreview() {
+async function renderPreview({ keepWorkingCopy = false } = {}) {
   const template = getTemplateById(templateId);
   const { data, kind } = await loadResumeData();
-  const html = resumeJsonToHtml(data, templateId);
+  if (!keepWorkingCopy || !workingResumeData) {
+    workingResumeData = cloneResume(data);
+  }
+  const renderData = workingResumeData || data;
+  const html = resumeJsonToHtml(renderData, templateId);
   pageEl.srcdoc = html;
   if (ledeEl) {
     ledeEl.hidden = false;
@@ -119,10 +221,25 @@ async function renderPreview() {
     else ledeEl.textContent = `Sample · ${template.label}`;
   }
   if (kind === "draft") {
-    setStatus("Draft resume — Confirm in the bot when ready.", "ok");
+    setStatus(
+      editMode
+        ? dirty
+          ? "Editing draft — Save to keep changes, then Confirm in the bot."
+          : "Editing draft — click text to change, then Save."
+        : "Draft resume — Edit here or Confirm in the bot when ready.",
+      "ok"
+    );
   } else if (kind === "paste") {
-    setStatus("Pasted resume — Export PDF from Resume style when ready.", "ok");
+    setStatus(
+      editMode
+        ? dirty
+          ? "Editing paste — Save to keep changes, then Export PDF from Resume style."
+          : "Editing paste — click text to change, then Save."
+        : "Pasted resume — Edit here or Export PDF from Resume style when ready.",
+      "ok"
+    );
   }
+  updateEditChrome();
 }
 
 async function initSource() {
@@ -176,10 +293,91 @@ async function useThisStyle() {
   showToast(msg, { kind: "ok", placement: "center" });
 }
 
+function enterEditMode() {
+  if (!canEditSource()) return;
+  editMode = true;
+  dirty = false;
+  skipStorageRefresh = true;
+  enableEditableFields(pageEl.contentDocument);
+  updateEditChrome();
+  setStatus("Editing — click text to change, then Save.", "ok");
+}
+
+async function discardEdits() {
+  if (!canEditSource()) return;
+  editMode = false;
+  dirty = false;
+  skipStorageRefresh = false;
+  workingResumeData = null;
+  await renderPreview();
+  showToast("Edits discarded.", { kind: "warn", placement: "center" });
+}
+
+async function saveEdits() {
+  if (!canEditSource() || !editMode) return;
+  const doc = pageEl.contentDocument;
+  if (!doc || !workingResumeData) {
+    setStatus("Nothing to save.", "warn");
+    return;
+  }
+  const edits = collectPathEdits(doc);
+  const next = applyPathEdits(workingResumeData, edits);
+  workingResumeData = next;
+  dirty = false;
+
+  try {
+    if (source === "draft") {
+      const res = await chrome.runtime.sendMessage({
+        type: "update_one_off_draft",
+        resumeData: next,
+        templateId
+      });
+      if (!res?.ok) throw new Error(res?.error || "Save failed");
+      const score =
+        res.atsEvaluation?.score != null ? ` · ATS ${res.atsEvaluation.score}/100` : "";
+      setStatus(`Draft saved${score}. Confirm in the bot when ready.`, "ok");
+      showToast(`Draft saved${score}.`, { kind: "ok", placement: "center" });
+    } else if (source === "paste") {
+      await chrome.storage.local.set({ [STYLE_EXPORT_PASTE_KEY]: next });
+      setStatus("Paste saved. Export PDF from Resume style when ready.", "ok");
+      showToast("Paste saved.", { kind: "ok", placement: "center" });
+    }
+    editMode = false;
+    skipStorageRefresh = false;
+    disableEditableFields(doc);
+    updateEditChrome();
+    await renderPreview({ keepWorkingCopy: true });
+  } catch (err) {
+    dirty = true;
+    const msg = String(err?.message || err);
+    setStatus(msg, "err");
+    showToast(msg, { kind: "err", placement: "center" });
+    updateEditChrome();
+  }
+}
+
+editBtn?.addEventListener("click", () => enterEditMode());
+saveBtn?.addEventListener("click", () => {
+  saveEdits().catch((err) => setStatus(String(err?.message || err), "err"));
+});
+discardBtn?.addEventListener("click", () => {
+  discardEdits().catch((err) => setStatus(String(err?.message || err), "err"));
+});
+
 templateSelectEl.addEventListener("change", () => {
-  persistActiveTemplate(templateSelectEl.value)
-    .then(() => renderPreview())
-    .catch((err) => setStatus(String(err?.message || err), "err"));
+  const run = async () => {
+    if (editMode && dirty) {
+      const edits = collectPathEdits(pageEl.contentDocument);
+      workingResumeData = applyPathEdits(workingResumeData || {}, edits);
+    }
+    await persistActiveTemplate(templateSelectEl.value);
+    await renderPreview({ keepWorkingCopy: editMode });
+    if (editMode) {
+      // iframe load handler re-enables contenteditable
+      skipStorageRefresh = true;
+    }
+  };
+  run().catch((err) => setStatus(String(err?.message || err), "err"));
 });
 
 useStyleBtn.addEventListener("click", () =>
@@ -192,17 +390,28 @@ useStyleBtn.addEventListener("click", () =>
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "template_preview_show") {
+    if (skipStorageRefresh && dirty) return;
     if (message.templateId) {
       templateId = message.templateId;
       templateSelectEl.value = templateId;
     }
-    if (message.source === "draft" || message.source === "last" || message.source === "sample" || message.source === "paste") {
+    if (
+      message.source === "draft" ||
+      message.source === "last" ||
+      message.source === "sample" ||
+      message.source === "paste"
+    ) {
       source = message.source;
     }
+    editMode = false;
+    dirty = false;
+    skipStorageRefresh = false;
+    workingResumeData = null;
     renderPreview().catch(() => {});
     return;
   }
   if (message?.type === "one_off_draft_updated") {
+    if (skipStorageRefresh && dirty) return;
     loadDraftResume()
       .then((data) => {
         hasDraft = Boolean(data);
@@ -213,6 +422,9 @@ chrome.runtime.onMessage.addListener((message) => {
             templateSelectEl.value = templateId;
           }
         }
+        editMode = false;
+        dirty = false;
+        workingResumeData = null;
         return renderPreview();
       })
       .catch(() => {});
@@ -221,7 +433,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.selected_template_id) {
+  if (changes.selected_template_id && !(skipStorageRefresh && dirty)) {
     const next = String(changes.selected_template_id.newValue || "").trim();
     if (next && next !== templateId) {
       templateId = next;
@@ -229,21 +441,29 @@ chrome.storage.onChanged.addListener((changes, area) => {
       const url = new URL(location.href);
       url.searchParams.set("template", next);
       history.replaceState({}, "", url);
-      renderPreview().catch(() => {});
+      renderPreview({ keepWorkingCopy: editMode }).catch(() => {});
     }
   }
   if (changes[STYLE_EXPORT_PASTE_KEY] && (source === "paste" || params.get("source") === "paste")) {
+    if (skipStorageRefresh && dirty) return;
     hasPaste = isResumePreviewable(changes[STYLE_EXPORT_PASTE_KEY].newValue);
     if (hasPaste) {
       source = "paste";
+      editMode = false;
+      dirty = false;
+      workingResumeData = null;
       renderPreview().catch(() => {});
     } else {
       source = "sample";
       setStatus("Paste cleared.", "warn");
+      editMode = false;
+      dirty = false;
+      workingResumeData = null;
       renderPreview().catch(() => {});
     }
   }
   if (!changes[ONE_OFF_DRAFT_KEY]) return;
+  if (skipStorageRefresh && dirty) return;
   const draft = changes[ONE_OFF_DRAFT_KEY].newValue;
   hasDraft = isResumePreviewable(draft?.resumeData);
   draftTemplateId = String(draft?.templateId || draft?.jobMeta?.templateId || "").trim();
@@ -254,16 +474,33 @@ chrome.storage.onChanged.addListener((changes, area) => {
         templateId = draftTemplateId;
         templateSelectEl.value = templateId;
       }
+      editMode = false;
+      dirty = false;
+      workingResumeData = null;
       renderPreview().catch(() => {});
     } else {
       source = "sample";
+      editMode = false;
+      dirty = false;
+      workingResumeData = null;
       setStatus("Draft cleared.", "warn");
+      updateEditChrome();
     }
   }
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.target && /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
+  const inEditable =
+    event.target?.closest?.("[contenteditable='true']") ||
+    (event.target && /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName));
+  if ((event.ctrlKey || event.metaKey) && String(event.key || "").toLowerCase() === "s") {
+    if (editMode && canEditSource()) {
+      event.preventDefault();
+      saveEdits().catch((err) => setStatus(String(err?.message || err), "err"));
+    }
+    return;
+  }
+  if (inEditable) return;
   const templates = getAllTemplates();
   const index = templates.findIndex((t) => t.id === templateId);
   if (event.key === "ArrowRight" || event.key === "ArrowDown") {

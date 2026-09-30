@@ -1,6 +1,7 @@
 import {
   contactLine,
   escapeHtml,
+  pathAttr,
   renderCerts,
   renderEducationRows,
   renderJobsTitleFirst,
@@ -135,8 +136,8 @@ export const modernSansTemplate = {
   label: "9 · Modern US Sans",
   description: "Segoe · teal accent · US product/SaaS senior engineer.",
   render(data) {
-    const name = escapeHtml(data.name || "Resume");
-    const headline = escapeHtml(data.headline || "");
+    const name = String(data.name || "Resume").trim() || "Resume";
+    const headline = String(data.headline || "").trim();
     const profile = String(data.profile || "").trim();
     const tech = renderTechnicalSummary(data.technicalSummary);
     const skills = renderSkillsInline(data.skills);
@@ -149,12 +150,12 @@ export const modernSansTemplate = {
       css: CSS,
       body: `<main class="resume">
   <header class="top">
-    <h1>${name}</h1>
-    ${headline ? `<p class="headline">${headline}</p>` : ""}
+    <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
+    ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
     <div class="accent"></div>
     <p class="contact">${contactLine(data, { linkColor: "#0f766e" })}</p>
   </header>
-  ${profile ? `<section><h2>About</h2><p>${escapeHtml(profile)}</p></section>` : ""}
+  ${profile ? `<section><h2>About</h2><p${pathAttr("profile")}>${escapeHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2>Impact</h2>${tech}</section>` : ""}
   ${jobs ? `<section><h2>Experience</h2>${jobs}</section>` : ""}
   ${skills ? `<section><h2>Skills</h2>${skills}</section>` : ""}

@@ -11720,6 +11720,79 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (type === "update_one_off_draft") {
+    (async () => {
+      try {
+        const existing = await getOneOffDraft();
+        if (!existing) {
+          safeSendResponse(sendResponse, { ok: false, error: "No draft to update." });
+          return;
+        }
+        const resumeData = message.resumeData;
+        if (!resumeData || typeof resumeData !== "object") {
+          safeSendResponse(sendResponse, { ok: false, error: "Missing resume data." });
+          return;
+        }
+        const nextTemplateId = String(
+          message.templateId || existing.templateId || existing.jobMeta?.templateId || DEFAULT_TEMPLATE_ID
+        ).trim();
+        const jobMeta = {
+          ...(existing.jobMeta || {}),
+          templateId: nextTemplateId
+        };
+        const atsJd = jobMeta.jdText || "";
+        const atsTitle = jobMeta.jobTitle || jobMeta.title || "";
+        const atsCompany = jobMeta.companyName || jobMeta.company || "";
+        const roleTrack = jobMeta.roleTrack || jobMeta.sessionRoleTrack || "";
+        let atsEvaluation = existing.atsEvaluation || null;
+        if (atsJd) {
+          atsEvaluation = evaluateAtsScore(resumeData, {
+            jdText: atsJd,
+            jobTitle: atsTitle,
+            roleTrack,
+            companyName: atsCompany
+          });
+        }
+        const draft = await persistOneOffDraft({
+          resumeData,
+          jobMeta,
+          atsEvaluation,
+          templateId: nextTemplateId,
+          aiTabId: existing.aiTabId,
+          aiChatId: existing.aiChatId,
+          aiProvider: existing.aiProvider
+        });
+        if (atsEvaluation) {
+          await persistOneOffResult({
+            ok: true,
+            draft: true,
+            jdLink: jobMeta.jdLink,
+            csvRow: jobMeta.csvRow,
+            atsScore: atsEvaluation.score,
+            atsGrade: atsEvaluation.grade,
+            atsEvaluation
+          });
+          if (jobMeta.csvRow != null) {
+            await updateQueueJob(jobMeta.csvRow, {
+              atsScore: atsEvaluation.score,
+              atsGrade: atsEvaluation.grade,
+              atsEvaluation,
+              status: "draft"
+            });
+          }
+        }
+        safeSendResponse(sendResponse, {
+          ok: true,
+          draft,
+          atsEvaluation
+        });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "log_profile_apply") {
     (async () => {
       try {

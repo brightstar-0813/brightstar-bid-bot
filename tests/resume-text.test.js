@@ -243,13 +243,41 @@ Record-Triggered Flows, Screen Flows`)
   );
   // The default template keeps each category on its own single-column line.
   const modern = resumeJsonToHtml(data, "ats-modern");
-  assert.match(modern, /<span class="skill-cat">Salesforce Clouds:<\/span> Service Cloud, Sales Cloud/);
-  assert.match(modern, /<span class="skill-cat">Automation:<\/span> Record-Triggered Flows/);
+  assert.match(modern, /<span class="skill-cat"[^>]*>Salesforce Clouds:<\/span>/);
+  assert.match(modern, /data-bs-path="skills\.0\.items"[^>]*>Service Cloud, Sales Cloud/);
+  assert.match(modern, /<span class="skill-cat"[^>]*>Automation:<\/span>/);
   // No table markup — Workday and Taleo cannot rebuild table rows.
   assert.doesNotMatch(modern, /<table/);
 
   // ...and inline templates get the same two labelled lines.
   const inline = resumeJsonToHtml(data, "harvard-rule");
-  assert.match(inline, /<span class="skill-cat">Salesforce Clouds:<\/span>/);
-  assert.match(inline, /<span class="skill-cat">Automation:<\/span>/);
+  assert.match(inline, /<span class="skill-cat"[^>]*>Salesforce Clouds:<\/span>/);
+  assert.match(inline, /<span class="skill-cat"[^>]*>Automation:<\/span>/);
+});
+
+test("preview HTML annotates editable paths and applyPathEdits round-trips", async () => {
+  const { applyPathEdits } = await import("../templates/shared.js");
+  const { sampleResumeForPerson } = await import("../templates/preview-sample.js");
+  const data = sampleResumeForPerson({ name: "D'Mario Lewis" });
+  const html = resumeJsonToHtml(data, "ats-modern");
+  assert.match(html, /data-bs-path="name"/);
+  assert.match(html, /data-bs-path="profile"/);
+  assert.match(html, /data-bs-path="experience\.0\.bullets\.0"/);
+  assert.match(html, /data-bs-path="skills\.0\.category"/);
+  assert.match(html, /data-bs-path="technicalSummary\.0"/);
+
+  const edited = applyPathEdits(data, {
+    profile: "Edited professional summary for ATS.",
+    "experience.0.bullets.0": "Edited first bullet with Capgemini keywords.",
+    "skills.0.items": "Apex, LWC, Capgemini"
+  });
+  assert.equal(edited.profile, "Edited professional summary for ATS.");
+  assert.equal(edited.experience[0].bullets[0], "Edited first bullet with Capgemini keywords.");
+  assert.equal(edited.skills[0].items, "Apex, LWC, Capgemini");
+  assert.equal(edited.name, data.name);
+  assert.equal(edited.experience[0].company, data.experience[0].company);
+
+  const again = resumeJsonToHtml(edited, "ats-modern");
+  assert.match(again, /Edited professional summary for ATS\./);
+  assert.match(again, /Edited first bullet with Capgemini keywords\./);
 });

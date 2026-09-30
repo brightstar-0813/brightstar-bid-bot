@@ -93,6 +93,43 @@ h1 {
   margin-left: auto;
 }
 
+.edit-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.edit-controls[hidden] {
+  display: none !important;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: transparent;
+  border-color: var(--control-border);
+  font-weight: 650;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--btn-ghost-hover);
+}
+
+body.is-editing .paper {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+body.is-editing #editResume {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
 .field {
   display: flex;
   align-items: center;

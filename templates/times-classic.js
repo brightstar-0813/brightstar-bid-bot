@@ -2,6 +2,7 @@ import {
   escapeHtml,
   educationLocationLine,
   educationYearLine,
+  pathAttr,
   renderCertBadges,
   renderCerts,
   renderContactBlock,
@@ -224,24 +225,34 @@ export const timesClassicTemplate = {
   label: "1 · US Times Classic",
   description: "Times serif · cert badges · traditional US senior-engineer resume.",
   render(data) {
-    const name = escapeHtml(data.name || "Resume");
-    const headline = escapeHtml(data.headline || "");
+    const name = String(data.name || "Resume").trim() || "Resume";
+    const headline = String(data.headline || "").trim();
+    const profile = String(data.profile || "").trim();
     const eduList = Array.isArray(data.education)
       ? data.education
       : data.education
         ? [data.education]
         : [];
     const eduHtml = eduList
-      .map((edu) => {
-        const school = escapeHtml(edu?.school || "");
-        const degree = escapeHtml(edu?.degree || "");
-        const year = escapeHtml(educationYearLine(edu));
-        const details = escapeHtml(educationLocationLine(edu));
+      .map((edu, ei) => {
+        const school = String(edu?.school || "").trim();
+        const degree = String(edu?.degree || "").trim();
+        const year = educationYearLine(edu);
+        const details = educationLocationLine(edu);
         if (!school && !degree) return "";
         // Keep this on one line: p uses white-space: pre-wrap, so any source
         // indentation would render as leading blank space.
-        const rest = [degree, year, details].filter(Boolean).join("<br>");
-        return `<p><strong>${school}</strong>${rest ? `<br>${rest}` : ""}</p>`;
+        const rest = [
+          degree ? `<span${pathAttr(`education.${ei}.degree`)}>${escapeHtml(degree)}</span>` : "",
+          year ? `<span${pathAttr(`education.${ei}.year`)}>${escapeHtml(year)}</span>` : "",
+          details ? `<span${pathAttr(`education.${ei}.location`)}>${escapeHtml(details)}</span>` : ""
+        ]
+          .filter(Boolean)
+          .join("<br>");
+        const schoolHtml = school
+          ? `<strong${pathAttr(`education.${ei}.school`)}>${escapeHtml(school)}</strong>`
+          : "";
+        return `<p>${schoolHtml}${rest ? `<br>${rest}` : ""}</p>`;
       })
       .filter(Boolean)
       .join("\n");
@@ -254,8 +265,8 @@ export const timesClassicTemplate = {
       css: CSS,
       body: `  <main class="resume">
     <header class="top">
-      <h1>${name}</h1>
-      ${headline ? `<p class="headline">${headline}</p>` : ""}
+      <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
+      ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
       <div class="header-row">
         ${contact}
         ${badges}
@@ -264,7 +275,7 @@ export const timesClassicTemplate = {
 
     <section>
       <h2>Profile</h2>
-      <p>${escapeHtml(data.profile || "")}</p>
+      <p${pathAttr("profile")}>${escapeHtml(profile)}</p>
     </section>
 
     ${
