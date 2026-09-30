@@ -576,6 +576,8 @@ let batchControl = {
 };
 /** Next job's active/inactive probe, started during the previous job's chat reset. */
 let inflightInactiveProbe = null;
+/** Set after a workflow-start history wipe left one blank chat for the next send. */
+let workflowBlankChatReady = false;
 
 function startKeepAlive() {
   stopKeepAlive();
@@ -3930,6 +3932,15 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
     const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT);
     needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CHATGPT, fresh);
+    if (await aiTabStillOnPriorConversation(tabId, AI_PROVIDERS.CHATGPT)) {
+      await setStatus("ChatGPT is still on the previous chat — opening a new one again…");
+      await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT);
+    }
+    if (await aiTabStillOnPriorConversation(tabId, AI_PROVIDERS.CHATGPT)) {
+      throw new Error(
+        "ChatGPT is still on the previous chat. Not sending this prompt into it."
+      );
+    }
     // Blank /c/<id> shells count toward cleanup if a twin is created later.
     await rememberAiChatFromTab(tabId, AI_PROVIDERS.CHATGPT).catch(() => "");
   }
@@ -4558,6 +4569,13 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
     await setStatus("Opening a fresh Claude chat…");
     const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CLAUDE);
     needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CLAUDE, fresh);
+    if (await aiTabStillOnPriorConversation(tabId, AI_PROVIDERS.CLAUDE)) {
+      await setStatus("Claude is still on the previous chat — opening a new one again…");
+      await ensureFreshChat(tabId, AI_PROVIDERS.CLAUDE);
+    }
+    if (await aiTabStillOnPriorConversation(tabId, AI_PROVIDERS.CLAUDE)) {
+      throw new Error("Claude is still on the previous chat. Not sending this prompt into it.");
+    }
     await rememberAiChatFromTab(tabId, AI_PROVIDERS.CLAUDE).catch(() => "");
   }
 
@@ -5249,12 +5267,12 @@ async function collectBotChatIdsFromConversationsApi(
  */
 async function deleteCurrentAiConversation(
   tabId,
-  { chatId = "", skipExtras = false, leaveBlank = true } = {}
+  { chatId = "", skipExtras = false, leaveBlank = true, force = false } = {}
 ) {
   const provider = await getStoredAiProvider();
   const label = aiProviderLabel(provider);
 
-  if (!(await isDeleteAiChatHistoryEnabled())) {
+  if (!force && !(await isDeleteAiChatHistoryEnabled())) {
     if (!skipExtras) {
       try {
         await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
@@ -5333,7 +5351,8 @@ async function deleteCurrentAiConversation(
           lastDetail = await deleteCurrentAiConversation(tabId, {
             chatId: id,
             skipExtras: true,
-            leaveBlank: false
+            leaveBlank: false,
+            force
           });
           // If we are still sitting on the deleted /c/<id> page, leave it so the
           // red "Failed to delete… Conversation has been deleted" banner clears.
@@ -6179,6 +6198,40 @@ async function armInactiveProbeForNextGenerateJob() {
  * No-op when cooldown already left a blank composer — a second navigate
  * creates a twin empty "New chat".
  */
+/**
+ * Start of a batch or Manual Bid: delete previous bot chats, then leave one blank chat.
+ * Manual Bid always sends into that new chat — never the conversation already on screen.
+ * @param {string} reason
+ */
+async function resetAiHistoryForNewWorkflow(reason = "workflow") {
+  const provider = await getStoredAiProvider();
+  const label = aiProviderLabel(provider);
+  const tab = await ensureAiTab(provider);
+  const tabId = tab?.id;
+  if (typeof tabId !== "number") {
+    throw new Error(`Open ${label} in a browser tab first.`);
+  }
+  workflowBlankChatReady = false;
+  await setStatus(`New ${reason} — clearing previous ${label} chat history…`);
+  await deleteCurrentAiConversation(tabId, {
+    chatId: "",
+    skipExtras: false,
+    leaveBlank: true,
+    force: true
+  });
+  if (!(await isBlankFreshAiChat(tabId, provider).catch(() => false))) {
+    await ensureFreshChat(tabId, provider);
+  }
+  if (await aiTabStillOnPriorConversation(tabId, provider)) {
+    throw new Error(
+      `Could not open a blank ${label} chat for ${reason}. The previous conversation is still open.`
+    );
+  }
+  workflowBlankChatReady = true;
+  await setStatus(`New ${reason} — previous ${label} chats cleared. Using a new chat.`);
+  return { tabId, blank: true };
+}
+
 async function prepareBlankAiChatAlongsideProbe(tabId, provider) {
   try {
     if (await isBlankFreshAiChat(tabId, provider)) return { blank: true, navigated: false };
@@ -7963,12 +8016,23 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   const provider = await getStoredAiProvider();
   const providerLabel = aiProviderLabel(provider);
   let reusePreparedChat = false;
+  // Manual Bid never continues the chat already on screen.
+  if (draftOnly || isManualOneOffJob(jobMeta)) {
+    await resetAiHistoryForNewWorkflow("manual bid");
+    reusePreparedChat = true;
+    workflowBlankChatReady = false;
+  }
   const [inactiveProbe, tab] = await Promise.all([
     probePromise,
     ensureAiTab(provider).then(async (aiTab) => {
       if (shouldProbe && typeof aiTab?.id === "number") {
         const prepared = await prepareBlankAiChatAlongsideProbe(aiTab.id, provider);
         reusePreparedChat = Boolean(prepared?.blank);
+      }
+      if (workflowBlankChatReady && typeof aiTab?.id === "number") {
+        const blank = await isBlankFreshAiChat(aiTab.id, provider).catch(() => false);
+        if (blank) reusePreparedChat = true;
+        workflowBlankChatReady = false;
       }
       return aiTab;
     })
@@ -8447,6 +8511,14 @@ async function runBatchLoop(outputDir) {
   startKeepAlive();
 
   try {
+    try {
+      await resetAiHistoryForNewWorkflow("batch");
+    } catch (resetErr) {
+      workflowBlankChatReady = false;
+      await setStatus(
+        `Batch chat reset: ${String(resetErr?.message || resetErr)}. The first job will still require a new chat.`
+      );
+    }
     await setStatus(
       `${aiProviderLabel(await getStoredAiProvider())} pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
     );
