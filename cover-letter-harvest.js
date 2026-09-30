@@ -167,6 +167,19 @@ export function extractCoverLetterText(text) {
  * conversation turn that also contains the user prompt is still readable.
  * executeScript serializes this function alone; the harvest API must already be loaded.
  */
+export function readNewestAssistantTurnInPage() {
+  const api = globalThis.__brightstarDomHarvest;
+  if (typeof api?.readNewestAssistantTurn === "function") {
+    const fromApi = String(api.readNewestAssistantTurn(typeof document !== "undefined" ? document : undefined) || "").trim();
+    if (fromApi) return fromApi;
+  }
+  const root =
+    (typeof document !== "undefined" && (document.querySelector("main") || document.body)) || null;
+  const text = String(root?.innerText || "");
+  if (text.length <= 20000) return text;
+  return text.slice(-60000);
+}
+
 export function readNewestAssistantProseInPage() {
   const api = globalThis.__brightstarDomHarvest;
   if (typeof api?.readNewestAssistantProse === "function") {

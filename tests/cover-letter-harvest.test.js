@@ -8,7 +8,7 @@ import { extractCoverLetterText, looksLikeCoverLetterBody } from "../cover-lette
 const harvestCode = readFileSync(fileURLToPath(new URL("../chatgpt-dom-harvest.js", import.meta.url)), "utf8");
 const harvestSandbox = {};
 runInContext(harvestCode, createContext(harvestSandbox));
-const { readNewestAssistantProse } = harvestSandbox.__brightstarDomHarvest;
+const { readNewestAssistantProse, readNewestAssistantTurn } = harvestSandbox.__brightstarDomHarvest;
 
 const culligan = [
   "At Culligan International, I design Salesforce solutions supporting dental and commercial selling, product and client operations, and revenue control aligned with the work this role with Revenue Cloud covers.",
@@ -216,6 +216,29 @@ test("strips footer chrome from a finished letter instead of saving the salutati
   assert.equal(/ChatGPT can make mistakes/.test(letter), false);
   assert.equal(/Thinking effort/.test(letter), false);
   assert.equal(looksLikeCoverLetterBody(letter), true);
+});
+
+test("Q&A harvest keeps the newest paragraph when an older letter is still in the chat", () => {
+  const answer =
+    "I bring 11+ years of hands-on Salesforce experience across Sales Cloud, Service Cloud, and Agentforce, and I have already delivered the kind of architecture this hiring manager is hiring for.";
+  const doc = node({
+    tag: "div",
+    children: [
+      node({
+        tag: "article",
+        testid: "conversation-turn-2",
+        children: [node({ role: "assistant", text: culligan })]
+      }),
+      node({
+        tag: "article",
+        testid: "conversation-turn-4",
+        children: [node({ role: "assistant", text: answer })]
+      })
+    ]
+  });
+  assert.equal(readNewestAssistantTurn(doc), answer);
+  assert.equal(readNewestAssistantProse(doc), culligan);
+  assert.equal(looksLikeCoverLetterBody(answer), false);
 });
 
 test("rejects resume JSON that has no letter after it", () => {

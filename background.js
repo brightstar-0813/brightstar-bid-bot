@@ -158,6 +158,7 @@ import {
   extractCoverLetterText,
   looksLikeCoverLetterBody,
   readNewestAssistantProseInPage,
+  readNewestAssistantTurnInPage,
   stripChatGptChrome
 } from "./cover-letter-harvest.js";
 
@@ -3128,6 +3129,21 @@ async function readLatestAssistantPlainText(tabId) {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: readNewestAssistantProseInPage
+    });
+    return String(results?.[0]?.result || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Newest assistant turn even when it is a short Q&A paragraph, not a cover letter. */
+async function readLatestAssistantAnswer(tabId) {
+  if (typeof tabId !== "number") return "";
+  await ensureChatGptDomHarvest(tabId);
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: readNewestAssistantTurnInPage
     });
     return String(results?.[0]?.result || "").trim();
   } catch {
@@ -6277,7 +6293,7 @@ async function ensureChatGptDomHarvest(tabId) {
     const check = await chrome.scripting.executeScript({
       target: { tabId },
       func: () =>
-        typeof globalThis.__brightstarDomHarvest?.readNewestAssistantProse === "function"
+        typeof globalThis.__brightstarDomHarvest?.readNewestAssistantTurn === "function"
     });
     if (check?.[0]?.result) return;
     await chrome.scripting.executeScript({
@@ -6898,6 +6914,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   const startNewChat = options.newChat !== false;
   const label = options.statusLabel || `Waiting for ${providerLabel} response...`;
   const expectResumeJson = Boolean(options.expectResumeJson);
+  const replyKind = options.replyKind === "answer" ? "answer" : "letter";
 
   const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat);
 
@@ -6925,7 +6942,26 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   let lastLen = 0;
   let lastJobCount = 0;
   let postStreamDelayDone = false;
+  let qaStableText = "";
+  let qaStableHits = 0;
   const pollHarvest = () => chatgptPollState(tabId, { harvestJson: expectResumeJson });
+
+  function freshQaAnswer(text) {
+    const t = String(text || "").trim();
+    if (t.length < 40) return "";
+    if (/"experience"\s*:/.test(t) && /"name"\s*:/.test(t)) return "";
+    if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i.test(t)) return "";
+    const promptHead = String(prompt || "").trim().slice(0, 160);
+    if (promptHead.length >= 40 && t.includes(promptHead)) return "";
+    const head = t.slice(0, 80);
+    if (head && String(latestBefore || "").includes(head)) return "";
+    return t;
+  }
+
+  async function readSettledQaAnswer() {
+    const plain = await readLatestAssistantAnswer(tabId);
+    return freshQaAnswer(plain) || freshQaAnswer(lastText);
+  }
 
   // Ignore any previous job's harvested JSON / ready flag.
   if (expectResumeJson) {
@@ -7028,7 +7064,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     // when the reply does not start with "Dear". Ignore prose that was already
     // on the page before this send (the resume turn). Do this before the
     // send-fail timeout so a visible letter is not thrown away.
-    if (!expectResumeJson) {
+    if (!expectResumeJson && replyKind !== "answer") {
       const letterNow =
         extractCoverLetterText(state.latest) || extractCoverLetterText(lastText);
       const alreadyThere =
@@ -7084,6 +7120,24 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         (state.recognizedWell && state.resumeData && state.latest.startsWith("{"))
       ) {
         lastText = state.latest;
+      }
+    }
+
+    // Custom Q&A: a finished one-paragraph answer is not a cover letter.
+    // Return it once it stops growing for about 2 seconds.
+    if (replyKind === "answer" && !expectResumeJson) {
+      if (state.generating) {
+        qaStableHits = 0;
+      } else {
+        const answerNow = await readSettledQaAnswer();
+        if (answerNow) {
+          if (answerNow === qaStableText) qaStableHits += 1;
+          else {
+            qaStableText = answerNow;
+            qaStableHits = 1;
+          }
+          if (qaStableHits >= 3) return answerNow;
+        }
       }
     }
 
@@ -7210,6 +7264,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
           await setStatus(`${label} — JSON is on screen; harvesting instead of treating Send as failed…`);
           continue;
         }
+      } else if (replyKind === "answer") {
+        const rescued = await readSettledQaAnswer();
+        if (rescued) return rescued;
       } else {
         const plain = await readLatestAssistantPlainText(tabId);
         const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
@@ -7326,6 +7383,11 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     if (!expectResumeJson) {
+      if (replyKind === "answer") {
+        const answer = await readSettledQaAnswer();
+        if (answer && !state.generating && qaStableHits >= 3) return answer;
+        continue;
+      }
       // Prefer the newest assistant turn — poller used to keep returning resume JSON.
       const plain = await readLatestAssistantPlainText(tabId);
       const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
@@ -7381,6 +7443,11 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   }
   if (expectResumeJson && (isUsableResumeJson(lastUsableResumeData) || isMinimallySaveableResume(lastUsableResumeData))) {
     return JSON.stringify(lastUsableResumeData);
+  }
+
+  if (!expectResumeJson && replyKind === "answer") {
+    const rescued = await readSettledQaAnswer();
+    if (rescued) return rescued;
   }
 
   if (!expectResumeJson) {
@@ -10132,6 +10199,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // One chat per job apply: reuse while job key matches; seed once with JD+resume.
             newChat: !reuseChat,
             expectResumeJson: false,
+            replyKind: "answer",
             statusLabel: reuseChat
               ? `Custom Q&A follow-up via ${providerLabel}…`
               : `Custom Q&A via ${providerLabel} (new job chat)…`

@@ -497,13 +497,9 @@
     return { assistantBlocks, userBlocks };
   }
 
-  /**
-   * Newest letter-like assistant prose, else the newest non-empty reply.
-   * Prefers a finished letter over a shorter retry that is still streaming,
-   * and over the resume JSON turn.
-   */
-  function readNewestAssistantProse(doc) {
-    const promptEcho = /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i;
+  const PROMPT_ECHO = /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i;
+
+  function assistantProsePieces(doc) {
     const pieces = [];
     const turns = queryAll(doc, TURN_SELECTOR);
     if (turns.length) {
@@ -522,27 +518,48 @@
       const mainText = mainTextExcludingUser(doc);
       if (mainText) pieces.push(mainText);
     }
-    const tailOf = (text) => {
-      const t = tidyChunk(text);
-      if (t.length <= 20000) return t;
-      return t.slice(-60000);
-    };
+    return pieces;
+  }
+
+  function tailOfProse(text) {
+    const t = tidyChunk(text);
+    if (t.length <= 20000) return t;
+    return t.slice(-60000);
+  }
+
+  /** Last assistant turn, including a short Q&A paragraph that is not a letter. */
+  function readNewestAssistantTurn(doc) {
+    let newest = "";
+    for (const raw of assistantProsePieces(doc)) {
+      const text = tidyChunk(raw);
+      if (!text) continue;
+      newest = PROMPT_ECHO.test(text) ? tailOfProse(text) : text;
+    }
+    return newest.slice(0, 20000);
+  }
+
+  /**
+   * Newest letter-like assistant prose, else the newest non-empty reply.
+   * Prefers a finished letter over a shorter retry that is still streaming,
+   * and over the resume JSON turn.
+   */
+  function readNewestAssistantProse(doc) {
     let bestLetter = "";
     let newest = "";
-    for (const raw of pieces) {
+    for (const raw of assistantProsePieces(doc)) {
       const text = tidyChunk(raw);
       if (!text) continue;
       // A turn that also contains the cover prompt still has the letter at the end.
       // Do not drop that whole turn.
-      if (promptEcho.test(text)) {
-        newest = tailOf(text);
+      if (PROMPT_ECHO.test(text)) {
+        newest = tailOfProse(text);
         continue;
       }
       newest = text;
       if (proseLooksLikeLetter(text) && text.length >= bestLetter.length) bestLetter = text;
     }
     if (bestLetter) return bestLetter.slice(0, 20000);
-    return tailOf(newest);
+    return tailOfProse(newest);
   }
 
   const api = {
@@ -557,6 +574,7 @@
     pageHasResumeMarkers,
     countChatBlocks,
     readNewestAssistantProse,
+    readNewestAssistantTurn,
     proseLooksLikeLetter
   };
   root.__brightstarDomHarvest = api;
