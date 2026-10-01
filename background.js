@@ -77,7 +77,7 @@ import {
 } from "./autofill-runner.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { isOpenAiQaAssistEnabled } from "./openai.js";
-import { cleanCustomQaAnswer, buildCustomQaJobKey } from "./ai-answers.js";
+import { cleanCustomQaAnswer, extractFreshCustomQaAnswer, buildCustomQaJobKey } from "./ai-answers.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -7000,15 +7000,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   const pollHarvest = () => chatgptPollState(tabId, { harvestJson: expectResumeJson });
 
   function freshQaAnswer(text) {
-    const t = String(text || "").trim();
-    if (t.length < 40) return "";
-    if (/"experience"\s*:/.test(t) && /"name"\s*:/.test(t)) return "";
-    if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i.test(t)) return "";
-    const promptHead = String(prompt || "").trim().slice(0, 160);
-    if (promptHead.length >= 40 && t.includes(promptHead)) return "";
-    const head = t.slice(0, 80);
-    if (head && String(latestBefore || "").includes(head)) return "";
-    return t;
+    return extractFreshCustomQaAnswer(text, { prompt, previous: latestBefore });
   }
 
   async function readSettledQaAnswer() {
@@ -7177,20 +7169,19 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     }
 
     // Custom Q&A: a finished one-paragraph answer is not a cover letter.
-    // Return it once it stops growing for about 2 seconds.
+    // Accept it once it stops changing, even if the stop control is still up.
     if (replyKind === "answer" && !expectResumeJson) {
-      if (state.generating) {
-        qaStableHits = 0;
+      const answerNow = await readSettledQaAnswer();
+      if (!answerNow) {
+        if (state.generating) qaStableHits = 0;
       } else {
-        const answerNow = await readSettledQaAnswer();
-        if (answerNow) {
-          if (answerNow === qaStableText) qaStableHits += 1;
-          else {
-            qaStableText = answerNow;
-            qaStableHits = 1;
-          }
-          if (qaStableHits >= 3) return answerNow;
+        if (answerNow === qaStableText) qaStableHits += 1;
+        else {
+          qaStableText = answerNow;
+          qaStableHits = 1;
         }
+        if (qaStableHits >= 2 && !state.generating) return answerNow;
+        if (qaStableHits >= 3) return answerNow;
       }
     }
 
@@ -7438,7 +7429,15 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     if (!expectResumeJson) {
       if (replyKind === "answer") {
         const answer = await readSettledQaAnswer();
-        if (answer && !state.generating && qaStableHits >= 3) return answer;
+        if (answer) {
+          if (answer === qaStableText) qaStableHits += 1;
+          else {
+            qaStableText = answer;
+            qaStableHits = 1;
+          }
+          if (qaStableHits >= 2 && !state.generating) return answer;
+          if (qaStableHits >= 3) return answer;
+        }
         continue;
       }
       // Prefer the newest assistant turn — poller used to keep returning resume JSON.
@@ -10276,7 +10275,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               ? `Custom Q&A follow-up via ${providerLabel}…`
               : `Custom Q&A via ${providerLabel} (new job chat)…`
           });
-          const answer = cleanCustomQaAnswer(raw);
+          const answer = extractFreshCustomQaAnswer(raw, { prompt: prep.prompt }) || cleanCustomQaAnswer(raw);
           if (!answer) {
             throw new Error(`${providerLabel} returned an empty answer. Try again.`);
           }

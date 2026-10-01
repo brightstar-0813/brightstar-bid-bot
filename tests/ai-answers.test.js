@@ -6,8 +6,10 @@ import {
   bankAnswerFitsQuestion,
   buildCustomQaFollowUpPrompt,
   buildCustomQaJobKey,
+  cleanCustomQaAnswer,
   compactApplicantContext,
   buildCustomQaPayload,
+  extractFreshCustomQaAnswer,
   normalizeSkillList,
   normalizeRecentRoles
 } from "../ai-answers.js";
@@ -128,6 +130,21 @@ test("buildCustomQaFollowUpPrompt includes job JD excerpt", () => {
   assert.match(prompt, /JOB DESCRIPTION/i);
   assert.match(prompt, /Build Apex and LWC/);
   assert.doesNotMatch(prompt, /CONTEXT \(JSON\)/);
+});
+
+test("extractFreshCustomQaAnswer keeps the finished paragraph after the ask prompt", () => {
+  const prompt = buildCustomQaFollowUpPrompt("Name 5 requirements from the job description that align to your background", {
+    jobTitle: "Senior Salesforce Developer",
+    companyName: "LanceSoft",
+    jdText: "Apex, LWC, Flow, REST/SOAP, CI/CD"
+  });
+  const answer =
+    "Apex development, Lightning Web Components, Salesforce Flow and declarative automation, REST/SOAP API and middleware integrations, and CI/CD with automated testing and deployment validation.";
+  const mixed = `${prompt}\n\nShow more\n\n${answer}\nChatGPT can make mistakes. Check important info.`;
+  assert.equal(extractFreshCustomQaAnswer(mixed, { prompt }), answer);
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt }), answer);
+  assert.equal(extractFreshCustomQaAnswer(prompt, { prompt }), "");
+  assert.equal(cleanCustomQaAnswer(`"${answer}"`), answer);
 });
 
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {

@@ -880,6 +880,43 @@ export function cleanCustomQaAnswer(raw) {
   return t.slice(0, 4000);
 }
 
+/**
+ * Pull the answer out of a ChatGPT turn that also contains the ask prompt
+ * or an earlier resume JSON blob. A finished paragraph after the prompt is
+ * the answer; the prompt itself is not.
+ */
+export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } = {}) {
+  let t = String(raw || "").trim();
+  if (!t) return "";
+  const promptTrim = String(prompt || "").trim();
+  if (promptTrim.length >= 40) {
+    const at = t.lastIndexOf(promptTrim);
+    if (at >= 0) t = t.slice(at + promptTrim.length).trim();
+    else {
+      const marker = "Reply with ONLY the answer text.";
+      const idx = t.lastIndexOf(marker);
+      if (idx >= 0) t = t.slice(idx + marker.length).trim();
+    }
+  }
+  t = t
+    .replace(/\bShow more\b/gi, " ")
+    .replace(/ChatGPT can make mistakes[\s\S]*$/i, "")
+    .replace(/Check important info\.?/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  t = cleanCustomQaAnswer(t);
+  if (/^(yes|no)\.?$/i.test(t)) return t.replace(/\.$/, "");
+  if (t.length < 20) return "";
+  if (/"experience"\s*:/.test(t) && /"name"\s*:/.test(t)) return "";
+  if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON|CONTEXT \(JSON\)/i.test(t)) {
+    return "";
+  }
+  const head = t.slice(0, 80);
+  if (head && String(previous || "").includes(head)) return "";
+  if (promptTrim.length >= 40 && promptTrim.includes(head)) return "";
+  return t;
+}
+
 export function buildCustomQaPayload({
   question,
   applicantInfo = {},
