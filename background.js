@@ -10684,19 +10684,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await setStatus("Apply skipped — no job link.");
             return;
           }
-          const located = await locateJobFolder({
-            csvRow: jobMeta.csvRow,
-            jobDir: jobMeta.jobDir || "",
-            jdLink: jobMeta.jdLink,
-            company: jobMeta.companyName || jobMeta.company || "",
-            title: jobMeta.jobTitle || jobMeta.title || ""
-          }).catch(() => null);
-          if (located?.jobDir) {
-            jobMeta.jobDir = located.jobDir;
-            if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-              await updateQueueJob(jobMeta.csvRow, { jobDir: located.jobDir, hasFiles: true }).catch(() => {});
-            }
-          }
           await persistJobContextForAutofill(jobMeta);
           const appliedDate = formatApplicationDateTime();
           if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
@@ -10735,8 +10722,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               openError: true
             })
           );
+          const folderPromise = locateJobFolder({
+            csvRow: jobMeta.csvRow,
+            jobDir: jobMeta.jobDir || "",
+            jdLink: jobMeta.jdLink,
+            company: jobMeta.companyName || jobMeta.company || "",
+            title: jobMeta.jobTitle || jobMeta.title || ""
+          })
+            .then(async (located) => {
+              if (!located?.jobDir) return;
+              jobMeta.jobDir = located.jobDir;
+              if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+                await updateQueueJob(jobMeta.csvRow, {
+                  jobDir: located.jobDir,
+                  hasFiles: true
+                }).catch(() => {});
+              }
+              await persistJobContextForAutofill(jobMeta);
+            })
+            .catch(() => {});
           const sheetPromise = markQueueJobAppliedOnSheet(jobMeta);
-          const [result, sheet] = await Promise.all([openPromise, sheetPromise]);
+          const [result, , sheet] = await Promise.all([openPromise, folderPromise, sheetPromise]);
           const sheetLabel = describeSheetAppliedResult(sheet, sheet?.appliedDate || appliedDate);
           const openedDetail =
             result?.detail || (diceAutoApply ? "Opened job link." : "Autofill panel ready.");
@@ -10749,26 +10755,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           jdLink: jobMeta.jdLink,
           company: jobMeta.companyName || jobMeta.company || "",
           title: jobMeta.jobTitle || jobMeta.title || ""
-        }).catch(() => null);
+        })
+          .then(async (located) => {
+            if (!located?.jobDir) return null;
+            jobMeta.jobDir = located.jobDir;
+            if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
+              await updateQueueJob(jobMeta.csvRow, { jobDir: located.jobDir, hasFiles: true }).catch(
+                () => {}
+              );
+              await rememberApplyHistory(jobMeta.csvRow, {
+                jobDir: located.jobDir,
+                jdLink: jobMeta.jdLink || ""
+              }).catch(() => {});
+            }
+            await persistJobContextForAutofill(jobMeta);
+            return located;
+          })
+          .catch(() => null);
         await persistJobContextForAutofill(jobMeta);
         const storedAssist = await chrome.storage.local.get(["allowSubmitOnAssist"]);
         const allowSubmit = Boolean(
           message.autoSubmit === true ||
             (message.autoSubmit !== false && storedAssist.allowSubmitOnAssist !== false)
         );
-
-        const located = await folderPromise;
-        if (located?.jobDir) {
-          jobMeta.jobDir = located.jobDir;
-          if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-            await updateQueueJob(jobMeta.csvRow, { jobDir: located.jobDir, hasFiles: true }).catch(() => {});
-            await rememberApplyHistory(jobMeta.csvRow, {
-              jobDir: located.jobDir,
-              jdLink: jobMeta.jdLink || ""
-            }).catch(() => {});
-          }
-        }
-        await persistJobContextForAutofill(jobMeta);
 
         const appliedDate = formatApplicationDateTime();
         if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
@@ -10805,7 +10814,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           })
         );
         const sheetPromise = markQueueJobAppliedOnSheet(jobMeta);
-        const [result, sheet] = await Promise.all([openPromise, sheetPromise]);
+        const [result, , sheet] = await Promise.all([openPromise, folderPromise, sheetPromise]);
         const sheetLabel = describeSheetAppliedResult(sheet, sheet?.appliedDate || appliedDate);
         if (result?.status === "submitted" && result?.tabId) {
           await closeApplyTab(result.tabId).catch(() => false);

@@ -3880,38 +3880,52 @@ async function findExistingApplyTab(jdLink) {
     return null;
   }
   const http = tabs.filter((t) => /^https?:/i.test(t.url || ""));
-  const target = normalizeJobLink(href);
-  const exact = target
-    ? http.find((t) => normalizeJobLink(t.url) === target)
-    : null;
-  if (exact) return { tab: exact, isWizard: looksLikeApplicationUrl(exact.url) };
-
-  try {
-    const want = new URL(href);
-    const sameJob = http.find((t) => {
-      try {
-        const have = new URL(t.url);
-        if (have.origin !== want.origin) return false;
-        const a = have.pathname.replace(/\/+$/, "");
-        const b = want.pathname.replace(/\/+$/, "");
-        return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
-      } catch {
-        return false;
-      }
-    });
-    if (sameJob) return { tab: sameJob, isWizard: looksLikeApplicationUrl(sameJob.url) };
-  } catch {
-    /* ignore */
-  }
+  const hit = http.find((t) => tabAlreadyOnJob(t.url, href));
+  if (hit) return { tab: hit, isWizard: looksLikeApplicationUrl(hit.url) };
   return null;
+}
+
+/** Add https when a sheet/CSV link was saved without a scheme. */
+export function toAbsoluteHttpUrl(raw) {
+  let href = String(raw || "").trim();
+  if (!href) return "";
+  if (/^https?:\/\//i.test(href)) return href;
+  if (href.startsWith("//")) return `https:${href}`;
+  if (/^[\w.-]+\.[a-z]{2,}([/:?#]|$)/i.test(href)) return `https://${href}`;
+  return href;
+}
+
+/**
+ * True when the tab is already this job posting or a deeper apply step for it.
+ * A shorter page on the same site (company board, search) is not the job.
+ */
+export function tabAlreadyOnJob(tabUrl, href) {
+  const current = String(tabUrl || "").trim();
+  const target = toAbsoluteHttpUrl(href);
+  if (!current || !target) return false;
+  if (normalizeJobLink(current) === normalizeJobLink(target)) return true;
+  const jobId = diceJobIdFromUrl(target) || diceJobIdFromUrl(current);
+  if (jobId && new RegExp(`/job-applications/${jobId}(?:/|$)`, "i").test(current)) return true;
+  try {
+    const have = new URL(current);
+    const want = new URL(target);
+    if (have.origin !== want.origin) return false;
+    const a = have.pathname.replace(/\/+$/, "") || "/";
+    const b = want.pathname.replace(/\/+$/, "") || "/";
+    if (a === b) return true;
+    if (b !== "/" && a.startsWith(`${b}/`)) return true;
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 export async function openJobAndApply(
   url,
   { multiStep = true, csvRow, jobDir, jdLink, autoSubmit = false, openOnly = false } = {}
 ) {
-  const href = String(url || "").trim();
-  if (!href) throw new Error("Missing job URL.");
+  const href = toAbsoluteHttpUrl(url);
+  if (!href || !/^https?:\/\//i.test(href)) throw new Error("Missing job URL.");
   const applyHint = {
     csvRow,
     jobDir,
@@ -3919,18 +3933,25 @@ export async function openJobAndApply(
   };
   await setActiveApplyJob(applyHint);
   const jobId = diceJobIdFromUrl(href);
+  const diceWizard =
+    !openOnly && jobId && /dice\.com/i.test(href) ? diceWizardUrl(jobId) : "";
+  const destination = diceWizard || href;
   const existing = await findExistingApplyTab(href);
   let tab = existing?.tab || null;
-  if (tab?.id) {
+  const alreadyThere = Boolean(tab?.id && tabAlreadyOnJob(tab.url, href));
+  if (tab?.id && alreadyThere) {
     await rememberApplyTab(tab.id);
     await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
-    if (!existing.isWizard && jobId && /dice\.com/i.test(tab.url || href)) {
-      await chrome.tabs.update(tab.id, { url: diceWizardUrl(jobId) });
+    if (diceWizard && !existing.isWizard && isDiceJobDetailUrl(tab.url || "")) {
+      await chrome.tabs.update(tab.id, { url: diceWizard, active: true });
       await waitForTabComplete(tab.id, 35000).catch(() => {});
     }
+  } else if (tab?.id) {
+    await rememberApplyTab(tab.id);
+    await chrome.tabs.update(tab.id, { url: destination, active: true });
+    await waitForTabComplete(tab.id, 35000).catch(() => {});
   } else {
-    const startUrl = jobId && /dice\.com/i.test(href) ? diceWizardUrl(jobId) : href;
-    tab = await chrome.tabs.create({ url: startUrl, active: true });
+    tab = await chrome.tabs.create({ url: destination, active: true });
     await rememberApplyTab(tab.id);
     try {
       await waitForTabComplete(tab.id, 35000);
