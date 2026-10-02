@@ -48,7 +48,7 @@ export function stripKeywordDumpSkills(resumeData) {
 function collectStrings(value, out = []) {
   if (value == null) return out;
   if (typeof value === "string" || typeof value === "number") {
-    out.push(String(value));
+    out.push(String(value).replace(/<[^>]+>/g, " "));
     return out;
   }
   if (Array.isArray(value)) {

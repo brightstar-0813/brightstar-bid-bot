@@ -93,6 +93,11 @@ function sanitizeResumeData(raw) {
 }
 
 export function resumeJsonToHtml(data, templateId) {
-  const template = getTemplateById(templateId);
-  return template.render(sanitizeResumeData(data));
+  const clean = sanitizeResumeData(data);
+  let html = getTemplateById(templateId).render(clean);
+  const align = clean?.headingAlign === "center" ? "center" : clean?.headingAlign === "left" ? "left" : "";
+  if (align) {
+    html = html.replace("</style>", `    h2 { text-align: ${align}; }\n  </style>`);
+  }
+  return html;
 }

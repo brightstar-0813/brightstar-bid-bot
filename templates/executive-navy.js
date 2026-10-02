@@ -1,5 +1,6 @@
 import {
   escapeHtml,
+  richHtml,
   pathAttr,
   renderCerts,
   renderEducationRows,
@@ -250,18 +251,18 @@ function renderJobs(jobs) {
         .map((b, bi) => {
           const text = String(b || "").trim();
           if (!text) return "";
-          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${escapeHtml(text)}</li>`;
+          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${richHtml(text)}</li>`;
         })
         .filter(Boolean)
         .join("\n");
       return `<article class="job">
   <div class="job-top">
-    <h3 class="job-company"${pathAttr(`experience.${ji}.company`)}>${escapeHtml(company)}</h3>
+    <h3 class="job-company"${pathAttr(`experience.${ji}.company`)}>${richHtml(company)}</h3>
     ${dates ? `<span class="job-dates"${pathAttr(`experience.${ji}.dates`)}>${escapeHtml(dates)}</span>` : ""}
   </div>
-  ${title ? `<p class="job-title"${pathAttr(`experience.${ji}.title`)}>${escapeHtml(title)}</p>` : ""}
+  ${title ? `<p class="job-title"${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</p>` : ""}
   ${location ? `<p class="job-meta"${pathAttr(`experience.${ji}.location`)}>${escapeHtml(location)}</p>` : ""}
-  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${escapeHtml(project)}</p>` : ""}
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
   ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
 </article>`;
     })
@@ -288,7 +289,7 @@ export const executiveNavyTemplate = {
       body: `<main class="resume">
   <aside>
     <p class="aside-name"${pathAttr("name")}>${escapeHtml(name)}</p>
-    ${headline ? `<p class="aside-headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
+    ${headline ? `<p class="aside-headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
     <div class="aside-rule"></div>
     ${renderAsideContact(data)}
     ${skills ? `<h2>Skills</h2>${skills}` : ""}
@@ -298,7 +299,7 @@ export const executiveNavyTemplate = {
   <div class="main">
     ${
       profile
-        ? `<section><h2>Profile</h2><p class="summary"${pathAttr("profile")}>${escapeHtml(profile)}</p></section>`
+        ? `<section><h2>Profile</h2><p class="summary"${pathAttr("profile")}>${richHtml(profile)}</p></section>`
         : ""
     }
     ${tech ? `<section><h2>Highlights</h2>${tech}</section>` : ""}

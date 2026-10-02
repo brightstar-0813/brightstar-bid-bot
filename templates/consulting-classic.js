@@ -1,6 +1,7 @@
 import {
   contactLine,
   escapeHtml,
+  richHtml,
   pathAttr,
   renderCerts,
   renderEducationRows,
@@ -157,26 +158,30 @@ const CSS = `
 
 function renderJobs(jobs) {
   return (jobs || [])
-    .map((job) => {
-      const company = escapeHtml(job.company || "");
-      const location = escapeHtml(job.location || "");
-      const title = escapeHtml(job.title || "");
-      const dates = escapeHtml(job.dates || "");
-      const project = escapeHtml(job.project || "");
+    .map((job, ji) => {
+      const company = String(job.company || "").trim();
+      const location = String(job.location || "").trim();
+      const title = String(job.title || "").trim();
+      const dates = String(job.dates || "").trim();
+      const project = String(job.project || "").trim();
       const bullets = (job.bullets || [])
+        .map((b, bi) => {
+          const text = String(b || "").trim();
+          if (!text) return "";
+          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${richHtml(text)}</li>`;
+        })
         .filter(Boolean)
-        .map((b) => `<li>${escapeHtml(b)}</li>`)
         .join("\n");
       return `<article class="job">
   <div class="job-row">
-    <h3 class="job-company">${company}</h3>
-    ${location ? `<span class="job-loc">${location}</span>` : ""}
+    <h3 class="job-company"${pathAttr(`experience.${ji}.company`)}>${richHtml(company)}</h3>
+    ${location ? `<span class="job-loc"${pathAttr(`experience.${ji}.location`)}>${escapeHtml(location)}</span>` : ""}
   </div>
   <div class="job-row">
-    <p class="job-title">${title}</p>
-    ${dates ? `<span class="job-dates">${dates}</span>` : ""}
+    <p class="job-title"${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</p>
+    ${dates ? `<span class="job-dates"${pathAttr(`experience.${ji}.dates`)}>${escapeHtml(dates)}</span>` : ""}
   </div>
-  ${project ? `<p class="project">${project}</p>` : ""}
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
   ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
 </article>`;
     })
@@ -203,10 +208,10 @@ export const consultingClassicTemplate = {
       body: `<main class="resume">
   <header class="top">
     <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
-    ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
+    ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
     <p class="contact">${contactLine(data)}</p>
   </header>
-  ${profile ? `<section><h2>Summary</h2><p${pathAttr("profile")}>${escapeHtml(profile)}</p></section>` : ""}
+  ${profile ? `<section><h2>Summary</h2><p${pathAttr("profile")}>${richHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2>Selected Highlights</h2>${tech}</section>` : ""}
   ${jobs ? `<section><h2>Experience</h2>${jobs}</section>` : ""}
   ${edu ? `<section><h2>Education</h2>${edu}</section>` : ""}

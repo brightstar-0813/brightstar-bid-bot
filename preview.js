@@ -5,6 +5,8 @@ import {
   resumeJsonToHtml
 } from "./templates/index.js";
 import { applyPathEdits } from "./templates/shared.js";
+import { isPlainResumePath, sanitizeRichHtml } from "./resume-rich.js";
+import { buildResumeDocx, resumeDocxFileName } from "./resume-docx.js";
 import { getActivePerson } from "./profiles.js";
 import { isResumePreviewable, sampleResumeForPerson } from "./templates/preview-sample.js";
 import { loadAndApplyTheme, watchThemeChanges } from "./theme.js";
@@ -23,6 +25,8 @@ const editControlsEl = document.getElementById("editControls");
 const editBtn = document.getElementById("editResume");
 const saveBtn = document.getElementById("saveResume");
 const discardBtn = document.getElementById("discardEdits");
+const formatBar = document.getElementById("formatBar");
+const downloadDocxBtn = document.getElementById("downloadDocx");
 
 const params = new URLSearchParams(location.search);
 let templateId = params.get("template") || DEFAULT_TEMPLATE_ID;
@@ -81,6 +85,8 @@ function updateEditChrome() {
   }
   if (saveBtn) saveBtn.disabled = !editable || !editMode || !dirty;
   if (discardBtn) discardBtn.disabled = !editable || !editMode;
+  if (formatBar) formatBar.hidden = !editable || !editMode;
+  if (downloadDocxBtn) downloadDocxBtn.disabled = !editable || !workingResumeData;
 }
 
 function collectPathEdits(doc) {
@@ -89,18 +95,76 @@ function collectPathEdits(doc) {
   for (const el of doc.querySelectorAll("[data-bs-path]")) {
     const path = String(el.getAttribute("data-bs-path") || "").trim();
     if (!path) continue;
-    const text = String(el.innerText || el.textContent || "")
-      .replace(/\u00a0/g, " ")
-      .replace(/\r\n/g, "\n")
-      .trim();
-    edits[path] = text;
+    if (isPlainResumePath(path)) {
+      edits[path] = String(el.innerText || el.textContent || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\r\n/g, "\n")
+        .trim();
+      continue;
+    }
+    let html = sanitizeRichHtml(el.innerHTML || "");
+    const align = String(el.style?.textAlign || "").toLowerCase();
+    if ((align === "center" || align === "left") && /^(headline|profile)$/.test(path)) {
+      html = `<div style="text-align:${align}">${html}</div>`;
+    }
+    edits[path] = html;
   }
   return edits;
 }
 
+function fieldFromNode(node) {
+  const el = node?.nodeType === 1 ? node : node?.parentElement;
+  return el?.closest?.("[data-bs-path]") || null;
+}
+
+function markDirty() {
+  dirty = true;
+  updateEditChrome();
+}
+
+function applyEmphasis(doc, command) {
+  const host = fieldFromNode(doc.getSelection()?.anchorNode);
+  const path = host?.getAttribute("data-bs-path") || "";
+  if (!host || isPlainResumePath(path)) return;
+  doc.execCommand(command, false);
+  host.innerHTML = sanitizeRichHtml(host.innerHTML);
+  markDirty();
+}
+
+function wrapSelection(doc, style) {
+  const sel = doc.getSelection();
+  const host = fieldFromNode(sel?.anchorNode);
+  const path = host?.getAttribute("data-bs-path") || "";
+  if (!host || !sel || !sel.rangeCount || sel.isCollapsed || isPlainResumePath(path)) return;
+  const range = sel.getRangeAt(0);
+  const span = doc.createElement("span");
+  span.setAttribute("style", style);
+  span.appendChild(range.extractContents());
+  range.insertNode(span);
+  host.innerHTML = sanitizeRichHtml(host.innerHTML);
+  markDirty();
+}
+
+function applyAlign(doc, align) {
+  const sel = doc.getSelection();
+  const node = sel?.anchorNode;
+  const el = node?.nodeType === 1 ? node : node?.parentElement;
+  const field = el?.closest?.("[data-bs-path]");
+  const path = field?.getAttribute("data-bs-path") || "";
+  if (field && /^(headline|profile)$/.test(path)) {
+    field.style.textAlign = align;
+  } else {
+    doc.querySelectorAll("h2").forEach((heading) => {
+      heading.style.textAlign = align;
+    });
+    if (workingResumeData) workingResumeData.headingAlign = align;
+  }
+  markDirty();
+}
+
 function enableEditableFields(doc) {
   if (!doc) return;
-  for (const el of doc.querySelectorAll("[data-bs-path]")) {
+  for (const el of doc.querySelectorAll("[data-bs-path], h2")) {
     el.setAttribute("contenteditable", "true");
     el.setAttribute("spellcheck", "true");
   }
@@ -108,25 +172,36 @@ function enableEditableFields(doc) {
     doc.__bsEditBound = true;
     doc.addEventListener("input", () => {
       if (!editMode) return;
-      dirty = true;
-      updateEditChrome();
+      markDirty();
     });
     doc.addEventListener("paste", (event) => {
       if (!editMode) return;
       const target = event.target?.closest?.("[data-bs-path]");
       if (!target) return;
       event.preventDefault();
+      const path = target.getAttribute("data-bs-path") || "";
+      const html = String(event.clipboardData?.getData("text/html") || "");
       const text = String(event.clipboardData?.getData("text/plain") || "").replace(/\r\n/g, "\n");
-      doc.execCommand("insertText", false, text);
-      dirty = true;
-      updateEditChrome();
+      if (!isPlainResumePath(path) && html.trim()) {
+        doc.execCommand("insertHTML", false, sanitizeRichHtml(html));
+      } else {
+        doc.execCommand("insertText", false, text);
+      }
+      markDirty();
+    });
+    doc.addEventListener("keydown", (event) => {
+      if (!editMode || !(event.ctrlKey || event.metaKey)) return;
+      const key = String(event.key || "").toLowerCase();
+      if (key !== "b" && key !== "i" && key !== "u") return;
+      event.preventDefault();
+      applyEmphasis(doc, key === "b" ? "bold" : key === "i" ? "italic" : "underline");
     });
   }
 }
 
 function disableEditableFields(doc) {
   if (!doc) return;
-  for (const el of doc.querySelectorAll("[data-bs-path]")) {
+  for (const el of doc.querySelectorAll("[data-bs-path], h2")) {
     el.removeAttribute("contenteditable");
   }
 }
@@ -362,6 +437,67 @@ saveBtn?.addEventListener("click", () => {
 });
 discardBtn?.addEventListener("click", () => {
   discardEdits().catch((err) => setStatus(String(err?.message || err), "err"));
+});
+
+function keepPreviewSelection(event) {
+  event.preventDefault();
+}
+
+for (const button of [document.getElementById("fmtBold"), document.getElementById("fmtItalic"), document.getElementById("fmtUnderline"), document.getElementById("fmtLeft"), document.getElementById("fmtCenter")]) {
+  button?.addEventListener("mousedown", keepPreviewSelection);
+}
+
+document.getElementById("fmtBold")?.addEventListener("click", () => {
+  const doc = pageEl.contentDocument;
+  if (doc) applyEmphasis(doc, "bold");
+});
+document.getElementById("fmtItalic")?.addEventListener("click", () => {
+  const doc = pageEl.contentDocument;
+  if (doc) applyEmphasis(doc, "italic");
+});
+document.getElementById("fmtUnderline")?.addEventListener("click", () => {
+  const doc = pageEl.contentDocument;
+  if (doc) applyEmphasis(doc, "underline");
+});
+document.getElementById("fmtFont")?.addEventListener("change", (event) => {
+  const font = String(event.target.value || "");
+  event.target.value = "";
+  const doc = pageEl.contentDocument;
+  if (font && doc) wrapSelection(doc, `font-family:${font}`);
+});
+document.getElementById("fmtSize")?.addEventListener("change", (event) => {
+  const size = String(event.target.value || "");
+  event.target.value = "";
+  const doc = pageEl.contentDocument;
+  if (size && doc) wrapSelection(doc, `font-size:${size}pt`);
+});
+document.getElementById("fmtLeft")?.addEventListener("click", () => {
+  const doc = pageEl.contentDocument;
+  if (doc) applyAlign(doc, "left");
+});
+document.getElementById("fmtCenter")?.addEventListener("click", () => {
+  const doc = pageEl.contentDocument;
+  if (doc) applyAlign(doc, "center");
+});
+
+downloadDocxBtn?.addEventListener("click", () => {
+  if (!workingResumeData) return;
+  if (editMode) {
+    workingResumeData = applyPathEdits(
+      workingResumeData,
+      collectPathEdits(pageEl.contentDocument)
+    );
+  }
+  const bytes = buildResumeDocx(workingResumeData);
+  const blob = new Blob([bytes], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = resumeDocxFileName(workingResumeData);
+  link.click();
+  URL.revokeObjectURL(url);
 });
 
 templateSelectEl.addEventListener("change", () => {

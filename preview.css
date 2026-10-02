@@ -104,6 +104,40 @@ h1 {
   display: none !important;
 }
 
+.format-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.format-bar[hidden] {
+  display: none !important;
+}
+
+.format-bar button,
+.format-bar select {
+  height: 32px;
+  padding: 0 8px;
+}
+
+.format-field {
+  display: inline-flex;
+  margin: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;

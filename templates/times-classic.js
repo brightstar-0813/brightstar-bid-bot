@@ -1,5 +1,6 @@
 import {
   escapeHtml,
+  richHtml,
   educationLocationLine,
   educationYearLine,
   pathAttr,
@@ -243,14 +244,14 @@ export const timesClassicTemplate = {
         // Keep this on one line: p uses white-space: pre-wrap, so any source
         // indentation would render as leading blank space.
         const rest = [
-          degree ? `<span${pathAttr(`education.${ei}.degree`)}>${escapeHtml(degree)}</span>` : "",
-          year ? `<span${pathAttr(`education.${ei}.year`)}>${escapeHtml(year)}</span>` : "",
-          details ? `<span${pathAttr(`education.${ei}.location`)}>${escapeHtml(details)}</span>` : ""
+          degree ? `<span${pathAttr(`education.${ei}.degree`)}>${richHtml(degree)}</span>` : "",
+          year ? `<span${pathAttr(`education.${ei}.year`)}>${richHtml(year)}</span>` : "",
+          details ? `<span${pathAttr(`education.${ei}.location`)}>${richHtml(details)}</span>` : ""
         ]
           .filter(Boolean)
           .join("<br>");
         const schoolHtml = school
-          ? `<strong${pathAttr(`education.${ei}.school`)}>${escapeHtml(school)}</strong>`
+          ? `<strong${pathAttr(`education.${ei}.school`)}>${richHtml(school)}</strong>`
           : "";
         return `<p>${schoolHtml}${rest ? `<br>${rest}` : ""}</p>`;
       })
@@ -266,7 +267,7 @@ export const timesClassicTemplate = {
       body: `  <main class="resume">
     <header class="top">
       <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
-      ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
+      ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
       <div class="header-row">
         ${contact}
         ${badges}
@@ -275,7 +276,7 @@ export const timesClassicTemplate = {
 
     <section>
       <h2>Profile</h2>
-      <p${pathAttr("profile")}>${escapeHtml(profile)}</p>
+      <p${pathAttr("profile")}>${richHtml(profile)}</p>
     </section>
 
     ${

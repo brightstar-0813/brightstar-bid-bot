@@ -1,6 +1,7 @@
 import {
   contactLine,
   escapeHtml,
+  richHtml,
   pathAttr,
   renderCerts,
   renderEducationRows,
@@ -155,10 +156,10 @@ export const cambriaCorporateTemplate = {
       body: `<main class="resume">
   <header class="top">
     <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
-    ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
+    ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
     <p class="contact">${contactLine(data, { linkColor: "#1f4e79" })}</p>
   </header>
-  ${profile ? `<section><h2>Professional Summary</h2><p${pathAttr("profile")}>${escapeHtml(profile)}</p></section>` : ""}
+  ${profile ? `<section><h2>Professional Summary</h2><p${pathAttr("profile")}>${richHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2>Technical Summary</h2>${tech}</section>` : ""}
   ${jobs ? `<section><h2>Professional Experience</h2>${jobs}</section>` : ""}
   ${skills ? `<section><h2>Core Competencies</h2>${skills}</section>` : ""}

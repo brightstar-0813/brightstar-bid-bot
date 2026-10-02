@@ -80,6 +80,24 @@ test("ATS score rewards JD keyword and Salesforce product coverage", () => {
   assert.ok(strong.components.experienceEvidence?.score > 0);
 });
 
+test("bold markup does not hide a catalog product from the ATS score", () => {
+  const rich = structuredClone(strongResume);
+  rich.skills = rich.skills.map((row) => ({
+    ...row,
+    items: `<b>${row.items}</b>`
+  }));
+  rich.experience = rich.experience.map((job) => ({
+    ...job,
+    bullets: job.bullets.map((bullet) => `<b>${bullet}</b>`)
+  }));
+  const scored = evaluateAtsScore(rich, {
+    jdText: jd,
+    jobTitle: "Salesforce Technical Architect",
+    roleTrack: "sf"
+  });
+  assert.equal(scored.missingProducts.length, 0);
+});
+
 test("skills-only products score lower than skills-plus-bullet proof", () => {
   const skillsOnly = {
     name: "Candidate",

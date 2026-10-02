@@ -1,6 +1,7 @@
 import {
   contactLine,
   escapeHtml,
+  richHtml,
   pathAttr,
   renderCerts,
   renderEducationRows,
@@ -151,11 +152,11 @@ export const modernSansTemplate = {
       body: `<main class="resume">
   <header class="top">
     <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
-    ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
+    ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
     <div class="accent"></div>
     <p class="contact">${contactLine(data, { linkColor: "#0f766e" })}</p>
   </header>
-  ${profile ? `<section><h2>About</h2><p${pathAttr("profile")}>${escapeHtml(profile)}</p></section>` : ""}
+  ${profile ? `<section><h2>About</h2><p${pathAttr("profile")}>${richHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2>Impact</h2>${tech}</section>` : ""}
   ${jobs ? `<section><h2>Experience</h2>${jobs}</section>` : ""}
   ${skills ? `<section><h2>Skills</h2>${skills}</section>` : ""}

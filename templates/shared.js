@@ -1,3 +1,7 @@
+import { isPlainResumePath, plainTextFromRich, richHtml } from "../resume-rich.js";
+
+export { isPlainResumePath, richHtml };
+
 export function escapeHtml(value) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -13,9 +17,9 @@ export function pathAttr(path) {
   return p ? ` data-bs-path="${escapeHtml(p)}"` : "";
 }
 
-/** Wrap escaped text (or prebuilt inner HTML) with a data-bs-path element. */
+/** Wrap escaped text (or sanitized Word marks) with a data-bs-path element. */
 export function editableText(path, text, tag = "span") {
-  const inner = escapeHtml(text);
+  const inner = isPlainResumePath(path) ? escapeHtml(text) : richHtml(text);
   const p = String(path || "").trim();
   if (!p) return inner;
   return `<${tag}${pathAttr(p)}>${inner}</${tag}>`;
@@ -36,10 +40,9 @@ export function applyPathEdits(resumeData, edits) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (!parts.length) continue;
-    const value = String(raw ?? "")
-      .replace(/\u00a0/g, " ")
-      .replace(/\r\n/g, "\n")
-      .trim();
+    const value = isPlainResumePath(path)
+      ? plainTextFromRich(raw)
+      : richHtml(raw);
     let cur = next;
     for (let i = 0; i < parts.length - 1; i++) {
       const key = parts[i];
@@ -183,8 +186,8 @@ export function renderSkills(skills) {
       if (!category && !items) return "";
       if (isKeywordDumpSkillsCategory(category)) return "";
       return `<tr>
-  <td class="skill-cat"${pathAttr(`skills.${si}.category`)}>${escapeHtml(category)}</td>
-  <td class="skill-items"${pathAttr(`skills.${si}.items`)}>${escapeHtml(items)}</td>
+  <td class="skill-cat"${pathAttr(`skills.${si}.category`)}>${richHtml(category)}</td>
+  <td class="skill-items"${pathAttr(`skills.${si}.items`)}>${richHtml(items)}</td>
 </tr>`;
     })
     .filter(Boolean);
@@ -209,7 +212,7 @@ export function renderCerts(certs, { listClass = "certifications" } = {}) {
     .map((c, ci) => {
       const label = certLabel(c);
       if (!label) return "";
-      return `<li${pathAttr(`certifications.${ci}`)}>${escapeHtml(label)}</li>`;
+      return `<li${pathAttr(`certifications.${ci}`)}>${richHtml(label)}</li>`;
     })
     .filter(Boolean)
     .join("\n");
@@ -228,7 +231,7 @@ export function renderTechnicalSummary(items) {
     .map((s, ti) => {
       const text = String(s || "").trim();
       if (!text) return "";
-      return `<li${pathAttr(`technicalSummary.${ti}`)}>${escapeHtml(text)}</li>`;
+      return `<li${pathAttr(`technicalSummary.${ti}`)}>${richHtml(text)}</li>`;
     })
     .filter(Boolean);
   if (!bullets.length) return "";
@@ -393,19 +396,19 @@ export function renderJobsFlex(jobs) {
         .map((b, bi) => {
           const text = String(b || "").trim();
           if (!text) return "";
-          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${escapeHtml(text)}</li>`;
+          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${richHtml(text)}</li>`;
         })
         .filter(Boolean)
         .join("\n");
 
       const companyHtml = company
-        ? `<span${pathAttr(`experience.${ji}.company`)}>${escapeHtml(company)}</span>`
+        ? `<span${pathAttr(`experience.${ji}.company`)}>${richHtml(company)}</span>`
         : "";
       const locationHtml = location
         ? ` (<span${pathAttr(`experience.${ji}.location`)}>${escapeHtml(location)}</span>)`
         : "";
       const titleHtml = title
-        ? `<span${pathAttr(`experience.${ji}.title`)}>${escapeHtml(title)}</span>`
+        ? `<span${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</span>`
         : "";
       const mid = [companyHtml + locationHtml, titleHtml].filter(Boolean).join(" — ");
 
@@ -414,7 +417,7 @@ export function renderJobsFlex(jobs) {
     <span class="company">${mid}</span>
     ${dates ? `<span class="date"${pathAttr(`experience.${ji}.dates`)}>${escapeHtml(dates)}</span>` : ""}
   </div>
-  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${escapeHtml(project)}</p>` : ""}
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
   <ul>
 ${bullets}
   </ul>
@@ -449,16 +452,16 @@ export function renderJobsStacked(jobs) {
         .map((b, bi) => {
           const text = String(b || "").trim();
           if (!text) return "";
-          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${escapeHtml(text)}</li>`;
+          return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${richHtml(text)}</li>`;
         })
         .filter(Boolean)
         .join("\n");
 
       return `<article class="job">
-  <h3 class="role-company"${pathAttr(`experience.${ji}.company`)}>${escapeHtml(company)}</h3>
-  <p class="role-title"${pathAttr(`experience.${ji}.title`)}>${escapeHtml(title)}</p>
+  <h3 class="role-company"${pathAttr(`experience.${ji}.company`)}>${richHtml(company)}</h3>
+  <p class="role-title"${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</p>
   ${meta ? `<p class="role-meta">${meta}</p>` : ""}
-  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${escapeHtml(project)}</p>` : ""}
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
   <ul>
 ${bullets}
   </ul>
@@ -543,11 +546,11 @@ export function renderEducationRows(education) {
       if (!schoolRaw && !degreeRaw) return "";
       return `<div class="edu-row">
   <div class="edu-main">
-    ${degreeRaw ? `<div class="edu-degree"${pathAttr(`education.${ei}.degree`)}>${escapeHtml(degreeRaw)}</div>` : ""}
-    ${schoolRaw ? `<div class="edu-school"${pathAttr(`education.${ei}.school`)}>${escapeHtml(schoolRaw)}</div>` : ""}
-    ${detailsRaw ? `<div class="edu-details"${pathAttr(`education.${ei}.location`)}>${escapeHtml(detailsRaw)}</div>` : ""}
+    ${degreeRaw ? `<div class="edu-degree"${pathAttr(`education.${ei}.degree`)}>${richHtml(degreeRaw)}</div>` : ""}
+    ${schoolRaw ? `<div class="edu-school"${pathAttr(`education.${ei}.school`)}>${richHtml(schoolRaw)}</div>` : ""}
+    ${detailsRaw ? `<div class="edu-details"${pathAttr(`education.${ei}.location`)}>${richHtml(detailsRaw)}</div>` : ""}
   </div>
-  ${yearRaw ? `<div class="edu-year"${pathAttr(`education.${ei}.year`)}>${escapeHtml(yearRaw)}</div>` : ""}
+  ${yearRaw ? `<div class="edu-year"${pathAttr(`education.${ei}.year`)}>${richHtml(yearRaw)}</div>` : ""}
 </div>`;
     })
     .filter(Boolean)
@@ -567,9 +570,9 @@ export function renderSkillsStacked(skills) {
       // category onto the first skill ("IntegrationREST, SOAP").
       return `<div class="skill-row"><span class="skill-cat"${pathAttr(
         `skills.${si}.category`
-      )}>${escapeHtml(category)}</span> <span class="skill-items"${pathAttr(
+      )}>${richHtml(category)}</span> <span class="skill-items"${pathAttr(
         `skills.${si}.items`
-      )}>${escapeHtml(items)}</span></div>`;
+      )}>${richHtml(items)}</span></div>`;
     })
     .filter(Boolean);
   if (!rows.length) return "";
@@ -585,11 +588,11 @@ export function renderSkillsInline(skills) {
       if (!category && !items) return "";
       if (isKeywordDumpSkillsCategory(category)) return "";
       if (!category) {
-        return `<div class="skill-inline"${pathAttr(`skills.${si}.items`)}>${escapeHtml(items)}</div>`;
+        return `<div class="skill-inline"${pathAttr(`skills.${si}.items`)}>${richHtml(items)}</div>`;
       }
       return `<div class="skill-inline"><span class="skill-cat"${pathAttr(
         `skills.${si}.category`
-      )}>${escapeHtml(category)}:</span> <span${pathAttr(`skills.${si}.items`)}>${escapeHtml(
+      )}>${richHtml(category)}:</span> <span${pathAttr(`skills.${si}.items`)}>${richHtml(
         items
       )}</span></div>`;
     })
@@ -603,7 +606,7 @@ function jobBullets(job, ji) {
     .map((b, bi) => {
       const text = String(b || "").trim();
       if (!text) return "";
-      return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${escapeHtml(text)}</li>`;
+      return `<li${pathAttr(`experience.${ji}.bullets.${bi}`)}>${richHtml(text)}</li>`;
     })
     .filter(Boolean)
     .join("\n");
@@ -621,10 +624,10 @@ export function renderJobsTitleFirst(jobs) {
       const bullets = jobBullets(job, ji);
       const headingParts = [];
       if (title) {
-        headingParts.push(`<span${pathAttr(`experience.${ji}.title`)}>${escapeHtml(title)}</span>`);
+        headingParts.push(`<span${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</span>`);
       }
       if (company) {
-        headingParts.push(`<span${pathAttr(`experience.${ji}.company`)}>${escapeHtml(company)}</span>`);
+        headingParts.push(`<span${pathAttr(`experience.${ji}.company`)}>${richHtml(company)}</span>`);
       }
       const heading = headingParts.join(", ");
       return `<article class="job">
@@ -633,7 +636,7 @@ export function renderJobsTitleFirst(jobs) {
     ${dates ? `<span class="job-dates"${pathAttr(`experience.${ji}.dates`)}>${escapeHtml(dates)}</span>` : ""}
   </div>
   ${location ? `<p class="job-meta"${pathAttr(`experience.${ji}.location`)}>${escapeHtml(location)}</p>` : ""}
-  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${escapeHtml(project)}</p>` : ""}
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
   ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
 </article>`;
     })
@@ -652,7 +655,7 @@ export function renderJobsDatedColumn(jobs) {
       const bullets = jobBullets(job, ji);
       const orgParts = [];
       if (company) {
-        orgParts.push(`<span${pathAttr(`experience.${ji}.company`)}>${escapeHtml(company)}</span>`);
+        orgParts.push(`<span${pathAttr(`experience.${ji}.company`)}>${richHtml(company)}</span>`);
       }
       if (location) {
         orgParts.push(`<span${pathAttr(`experience.${ji}.location`)}>${escapeHtml(location)}</span>`);
@@ -661,9 +664,9 @@ export function renderJobsDatedColumn(jobs) {
       return `<article class="job">
   <div class="job-dates"${dates ? pathAttr(`experience.${ji}.dates`) : ""}>${escapeHtml(dates)}</div>
   <div class="job-body">
-    ${title ? `<h3 class="job-title"${pathAttr(`experience.${ji}.title`)}>${escapeHtml(title)}</h3>` : ""}
+    ${title ? `<h3 class="job-title"${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</h3>` : ""}
     ${org ? `<p class="job-company">${org}</p>` : ""}
-    ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${escapeHtml(project)}</p>` : ""}
+    ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
     ${bullets ? `<ul>\n${bullets}\n  </ul>` : ""}
   </div>
 </article>`;
@@ -694,11 +697,11 @@ export function renderEducationDatedColumn(education) {
       }
       if (!schoolRaw && !degreeRaw) return "";
       return `<article class="edu-col">
-  <div class="job-dates"${yearRaw ? pathAttr(`education.${ei}.year`) : ""}>${escapeHtml(yearRaw)}</div>
+  <div class="job-dates"${yearRaw ? pathAttr(`education.${ei}.year`) : ""}>${richHtml(yearRaw)}</div>
   <div class="job-body">
-    ${degreeRaw ? `<h3 class="job-title"${pathAttr(`education.${ei}.degree`)}>${escapeHtml(degreeRaw)}</h3>` : ""}
-    ${schoolRaw ? `<p class="job-company"${pathAttr(`education.${ei}.school`)}>${escapeHtml(schoolRaw)}</p>` : ""}
-    ${detailsRaw ? `<p class="project"${pathAttr(`education.${ei}.location`)}>${escapeHtml(detailsRaw)}</p>` : ""}
+    ${degreeRaw ? `<h3 class="job-title"${pathAttr(`education.${ei}.degree`)}>${richHtml(degreeRaw)}</h3>` : ""}
+    ${schoolRaw ? `<p class="job-company"${pathAttr(`education.${ei}.school`)}>${richHtml(schoolRaw)}</p>` : ""}
+    ${detailsRaw ? `<p class="project"${pathAttr(`education.${ei}.location`)}>${richHtml(detailsRaw)}</p>` : ""}
   </div>
 </article>`;
     })

@@ -1,6 +1,7 @@
 import {
   contactLine,
   escapeHtml,
+  richHtml,
   pathAttr,
   renderCerts,
   renderEducationRows,
@@ -171,11 +172,11 @@ export const nycFinanceTemplate = {
       body: `<main class="resume">
   <header class="banner">
     <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
-    ${headline ? `<p class="headline"${pathAttr("headline")}>${escapeHtml(headline)}</p>` : ""}
+    ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
     <p class="contact">${contactLine(data, { linkColor: "#e8eef6" })}</p>
   </header>
   <div class="body">
-    ${profile ? `<section><h2>Profile</h2><p${pathAttr("profile")}>${escapeHtml(profile)}</p></section>` : ""}
+    ${profile ? `<section><h2>Profile</h2><p${pathAttr("profile")}>${richHtml(profile)}</p></section>` : ""}
     ${tech ? `<section><h2>Selected Achievements</h2>${tech}</section>` : ""}
     ${jobs ? `<section><h2>Professional Experience</h2>${jobs}</section>` : ""}
     ${skills ? `<section><h2>Technical Skills</h2>${skills}</section>` : ""}
