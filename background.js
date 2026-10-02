@@ -134,8 +134,10 @@ import {
   normalizeIndeedCapturedJob
 } from "./indeed.js";
 import {
+  ATS_TARGET_SCORE,
   evaluateAtsScore,
-  boostResumeForAts
+  boostResumeForAts,
+  buildAtsScoreRetryPrompt
 } from "./ats-score.js";
 import {
   AI_PROVIDER_KEY,
@@ -8361,6 +8363,55 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       resumeData = boosted.data;
       atsEvaluation = boosted.evaluation;
       await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
+    }
+  }
+  if (
+    Number(atsEvaluation?.score) < ATS_TARGET_SCORE &&
+    !batchControl.skipCurrent &&
+    !batchControl.stop &&
+    tab &&
+    typeof tab.id === "number"
+  ) {
+    await setStatus(
+      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — one project-bank retry…`
+    );
+    try {
+      const retryRaw = await automateChatGpt(
+        tab.id,
+        buildAtsScoreRetryPrompt(resumeData, atsEvaluation, {
+          jdText: atsJd,
+          jobTitle: atsTitle,
+          roleTrack,
+          companyName: atsCompany
+        }),
+        {
+          newChat: false,
+          expectResumeJson: true,
+          statusLabel: `Same chat · ATS retry (${jobMeta.companyName || "job"})…`
+        }
+      );
+      const improved = extractResumeJson(retryRaw);
+      if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
+        const nextEval = evaluateAtsScore(improved, {
+          jdText: atsJd,
+          jobTitle: atsTitle,
+          roleTrack,
+          companyName: atsCompany
+        });
+        const beforeBullets = totalExperienceBullets(resumeData);
+        if (
+          nextEval.score > atsEvaluation.score &&
+          totalExperienceBullets(improved) >= beforeBullets * 0.8
+        ) {
+          resumeData = improved;
+          atsEvaluation = nextEval;
+          await setStatus(`ATS retry → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
+        } else {
+          await setStatus("ATS retry was not higher — keeping the first resume.");
+        }
+      }
+    } catch (err) {
+      await setStatus(`ATS retry skipped (${err?.message || "failed"}). Keeping resume.`);
     }
   }
   if (jobMeta.csvRow != null) {
