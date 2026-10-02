@@ -242,3 +242,15 @@ test("vector headline override is the last headline instruction", async () => {
   assert.ok(overrideAt > passAt);
   assert.ok(prompt.trimEnd().endsWith(SF_TEST_HEADLINE_OVERRIDE.trim()));
 });
+
+test("first-pass Salesforce bank ranks catalog products from the JD", async () => {
+  const { resolveSfProjectBankForJd } = await import("../profiles.js");
+  const excerpt = resolveSfProjectBankForJd(
+    "Build with Service Cloud, Data Cloud, and Agentforce."
+  );
+  assert.match(excerpt, /Agentforce/);
+  assert.match(excerpt, /Data Cloud/);
+  const first = excerpt.split(/(?=^\d+\.\s+)/m).map((part) => part.trim()).filter(Boolean)[0];
+  assert.match(first, /Service Cloud|Data Cloud|Agentforce/);
+  assert.ok(excerpt.length <= 5500);
+});

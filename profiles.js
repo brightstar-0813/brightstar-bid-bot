@@ -18,6 +18,7 @@ import {
   normalizeRoleTrackId,
   resolveEffectiveRoleTrack,
   resolveRoleTrackForPerson,
+  jdRequiredSkills,
   ROLE_TRACK_LIST
 } from "./role-tracks.js";
 import {
@@ -547,9 +548,10 @@ const SF_PROJECT_BANK_APPENDIX =
 
 /** Prefer a JD-scored bank excerpt (~4–6k) over dumping the full library. */
 export function resolveSfProjectBankForJd(jdText = "", { maxChars = 5500, maxProjects = 5 } = {}) {
+  const products = jdRequiredSkills(jdText, "sf").map((product) => product.name);
   const excerpt = selectProjectBankExcerpts({
     jdText,
-    missingProducts: [],
+    missingProducts: products,
     bank: SF_ENTERPRISE_PROJECT_BANK,
     maxProjects,
     maxChars
