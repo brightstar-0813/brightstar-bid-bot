@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>BrightStar Bid Bot · Style preview</title>
+    <script src="theme-boot.js"></script>
+    <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="ui-toast.css" />
+    <link rel="stylesheet" href="preview.css" />
+  </head>
+  <body>
+    <header class="preview-bar">
+      <div class="brand">
+        <img src="icons/brightstar-icon.svg" alt="" class="brand-icon" />
+        <div class="brand-copy">
+          <h1>Style preview</h1>
+          <p class="hype hype-muted" id="previewLede" hidden></p>
+        </div>
+      </div>
+      <div class="preview-controls">
+        <label class="field">
+          <span>Template</span>
+          <select id="templateSelect" aria-label="Resume template"></select>
+        </label>
+        <div class="edit-controls" id="editControls" hidden>
+          <button type="button" id="editResume" class="ghost">Edit</button>
+          <div class="format-bar" id="formatBar" hidden>
+            <button type="button" id="fmtBold" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button type="button" id="fmtItalic" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button type="button" id="fmtUnderline" title="Underline (Ctrl+U)"><u>U</u></button>
+            <label class="format-field">
+              <span class="sr-only">Font</span>
+              <select id="fmtFont" aria-label="Font">
+                <option value="">Font</option>
+                <option>Calibri</option>
+                <option>Cambria</option>
+                <option>Times New Roman</option>
+                <option>Arial</option>
+                <option>Georgia</option>
+              </select>
+            </label>
+            <label class="format-field">
+              <span class="sr-only">Size</span>
+              <select id="fmtSize" aria-label="Size">
+                <option value="">Size</option>
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12">12</option>
+                <option value="14">14</option>
+              </select>
+            </label>
+            <button type="button" id="fmtLeft" title="Align left">Left</button>
+            <button type="button" id="fmtCenter" title="Align center">Center</button>
+          </div>
+          <button type="button" id="saveResume" class="primary" disabled>Save</button>
+          <button type="button" id="discardEdits" disabled>Discard edits</button>
+          <button type="button" id="downloadDocx" class="ghost">Download Word</button>
+        </div>
+        <button type="button" id="useStyle" class="primary">Use this style</button>
+      </div>
+    </header>
+    <div class="stage" id="stage">
+      <div class="paper">
+        <iframe id="page" title="Resume style preview"></iframe>
+      </div>
+    </div>
+    <p class="status-bar is-empty" id="status" role="status"></p>
+    <script type="module" src="preview.js"></script>
+  </body>
+</html>
