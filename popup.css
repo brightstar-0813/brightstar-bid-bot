@@ -1959,6 +1959,12 @@ input[type="file"]::file-selector-button {
   height: 16px;
 }
 
+.manual-primary-icons > .icon-button-labeled {
+  width: auto;
+  min-width: 0;
+  padding: 0 10px;
+}
+
 .manual-primary-icons {
   display: inline-flex;
   align-items: center;
@@ -2324,6 +2330,21 @@ input[type="file"]::file-selector-button {
   height: 16px;
 }
 
+.batch-toolbar button.icon-button.icon-button-labeled,
+.apply-actions button.icon-button.icon-button-labeled,
+.manual-primary-icons > .icon-button.icon-button-labeled {
+  width: auto;
+  min-width: 0;
+  padding: 0 10px;
+  gap: 6px;
+}
+
+button.icon-button-labeled .icon-button-label {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
 @media (max-width: 360px) {
   .batch-toolbar {
     justify-content: flex-start;
@@ -2536,6 +2557,11 @@ input[type="file"]::file-selector-button {
 .apply-actions button.icon-button svg {
   width: 16px;
   height: 16px;
+}
+
+.apply-actions button.icon-button-labeled {
+  width: auto;
+  min-width: 0;
 }
 
 .custom-qa-ask {

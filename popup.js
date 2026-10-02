@@ -1268,6 +1268,13 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   if (mode === "indeed") mode = DEFAULT_CHANNEL_FILTER;
   channelFilter = mode;
   syncChannelFilterButtons();
+  const sourceSubmitHintEl = document.getElementById("sourceSubmitHint");
+  if (sourceSubmitHintEl) {
+    sourceSubmitHintEl.textContent =
+      channelFilter === "dice"
+        ? "Dice: batch builds files and submits."
+        : "This board: batch builds files and opens the Autofill panel. It does not submit.";
+  }
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   const person = await getActivePerson().catch(() => null);
   queueCache = mergeStatusFromQueue(filtered, queueCache, person?.id || "");
@@ -1398,11 +1405,16 @@ const ACTION_ICON_PATHS = {
   mail: '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>'
 };
 
-function setIconButton(button, icon, label) {
+function setIconButton(button, icon, label, { showLabel = false } = {}) {
   button.classList.add("icon-button");
   button.setAttribute("aria-label", label);
-  if (label) button.title = label;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICON_PATHS[icon] || ""}</svg>`;
+  const existingTitle = button.getAttribute("title") || "";
+  if (label && existingTitle.length <= label.length) button.title = label;
+  const svg = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICON_PATHS[icon] || ""}</svg>`;
+  button.innerHTML = showLabel
+    ? `${svg}<span class="icon-button-label">${label}</span>`
+    : svg;
+  button.classList.toggle("icon-button-labeled", Boolean(showLabel));
 }
 
 function atsScoreTitle(job) {
@@ -4123,7 +4135,7 @@ function initThemePicker() {
 
 if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from this page");
 if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear job fields");
-if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate Draft Version");
+if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate draft", { showLabel: true });
 if (logProfileApplyBtn) {
   setIconButton(logProfileApplyBtn, "profileApply", "Log apply — save JD and mark Applied");
 }
@@ -4131,7 +4143,7 @@ if (emailBidPrepareBtn) {
   setIconButton(emailBidPrepareBtn, "search", "Find contacts & draft (Email Bid)");
 }
 if (autofillPageBtn) {
-  setIconButton(autofillPageBtn, "autofill", "Autofill (Ctrl+Shift+Y)");
+  setIconButton(autofillPageBtn, "autofill", "Autofill", { showLabel: true });
 }
 if (autoApplyPageBtn) {
   setIconButton(autoApplyPageBtn, "apply", "Auto Apply (Ctrl+Shift+U)");
