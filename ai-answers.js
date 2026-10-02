@@ -870,6 +870,7 @@ export function cleanCustomQaAnswer(raw) {
   let t = String(raw || "").trim();
   if (!t) return "";
   t = t.replace(/^```(?:text|markdown|md)?\s*/i, "").replace(/```$/i, "").trim();
+  t = t.replace(/^(?:chatgpt|claude|gpt|assistant|you)\s+said\s*[:\-–]?\s*/i, "").trim();
   t = t.replace(/^(here(?:'s| is)|answer|response)\s*[:\-–]\s*/i, "").trim();
   if (
     (t.startsWith('"') && t.endsWith('"')) ||
