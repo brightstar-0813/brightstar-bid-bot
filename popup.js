@@ -308,6 +308,7 @@ const customQaGenerateBtn = document.getElementById("customQaGenerate");
 const customQaScanPageBtn = document.getElementById("customQaScanPage");
 const customQaCopyBtn = document.getElementById("customQaCopy");
 const customQaSaveBtn = document.getElementById("customQaSave");
+const customQaClearBtn = document.getElementById("customQaClear");
 const customQaStrongModelEl = document.getElementById("customQaStrongModel");
 const customQaStrongWrapEl = document.getElementById("customQaStrongWrap");
 const resetBtn = document.getElementById("reset");
@@ -3482,8 +3483,10 @@ function syncCustomQaAskControls() {
   }
   const busy = Boolean(customQaGenerateBtn?.dataset.busy === "1");
   const hasAnswer = Boolean(String(customQaAnswerEl?.value || "").trim());
+  const hasQuestion = Boolean(String(customQaQuestionEl?.value || "").trim());
   if (customQaCopyBtn) customQaCopyBtn.disabled = !hasAnswer;
   if (customQaSaveBtn) customQaSaveBtn.disabled = !hasAnswer || busy;
+  if (customQaClearBtn) customQaClearBtn.disabled = busy || (!hasAnswer && !hasQuestion);
   if (customQaGenerateBtn) {
     customQaGenerateBtn.disabled = busy || !autofillEnabledCache;
   }
@@ -3491,6 +3494,14 @@ function syncCustomQaAskControls() {
     const openaiOn = openaiQaToggleEl ? Boolean(openaiQaToggleEl.checked) : true;
     customQaScanPageBtn.disabled = busy || !autofillEnabledCache || !openaiOn;
   }
+}
+
+function clearCustomQaAsk() {
+  if (customQaQuestionEl) customQaQuestionEl.value = "";
+  if (customQaAnswerEl) customQaAnswerEl.value = "";
+  setCustomQaMeta("");
+  syncCustomQaAskControls();
+  setStatus("Cleared question and answer.");
 }
 
 function setCustomQaMeta(text) {
@@ -3948,6 +3959,8 @@ customQaScanPageBtn?.addEventListener("click", () => {
 customQaCopyBtn?.addEventListener("click", () => {
   copyCustomQaAnswer().catch((e) => setStatus(String(e.message || e)));
 });
+customQaClearBtn?.addEventListener("click", () => clearCustomQaAsk());
+customQaQuestionEl?.addEventListener("input", syncCustomQaAskControls);
 customQaSaveBtn?.addEventListener("click", () => {
   saveCustomQaAskToBank().catch((e) => setStatus(String(e.message || e)));
 });

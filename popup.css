@@ -2640,6 +2640,7 @@ button.icon-button-labeled .icon-button-label {
 }
 
 .custom-qa-actions-secondary {
+  grid-template-columns: auto 1fr 1fr;
   margin-bottom: 0;
 }
 
