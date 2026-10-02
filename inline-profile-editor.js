@@ -14,7 +14,6 @@ import {
   getPersonSheetConfig,
   DEFAULT_PROFILE_ID,
   resolveCoverLetterTemplateForTrack,
-  resolvePromptTemplateForTrack,
   applyUsApplicantDefaults
 } from "./profiles.js";
 import {
@@ -28,7 +27,6 @@ import { resolveSheetTabNameForPerson, defaultSheetTabNameForPerson } from "./sh
 import {
   normalizeRoleTrackId,
   resolveRoleTrackForPerson,
-  getTrackPromptTemplate,
   applyRoleTrackSelectState
 } from "./role-tracks.js";
 import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
@@ -186,7 +184,7 @@ export function createInlineProfileEditor(opts) {
       masterResume: "",
       requiredExperience: [],
       roleTrack: track,
-      promptTemplate: getTrackPromptTemplate(track),
+      promptTemplate: "",
       coverLetterPrompt: resolveCoverLetterTemplateForTrack({ roleTrack: track }, track),
       templateId: DEFAULT_TEMPLATE_ID,
       resumeFilePrefix: "",
@@ -207,9 +205,7 @@ export function createInlineProfileEditor(opts) {
       }),
       roleTrack: previousTrack
     };
-    const resumeEl = formRoot.querySelector("#personResumePrompt");
     const coverEl = formRoot.querySelector("#personCoverPrompt");
-    if (resumeEl) resumeEl.value = resolvePromptTemplateForTrack(person, nextTrack);
     if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(person, nextTrack);
     const tabEl = formRoot.querySelector("#inlineSheetTabName");
     if (tabEl) {

@@ -1,43 +1,7 @@
 /**
- * Shared Salesforce resume prompt (test). Any SF user can select this
- * instead of their built-in / v1 prompt. No person-specific employers.
+ * Shared Salesforce resume prompt (Vector). Any SF profile can select this
+ * from the Prompt menu. No person-specific employers.
  */
-
-export const SF_PROMPT_VERSION_KEY = "sf_prompt_version";
-
-/** @typedef {"v1"|"test"|"v3"} SfPromptVersion */
-
-export const SF_PROMPT_VERSIONS = Object.freeze({
-  V1: "v1",
-  TEST: "test",
-  V3: "v3"
-});
-
-export function normalizeSfPromptVersion(value) {
-  const version = String(value || "").trim().toLowerCase();
-  if (version === "test" || version === "v3") return version;
-  return "v1";
-}
-
-export function sfPromptVersionLabel(value) {
-  const version = normalizeSfPromptVersion(value);
-  if (version === "test") return "Test: Vector";
-  if (version === "v3") return "V3: Luck";
-  return "V1: Profile";
-}
-
-export async function getSfPromptVersion() {
-  if (typeof chrome === "undefined" || !chrome.storage?.local) return "v1";
-  const data = await chrome.storage.local.get(SF_PROMPT_VERSION_KEY);
-  return normalizeSfPromptVersion(data[SF_PROMPT_VERSION_KEY]);
-}
-
-export async function setSfPromptVersion(value) {
-  if (typeof chrome === "undefined" || !chrome.storage?.local) return;
-  await chrome.storage.local.set({
-    [SF_PROMPT_VERSION_KEY]: normalizeSfPromptVersion(value)
-  });
-}
 
 /** Wins over the shared SF ATS appendix, which forbids pasting the JD title. */
 export const SF_TEST_HEADLINE_OVERRIDE = `

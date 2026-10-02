@@ -9726,7 +9726,7 @@ async function ingestCsvText({
   let started = false;
   if (autoStart && pending > 0 && !isRunning) {
     const person = await getActivePerson().catch(() => null);
-    if (person?.promptTemplate?.includes("{JD}")) {
+    if (person) {
       isRunning = true;
       started = true;
       const outputDir = await resolveOutputDir(data.batch_output_dir);

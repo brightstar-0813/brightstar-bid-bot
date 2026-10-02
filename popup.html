@@ -131,15 +131,18 @@
               aria-expanded="false"
               aria-controls="sfPromptVersionMenu"
             >V1: Profile</button>
-            <ul class="prompt-version-menu" id="sfPromptVersionMenu" role="listbox" aria-label="Resume prompt version" hidden>
+            <ul class="prompt-version-menu" id="sfPromptVersionMenu" role="listbox" aria-label="Resume prompt" hidden>
               <li role="none">
-                <button type="button" role="option" data-sf-prompt="v1" title="This person's saved prompt">V1: Profile</button>
+                <button type="button" role="option" data-resume-prompt="track" title="Senior prompt for this profile's engineering track.">SF: Senior</button>
               </li>
               <li role="none">
-                <button type="button" role="option" data-sf-prompt="test" title="Shared Salesforce prompt. Salesforce track only.">Test: Vector</button>
+                <button type="button" role="option" data-resume-prompt="v3" title="Shared ATS resume prompt. Any person, any track.">V3: Luck</button>
               </li>
-              <li role="none">
-                <button type="button" role="option" data-sf-prompt="v3" title="Shared ATS resume prompt. Any person, any track.">V3: Luck</button>
+              <li role="none" data-resume-prompt-item="vector">
+                <button type="button" role="option" data-resume-prompt="vector" title="Shared Salesforce prompt. Salesforce track only.">Vector</button>
+              </li>
+              <li role="none" data-resume-prompt-item="custom">
+                <button type="button" role="option" data-resume-prompt="custom" title="This profile's saved resume prompt. Must include {JD}.">Custom</button>
               </li>
             </ul>
           </div>
@@ -370,8 +373,8 @@
                     <select id="inlineTemplateSelect"></select>
                   </label>
                   <label class="field">
-                    <span>Resume prompt ({JD})</span>
-                    <textarea id="personResumePrompt" class="prompt-input" rows="6"></textarea>
+                    <span>Custom resume prompt ({JD})</span>
+                    <textarea id="personResumePrompt" class="prompt-input" rows="6" placeholder="Optional. Leave blank to use the Prompt menu. Must include {JD}."></textarea>
                   </label>
                   <label class="field">
                     <span>Cover letter prompt ({JD})</span>

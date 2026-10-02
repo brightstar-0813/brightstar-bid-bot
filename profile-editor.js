@@ -10,7 +10,6 @@ import {
   getPersonSheetConfig,
   DEFAULT_PROFILE_ID,
   resolveCoverLetterTemplateForTrack,
-  resolvePromptTemplateForTrack,
   applyUsApplicantDefaults
 } from "./profiles.js";
 import {
@@ -31,7 +30,6 @@ import {
 import {
   normalizeRoleTrackId,
   resolveRoleTrackForPerson,
-  getTrackPromptTemplate,
   applyRoleTrackSelectState
 } from "./role-tracks.js";
 import { parseRequiredExperienceFromPrompt } from "./experience-rules.js";
@@ -373,7 +371,7 @@ function blankNewPerson() {
     masterResume: "",
     requiredExperience: [],
     roleTrack: track,
-    promptTemplate: getTrackPromptTemplate(track),
+    promptTemplate: "",
     coverLetterPrompt: resolveCoverLetterTemplateForTrack({ roleTrack: track }, track),
     templateId: DEFAULT_TEMPLATE_ID,
     resumeFilePrefix: "",
@@ -425,9 +423,7 @@ function applyTrackTemplatesToForm(nextTrack, person, previousTrack) {
     }),
     roleTrack: previousTrack
   };
-  const resumeEl = formRoot.querySelector("#personResumePrompt");
   const coverEl = formRoot.querySelector("#personCoverPrompt");
-  if (resumeEl) resumeEl.value = resolvePromptTemplateForTrack(base, nextTrack);
   if (coverEl) coverEl.value = resolveCoverLetterTemplateForTrack(base, nextTrack);
   const tabEl = formRoot.querySelector("#sheetTabName");
   if (tabEl) {

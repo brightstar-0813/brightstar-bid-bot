@@ -259,13 +259,8 @@ export function validatePerson(person) {
     errors.push("Enter a display name (or full name) before saving.");
     focusKey = focusKey || "label";
   }
-  if (!person.promptTemplate?.trim()) {
-    errors.push(
-      "Paste your resume tailor prompt (ChatGPT instructions). Job descriptions come from the CSV — not here."
-    );
-    focusKey = focusKey || "promptTemplate";
-  } else if (!person.promptTemplate.includes("{JD}")) {
-    errors.push("Add the {JD} placeholder in your tailor prompt.");
+  if (person.promptTemplate?.trim() && !person.promptTemplate.includes("{JD}")) {
+    errors.push("Add the {JD} placeholder in your custom resume prompt, or leave it blank to use the Prompt menu.");
     focusKey = focusKey || "promptTemplate";
   }
   if (!person.masterResume?.trim() && person.promptTemplate?.includes("{MASTER_RESUME}")) {

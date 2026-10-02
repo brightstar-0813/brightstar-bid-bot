@@ -812,8 +812,17 @@ select {
 }
 
 .prompt-version-menu button.is-active,
-.prompt-version-menu button:hover {
+.prompt-version-menu button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--gold) 18%, transparent);
+}
+
+.prompt-version-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.prompt-version-menu li[hidden] {
+  display: none;
 }
 
 input:not([type="file"]):not([type="checkbox"]):not([type="number"]) {

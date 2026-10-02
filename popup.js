@@ -7,25 +7,21 @@
   setActivePersonId,
   savePersonProfile,
   addCustomProfile,
-  getTrackPromptTemplate,
-  getTrackCoverLetterTemplate,
   resolveRoleTrackForPerson,
-  resolvePromptTemplateForTrack,
   resolveCoverLetterTemplateForTrack,
+  isUsableCustomResumePrompt,
   normalizeRequiredExperienceInput,
   parseRequiredExperienceFromPrompt,
   resolveExperienceRulesForPerson,
   setPersonSheetConfig,
   syncActivePersonOutputContext,
   applyUsApplicantDefaults,
-  promptHasFixedCompanyHistory,
   resolveSheetTabNameForPerson
 } from "./profiles.js";
 import {
   getSessionRoleTrack,
   setSessionRoleTrack,
   getRoleTrack,
-  isTrackDefaultPrompt,
   isTrackDefaultCoverLetter,
   normalizeRoleTrackId,
   isRoleTrackLockedForPerson,
@@ -75,12 +71,15 @@ import {
   strongHumanizeModeLabel
 } from "./prompts/humanize-resume.js";
 import {
-  SF_PROMPT_VERSION_KEY,
-  SF_PROMPT_VERSIONS,
-  normalizeSfPromptVersion,
-  setSfPromptVersion,
-  sfPromptVersionLabel
-} from "./prompts/sf-test.js";
+  LEGACY_SF_PROMPT_VERSION_KEY,
+  RESUME_PROMPT_ID_KEY,
+  effectiveResumePromptId,
+  normalizeResumePromptId,
+  resumePromptChoices,
+  resumePromptLabel,
+  resumePromptTitle,
+  setResumePromptId
+} from "./prompts/resume-catalog.js";
 import {
   extractProfileFromResumeText,
   parseEmployersFromResume,
@@ -267,7 +266,7 @@ const humanizeOnBtn = document.getElementById("humanizeOn");
 let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
 const sfPromptVersionTrigger = document.getElementById("sfPromptVersionTrigger");
 const sfPromptVersionMenu = document.getElementById("sfPromptVersionMenu");
-let sfPromptVersionCache = SF_PROMPT_VERSIONS.V1;
+let resumePromptCache = "track";
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const keepOpenBtn = document.getElementById("keepOpen");
@@ -407,11 +406,13 @@ async function syncActiveTrackUi({ savedTrack, person } = {}) {
   const personTrack = savedTrack || resolveRoleTrackForPerson(activePerson);
   if (locked) {
     setActiveRoleTrackUi(personTrack, { locked: true });
+    renderResumePromptMenu(personTrack, activePerson);
     return;
   }
   const sessionTrack = await getSessionRoleTrack();
   const activeTrack = sessionTrack || personTrack || readActiveRoleTrack();
   setActiveRoleTrackUi(activeTrack, { locked: false });
+  renderResumePromptMenu(activeTrack, activePerson);
 }
 
 function applyTrackTemplatesToForm(_roleTrack, _person) {
@@ -424,6 +425,7 @@ async function applyActiveRoleTrackChange({ track: nextTrack } = {}) {
   if (isRoleTrackLockedForPerson(person)) {
     await setSessionRoleTrack(savedTrack);
     setActiveRoleTrackUi(savedTrack, { locked: true });
+    renderResumePromptMenu(savedTrack, person);
     setStatus(`Track: ${getRoleTrack(savedTrack).label} (set for profile)`);
     return;
   }
@@ -473,17 +475,11 @@ function setPersonImportNotice(message, { ok = true } = {}) {
 function ensurePromptsOnPerson(person, { resetEeo = false, resetPrompts = false } = {}) {
   let next = { ...person };
   const track = next.roleTrack || readActiveRoleTrack();
-  const prompt = String(next.promptTemplate || "").trim();
-  const hasRichPrompt =
-    Boolean(prompt) &&
-    prompt.includes("{JD}") &&
-    (promptHasFixedCompanyHistory(prompt) || !isTrackDefaultPrompt(prompt));
-
-  // Save-as-mine uses resetEeo only — keep FIXED COMPANY HISTORY / custom rich prompts.
-  if (resetPrompts || !hasRichPrompt) {
-    if (resetPrompts || !prompt || !prompt.includes("{JD}") || isTrackDefaultPrompt(prompt)) {
-      next.promptTemplate = getTrackPromptTemplate(track, next);
-    }
+  if (resetPrompts) {
+    next.promptTemplate = "";
+  } else {
+    const prompt = String(next.promptTemplate || "").trim();
+    if (prompt && !prompt.includes("{JD}")) next.promptTemplate = "";
   }
 
   const cover = String(next.coverLetterPrompt || "");
@@ -883,15 +879,29 @@ async function setHumanizeMode(mode) {
   setStatus(`Strong humanize: ${strongHumanizeModeLabel(next)}.`);
 }
 
-function renderSfPromptVersion(version) {
-  sfPromptVersionCache = normalizeSfPromptVersion(version);
+function renderResumePromptMenu(roleTrack, person) {
+  const track = normalizeRoleTrackId(roleTrack || readActiveRoleTrack());
+  const customReady = isUsableCustomResumePrompt(person?.promptTemplate);
+  const visible = new Set(resumePromptChoices(track));
+  const effective = effectiveResumePromptId(resumePromptCache, track, { customReady });
   if (sfPromptVersionTrigger) {
-    sfPromptVersionTrigger.textContent = sfPromptVersionLabel(sfPromptVersionCache);
+    sfPromptVersionTrigger.textContent = resumePromptLabel(effective, track);
+    sfPromptVersionTrigger.title = resumePromptTitle(effective);
   }
-  for (const btn of sfPromptVersionMenu?.querySelectorAll("[data-sf-prompt]") || []) {
-    const active = btn.dataset.sfPrompt === sfPromptVersionCache;
+  for (const btn of sfPromptVersionMenu?.querySelectorAll("[data-resume-prompt]") || []) {
+    const id = btn.dataset.resumePrompt;
+    const item = btn.closest("[data-resume-prompt-item]");
+    if (item) item.hidden = !visible.has(id);
+    const active = id === effective;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
+    if (id === "track") btn.textContent = resumePromptLabel("track", track);
+    if (id === "custom") {
+      btn.disabled = !customReady;
+      btn.title = customReady
+        ? resumePromptTitle("custom")
+        : "Add a resume prompt in Bid setup first.";
+    }
   }
 }
 
@@ -919,11 +929,16 @@ function openSfPromptMenu() {
   sfPromptVersionTrigger.setAttribute("aria-expanded", "true");
 }
 
-async function setSfPromptVersionUi(version) {
-  const next = normalizeSfPromptVersion(version);
-  await setSfPromptVersion(next);
-  renderSfPromptVersion(next);
-  setStatus(`Prompt: ${sfPromptVersionLabel(next)}.`);
+async function setResumePromptUi(promptId) {
+  const next = normalizeResumePromptId(promptId);
+  resumePromptCache = next;
+  await setResumePromptId(next);
+  const person = profilesCache.find((p) => p.id === profileSelectEl?.value) || null;
+  renderResumePromptMenu(readActiveRoleTrack(), person);
+  const effective = effectiveResumePromptId(next, readActiveRoleTrack(), {
+    customReady: isUsableCustomResumePrompt(person?.promptTemplate)
+  });
+  setStatus(`Prompt: ${resumePromptLabel(effective, readActiveRoleTrack())}.`);
 }
 
 function renderIndeedGrabState(state) {
@@ -992,7 +1007,8 @@ async function loadSettings() {
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
     STRONG_HUMANIZE_MODE_KEY,
-    SF_PROMPT_VERSION_KEY,
+    RESUME_PROMPT_ID_KEY,
+    LEGACY_SF_PROMPT_VERSION_KEY,
     MANUAL_PANEL_OPEN_KEY,
     PROFILE_EDITOR_PANEL_OPEN_KEY,
     ALLOW_BATCH_KEY,
@@ -1012,6 +1028,9 @@ async function loadSettings() {
   ]);
 
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
+  resumePromptCache = normalizeResumePromptId(
+    data[RESUME_PROMPT_ID_KEY] || data[LEGACY_SF_PROMPT_VERSION_KEY] || "track"
+  );
   await refreshTemplates(data.selected_template_id || DEFAULT_TEMPLATE_ID);
   await loadActivePersonIntoForm();
   await syncActiveTrackUi({ savedTrack: resolveRoleTrackForPerson(await getActivePerson()) });
@@ -1049,7 +1068,6 @@ async function loadSettings() {
   }
   renderAiProvider(data[AI_PROVIDER_KEY]);
   renderHumanizeMode(data[STRONG_HUMANIZE_MODE_KEY]);
-  renderSfPromptVersion(data[SF_PROMPT_VERSION_KEY]);
   const allowBatch = resolveAllowBatch(data);
   renderAllowBatch(allowBatch, { expandManual: false });
   setManualPanelOpen(
@@ -3152,11 +3170,21 @@ async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {})
     return;
   }
 
-  if (!person?.promptTemplate?.includes("{JD}")) {
-    setStatus("Prompt needs {JD}.");
+  const customReady = isUsableCustomResumePrompt(person?.promptTemplate);
+  const promptId = effectiveResumePromptId(resumePromptCache, readActiveRoleTrack(), { customReady });
+  if (promptId === "custom" && !customReady) {
+    setStatus("Custom prompt needs {JD}, or pick a shared prompt.");
     return;
   }
-  if (!person.masterResume?.trim() && person.promptTemplate.includes("{MASTER_RESUME}")) {
+  if (!person.masterResume?.trim() && promptId !== "custom") {
+    setStatus("Upload a master resume for this profile before generating.");
+    return;
+  }
+  if (
+    promptId === "custom" &&
+    person.promptTemplate.includes("{MASTER_RESUME}") &&
+    !person.masterResume?.trim()
+  ) {
     setStatus("Master resume required.");
     return;
   }
@@ -4029,9 +4057,9 @@ sfPromptVersionTrigger?.addEventListener("click", (event) => {
   else closeSfPromptMenu();
 });
 sfPromptVersionMenu?.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-sf-prompt]");
-  if (!btn) return;
-  setSfPromptVersionUi(btn.dataset.sfPrompt)
+  const btn = event.target.closest("[data-resume-prompt]");
+  if (!btn || btn.disabled) return;
+  setResumePromptUi(btn.dataset.resumePrompt)
     .catch((e) => setStatus(String(e.message || e)))
     .finally(closeSfPromptMenu);
 });
@@ -4190,8 +4218,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[STRONG_HUMANIZE_MODE_KEY] && changes[STRONG_HUMANIZE_MODE_KEY].newValue !== undefined) {
     renderHumanizeMode(changes[STRONG_HUMANIZE_MODE_KEY].newValue);
   }
-  if (changes[SF_PROMPT_VERSION_KEY] && changes[SF_PROMPT_VERSION_KEY].newValue !== undefined) {
-    renderSfPromptVersion(changes[SF_PROMPT_VERSION_KEY].newValue);
+  if (changes[RESUME_PROMPT_ID_KEY] && changes[RESUME_PROMPT_ID_KEY].newValue !== undefined) {
+    resumePromptCache = normalizeResumePromptId(changes[RESUME_PROMPT_ID_KEY].newValue);
+    const person = profilesCache.find((p) => p.id === profileSelectEl?.value) || null;
+    renderResumePromptMenu(readActiveRoleTrack(), person);
   }
   if (changes[SESSION_ROLE_TRACK_KEY]) {
     syncActiveTrackUi().catch(() => {});

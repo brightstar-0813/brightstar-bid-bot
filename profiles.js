@@ -1,24 +1,24 @@
-import { PROMPT as dmarioLewisPrompt } from "./prompts/dmario-lewis.js";
-import { PROMPT as sandeepUnnikrishnanPrompt } from "./prompts/sandeep-unnikrishnan.js";
-import { PROMPT as sandeepMahankaliPrompt } from "./prompts/sandeep-mahankali.js";
-import { PROMPT as michaelIbeaPrompt } from "./prompts/michael-ibea.js";
-import { PROMPT as carlosCapulongPrompt } from "./prompts/carlos-capulong.js";
-import { PROMPT as davidOliveiraPrompt } from "./prompts/david-oliveira.js";
-import { PROMPT as davidOliveiraDePrompt } from "./prompts/david-oliveira-de.js";
-import { PROMPT as victorHolandaPrompt } from "./prompts/victor-holanda.js";
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
+import {
+  CARLOS_CAPULONG_MASTER,
+  DAVID_OLIVEIRA_SF_MASTER,
+  DMARIO_LEWIS_MASTER,
+  MICHAEL_IBEA_MASTER,
+  SANDEEP_MAHANKALI_MASTER,
+  SANDEEP_UNNIKRISHNAN_MASTER,
+  VICTOR_HOLANDA_MASTER
+} from "./prompts/builtin-master-resumes.js";
 import { PROMPT as coverLetterDePrompt } from "./prompts/cover-letter-de.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
-  ATS_RECRUITER_PASS,
   getTrackAtsAppendix,
   getTrackCoverLetterTemplate,
   getTrackPromptTemplate,
   isTrackDefaultCoverLetter,
-  isTrackDefaultPrompt,
   normalizeRoleTrackId,
   resolveEffectiveRoleTrack,
   resolveRoleTrackForPerson,
+  ATS_RECRUITER_PASS,
   ROLE_TRACK_LIST
 } from "./role-tracks.js";
 import {
@@ -34,13 +34,14 @@ import {
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
-import {
-  PROMPT as sfTestPrompt,
-  SF_TEST_HEADLINE_OVERRIDE,
-  getSfPromptVersion,
-  normalizeSfPromptVersion
-} from "./prompts/sf-test.js";
+import { PROMPT as sfTestPrompt, SF_TEST_HEADLINE_OVERRIDE } from "./prompts/sf-test.js";
 import { PROMPT as resumeV3Prompt } from "./prompts/resume-v3.js";
+import {
+  RESUME_PROMPT_IDS,
+  effectiveResumePromptId,
+  getResumePromptId,
+  normalizeResumePromptId
+} from "./prompts/resume-catalog.js";
 import { buildMustProveBlock, selectProjectBankExcerpts } from "./ats-score.js";
 import {
   normalizeResumeFilePrefix,
@@ -78,7 +79,7 @@ export const BUILTIN_PROFILES = [
     id: "dmario-lewis",
     label: "D'Mario Lewis",
     roleTrack: "sf",
-    promptTemplate: dmarioLewisPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Lewis_Resume",
     sheetTabName: "Lewis-SF",
@@ -103,7 +104,7 @@ export const BUILTIN_PROFILES = [
     sponsorship: "No",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Engineer | Technical Architect",
-    masterResume: "",
+    masterResume: DMARIO_LEWIS_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -119,7 +120,7 @@ export const BUILTIN_PROFILES = [
     id: "sandeep-unnikrishnan",
     label: "Sandeep Unnikrishnan",
     roleTrack: "sf",
-    promptTemplate: sandeepUnnikrishnanPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Unnikrishnan_Resume",
     sheetTabName: "Unnikrishnan-SF",
@@ -144,7 +145,7 @@ export const BUILTIN_PROFILES = [
     sponsorship: "No",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Architect | Senior Salesforce Engineer",
-    masterResume: "",
+    masterResume: SANDEEP_UNNIKRISHNAN_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -161,7 +162,7 @@ export const BUILTIN_PROFILES = [
     id: "sandeep-mahankali",
     label: "Sandeep Mahankali",
     roleTrack: "sf",
-    promptTemplate: sandeepMahankaliPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Mahankali_Resume",
     sheetTabName: "Sandeep-SF",
@@ -186,7 +187,7 @@ export const BUILTIN_PROFILES = [
     sponsorship: "No",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Technical Architect | Senior Salesforce Engineer",
-    masterResume: "",
+    masterResume: SANDEEP_MAHANKALI_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -205,7 +206,7 @@ export const BUILTIN_PROFILES = [
     id: "michael-ibea",
     label: "Michael Haries Namuco Ibea",
     roleTrack: "sf",
-    promptTemplate: michaelIbeaPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Ibea_Resume",
     sheetTabName: "Michael-SF",
@@ -230,7 +231,7 @@ export const BUILTIN_PROFILES = [
     sponsorship: "Yes",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Application Systems Analyst / Salesforce Developer",
-    masterResume: "",
+    masterResume: MICHAEL_IBEA_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -244,7 +245,7 @@ export const BUILTIN_PROFILES = [
     id: "carlos-capulong",
     label: "Carlos Padonan Capulong",
     roleTrack: "sf",
-    promptTemplate: carlosCapulongPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Capulong_Resume",
     sheetTabName: "Carlos-SF",
@@ -269,7 +270,7 @@ export const BUILTIN_PROFILES = [
     sponsorship: "Yes",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Engineer",
-    masterResume: "",
+    masterResume: CARLOS_CAPULONG_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -284,7 +285,7 @@ export const BUILTIN_PROFILES = [
     id: "david-oliveira",
     label: "David Leandro de Oliveira (Salesforce)",
     roleTrack: "sf",
-    promptTemplate: davidOliveiraPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Oliveira_Resume",
     sheetTabName: "David-SF",
@@ -309,7 +310,7 @@ export const BUILTIN_PROFILES = [
     sponsorship: "Yes",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Engineer",
-    masterResume: "",
+    masterResume: DAVID_OLIVEIRA_SF_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -324,7 +325,7 @@ export const BUILTIN_PROFILES = [
     id: "david-oliveira-de",
     label: "David Leandro de Oliveira (Data Engineering)",
     roleTrack: "de",
-    promptTemplate: davidOliveiraDePrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Oliveira_Resume",
     sheetTabName: "David-DE",
@@ -374,7 +375,10 @@ Tempest Security Intelligence — Software Engineer Intern / Backend Developer |
 Java, Python, SQL, Linux, REST APIs for cybersecurity platforms; security log normalization; SQL reporting; backend utilities and small Python automation.
 
 EDUCATION
-Federal University of Pernambuco — Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017 | Recife, Brazil`,
+Federal University of Pernambuco — Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017 | Recife, Brazil
+
+CERTIFICATIONS
+None.`,
     coverLetterPrompt: coverLetterDePrompt,
     autofillExtras: {},
     requiredExperience: [
@@ -388,7 +392,7 @@ Federal University of Pernambuco — Bachelor's Degree in Mathematics and Comput
     id: "victor-holanda",
     label: "Victor Barros de Holanda",
     roleTrack: "sf",
-    promptTemplate: victorHolandaPrompt,
+    promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Holanda_Resume",
     sheetTabName: "Victor-SF",
@@ -413,7 +417,7 @@ Federal University of Pernambuco — Bachelor's Degree in Mathematics and Comput
     sponsorship: "Yes",
     hispanicLatino: "",
     signatureTitle: "Senior Salesforce Engineer",
-    masterResume: "",
+    masterResume: VICTOR_HOLANDA_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
     requiredExperience: ["EPAM Systems", "Endava", "BairesDev", "Accenture"]
@@ -880,76 +884,36 @@ export async function getCoverLetterProfile() {
   );
 }
 
-const BUILTIN_SF_PROFILE_IDS = new Set([
-  "dmario-lewis",
-  "sandeep-unnikrishnan",
-  "sandeep-mahankali",
-  "michael-ibea",
-  "carlos-capulong",
-  "david-oliveira",
-  "victor-holanda"
-]);
-
-const BUILTIN_DE_PROFILE_IDS = new Set(["david-oliveira-de"]);
-
-function isBuiltinSfProfile(person) {
-  return BUILTIN_SF_PROFILE_IDS.has(String(person?.id || ""));
+/** Saved Bid-setup text is used only when the Prompt menu is Custom. */
+export function isUsableCustomResumePrompt(promptText) {
+  const prompt = String(promptText || "").trim();
+  return Boolean(prompt) && prompt.includes("{JD}");
 }
 
-function isBuiltinDeProfile(person) {
-  return BUILTIN_DE_PROFILE_IDS.has(String(person?.id || ""));
-}
-
-/** Resume prompt for the active engineering track (session or saved default). */
-export function resolvePromptTemplateForTrack(person, roleTrack) {
-  const track = normalizeRoleTrackId(roleTrack);
-  const rawPrompt = String(person?.promptTemplate || "");
-  const prompt = rawPrompt.trim();
-  const hasRichPrompt =
-    Boolean(prompt) &&
-    (promptHasFixedCompanyHistory(prompt) || !isTrackDefaultPrompt(prompt));
-
-  // Built-ins and Save-as-mine copies with FIXED COMPANY HISTORY / custom rich prompts
-  // keep their template when the session track matches that person's engineering track.
-  if (
-    track === "sf" &&
-    (isBuiltinSfProfile(person) ||
-      (promptHasFixedCompanyHistory(prompt) && resolveRoleTrackForPerson(person) === "sf"))
-  ) {
-    return prompt ? rawPrompt : getTrackPromptTemplate(track);
-  }
-  if (
-    track === "de" &&
-    (isBuiltinDeProfile(person) ||
-      (promptHasFixedCompanyHistory(prompt) && resolveRoleTrackForPerson(person) === "de"))
-  ) {
-    return prompt ? rawPrompt : getTrackPromptTemplate(track);
-  }
-
-  const personTrack = resolveRoleTrackForPerson(person);
-  if (track !== personTrack) {
-    // Session override: only keep a rich non-default prompt when it already targets this track.
-    if (hasRichPrompt && !isTrackDefaultPrompt(prompt) && personTrack === track) {
-      return rawPrompt;
-    }
-    return getTrackPromptTemplate(track);
-  }
-  if (hasRichPrompt) return rawPrompt;
-  return getTrackPromptTemplate(track);
+/** Senior prompt for the engineering track. Person text is not included. */
+export function resolvePromptTemplateForTrack(_person, roleTrack) {
+  return getTrackPromptTemplate(roleTrack);
 }
 
 /**
- * Resume prompt after the v1 / test / v3 switch.
- * Test replaces the person's stored prompt on the SF track only.
- * v3 is the shared ATS resume prompt and applies for any person and any track.
- * Employer checks still read person.promptTemplate, not this result.
+ * Shared catalog prompt for any person and any track.
+ * Custom uses person.promptTemplate. Employer checks still read that field, not this result.
+ * @param {object} person
+ * @param {string} roleTrack
+ * @param {string} [promptId]
  */
+export function resolveResumePrompt(person, roleTrack, promptId = RESUME_PROMPT_IDS.TRACK) {
+  const customReady = isUsableCustomResumePrompt(person?.promptTemplate);
+  const id = effectiveResumePromptId(promptId, roleTrack, { customReady });
+  if (id === RESUME_PROMPT_IDS.CUSTOM) return String(person.promptTemplate);
+  if (id === RESUME_PROMPT_IDS.V3) return resumeV3Prompt;
+  if (id === RESUME_PROMPT_IDS.VECTOR) return sfTestPrompt;
+  return getTrackPromptTemplate(roleTrack);
+}
+
+/** @deprecated Use resolveResumePrompt. Maps the old v1 / test / v3 ids. */
 export function resolveResumePromptForVersion(person, roleTrack, sfPromptVersion = "v1") {
-  const version = normalizeSfPromptVersion(sfPromptVersion);
-  if (version === "v3") return resumeV3Prompt;
-  const track = normalizeRoleTrackId(roleTrack);
-  if (track === "sf" && version === "test") return sfTestPrompt;
-  return resolvePromptTemplateForTrack(person, roleTrack);
+  return resolveResumePrompt(person, roleTrack, normalizeResumePromptId(sfPromptVersion));
 }
 
 /** Cover letter prompt for the active engineering track. */
@@ -990,16 +954,24 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
     extras.roleTrack ||
       resolveEffectiveRoleTrack(person, extras.sessionRoleTrack || "")
   );
-  const sfPromptVersion = normalizeSfPromptVersion(
-    extras.sfPromptVersion != null ? extras.sfPromptVersion : await getSfPromptVersion()
+  const resumePromptId = normalizeResumePromptId(
+    extras.resumePromptId != null ? extras.resumePromptId : await getResumePromptId()
   );
-  const resolvedTemplate = resolveResumePromptForVersion(person, roleTrack, sfPromptVersion);
+  const resolvedTemplate = resolveResumePrompt(person, roleTrack, resumePromptId);
   const promptTemplate = ensureSfProjectBankInTemplate(resolvedTemplate, roleTrack);
   if (!promptTemplate) {
     throw new Error("Selected profile has no prompt content.");
   }
   if (!promptTemplate.includes("{JD}")) {
     throw new Error("Prompt must include the {JD} placeholder.");
+  }
+  const masterResumeText = String(
+    personPlaceholderExtras(person, { masterResume: extras.masterResume }).masterResume || ""
+  ).trim();
+  if (promptTemplate.includes("{MASTER_RESUME}") && !masterResumeText) {
+    throw new Error(
+      "Upload a master resume for this profile before generating. The shared prompt has no career history of its own."
+    );
   }
   const sfProjectBank =
     roleTrack === "sf"
@@ -1048,7 +1020,10 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (additional) {
     prompt = `${prompt}\n\n---\nAdditional instructions for this job only (follow in addition to the rules above):\n${additional}`;
   }
-  if (roleTrack === "sf" && sfPromptVersion === "test") {
+  const appliedPromptId = effectiveResumePromptId(resumePromptId, roleTrack, {
+    customReady: isUsableCustomResumePrompt(person?.promptTemplate)
+  });
+  if (appliedPromptId === RESUME_PROMPT_IDS.VECTOR) {
     prompt = `${prompt}\n\n${SF_TEST_HEADLINE_OVERRIDE}`;
   }
   prompt = `${prompt}\n\n${ATS_RECRUITER_PASS}`;
@@ -1115,8 +1090,7 @@ export async function addCustomProfile({
   const prompt = String(promptTemplate || "").trim();
 
   if (!displayName) throw new Error("Profile name is required.");
-  if (!prompt) throw new Error("Prompt content is required.");
-  if (!prompt.includes("{JD}")) {
+  if (prompt && !prompt.includes("{JD}")) {
     throw new Error("Prompt content must include {JD} where the job description goes.");
   }
 
@@ -1225,8 +1199,7 @@ export async function savePersonProfile(person) {
   const displayName = String(person?.label || person?.name || "").trim();
   const prompt = String(person?.promptTemplate || "").trim();
   if (!displayName) throw new Error("Display name is required.");
-  if (!prompt) throw new Error("Resume tailor prompt is required — paste ChatGPT instructions (not the job description).");
-  if (!prompt.includes("{JD}")) {
+  if (prompt && !prompt.includes("{JD}")) {
     throw new Error("Add {JD} in the tailor prompt — each CSV job’s description is inserted there automatically.");
   }
 

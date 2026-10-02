@@ -12,16 +12,15 @@ import {
 } from "../role-tracks.js";
 import { enforceJdSkills, rolesMissingJdSkills } from "../resume-json.js";
 import {
+  BUILTIN_PROFILES,
   resolvePromptTemplateForTrack,
   resolveCoverLetterTemplateForTrack,
-  resolveResumePromptForVersion
+  resolveResumePrompt
 } from "../profiles.js";
-import { PROMPT as dmarioPrompt } from "../prompts/dmario-lewis.js";
-import { PROMPT as deSeniorPrompt } from "../prompts/de-senior.js";
-import { PROMPT as davidDePrompt } from "../prompts/david-oliveira-de.js";
 import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
 import { PROMPT as resumeV3Prompt } from "../prompts/resume-v3.js";
+import { effectiveResumePromptId, normalizeResumePromptId } from "../prompts/resume-catalog.js";
 import { ATS_RECRUITER_PASS } from "../role-tracks.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
@@ -114,65 +113,66 @@ test("rolesMissingJdSkills uses track catalog", () => {
   assert.ok(gaps.length > 0);
 });
 
-test("resolvePromptTemplateForTrack keeps built-in SF prompt on SF track", () => {
-  const person = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
-  assert.equal(resolvePromptTemplateForTrack(person, "sf"), dmarioPrompt);
+test("built-in resume profiles keep career facts and no resume prompt", () => {
+  const resumes = BUILTIN_PROFILES.filter((p) => p.kind !== "coverLetter");
+  assert.ok(resumes.length >= 8);
+  for (const person of resumes) {
+    assert.equal(String(person.promptTemplate || "").trim(), "");
+    assert.match(person.masterResume, new RegExp(person.requiredExperience[0], "i"));
+    assert.match(person.masterResume, /EDUCATION/i);
+    assert.doesNotMatch(person.masterResume, /SEVEN GATES|FIXED COMPANY HISTORY/);
+  }
 });
 
-test("resolvePromptTemplateForTrack uses DE template for built-in when track is DE", () => {
-  const person = { id: "sandeep-unnikrishnan", promptTemplate: dmarioPrompt, roleTrack: "sf" };
-  assert.equal(resolvePromptTemplateForTrack(person, "de"), deSeniorPrompt);
+test("resolvePromptTemplateForTrack is the track senior prompt for every track", () => {
+  const person = { id: "dmario-lewis", promptTemplate: "Custom {JD}", roleTrack: "sf" };
+  for (const id of ["sf", "de", "fs", "ai"]) {
+    assert.equal(resolvePromptTemplateForTrack(person, id), getRoleTrack(id).prompt);
+  }
 });
 
-test("resolvePromptTemplateForTrack keeps built-in DE prompt on DE track", () => {
-  const person = {
-    id: "david-oliveira-de",
-    promptTemplate: davidDePrompt,
-    roleTrack: "de"
-  };
-  assert.equal(resolvePromptTemplateForTrack(person, "de"), davidDePrompt);
-  assert.equal(resolvePromptTemplateForTrack(person, "sf"), sfSeniorPrompt);
+test("resolveResumePrompt defaults to the track senior prompt", () => {
+  const person = { id: "dmario-lewis", promptTemplate: "Custom {JD} xyz", roleTrack: "sf" };
+  assert.equal(resolveResumePrompt(person, "sf", "track"), sfSeniorPrompt);
+  assert.equal(resolveResumePrompt(person, "sf", "v1"), sfSeniorPrompt);
+  assert.equal(resolveResumePrompt(person, "de", "track"), getRoleTrack("de").prompt);
+  assert.equal(resolveResumePrompt(person, "fs"), getRoleTrack("fs").prompt);
+  assert.equal(resolveResumePrompt(person, "ai", ""), getRoleTrack("ai").prompt);
 });
 
-test("resolvePromptTemplateForTrack keeps custom non-default prompt on matching track", () => {
-  const custom = "Custom resume prompt {JD} {NAME} {MASTER_RESUME} with unique xyz123 content";
-  const person = { id: "custom-jane", promptTemplate: custom, roleTrack: "de" };
-  assert.equal(resolvePromptTemplateForTrack(person, "de"), custom);
-});
-
-test("resolveResumePromptForVersion keeps built-in SF prompt on v1", () => {
-  const person = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
-  assert.equal(resolveResumePromptForVersion(person, "sf", "v1"), dmarioPrompt);
-  assert.equal(resolveResumePromptForVersion(person, "sf"), dmarioPrompt);
-});
-
-test("resolveResumePromptForVersion uses the shared test prompt for built-in and custom SF", () => {
-  const builtin = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
-  const customPrompt = "Custom SF prompt {JD} {NAME} {MASTER_RESUME} unique xyz123";
-  const custom = { id: "custom-sf", promptTemplate: customPrompt, roleTrack: "sf" };
-  assert.equal(resolveResumePromptForVersion(builtin, "sf", "test"), sfTestPrompt);
-  assert.equal(resolveResumePromptForVersion(custom, "sf", "test"), sfTestPrompt);
-  assert.equal(resolveResumePromptForVersion(custom, "sf", "v1"), customPrompt);
-  assert.doesNotMatch(sfTestPrompt, /ChowNow|Bluebeam|Hilmar/);
+test("resolveResumePrompt uses v3 on every track and vector only on SF", () => {
+  const person = { id: "david-oliveira-de", promptTemplate: "", roleTrack: "de" };
+  assert.equal(resolveResumePrompt(person, "de", "v3"), resumeV3Prompt);
+  assert.equal(resolveResumePrompt(person, "ai", "v3"), resumeV3Prompt);
+  assert.equal(resolveResumePrompt(person, "sf", "vector"), sfTestPrompt);
+  assert.equal(resolveResumePrompt(person, "sf", "test"), sfTestPrompt);
+  assert.equal(resolveResumePrompt(person, "de", "vector"), getRoleTrack("de").prompt);
+  assert.equal(resolveResumePrompt(person, "fs", "test"), getRoleTrack("fs").prompt);
   assert.match(sfTestPrompt, /\{JD\}/);
   assert.match(sfTestPrompt, /\{MASTER_RESUME\}/);
-});
-
-test("resolveResumePromptForVersion uses the shared v3 prompt for any person", () => {
-  const builtin = { id: "dmario-lewis", promptTemplate: dmarioPrompt, roleTrack: "sf" };
-  const dePerson = {
-    id: "david-oliveira-de",
-    promptTemplate: davidDePrompt,
-    roleTrack: "de"
-  };
-  assert.equal(resolveResumePromptForVersion(builtin, "sf", "v3"), resumeV3Prompt);
-  assert.equal(resolveResumePromptForVersion(dePerson, "de", "v3"), resumeV3Prompt);
   assert.match(resumeV3Prompt, /\{JD\}/);
   assert.match(resumeV3Prompt, /\{MASTER_RESUME\}/);
-  assert.doesNotMatch(
-    resumeV3Prompt,
-    /Becton|Cognizant|Secure Haven|EPAM|Centre Technologies/i
+  assert.doesNotMatch(resumeV3Prompt, /Becton|Cognizant|Secure Haven|EPAM|Centre Technologies/i);
+});
+
+test("resolveResumePrompt uses a saved custom prompt only when Custom is selected", () => {
+  const custom = "Custom resume prompt {JD} {NAME} {MASTER_RESUME} with unique xyz123 content";
+  const person = { id: "custom-jane", promptTemplate: custom, roleTrack: "de" };
+  assert.equal(resolveResumePrompt(person, "de", "custom"), custom);
+  assert.equal(resolveResumePrompt(person, "de", "track"), getRoleTrack("de").prompt);
+  assert.equal(
+    resolveResumePrompt({ id: "custom-jane", promptTemplate: "", roleTrack: "de" }, "de", "custom"),
+    getRoleTrack("de").prompt
   );
+});
+
+test("normalizeResumePromptId maps the old menu onto the shared catalog", () => {
+  assert.equal(normalizeResumePromptId("v1"), "track");
+  assert.equal(normalizeResumePromptId(""), "track");
+  assert.equal(normalizeResumePromptId("test"), "vector");
+  assert.equal(normalizeResumePromptId("v3"), "v3");
+  assert.equal(effectiveResumePromptId("vector", "ai"), "track");
+  assert.equal(effectiveResumePromptId("custom", "sf", { customReady: false }), "track");
 });
 
 test("ATS recruiter pass requires exact JD spellings in recent-role bullets", () => {
@@ -184,14 +184,10 @@ test("ATS recruiter pass requires exact JD spellings in recent-role bullets", ()
   }
 });
 
-test("resolveResumePromptForVersion ignores the SF test setting on a non-SF track", () => {
-  const person = {
-    id: "david-oliveira-de",
-    promptTemplate: davidDePrompt,
-    roleTrack: "de"
-  };
-  assert.equal(resolveResumePromptForVersion(person, "de", "test"), davidDePrompt);
-  assert.equal(resolveResumePromptForVersion(person, "de", "v1"), davidDePrompt);
+test("resolveResumePrompt ignores Vector on a non-SF track", () => {
+  const person = { id: "david-oliveira-de", promptTemplate: "", roleTrack: "de" };
+  assert.equal(resolveResumePrompt(person, "de", "test"), getRoleTrack("de").prompt);
+  assert.equal(resolveResumePrompt(person, "de", "v1"), getRoleTrack("de").prompt);
 });
 
 test("resolveCoverLetterTemplateForTrack switches when session track differs", () => {
