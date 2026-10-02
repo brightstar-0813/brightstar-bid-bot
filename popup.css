@@ -69,12 +69,9 @@ body.ctx-window {
 .brand-icon {
   width: 40px;
   height: 40px;
-  border-radius: 11px;
   flex: 0 0 auto;
-  box-shadow:
-    0 0 0 1px var(--brand-ring),
-    0 0 20px var(--brand-glow),
-    0 8px 18px rgba(0, 0, 0, 0.4);
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px var(--brand-glow));
 }
 
 .brand-copy {

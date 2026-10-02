@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Brightstar Bid bot",
-  "description": "CSV batch resume & cover letters via ChatGPT or Claude — Brightstar Bid bot.",
+  "name": "BrightStar Bid Bot",
+  "description": "CSV batch resume & cover letters via ChatGPT or Claude — BrightStar Bid Bot.",
   "version": "1.9.3",
   "permissions": [
     "storage",
@@ -119,7 +119,7 @@
     "128": "icons/brightstar-icon.svg"
   },
   "action": {
-    "default_title": "Brightstar Bid bot (Ctrl+Shift+Z)",
+    "default_title": "BrightStar Bid Bot (Ctrl+Shift+Z)",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/brightstar-icon.svg",
@@ -135,10 +135,10 @@
         "default": "Ctrl+Shift+Z",
         "mac": "Command+Shift+Z"
       },
-      "description": "Open Brightstar Bid bot"
+      "description": "Open BrightStar Bid Bot"
     },
     "open-window-app": {
-      "description": "Open Brightstar Bid bot as a window app (set a shortcut in chrome://extensions/shortcuts)"
+      "description": "Open BrightStar Bid Bot as a window app (set a shortcut in chrome://extensions/shortcuts)"
     },
     "autofill-page": {
       "suggested_key": {
