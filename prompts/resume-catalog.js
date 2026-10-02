@@ -60,10 +60,10 @@ export function resumePromptLabel(promptId, roleTrack) {
 
 export function resumePromptTitle(promptId) {
   const id = normalizeResumePromptId(promptId);
-  if (id === RESUME_PROMPT_IDS.V3) return "Shared ATS resume prompt. Any person, any track.";
-  if (id === RESUME_PROMPT_IDS.VECTOR) return "Shared Salesforce prompt. Salesforce track only.";
-  if (id === RESUME_PROMPT_IDS.CUSTOM) return "This profile's saved resume prompt. Must include {JD}.";
-  return "Senior prompt for this profile's engineering track.";
+  if (id === RESUME_PROMPT_IDS.V3) return "Shared ATS prompt";
+  if (id === RESUME_PROMPT_IDS.VECTOR) return "Salesforce prompt";
+  if (id === RESUME_PROMPT_IDS.CUSTOM) return "Saved prompt";
+  return "Track senior prompt";
 }
 
 export async function getResumePromptId() {

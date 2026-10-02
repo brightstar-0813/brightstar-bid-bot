@@ -2,6 +2,14 @@
  * In-app confirm dialog — replaces window.confirm in extension pages.
  */
 
+function shortDialogTip(text, max = 48) {
+  const line = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (line.length <= max) return line;
+  return `${line.slice(0, max - 1).trimEnd()}…`;
+}
+
 function escapeHtml(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")
@@ -107,7 +115,7 @@ export function jobDetailsDialog({
         const id = String(t?.id || "").trim();
         if (!id) return "";
         const label = escapeHtml(t.label || id);
-        const desc = t.description ? ` title="${escapeHtml(t.description)}"` : "";
+        const desc = t.description ? ` title="${escapeHtml(shortDialogTip(t.description))}"` : "";
         return `<option value="${escapeHtml(id)}"${desc}>${label}</option>`;
       })
       .filter(Boolean)

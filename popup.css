@@ -270,11 +270,15 @@ h1 {
   margin: 4px 0 2px;
 }
 
-.style-export-actions > .primary,
-.style-export-actions > .ghost {
-  width: auto;
+.style-export-actions > .icon-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 8px;
   flex: 0 0 auto;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .section-muted {
@@ -1588,6 +1592,52 @@ input[type="file"]::file-selector-button {
 .file-field input[type="file"]:hover {
   border-color: var(--gold);
   background: var(--accent-soft-08);
+}
+
+.resume-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 4px 8px;
+  border: 1px dashed var(--accent-border-32);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft-04);
+}
+
+.resume-file-row:hover {
+  border-color: var(--gold);
+  background: var(--accent-soft-08);
+}
+
+.resume-file-row .icon-button {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resume-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.resume-file-field input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .queue-now-working {
@@ -3046,9 +3096,9 @@ body.ctx-window .status-bar {
   --tip-bg: #1a2230;
   position: fixed;
   z-index: 100001;
-  max-width: min(248px, calc(100vw - 16px));
+  max-width: min(280px, calc(100vw - 16px));
   margin: 0;
-  padding: 6px 10px;
+  padding: 5px 8px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: var(--tip-bg);
@@ -3056,10 +3106,12 @@ body.ctx-window .status-bar {
   font-family: var(--font);
   font-size: 12px;
   font-weight: 500;
-  line-height: 1.45;
+  line-height: 1.3;
   letter-spacing: 0.01em;
   text-align: left;
-  white-space: pre-line;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
   visibility: hidden;
   opacity: 0;

@@ -152,6 +152,8 @@ const templatePickerMenu = document.getElementById("templatePickerMenu");
 let closeTemplatePicker = () => {};
 const addProfileBtn = document.getElementById("addProfile");
 const personResumeFileEl = document.getElementById("personResumeFile");
+const personResumeFileBtn = document.getElementById("personResumeFileBtn");
+const personResumeFileNameEl = document.getElementById("personResumeFileName");
 const personImportNoticeEl = document.getElementById("personImportNotice");
 const toggleProfileEditorPanelBtn = document.getElementById("toggleProfileEditorPanel");
 const profileEditorPanelBody = document.getElementById("profileEditorPanelBody");
@@ -942,7 +944,7 @@ function renderResumePromptMenu(roleTrack, person) {
       btn.disabled = !customReady;
       btn.title = customReady
         ? resumePromptTitle("custom")
-        : "Add a resume prompt in Bid setup first.";
+        : "Add a saved prompt first.";
     }
   }
 }
@@ -1314,8 +1316,8 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   if (sourceSubmitHintEl) {
     sourceSubmitHintEl.textContent =
       channelFilter === "dice"
-        ? "Dice: batch builds files and submits."
-        : "This board: batch builds files and opens the Autofill panel. It does not submit.";
+        ? "Dice: builds files and submits."
+        : "Builds files. Apply from the panel.";
   }
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   const person = await getActivePerson().catch(() => null);
@@ -1350,27 +1352,8 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   );
 }
 
-function folderLabelFromJobDir(jobDir) {
-  const parts = String(jobDir || "")
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : "";
-}
-
 function appliedDocsTitle(job) {
-  const lines = [];
-  lines.push(job.appliedDate ? `Applied ${job.appliedDate}` : "Applied");
-  const folder = folderLabelFromJobDir(job.jobDir);
-  if (folder) lines.push(folder);
-  if (job.resumeName) lines.push(`Resume: ${job.resumeName}`);
-  if (job.coverName) lines.push(`Cover letter: ${job.coverName}`);
-  if (!job.resumeName && !job.coverName && (job.jobDir || job.hasFiles)) {
-    lines.push("Resume and cover letter are in this job folder.");
-  }
-  lines.push("Marked on the Google Sheet.");
-  return lines.join("\n");
+  return job.appliedDate ? `Applied ${job.appliedDate}` : "Applied";
 }
 
 function badgeClass(status) {
@@ -1426,7 +1409,10 @@ const ACTION_ICON_PATHS = {
   bundled:
     '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.27 6.96 8.73 5.05 8.73-5.05M12 22.08V12"/>',
   import: '<path d="M12 3v12"/><path d="m7 10 5-5 5 5"/><path d="M5 21h14"/>',
+  fileUp:
+    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/>',
   export: '<path d="M12 3v12"/><path d="m7 14 5 5 5-5"/><path d="M5 21h14"/>',
+  pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/>',
   scrape:
     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/>',
   draft:
@@ -1452,8 +1438,7 @@ const ACTION_ICON_PATHS = {
 function setIconButton(button, icon, label, { showLabel = false } = {}) {
   button.classList.add("icon-button");
   button.setAttribute("aria-label", label);
-  const existingTitle = button.getAttribute("title") || "";
-  if (label && existingTitle.length <= label.length) button.title = label;
+  button.title = shortTip(label);
   const svg = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACTION_ICON_PATHS[icon] || ""}</svg>`;
   button.innerHTML = showLabel
     ? `${svg}<span class="icon-button-label">${label}</span>`
@@ -1462,14 +1447,7 @@ function setIconButton(button, icon, label, { showLabel = false } = {}) {
 }
 
 function atsScoreTitle(job) {
-  const detail = describeAtsGaps(job?.atsEvaluation || {});
-  const lines = [`ATS ${job.atsScore}/100${job.atsGrade ? ` · ${job.atsGrade}` : ""}`];
-  if (detail.summary) lines.push(detail.summary);
-  for (const f of (detail.findings || []).slice(0, 3)) {
-    if (f.kind === "score") continue;
-    lines.push(`${f.title}: ${f.body}`);
-  }
-  return lines.join("\n");
+  return `ATS ${job.atsScore}/100${job.atsGrade ? ` · ${job.atsGrade}` : ""}`;
 }
 
 function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
@@ -1488,7 +1466,7 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
         `<ul class="ats-gap-tech-list">${detail.missingProducts
           .map((item) => `<li>${escapeHtml(item)}</li>`)
           .join("")}</ul>` +
-        `<p class="ats-gap-tech-hint">Add under a real skills category, then prove in ≥2 recent-role bullets.</p>` +
+        `<p class="ats-gap-tech-hint">Add to skills, then prove in recent bullets.</p>` +
         `</div>`
     );
   }
@@ -1499,7 +1477,7 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
         `<ul class="ats-gap-tech-list">${detail.skillsOnlyProducts
           .map((item) => `<li>${escapeHtml(item)}</li>`)
           .join("")}</ul>` +
-        `<p class="ats-gap-tech-hint">Name each in a concrete story for the two most recent roles.</p>` +
+        `<p class="ats-gap-tech-hint">Name each in recent-role bullets.</p>` +
         `</div>`
     );
   }
@@ -1510,7 +1488,7 @@ function atsGapsHtml(evaluation = {}, { rebuild = false, csvRow = null } = {}) {
         `<ul class="ats-gap-tech-list">${detail.weaveTech
           .map((item) => `<li>${escapeHtml(item)}</li>`)
           .join("")}</ul>` +
-        `<p class="ats-gap-tech-hint">Use in profile / bullets — not a keyword dump row.</p>` +
+        `<p class="ats-gap-tech-hint">Use in the profile or bullets.</p>` +
         `</div>`
     );
   }
@@ -1731,25 +1709,23 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
     setIconButton(
       runOneOffBtn,
       force ? "retry" : "draft",
-      force ? "Force Generate Draft Version" : "Generate Draft Version"
+      force ? "Force draft" : "Generate draft"
     );
   }
   if (logProfileApplyBtn) {
     logProfileApplyBtn.disabled = busy;
-    setIconButton(logProfileApplyBtn, "profileApply", "Log apply — save JD and mark Applied");
+    setIconButton(logProfileApplyBtn, "profileApply", "Log apply");
   }
   if (emailBidPrepareBtn) {
     emailBidPrepareBtn.disabled = busy;
-    setIconButton(emailBidPrepareBtn, "search", "Find contacts & draft (Email Bid)");
+    setIconButton(emailBidPrepareBtn, "search", "Find contacts");
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
     const score = Number(lastOneOffAtsCache?.atsScore);
     const needsGaps = draftReady && Number.isFinite(score) && score < ATS_TARGET_SCORE;
     regenerateOneOffBtn.textContent = needsGaps ? "Regenerate for gaps" : "Regenerate";
-    regenerateOneOffBtn.title = needsGaps
-      ? "Rebuild using Gaps and Additional prompt"
-      : "Re-run AI with current fields and additional prompt";
+    regenerateOneOffBtn.title = needsGaps ? "Regenerate for gaps" : "Regenerate draft";
   }
   if (confirmOneOffBtn) confirmOneOffBtn.disabled = busy || !draftReady;
   if (discardOneOffBtn) discardOneOffBtn.disabled = busy || !draftReady;
@@ -2146,7 +2122,7 @@ function renderQueue() {
       const err = document.createElement("div");
       err.className = "sub";
       err.textContent = job.error;
-      err.title = job.error;
+      err.title = shortTip(job.error);
       meta.appendChild(err);
     }
 
@@ -2156,19 +2132,9 @@ function renderQueue() {
     const revealBtn = document.createElement("button");
     revealBtn.type = "button";
     revealBtn.className = "secondary";
-    setIconButton(revealBtn, "files", "Open generated files");
+    setIconButton(revealBtn, "files", "Open files");
     revealBtn.disabled = !job.jobDir && job.status !== "done" && !job.hasFiles;
-    revealBtn.title = job.jobDir
-      ? [
-          `Open ${job.jobDir}`,
-          job.resumeName ? `Resume: ${job.resumeName}` : "",
-          job.coverName ? `Cover letter: ${job.coverName}` : ""
-        ]
-          .filter(Boolean)
-          .join("\n")
-      : job.status === "done" || job.hasFiles
-        ? "Reveal generated resume and cover letter"
-        : "Generate this job first to create files";
+    revealBtn.title = job.jobDir || job.status === "done" || job.hasFiles ? "Open files" : "Not ready";
     revealBtn.addEventListener("click", () => revealJobFiles(job));
 
     const removeBtn = document.createElement("button");
@@ -2711,6 +2677,7 @@ async function onMasterResumeFile(file) {
     const { text, fileName } = await extractMasterResumeFromFile(file);
     await importPersonFromResumeText(text, { sourceLabel: fileName });
     if (personResumeFileEl) personResumeFileEl.value = "";
+    if (personResumeFileNameEl) personResumeFileNameEl.textContent = "No file chosen";
   } catch (err) {
     const message = String(err.message || err);
     setPersonImportNotice(message, { ok: false });
@@ -3804,8 +3771,12 @@ activeRoleTrackBtns.forEach((btn) => {
   });
 });
 
+personResumeFileBtn?.addEventListener("click", () => {
+  personResumeFileEl?.click();
+});
 personResumeFileEl?.addEventListener("change", () => {
   const file = personResumeFileEl.files?.[0];
+  if (personResumeFileNameEl) personResumeFileNameEl.textContent = file?.name || "No file chosen";
   onMasterResumeFile(file).catch((e) => setStatus(String(e.message || e)));
 });
 
@@ -4195,7 +4166,7 @@ function installTemplatePicker() {
     sheet.dataset.layout = sketch.layout;
     sheet.dataset.font = sketch.font;
     sheet.style.setProperty("--ts-accent", sketch.accent);
-    note.textContent = template?.description || template?.label || "";
+    note.textContent = shortTip(template?.description || template?.label || "");
     for (const btn of templatePickerMenu.querySelectorAll(".is-preview")) {
       btn.classList.remove("is-preview");
     }
@@ -4324,8 +4295,8 @@ if (UI_CONTEXT === "popup") {
 } else if (UI_CONTEXT === "window") {
   if (keepOpenBtn) {
     keepOpenBtn.hidden = false;
-    keepOpenBtn.title = "Dock to Chrome side panel";
-    keepOpenBtn.setAttribute("aria-label", "Dock to Chrome side panel");
+    keepOpenBtn.title = "Side panel";
+    keepOpenBtn.setAttribute("aria-label", "Side panel");
   }
   if (openAsWindowBtn) openAsWindowBtn.hidden = true;
 }
@@ -4336,31 +4307,36 @@ function initThemePicker() {
   });
 }
 
+if (styleExportClearBtn) {
+  setIconButton(styleExportClearBtn, "remove", "Clear fields");
+}
+if (styleExportPdfBtn) {
+  setIconButton(styleExportPdfBtn, "pdf", "Export PDF");
+}
 if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from this page");
 if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear job fields");
 if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate draft", { showLabel: true });
 if (logProfileApplyBtn) {
-  setIconButton(logProfileApplyBtn, "profileApply", "Log apply — save JD and mark Applied");
+  setIconButton(logProfileApplyBtn, "profileApply", "Log apply");
 }
 if (emailBidPrepareBtn) {
-  setIconButton(emailBidPrepareBtn, "search", "Find contacts & draft (Email Bid)");
+  setIconButton(emailBidPrepareBtn, "search", "Find contacts");
 }
 if (autofillPageBtn) {
   setIconButton(autofillPageBtn, "autofill", "Autofill", { showLabel: true });
 }
 if (autoApplyPageBtn) {
-  setIconButton(autoApplyPageBtn, "apply", "Auto Apply (Ctrl+Shift+U)");
+  setIconButton(autoApplyPageBtn, "apply", "Auto Apply");
 }
 if (customQaPageBtn) {
-  setIconButton(customQaPageBtn, "qa", "Custom Q&A (Ctrl+Shift+Q)");
+  setIconButton(customQaPageBtn, "qa", "Custom Q&A");
 }
 
-if (addProfileBtn) setIconButton(addProfileBtn, "userPlus", "Create a new custom profile");
-if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
+if (addProfileBtn) setIconButton(addProfileBtn, "userPlus", "New profile");
+if (personResumeFileBtn) setIconButton(personResumeFileBtn, "fileUp", "From resume file");
+if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open window");
 if (keepOpenBtn) {
-  const panelLabel =
-    UI_CONTEXT === "window" ? "Dock to Chrome side panel" : "Keep open in side panel";
-  setIconButton(keepOpenBtn, "panel", panelLabel);
+  setIconButton(keepOpenBtn, "panel", "Side panel");
 }
 
 function setLabeledRunButton(button, label) {
@@ -4537,6 +4513,14 @@ setInterval(async () => {
 // silence unused import warning path for extractSpreadsheetId when sheets hidden
 void extractSpreadsheetId;
 
+function shortTip(text, max = 48) {
+  const line = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (line.length <= max) return line;
+  return `${line.slice(0, max - 1).trimEnd()}…`;
+}
+
 installHoverTips();
 
 function installHoverTips() {
@@ -4574,10 +4558,7 @@ function installHoverTips() {
     return null;
   };
 
-  const tipText = (el) => {
-    const raw = el.getAttribute("title") || el.getAttribute("data-ui-tip") || "";
-    return String(raw).trim();
-  };
+  const tipText = (el) => shortTip(el.getAttribute("title") || el.getAttribute("data-ui-tip") || "");
 
   const worthShowing = (_el, text) => Boolean(text);
 

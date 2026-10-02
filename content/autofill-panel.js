@@ -186,9 +186,7 @@
     const req = f.required ? ` data-required="1"` : "";
     const open = state.answerFieldId === f.id ? ` data-open="1"` : "";
     const isNeed = f.matchSource === "unmatched" && st !== "done";
-    const title = isNeed
-      ? "Click to answer here or highlight on page"
-      : "Click to highlight on page";
+    const title = isNeed ? "Answer or highlight" : "Highlight";
     return `<li class="field-row${isNeed ? " needs-answer" : ""}" data-field-id="${escapeHtml(f.id)}"${req}${open} title="${title}">
       <div class="field-row-main">
         <span class="field-status ${statusClass}"></span>
@@ -371,7 +369,7 @@
     shadow.innerHTML = `
       <style id="panelStyles"></style>
       <div class="panel-root">
-        <button type="button" class="panel-tab" id="panelTab" title="Brightstar Autofill">Autofill</button>
+        <button type="button" class="panel-tab" id="panelTab" title="Autofill">Autofill</button>
         <div class="panel-shell" id="panelShell" hidden>
           <div class="panel-header">
             <div class="panel-brand">

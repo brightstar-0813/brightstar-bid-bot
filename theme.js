@@ -97,7 +97,7 @@ export function mountThemeSwatches(container, options = {}) {
     btn.type = "button";
     btn.className = "theme-swatch";
     btn.dataset.theme = theme.id;
-    btn.title = `${theme.label} — ${theme.blurb}`;
+    btn.title = theme.label;
     btn.setAttribute("aria-label", theme.label);
     btn.setAttribute("aria-pressed", "false");
     btn.addEventListener("click", () => {

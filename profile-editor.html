@@ -252,7 +252,7 @@
             <details class="profile-acc-item">
               <summary>Portal passwords</summary>
               <div class="profile-acc-body">
-                <p class="acc-hint">Stored locally for ATS portals (e.g. Workday). Never sent anywhere else.</p>
+                <p class="acc-hint">Stored locally. Autofill only.</p>
                 <label class="field">
                   <span>Workday / ATS password</span>
                   <input id="personPassword" type="password" autocomplete="off" placeholder="Optional — for autofill only" />
@@ -266,7 +266,7 @@
                 <span id="qaBankNote" class="acc-summary-meta">0 answers</span>
               </summary>
               <div class="profile-acc-body">
-                <p class="acc-hint">Saved question → answer pairs. Matched on forms before calling AI.</p>
+                <p class="acc-hint">Matched on forms before AI.</p>
                 <button type="button" id="openQaEditorBtn" class="primary compact profile-qa-open">Open Q&amp;A bank</button>
               </div>
             </details>
@@ -301,13 +301,13 @@
               </section>
 
               <section class="resume-step-panel" data-step="1" role="tabpanel" hidden>
-                <p class="acc-hint">Add each employer — used to autofill work history on application forms.</p>
+                <p class="acc-hint">Used to fill work history.</p>
                 <div id="resumeWorkList" class="resume-entry-list"></div>
                 <button type="button" id="addWorkEntry" class="ghost compact resume-add-entry">+ Add another job</button>
               </section>
 
               <section class="resume-step-panel" data-step="2" role="tabpanel" hidden>
-                <p class="acc-hint">Schools and degrees — matched on education sections of job applications.</p>
+                <p class="acc-hint">Matched on education fields.</p>
                 <div id="resumeEducationList" class="resume-entry-list"></div>
                 <button type="button" id="addEducationEntry" class="ghost compact resume-add-entry">+ Add another school</button>
               </section>
@@ -356,7 +356,7 @@
               <div class="profile-acc-body">
                 <label class="field">
                   <span>Custom resume prompt ({JD})</span>
-                  <textarea id="personResumePrompt" class="prompt-input" rows="6" placeholder="Optional. Leave blank to use the Prompt menu. Must include {JD}."></textarea>
+                  <textarea id="personResumePrompt" class="prompt-input" rows="6" placeholder="Optional. Must include {JD}."></textarea>
                 </label>
                 <label class="field">
                   <span>Cover letter prompt ({JD})</span>

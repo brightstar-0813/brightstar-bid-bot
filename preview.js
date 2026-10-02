@@ -224,6 +224,14 @@ pageEl.addEventListener("load", () => {
   }
 });
 
+function shortPreviewTip(text, max = 48) {
+  const line = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (line.length <= max) return line;
+  return `${line.slice(0, max - 1).trimEnd()}…`;
+}
+
 function populateTemplates() {
   const templates = getAllTemplates();
   templateSelectEl.innerHTML = "";
@@ -231,7 +239,7 @@ function populateTemplates() {
     const option = document.createElement("option");
     option.value = template.id;
     option.textContent = template.label;
-    option.title = template.description || template.label;
+    option.title = shortPreviewTip(template.description || template.label);
     templateSelectEl.appendChild(option);
   }
   const valid = new Set(templates.map((t) => t.id));
