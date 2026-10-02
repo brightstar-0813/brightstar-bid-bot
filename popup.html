@@ -905,8 +905,16 @@
               </button>
             </div>
 
-            <div class="subblock" id="emailBidMailboxBlock">
-              <p class="subsection-title">Email Bid · Mailbox</p>
+            <button
+              type="button"
+              class="panel-toggle"
+              id="toggleEmailBidMailbox"
+              aria-expanded="false"
+              aria-controls="emailBidMailboxBody"
+            >
+              Email Bid · Mailbox
+            </button>
+            <div id="emailBidMailboxBody" hidden>
               <label class="field">
                 <span>Email</span>
                 <input id="emailBidMailboxEmail" type="email" placeholder="you@outlook.com" autocomplete="username" />

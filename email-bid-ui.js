@@ -49,6 +49,9 @@ export function initEmailBidUi(deps) {
   const passwordEl = document.getElementById("emailBidMailboxPassword");
   const mailboxSaveBtn = document.getElementById("emailBidMailboxSave");
   const mailboxDisconnectBtn = document.getElementById("emailBidMailboxDisconnect");
+  const toggleMailboxBtn = document.getElementById("toggleEmailBidMailbox");
+  const mailboxBody = document.getElementById("emailBidMailboxBody");
+  const MAILBOX_PANEL_OPEN_KEY = "email_bid_mailbox_open";
   const draftHost = document.getElementById("emailBidDraftHost");
   const draftBlock = document.getElementById("emailBidDraftBlock");
   const draftCloseBtn = document.getElementById("emailBidDraftClose");
@@ -79,6 +82,17 @@ export function initEmailBidUi(deps) {
 
   function ensureBidPanelOpen() {
     if (typeof setManualPanelOpen === "function") setManualPanelOpen(true);
+  }
+
+  function setMailboxPanelOpen(open, { persist = true } = {}) {
+    if (!toggleMailboxBtn || !mailboxBody) return;
+    const isOpen = Boolean(open);
+    mailboxBody.hidden = !isOpen;
+    toggleMailboxBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    toggleMailboxBtn.textContent = isOpen ? "Collapse" : "Email Bid · Mailbox";
+    if (persist) {
+      chrome.storage.local.set({ [MAILBOX_PANEL_OPEN_KEY]: isOpen }).catch(() => {});
+    }
   }
 
   function setDraftModalOpen(open) {
@@ -593,6 +607,9 @@ export function initEmailBidUi(deps) {
   prepareBtn?.addEventListener("click", () => prepare().catch((e) => setStatus(String(e.message || e))));
   confirmBtn?.addEventListener("click", () => confirmSend().catch((e) => setStatus(String(e.message || e))));
   openWebBtn?.addEventListener("click", () => openWebCompose().catch((e) => setStatus(String(e.message || e))));
+  toggleMailboxBtn?.addEventListener("click", () => {
+    setMailboxPanelOpen(mailboxBody?.hidden);
+  });
   mailboxSaveBtn?.addEventListener("click", () => saveMailbox().catch((e) => setStatus(String(e.message || e))));
   mailboxDisconnectBtn?.addEventListener("click", () =>
     disconnectMailbox().catch((e) => setStatus(String(e.message || e)))
@@ -655,6 +672,9 @@ export function initEmailBidUi(deps) {
   });
 
   refreshFromAndMailbox().catch(() => {});
+  chrome.storage.local.get([MAILBOX_PANEL_OPEN_KEY]).then((data) => {
+    setMailboxPanelOpen(Boolean(data[MAILBOX_PANEL_OPEN_KEY]), { persist: false });
+  }).catch(() => {});
 
-  return { refreshFromAndMailbox, clearEmailDraft, ensureBidPanelOpen, setDraftModalOpen };
+  return { refreshFromAndMailbox, clearEmailDraft, ensureBidPanelOpen, setDraftModalOpen, setMailboxPanelOpen };
 }

@@ -1265,8 +1265,13 @@ button.primary:hover,
   color: var(--ink);
 }
 
-.panel-body + .panel-toggle {
+.panel-body + .panel-toggle,
+#manualPanelBody > #toggleEmailBidMailbox {
   margin-top: 6px;
+}
+
+#emailBidMailboxBody {
+  margin-top: 8px;
 }
 
 .integrations-shared-hint {
