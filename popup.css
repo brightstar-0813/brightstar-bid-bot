@@ -1736,14 +1736,9 @@ input[type="file"]::file-selector-button {
   color: var(--muted);
 }
 
-.queue-empty::before {
-  content: "";
+.queue-empty-mark {
   display: block;
-  width: 28px;
-  height: 28px;
   margin: 0 auto 10px;
-  background: url("icons/brightstar-icon.svg") center / contain no-repeat;
-  opacity: 0.55;
 }
 
 .queue-empty p {

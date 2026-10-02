@@ -1958,7 +1958,7 @@ function renderQueue() {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
     empty.innerHTML =
-      "<p>Queue is empty</p>";
+      '<img src="icons/brightstar-mark.gif" alt="" class="brand-icon queue-empty-mark" /><p>Queue is empty</p>';
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     queueListScrollTop = 0;
@@ -4323,7 +4323,7 @@ if (emailBidPrepareBtn) {
   setIconButton(emailBidPrepareBtn, "search", "Find contacts");
 }
 if (autofillPageBtn) {
-  setIconButton(autofillPageBtn, "autofill", "Autofill", { showLabel: true });
+  setIconButton(autofillPageBtn, "autofill", "Autofill");
 }
 if (autoApplyPageBtn) {
   setIconButton(autoApplyPageBtn, "apply", "Auto Apply");
