@@ -709,6 +709,15 @@ h1 {
   white-space: nowrap;
 }
 
+.row-split button.compact.icon-button {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .keep-open {
   width: auto;
   flex: 0 0 auto;
@@ -2755,6 +2764,71 @@ body.ctx-panel .status-bar,
 body.ctx-window .status-bar {
   padding-left: 16px;
   padding-right: 16px;
+}
+
+#uiTooltip {
+  --tip-bg: #1a2230;
+  position: fixed;
+  z-index: 100001;
+  max-width: min(248px, calc(100vw - 16px));
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--tip-bg);
+  color: #f6f3ea;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  text-align: left;
+  white-space: pre-line;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 8px 24px rgba(0, 0, 0, 0.32),
+    0 2px 6px rgba(0, 0, 0, 0.22);
+  transform: translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+}
+
+#uiTooltip.is-open {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#uiTooltip[data-place="bottom"] {
+  transform: translateY(-4px);
+}
+
+#uiTooltip[data-place="bottom"].is-open {
+  transform: translateY(0);
+}
+
+#uiTooltip::after {
+  content: "";
+  position: absolute;
+  left: var(--tip-arrow, 50%);
+  width: 8px;
+  height: 8px;
+  background: var(--tip-bg);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+#uiTooltip[data-place="top"]::after {
+  bottom: -4px;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#uiTooltip[data-place="bottom"]::after {
+  top: -4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 @media (prefers-reduced-motion: reduce) {

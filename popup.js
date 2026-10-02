@@ -1403,7 +1403,9 @@ const ACTION_ICON_PATHS = {
     '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7.1-7.1l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7.1 7.1l1-1"/>',
   disconnect:
     '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7.1-7.1l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7.1 7.1l1-1"/><path d="m4 4 16 16"/>',
-  mail: '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>'
+  mail: '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>',
+  userPlus:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>'
 };
 
 function setIconButton(button, icon, label, { showLabel = false } = {}) {
@@ -4165,6 +4167,7 @@ if (customQaPageBtn) {
   setIconButton(customQaPageBtn, "qa", "Custom Q&A (Ctrl+Shift+Q)");
 }
 
+if (addProfileBtn) setIconButton(addProfileBtn, "userPlus", "Create a new custom profile");
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open as window app");
 if (keepOpenBtn) {
   const panelLabel =
@@ -4344,3 +4347,227 @@ setInterval(async () => {
 
 // silence unused import warning path for extractSpreadsheetId when sheets hidden
 void extractSpreadsheetId;
+
+installHoverTips();
+
+function installHoverTips() {
+  const SHOW_DELAY = 420;
+  const WARM_DELAY = 50;
+  const WARM_WINDOW = 380;
+  const tip = document.createElement("div");
+  tip.id = "uiTooltip";
+  tip.setAttribute("role", "tooltip");
+  document.body.appendChild(tip);
+
+  let active = null;
+  let pending = null;
+  let held = null;
+  let showTimer = 0;
+  let hideTimer = 0;
+  let warmUntil = 0;
+  let fromPointer = false;
+  let lastX = -1;
+  let lastY = -1;
+
+  const covers = (el) => {
+    if (el.matches(":hover") || document.activeElement === el) return true;
+    if (!el.disabled || lastX < 0) return false;
+    const rect = el.getBoundingClientRect();
+    return lastX >= rect.left && lastX <= rect.right && lastY >= rect.top && lastY <= rect.bottom;
+  };
+
+  const disabledAt = (x, y) => {
+    for (const btn of document.querySelectorAll("button:disabled")) {
+      if (!tipText(btn)) continue;
+      const rect = btn.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return btn;
+    }
+    return null;
+  };
+
+  const tipText = (el) => {
+    const raw = el.getAttribute("title") || el.getAttribute("data-ui-tip") || "";
+    return String(raw).trim();
+  };
+
+  const worthShowing = (_el, text) => Boolean(text);
+
+  const holdTitle = (el) => {
+    const title = el.getAttribute("title");
+    if (title) {
+      el.setAttribute("data-ui-tip", title);
+      el.removeAttribute("title");
+    }
+    if (held && held !== el) releaseTitle(held);
+    held = el;
+  };
+
+  const releaseTitle = (el) => {
+    if (!el?.isConnected || el.hasAttribute("title")) return;
+    const stored = el.getAttribute("data-ui-tip");
+    if (stored) el.setAttribute("title", stored);
+  };
+
+  const releaseHeld = () => {
+    if (!held) return;
+    releaseTitle(held);
+    held = null;
+  };
+
+  const place = (el) => {
+    const gap = 10;
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    let placeName = "top";
+    let top = rect.top - box.height - gap;
+    if (top < margin) {
+      placeName = "bottom";
+      top = rect.bottom + gap;
+    }
+    if (placeName === "bottom" && top + box.height > window.innerHeight - margin) {
+      placeName = "top";
+      top = Math.max(margin, rect.top - box.height - gap);
+    }
+    let left = rect.left + rect.width / 2 - box.width / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - box.width - margin));
+    tip.dataset.place = placeName;
+    tip.style.top = `${Math.round(top)}px`;
+    tip.style.left = `${Math.round(left)}px`;
+    const arrow = rect.left + rect.width / 2 - left;
+    tip.style.setProperty("--tip-arrow", `${Math.max(14, Math.min(arrow, box.width - 14))}px`);
+  };
+
+  const close = ({ keepWarm = true, except = null } = {}) => {
+    window.clearTimeout(showTimer);
+    window.clearTimeout(hideTimer);
+    showTimer = 0;
+    hideTimer = 0;
+    pending = null;
+    if (active) {
+      if (active.getAttribute("aria-describedby") === "uiTooltip") {
+        active.removeAttribute("aria-describedby");
+      }
+      active = null;
+      if (keepWarm) warmUntil = Date.now() + WARM_WINDOW;
+    }
+    if (held !== except) releaseHeld();
+    tip.classList.remove("is-open");
+  };
+
+  const open = (el) => {
+    const text = tipText(el);
+    if (!worthShowing(el, text) || !el.isConnected) {
+      close({ keepWarm: false });
+      return;
+    }
+    holdTitle(el);
+    active = el;
+    pending = el;
+    tip.classList.remove("is-open");
+    tip.style.transform = "none";
+    tip.textContent = text;
+    place(el);
+    tip.style.transform = "";
+    tip.classList.add("is-open");
+    el.setAttribute("aria-describedby", "uiTooltip");
+  };
+
+  const arm = (el) => {
+    const text = tipText(el);
+    if (!worthShowing(el, text)) return;
+    holdTitle(el);
+    window.clearTimeout(hideTimer);
+    hideTimer = 0;
+    if (el === active) {
+      pending = el;
+      return;
+    }
+    const warm = Date.now() < warmUntil;
+    if (!warm && active) close({ keepWarm: false, except: el });
+    pending = el;
+    window.clearTimeout(showTimer);
+    showTimer = window.setTimeout(() => {
+      if (pending !== el || !el.isConnected) return;
+      if (!covers(el)) return;
+      open(el);
+    }, warm ? WARM_DELAY : SHOW_DELAY);
+  };
+
+  document.addEventListener(
+    "pointerover",
+    (event) => {
+      const btn = event.target?.closest?.("button");
+      if (!btn) return;
+      arm(btn);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "pointerout",
+    (event) => {
+      const btn = event.target?.closest?.("button");
+      if (!btn) return;
+      if (event.relatedTarget?.closest?.("button") === btn) return;
+      if (btn !== pending && btn !== active) return;
+      pending = null;
+      window.clearTimeout(showTimer);
+      showTimer = 0;
+      window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => close(), 40);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      fromPointer = true;
+      close({ keepWarm: false });
+    },
+    true
+  );
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close({ keepWarm: false });
+    else fromPointer = false;
+  });
+
+  document.addEventListener("focusin", (event) => {
+    const btn = event.target?.closest?.("button");
+    if (!btn || fromPointer) return;
+    arm(btn);
+  });
+
+  document.addEventListener("focusout", (event) => {
+    const btn = event.target?.closest?.("button");
+    if (!btn || (btn !== active && btn !== pending)) return;
+    close();
+  });
+
+  let disabledHover = null;
+  document.addEventListener(
+    "pointermove",
+    (event) => {
+      lastX = event.clientX;
+      lastY = event.clientY;
+      if (event.target?.closest?.("button")) return;
+      const btn = disabledAt(lastX, lastY);
+      if (btn === disabledHover) return;
+      if (disabledHover && (disabledHover === pending || disabledHover === active)) {
+        pending = null;
+        window.clearTimeout(showTimer);
+        showTimer = 0;
+        window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => close(), 40);
+      }
+      disabledHover = btn;
+      if (btn) arm(btn);
+    },
+    true
+  );
+
+  document.addEventListener("scroll", () => close({ keepWarm: false }), true);
+  window.addEventListener("blur", () => close({ keepWarm: false }));
+}
