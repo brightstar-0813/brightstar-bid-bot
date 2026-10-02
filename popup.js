@@ -147,6 +147,9 @@ let currentWindowId = null;
 const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
 const templateSelectEl = document.getElementById("templateSelect");
+const templatePickerTrigger = document.getElementById("templatePickerTrigger");
+const templatePickerMenu = document.getElementById("templatePickerMenu");
+let closeTemplatePicker = () => {};
 const addProfileBtn = document.getElementById("addProfile");
 const personResumeFileEl = document.getElementById("personResumeFile");
 const personImportNoticeEl = document.getElementById("personImportNotice");
@@ -271,7 +274,6 @@ const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
-const previewTemplateBtn = document.getElementById("previewTemplate");
 const styleExportPasteEl = document.getElementById("styleExportPaste");
 const styleExportClearBtn = document.getElementById("styleExportClear");
 const styleExportPdfBtn = document.getElementById("styleExportPdf");
@@ -608,17 +610,56 @@ async function openProfileEditorFromPopup({ tab = "apply", presetId = "", profil
   setStatus("Editing profile.");
 }
 
+const TEMPLATE_SKETCH = {
+  "times-classic": { layout: "classic", accent: "#111111", font: "serif" },
+  "ats-modern": { layout: "rule", accent: "#1f4e79", font: "sans" },
+  "consulting-classic": { layout: "serif", accent: "#222222", font: "serif" },
+  "sv-senior": { layout: "experience", accent: "#111111", font: "sans" },
+  "nyc-finance": { layout: "band", accent: "#0b1f3a", font: "sans" },
+  "harvard-rule": { layout: "double", accent: "#111111", font: "serif" },
+  "cambria-corporate": { layout: "rule", accent: "#1f4e79", font: "serif" },
+  "skills-first": { layout: "skills", accent: "#333333", font: "sans" },
+  "modern-sans": { layout: "teal", accent: "#0f766e", font: "sans" },
+  "executive-navy": { layout: "sidebar", accent: "#0b1f3a", font: "sans" }
+};
+
+function syncTemplatePickerLabel() {
+  if (!templateSelectEl) return;
+  const selected = templatesCache.find((template) => template.id === templateSelectEl.value);
+  if (templatePickerTrigger) {
+    const label = selected?.label || "Resume template";
+    templatePickerTrigger.textContent = label;
+    templatePickerTrigger.setAttribute("aria-label", `Resume template, ${label}`);
+  }
+  for (const btn of templatePickerMenu?.querySelectorAll("[data-template-id]") || []) {
+    const active = btn.dataset.templateId === templateSelectEl.value;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  }
+}
+
 function populateTemplateSelect(selectedId) {
   templateSelectEl.innerHTML = "";
+  if (templatePickerMenu) templatePickerMenu.replaceChildren();
   for (const template of templatesCache) {
     const option = document.createElement("option");
     option.value = template.id;
     option.textContent = template.label;
-    option.title = template.label;
     templateSelectEl.appendChild(option);
+    if (!templatePickerMenu) continue;
+    const item = document.createElement("li");
+    item.setAttribute("role", "none");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "option");
+    button.dataset.templateId = template.id;
+    button.textContent = template.label;
+    item.appendChild(button);
+    templatePickerMenu.appendChild(item);
   }
   const validIds = new Set(templatesCache.map((t) => t.id));
   templateSelectEl.value = validIds.has(selectedId) ? selectedId : DEFAULT_TEMPLATE_ID;
+  syncTemplatePickerLabel();
 }
 
 function populateProfileSelect(selectedId) {
@@ -2734,32 +2775,6 @@ async function testSlackWebhook() {
   }
 }
 
-async function openTemplatePreview() {
-  const templateId = templateSelectEl.value || DEFAULT_TEMPLATE_ID;
-  const url = chrome.runtime.getURL(`preview.html?template=${encodeURIComponent(templateId)}`);
-  const stored = (await chrome.storage.local.get(PREVIEW_WINDOW_KEY))[PREVIEW_WINDOW_KEY];
-  if (stored != null) {
-    try {
-      await chrome.windows.update(stored, { focused: true, drawAttention: true });
-      await chrome.runtime.sendMessage({ type: "template_preview_show", templateId }).catch(() => {});
-      const template = templatesCache.find((t) => t.id === templateId);
-      setStatus(`Previewing ${template?.label || "resume style"}…`);
-      return;
-    } catch {
-      // Window was closed.
-    }
-  }
-  const created = await chrome.windows.create({
-    url,
-    type: "popup",
-    width: 980,
-    height: 1040
-  });
-  await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
-  const template = templatesCache.find((t) => t.id === templateId);
-  setStatus(`Opened preview for ${template?.label || "resume style"}.`);
-}
-
 function parseStyleExportPaste() {
   const raw = String(styleExportPasteEl?.value || "").trim();
   if (!raw) throw new Error("Paste resume text first.");
@@ -2792,7 +2807,10 @@ async function openStyleExportPreview(templateId = "") {
     [STYLE_EXPORT_PASTE_KEY]: resumeData,
     selected_template_id: tid
   });
-  if (templateSelectEl && tid) templateSelectEl.value = tid;
+  if (templateSelectEl && tid) {
+    templateSelectEl.value = tid;
+    syncTemplatePickerLabel();
+  }
 
   const url = chrome.runtime.getURL(
     `preview.html?source=paste&template=${encodeURIComponent(tid)}`
@@ -2833,6 +2851,7 @@ async function exportStyleExportPdf() {
     String(storedTemplate || templateSelectEl?.value || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   if (templateSelectEl && templateSelectEl.value !== activeTemplateId) {
     templateSelectEl.value = activeTemplateId;
+    syncTemplatePickerLabel();
   }
 
   const details = await jobDetailsDialog({
@@ -2864,6 +2883,7 @@ async function exportStyleExportPdf() {
   const templateId = details.templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
   if (templateSelectEl && templateId) {
     templateSelectEl.value = templateId;
+    syncTemplatePickerLabel();
     chrome.storage.local.set({ selected_template_id: templateId }).catch(() => {});
   }
 
@@ -3891,9 +3911,6 @@ togglePacingSlackPanelBtn?.addEventListener("click", () => {
   const open = pacingSlackPanelBody?.hidden !== false;
   setPacingSlackPanelOpen(open);
 });
-previewTemplateBtn?.addEventListener("click", () => {
-  openTemplatePreview().catch((e) => setStatus(String(e.message || e)));
-});
 styleExportClearBtn?.addEventListener("click", () => {
   clearStyleExport().catch((e) => setStatus(String(e.message || e)));
 });
@@ -4091,11 +4108,182 @@ sfPromptVersionMenu?.addEventListener("click", (event) => {
     .finally(closeSfPromptMenu);
 });
 document.addEventListener("click", (event) => {
-  if (event.target.closest?.(".prompt-version") || event.target.closest?.("#sfPromptVersionMenu")) return;
-  closeSfPromptMenu();
+  const inPrompt = event.target.closest?.(".prompt-version") || event.target.closest?.("#sfPromptVersionMenu");
+  if (!inPrompt) closeSfPromptMenu();
+  const inTemplate =
+    event.target.closest?.(".template-picker") || event.target.closest?.("#templatePickerMenu");
+  if (!inTemplate) closeTemplatePicker();
 });
-window.addEventListener("resize", closeSfPromptMenu);
-document.querySelector(".app-body")?.addEventListener("scroll", closeSfPromptMenu, { passive: true });
+window.addEventListener("resize", () => {
+  closeSfPromptMenu();
+  closeTemplatePicker();
+});
+document.querySelector(".app-body")?.addEventListener(
+  "scroll",
+  () => {
+    closeSfPromptMenu();
+    closeTemplatePicker();
+  },
+  { passive: true }
+);
+
+installTemplatePicker();
+
+function installTemplatePicker() {
+  if (!templatePickerTrigger || !templatePickerMenu || !templateSelectEl) return;
+  const bubble = document.createElement("div");
+  bubble.id = "templatePreviewBubble";
+  bubble.className = "template-bubble";
+  bubble.hidden = true;
+  bubble.innerHTML = `
+    <div class="template-sheet" data-layout="rule" data-font="sans">
+      <div class="ts-side"></div>
+      <div class="ts-body">
+        <div class="ts-name"></div>
+        <div class="ts-sub"></div>
+        <div class="ts-rule"></div>
+        <div class="ts-rule ts-rule-2"></div>
+        <div class="ts-block ts-a"></div>
+        <div class="ts-block ts-b"></div>
+        <div class="ts-block ts-c"></div>
+      </div>
+    </div>
+    <p class="template-bubble-note"></p>`;
+  document.body.appendChild(bubble);
+  const sheet = bubble.querySelector(".template-sheet");
+  const note = bubble.querySelector(".template-bubble-note");
+
+  const hideBubble = () => {
+    bubble.hidden = true;
+    for (const btn of templatePickerMenu.querySelectorAll(".is-preview")) {
+      btn.classList.remove("is-preview");
+    }
+  };
+
+  const placeMenu = () => {
+    if (templatePickerMenu.parentElement !== document.body) {
+      document.body.appendChild(templatePickerMenu);
+    }
+    const rect = templatePickerTrigger.getBoundingClientRect();
+    const width = Math.min(rect.width, 300);
+    const menuHeight = Math.min(templatePickerMenu.scrollHeight, 240);
+    let top = rect.bottom + 4;
+    if (top + menuHeight > window.innerHeight - 8) top = Math.max(8, rect.top - menuHeight - 4);
+    templatePickerMenu.style.width = `${width}px`;
+    templatePickerMenu.style.left = `${Math.round(rect.left)}px`;
+    templatePickerMenu.style.top = `${Math.round(top)}px`;
+  };
+
+  const placeBubble = (anchor) => {
+    const item = anchor.getBoundingClientRect();
+    const menu = templatePickerMenu.getBoundingClientRect();
+    const width = bubble.offsetWidth;
+    const height = bubble.offsetHeight;
+    let left = menu.right + 8;
+    if (left + width > window.innerWidth - 8) left = menu.left - width - 8;
+    if (left < 8) left = Math.max(8, window.innerWidth - width - 8);
+    let top = item.top;
+    if (top + height > window.innerHeight - 8) top = window.innerHeight - height - 8;
+    if (top < 8) top = 8;
+    bubble.style.left = `${Math.round(left)}px`;
+    bubble.style.top = `${Math.round(top)}px`;
+  };
+
+  const showBubble = (id, anchor) => {
+    const template = templatesCache.find((item) => item.id === id);
+    const sketch = TEMPLATE_SKETCH[id] || { layout: "rule", accent: "#1f4e79", font: "sans" };
+    sheet.dataset.layout = sketch.layout;
+    sheet.dataset.font = sketch.font;
+    sheet.style.setProperty("--ts-accent", sketch.accent);
+    note.textContent = template?.description || template?.label || "";
+    for (const btn of templatePickerMenu.querySelectorAll(".is-preview")) {
+      btn.classList.remove("is-preview");
+    }
+    anchor.classList.add("is-preview");
+    bubble.hidden = false;
+    placeBubble(anchor);
+  };
+
+  closeTemplatePicker = () => {
+    if (templatePickerMenu.hidden) return;
+    templatePickerMenu.hidden = true;
+    templatePickerTrigger.setAttribute("aria-expanded", "false");
+    hideBubble();
+  };
+
+  const openTemplatePicker = () => {
+    closeSfPromptMenu();
+    templatePickerMenu.hidden = false;
+    templatePickerTrigger.setAttribute("aria-expanded", "true");
+    placeMenu();
+    const selected =
+      templatePickerMenu.querySelector(`[data-template-id="${CSS.escape(templateSelectEl.value)}"]`) ||
+      templatePickerMenu.querySelector("[data-template-id]");
+    selected?.focus();
+    if (selected) showBubble(selected.dataset.templateId, selected);
+  };
+
+  const chooseTemplate = (id) => {
+    if (templateSelectEl.value !== id) {
+      templateSelectEl.value = id;
+      templateSelectEl.dispatchEvent(new Event("change"));
+    }
+    syncTemplatePickerLabel();
+    closeTemplatePicker();
+    templatePickerTrigger.focus();
+  };
+
+  templatePickerTrigger.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (templatePickerMenu.hidden) openTemplatePicker();
+    else closeTemplatePicker();
+  });
+  templatePickerTrigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (templatePickerMenu.hidden) openTemplatePicker();
+  });
+  templatePickerMenu.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-template-id]");
+    if (!btn) return;
+    chooseTemplate(btn.dataset.templateId);
+  });
+  templatePickerMenu.addEventListener("pointerover", (event) => {
+    const btn = event.target.closest?.("[data-template-id]");
+    if (!btn) return;
+    showBubble(btn.dataset.templateId, btn);
+  });
+  templatePickerMenu.addEventListener("focusin", (event) => {
+    const btn = event.target.closest?.("[data-template-id]");
+    if (!btn) return;
+    showBubble(btn.dataset.templateId, btn);
+  });
+  templatePickerMenu.addEventListener("keydown", (event) => {
+    const items = [...templatePickerMenu.querySelectorAll("[data-template-id]")];
+    const index = items.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = event.key === "ArrowDown" ? Math.min(items.length - 1, index + 1) : Math.max(0, index - 1);
+      items[next]?.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const btn = document.activeElement?.closest?.("[data-template-id]");
+      if (btn) chooseTemplate(btn.dataset.templateId);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeTemplatePicker();
+      templatePickerTrigger.focus();
+    }
+  });
+  templatePickerMenu.addEventListener(
+    "scroll",
+    () => {
+      const current = templatePickerMenu.querySelector(".is-preview");
+      if (current && !bubble.hidden) placeBubble(current);
+    },
+    { passive: true }
+  );
+}
 
 allowBatchYesBtn?.addEventListener("click", () => {
   setAllowBatch(ALLOW_BATCH.YES).catch((e) => setStatus(String(e.message || e)));
@@ -4234,6 +4422,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const next = changes.selected_template_id.newValue;
     if (next && templateSelectEl.value !== next) {
       templateSelectEl.value = next;
+      syncTemplatePickerLabel();
       chrome.runtime.sendMessage({ type: "template_preview_show", templateId: next }).catch(() => {});
     }
   }

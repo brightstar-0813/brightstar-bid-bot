@@ -86,10 +86,10 @@ export async function notifySlackBatchComplete({
   errors = []
 }) {
   const headline = isTest
-    ? "*Brightstar Bid bot* — Slack webhook test ✅"
+    ? "*BrightStar Bid Bot* — Slack webhook test ✅"
     : failed > 0
-      ? "*Brightstar Bid bot* — CSV batch complete ⚠️"
-      : "*Brightstar Bid bot* — CSV batch complete ✅";
+      ? "*BrightStar Bid Bot* — CSV batch complete ⚠️"
+      : "*BrightStar Bid Bot* — CSV batch complete ✅";
 
   const lines = [
     headline,
@@ -162,7 +162,7 @@ export async function notifySlackJobStatus({
   const label = labels[key] || "Job update";
 
   const who = [company, jobTitle].filter(Boolean).join(" / ") || "job";
-  const lines = [`*Brightstar Bid bot* — ${label} ${icon}`];
+  const lines = [`*BrightStar Bid Bot* — ${label} ${icon}`];
   lines.push(csvRow != null ? `• Job: #${csvRow} ${who}` : `• Job: ${who}`);
   if (personLabel) lines.push(`• Person: ${personLabel}`);
   if (key === "done" && message) lines.push(`• Status: ${truncate(message, 200)}`);
@@ -212,7 +212,7 @@ export async function notifySlackAlert({
   company = "",
   jobTitle = ""
 }) {
-  const lines = [`*Brightstar Bid bot* — ${String(title || "Alert").trim()}`];
+  const lines = [`*BrightStar Bid Bot* — ${String(title || "Alert").trim()}`];
   if (csvRow != null || company || jobTitle) {
     const who = [company, jobTitle].filter(Boolean).join(" / ");
     lines.push(
@@ -235,7 +235,7 @@ export async function notifySlackDuplicates({
 }) {
   const list = Array.isArray(duplicates) ? duplicates : [];
   const lines = [
-    `*Brightstar Bid bot* — Skipped ${list.length} duplicate job(s) ⏭️`,
+    `*BrightStar Bid Bot* — Skipped ${list.length} duplicate job(s) ⏭️`,
     `• Already on sheet: matched by job link`,
     sheetLinkCount ? `• Sheet had ${sheetLinkCount} link(s) when checked` : ""
   ].filter(Boolean);

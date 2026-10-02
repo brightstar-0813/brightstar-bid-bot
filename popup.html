@@ -41,9 +41,9 @@
             ></button>
           </div>
         </div>
-        <div class="allow-batch-switch" role="group" aria-label="Allow Batch Process">
-          <span class="allow-batch-label">Allow Batch Process</span>
-          <div class="allow-batch-chips" role="radiogroup" aria-label="Allow Batch Process">
+        <div class="allow-batch-switch" role="group" aria-label="Allow batch process">
+          <span class="allow-batch-label">Allow batch process</span>
+          <div class="allow-batch-chips" role="radiogroup" aria-label="Allow batch process">
             <button
               type="button"
               class="allow-batch-chip is-active"
@@ -414,14 +414,18 @@
               <p class="section-title">Resume style</p>
             </div>
           </header>
-          <div class="row-split">
-            <label class="field grow">
-              <span>Resume template</span>
-              <select id="templateSelect"></select>
-            </label>
-            <button type="button" id="previewTemplate" class="primary compact" title="Open a full-page preview of this style">
-              Preview
-            </button>
+          <div class="field template-picker">
+            <span id="templatePickerLabel">Resume template</span>
+            <select id="templateSelect" class="template-select-native" tabindex="-1" aria-hidden="true"></select>
+            <button
+              type="button"
+              class="template-picker-trigger"
+              id="templatePickerTrigger"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-controls="templatePickerMenu"
+            ></button>
+            <ul class="template-picker-menu" id="templatePickerMenu" role="listbox" aria-label="Resume template" hidden></ul>
           </div>
           <label class="field">
             <span>Paste resume text</span>
@@ -508,7 +512,7 @@
           </button>
         </section>
 
-        <!-- Jobs queue (CSV + shared batch) — when Allow Batch Process is Yes -->
+        <!-- Jobs queue (CSV + shared batch) — when Allow batch process is Yes -->
         <section class="section section-hero" id="jobsSection">
           <header class="section-header">
             <span class="step" id="jobsStepNum" aria-hidden="true">4</span>
