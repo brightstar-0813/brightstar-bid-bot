@@ -211,3 +211,34 @@ test("ATS appendices use evidence match and forbid keyword-dump sections", () =>
     assert.match(appendix, /EXACT JD spellings/i);
   }
 });
+
+test("humanize appendix does not ask for invented metrics", async () => {
+  const { buildStrongHumanizeAppendix } = await import("../prompts/humanize-resume.js");
+  const text = buildStrongHumanizeAppendix("sf");
+  assert.doesNotMatch(text, /Include realistic numbers/);
+  assert.match(text, /Do not invent metrics/);
+});
+
+test("vector headline override is the last headline instruction", async () => {
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async () => ({}),
+        set: async () => {}
+      }
+    }
+  };
+  const { buildPrompt } = await import("../profiles.js");
+  const { SF_TEST_HEADLINE_OVERRIDE } = await import("../prompts/sf-test.js");
+  const prompt = await buildPrompt("dmario-lewis", "Salesforce Service Cloud role.", {
+    resumePromptId: "vector",
+    strongHumanizeMode: "off",
+    jobTitle: "Salesforce Architect",
+    roleTrack: "sf"
+  });
+  const passAt = prompt.lastIndexOf("ATS + RECRUITER PASS");
+  const overrideAt = prompt.lastIndexOf("HEADLINE OVERRIDE");
+  assert.ok(passAt > 0);
+  assert.ok(overrideAt > passAt);
+  assert.ok(prompt.trimEnd().endsWith(SF_TEST_HEADLINE_OVERRIDE.trim()));
+});

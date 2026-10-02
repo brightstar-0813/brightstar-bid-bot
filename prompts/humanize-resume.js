@@ -40,7 +40,7 @@ Use occasional informal phrasing that still fits a professional resume.
 Add realistic micro‑stories or context (short, subtle, not long paragraphs).
 Use verbs that humans naturally use instead of AI‑favored verbs.
 Add specific details about tools, systems, and challenges.
-Include realistic numbers, metrics, and outcomes.
+Use a number only when the career history already states it. Do not invent metrics.
 Avoid generic corporate clichés and buzzwords.
 Avoid symmetrical or overly polished sentences.
 Avoid repeating the same verbs at the start of bullets.

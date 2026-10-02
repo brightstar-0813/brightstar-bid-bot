@@ -18,7 +18,6 @@ import {
   normalizeRoleTrackId,
   resolveEffectiveRoleTrack,
   resolveRoleTrackForPerson,
-  ATS_RECRUITER_PASS,
   ROLE_TRACK_LIST
 } from "./role-tracks.js";
 import {
@@ -1026,7 +1025,6 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   if (appliedPromptId === RESUME_PROMPT_IDS.VECTOR) {
     prompt = `${prompt}\n\n${SF_TEST_HEADLINE_OVERRIDE}`;
   }
-  prompt = `${prompt}\n\n${ATS_RECRUITER_PASS}`;
   return trimPromptToBudget(prompt, {
     maxChars: Number(extras.maxPromptChars) > 0 ? Number(extras.maxPromptChars) : MAX_RESUME_PROMPT_CHARS
   });
