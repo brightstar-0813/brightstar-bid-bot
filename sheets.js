@@ -392,6 +392,37 @@ export function buildKnownCompanySet(companies) {
   return set;
 }
 
+/** Blank names never match. "Google LLC" matches a set that already holds "Google". */
+export function isKnownCompany(name, knownCompanySet) {
+  const key = normalizeCompanyName(name);
+  if (!key) return false;
+  const known =
+    knownCompanySet instanceof Set ? knownCompanySet : buildKnownCompanySet(knownCompanySet);
+  return known.has(key);
+}
+
+/**
+ * Walk jobs in order. The first row for a company stays; a later row with the
+ * same normalized company is a duplicate. A blank company stays fresh.
+ */
+export function skipLaterCompanyRows(jobs, knownCompanies) {
+  const known =
+    knownCompanies instanceof Set
+      ? new Set(knownCompanies)
+      : buildKnownCompanySet(knownCompanies);
+  const fresh = [];
+  const duplicates = [];
+  for (const job of jobs || []) {
+    const key = normalizeCompanyName(job?.companyName || job?.company || "");
+    if (key && known.has(key)) duplicates.push(job);
+    else {
+      if (key) known.add(key);
+      fresh.push(job);
+    }
+  }
+  return { fresh, duplicates };
+}
+
 /**
  * Split jobs into fresh vs already-on-sheet (by normalized JD link).
  * Jobs without a link are treated as fresh (cannot match).
