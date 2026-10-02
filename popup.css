@@ -1311,6 +1311,54 @@ button.primary:hover,
   margin-top: 2px;
 }
 
+.section-ai {
+  padding: 8px 10px;
+}
+
+.section-ai .section-header {
+  gap: 8px;
+  margin: 0 0 6px;
+  padding-bottom: 6px;
+}
+
+.section-ai .ai-provider-toggle {
+  gap: 6px;
+  margin-top: 0;
+}
+
+.section-ai .ai-provider-btn {
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.section-ai .ai-engine-label {
+  margin: 6px 0 3px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.section-ai .checkbox-field {
+  min-height: 0;
+  margin: 6px 0 0;
+  padding: 3px 8px;
+}
+
+.section-ai .checkbox-field span {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.section-ai #cleanLeftoverAiChatsBtn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .ai-provider-toggle.humanize-toggle {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

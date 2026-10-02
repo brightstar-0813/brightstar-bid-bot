@@ -465,7 +465,7 @@
         </section>
 
         <!-- AI engine -->
-        <section class="section" id="aiProviderSection">
+        <section class="section section-ai" id="aiProviderSection">
           <header class="section-header">
             <span class="step" aria-hidden="true">3</span>
             <div class="section-copy">
@@ -498,7 +498,7 @@
               Claude
             </button>
           </div>
-          <p class="field-label" style="margin-top:12px;margin-bottom:6px;font-weight:600;font-size:12px;">Strong humanize</p>
+          <p class="ai-engine-label">Strong humanize</p>
           <div class="ai-provider-toggle humanize-toggle" role="radiogroup" aria-label="Strong humanize mode">
             <button type="button" class="ai-provider-btn" id="humanizeOff" data-humanize="off" aria-pressed="false" title="Off">
               Off
@@ -510,7 +510,7 @@
               Always
             </button>
           </div>
-          <label class="checkbox-field toggle-field" style="margin-top:10px;">
+          <label class="checkbox-field toggle-field">
             <span>Delete AI chat after job</span>
             <input
               type="checkbox"
@@ -523,7 +523,6 @@
             type="button"
             id="cleanLeftoverAiChatsBtn"
             class="ghost"
-            style="margin-top:8px;width:100%;"
             title="Delete leftover bot chats"
           >
             Clean leftover AI chats
