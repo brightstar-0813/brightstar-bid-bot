@@ -73,6 +73,7 @@ import {
   handleQaLearnCapture,
   answerQuestionsFromBank,
   runCustomOpenAiQaOnTab,
+  listCustomQaPageQuestions,
   answerCustomQaAsk,
   prepareCustomQaAsk,
   markCustomQaAgentSession,
@@ -10344,6 +10345,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (err) {
         const msg = String(err?.message || err);
         await setStatus(`Custom Q&A failed: ${msg}`);
+        safeSendResponse(sendResponse, { ok: false, error: msg });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "custom_qa_list_questions") {
+    (async () => {
+      try {
+        if (!(await isAutofillEnabled())) {
+          safeSendResponse(sendResponse, {
+            ok: false,
+            error: "Autofill is disabled. Turn it on in Apply assist."
+          });
+          return;
+        }
+        const tab = await resolveAssistTab(message.tabId ?? senderTabId);
+        const result = await listCustomQaPageQuestions(tab?.id || null);
+        const count = result.questions?.length || 0;
+        await setStatus(
+          count
+            ? `Custom Q&A: ${count} empty question${count === 1 ? "" : "s"} on this step.`
+            : "Custom Q&A: no empty questions on this step."
+        );
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Custom Q&A scan failed: ${msg}`);
         safeSendResponse(sendResponse, { ok: false, error: msg });
       }
     })();

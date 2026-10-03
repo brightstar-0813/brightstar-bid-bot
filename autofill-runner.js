@@ -4329,6 +4329,64 @@ export async function saveCustomQaAnswer({
   };
 }
 
+function customQaQuestionRows(inventory) {
+  const rows = [
+    ...(inventory?.unmatchedQuestions || []),
+    ...(inventory?.unmatchedChoiceQuestions || [])
+  ];
+  const seen = new Set();
+  const questions = [];
+  for (const row of rows) {
+    const label = String(row?.label || "").replace(/\s+/g, " ").trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const options = (Array.isArray(row.options) ? row.options : [])
+      .map((option) => String(option || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    questions.push({
+      label: label.slice(0, 400),
+      fieldType: String(row.fieldType || "text"),
+      options
+    });
+    if (questions.length >= 12) break;
+  }
+  return questions;
+}
+
+/**
+ * Read empty special questions on the application tab without answering them.
+ * Custom Q&A uses this to fill the Question field; Generate answers it.
+ */
+export async function listCustomQaPageQuestions(tabId = null) {
+  const { applicantInfo } = await getApplicantInfoForAutofill();
+  const tab = tabId
+    ? await chrome.tabs.get(tabId).catch(() => null)
+    : (await getCurrentApplicationTab()) || (await resolveAssistTab());
+
+  if (!tab?.id) {
+    throw new Error("No active application tab. Focus the job form tab first.");
+  }
+  if (!/^https?:\/\//i.test(tab.url || "")) {
+    throw new Error("Cannot scan Chrome system pages. Focus the job application tab.");
+  }
+
+  if (tab.status === "loading") {
+    try {
+      await waitForTabComplete(tab.id, 25000);
+    } catch {
+      /* continue */
+    }
+    await sleep(APPLY_SETTLE_MS);
+  }
+
+  await ensureAutofillScript(tab.id);
+  const inventory = await collectRemainingUnmatchedFromTab(tab.id, applicantInfo);
+  return { ok: true, questions: customQaQuestionRows(inventory) };
+}
+
 /**
  * Dedicated Apply Assist action: scan empty special questions on the current
  * application tab and answer them via Q&A bank + OpenAI (forced).

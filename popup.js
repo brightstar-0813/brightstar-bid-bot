@@ -310,11 +310,11 @@ const customQaAnswerEl = document.getElementById("customQaAnswer");
 const customQaMetaEl = document.getElementById("customQaMeta");
 const customQaGenerateBtn = document.getElementById("customQaGenerate");
 const customQaScanPageBtn = document.getElementById("customQaScanPage");
+const customQaPicksEl = document.getElementById("customQaPicks");
 const customQaCopyBtn = document.getElementById("customQaCopy");
 const customQaSaveBtn = document.getElementById("customQaSave");
 const customQaClearBtn = document.getElementById("customQaClear");
-const customQaStrongModelEl = document.getElementById("customQaStrongModel");
-const customQaStrongWrapEl = document.getElementById("customQaStrongWrap");
+let customQaPickCache = [];
 const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
@@ -1400,6 +1400,8 @@ const ACTION_ICON_PATHS = {
   skip: '<path d="M5 5v14l9-7z"/><path d="M17 5v14"/>',
   stop: '<path d="M7 7h10v10H7z"/>',
   save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/>',
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
   window:
     '<path d="M3 5h18v14H3z"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M14 14h2"/>',
@@ -3431,29 +3433,78 @@ async function autoApplyThisPage() {
   }
 }
 
-async function customQaThisPage() {
+function customQaPickText(question) {
+  const label = String(question?.label || "").trim();
+  const options = (Array.isArray(question?.options) ? question.options : [])
+    .map((option) => String(option || "").trim())
+    .filter(Boolean);
+  if (!label) return "";
+  if (!options.length) return label;
+  return `${label}\nOptions: ${options.join(", ")}`;
+}
+
+function renderCustomQaPicks(questions = []) {
+  customQaPickCache = questions;
+  if (!customQaPicksEl) return;
+  if (!questions.length) {
+    customQaPicksEl.hidden = true;
+    customQaPicksEl.innerHTML = "";
+    return;
+  }
+  customQaPicksEl.hidden = false;
+  customQaPicksEl.innerHTML = questions
+    .map((question, index) => {
+      const hint = question.options?.length
+        ? ` title="${escapeHtml(question.options.join(", "))}"`
+        : "";
+      return `<button type="button" class="custom-qa-pick" data-idx="${index}"${hint}>${escapeHtml(question.label)}</button>`;
+    })
+    .join("");
+}
+
+function applyCustomQaPick(question, index = -1) {
+  const text = customQaPickText(question);
+  if (!text || !customQaQuestionEl) return;
+  customQaQuestionEl.value = text;
+  if (customQaAnswerEl) customQaAnswerEl.value = "";
+  setCustomQaMeta("");
+  if (customQaPicksEl) {
+    for (const button of customQaPicksEl.querySelectorAll(".custom-qa-pick")) {
+      button.setAttribute("aria-pressed", button.dataset.idx === String(index) ? "true" : "false");
+    }
+  }
+  syncCustomQaAskControls();
+  setStatus("Question filled. Generate to answer.");
+}
+
+async function scanCustomQaQuestions() {
   if (!autofillEnabledCache) {
     setStatus("Autofill is off.");
     return;
   }
-  if (openaiQaToggleEl && !openaiQaToggleEl.checked) {
-    setStatus("OpenAI Custom Q&A is off.");
-    return;
-  }
-  autofillPageBtn.disabled = true;
-  autoApplyPageBtn.disabled = true;
-  if (customQaPageBtn) customQaPageBtn.disabled = true;
   if (customQaScanPageBtn) customQaScanPageBtn.disabled = true;
   try {
-    setStatus("Custom Q&A…");
-    const res = await chrome.runtime.sendMessage({ type: "autofill_openai_qa" });
+    setStatus("Scanning page questions…");
+    const res = await chrome.runtime.sendMessage({ type: "custom_qa_list_questions" });
     if (!res?.ok) {
-      setStatus(res?.error || "Custom Q&A failed.");
+      setStatus(res?.error || "Scan failed.");
       return;
     }
-    setStatus(res.statusText || formatAutofillSummary(res) || "Custom Q&A complete.");
+    const questions = Array.isArray(res.questions) ? res.questions : [];
+    if (!questions.length) {
+      renderCustomQaPicks([]);
+      setStatus("No empty questions on this step.");
+      return;
+    }
+    if (questions.length === 1) {
+      renderCustomQaPicks([]);
+      applyCustomQaPick(questions[0]);
+      return;
+    }
+    renderCustomQaPicks(questions);
+    setStatus(`${questions.length} questions. Pick one.`);
   } finally {
-    syncAutofillUi();
+    syncCustomQaAskControls();
   }
 }
 
@@ -3463,13 +3514,6 @@ function selectedCustomQaEngine() {
 }
 
 function syncCustomQaAskControls() {
-  const engine = selectedCustomQaEngine();
-  if (customQaStrongWrapEl) {
-    customQaStrongWrapEl.style.opacity = engine === "openai" ? "1" : "0.45";
-  }
-  if (customQaStrongModelEl) {
-    customQaStrongModelEl.disabled = engine !== "openai";
-  }
   const busy = Boolean(customQaGenerateBtn?.dataset.busy === "1");
   const hasAnswer = Boolean(String(customQaAnswerEl?.value || "").trim());
   const hasQuestion = Boolean(String(customQaQuestionEl?.value || "").trim());
@@ -3480,14 +3524,14 @@ function syncCustomQaAskControls() {
     customQaGenerateBtn.disabled = busy || !autofillEnabledCache;
   }
   if (customQaScanPageBtn) {
-    const openaiOn = openaiQaToggleEl ? Boolean(openaiQaToggleEl.checked) : true;
-    customQaScanPageBtn.disabled = busy || !autofillEnabledCache || !openaiOn;
+    customQaScanPageBtn.disabled = busy || !autofillEnabledCache;
   }
 }
 
 function clearCustomQaAsk() {
   if (customQaQuestionEl) customQaQuestionEl.value = "";
   if (customQaAnswerEl) customQaAnswerEl.value = "";
+  renderCustomQaPicks([]);
   setCustomQaMeta("");
   syncCustomQaAskControls();
   setStatus("Cleared question and answer.");
@@ -3537,24 +3581,16 @@ async function generateCustomQaAsk() {
     return;
   }
   const engine = selectedCustomQaEngine();
-  const strongModel = Boolean(customQaStrongModelEl?.checked) && engine === "openai";
   if (customQaGenerateBtn) customQaGenerateBtn.dataset.busy = "1";
   syncCustomQaAskControls();
   if (customQaAnswerEl) customQaAnswerEl.value = "";
   setCustomQaMeta("");
   try {
-    setStatus(
-      engine === "chatgpt"
-        ? "Custom Q&A · AI tab…"
-        : strongModel
-          ? "Custom Q&A · strong…"
-          : "Custom Q&A…"
-    );
+    setStatus(engine === "chatgpt" ? "Custom Q&A · AI tab…" : "Custom Q&A…");
     const res = await chrome.runtime.sendMessage({
       type: "custom_qa_ask",
       question,
-      engine,
-      strongModel
+      engine
     });
     if (!res?.ok) {
       setStatus(res?.error || "Custom Q&A generate failed.");
@@ -3944,7 +3980,13 @@ customQaGenerateBtn?.addEventListener("click", () => {
   generateCustomQaAsk().catch((e) => setStatus(String(e.message || e)));
 });
 customQaScanPageBtn?.addEventListener("click", () => {
-  customQaThisPage().catch((e) => setStatus(String(e.message || e)));
+  scanCustomQaQuestions().catch((e) => setStatus(String(e.message || e)));
+});
+customQaPicksEl?.addEventListener("click", (event) => {
+  const button = event.target.closest(".custom-qa-pick");
+  if (!button || !customQaPicksEl.contains(button)) return;
+  const question = customQaPickCache[Number(button.dataset.idx)];
+  if (question) applyCustomQaPick(question, Number(button.dataset.idx));
 });
 customQaCopyBtn?.addEventListener("click", () => {
   copyCustomQaAnswer().catch((e) => setStatus(String(e.message || e)));
@@ -4331,6 +4373,10 @@ if (autoApplyPageBtn) {
 if (customQaPageBtn) {
   setIconButton(customQaPageBtn, "qa", "Custom Q&A");
 }
+if (customQaScanPageBtn) setIconButton(customQaScanPageBtn, "scan", "Scan page questions");
+if (customQaClearBtn) setIconButton(customQaClearBtn, "remove", "Clear");
+if (customQaCopyBtn) setIconButton(customQaCopyBtn, "copy", "Copy");
+if (customQaSaveBtn) setIconButton(customQaSaveBtn, "save", "Save to bank");
 
 if (addProfileBtn) setIconButton(addProfileBtn, "userPlus", "New profile");
 if (personResumeFileBtn) setIconButton(personResumeFileBtn, "fileUp", "From resume file");

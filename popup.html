@@ -725,34 +725,38 @@
             </div>
           </div>
           <div id="customQaAskPanel" class="custom-qa-ask" hidden>
-            <p class="custom-qa-ask-title">Ask from active profile</p>
-            <label class="field-label" for="customQaQuestion">Question</label>
-            <textarea id="customQaQuestion" class="custom-qa-textarea" rows="3" placeholder="Paste or type the application question…"></textarea>
             <div class="custom-qa-engines" role="radiogroup" aria-label="Answer engine">
-              <label class="radio-inline">
+              <label class="custom-qa-engine">
                 <input type="radio" name="customQaEngine" value="openai" checked />
-                <span>OpenAI API</span>
+                <span>OpenAI</span>
               </label>
-              <label class="radio-inline">
+              <label class="custom-qa-engine" title="ChatGPT or Claude tab">
                 <input type="radio" name="customQaEngine" value="chatgpt" />
-                <span>AI tab (ChatGPT/Claude)</span>
+                <span>AI tab</span>
               </label>
             </div>
-            <label class="checkbox-field custom-qa-strong" id="customQaStrongWrap">
-              <span>Stronger OpenAI model (costs more)</span>
-              <input type="checkbox" id="customQaStrongModel" />
-            </label>
+            <div class="custom-qa-question-head">
+              <label class="field-label" for="customQaQuestion">Question</label>
+              <button
+                type="button"
+                id="customQaScanPage"
+                class="ghost icon-button"
+                title="Scan page questions"
+                aria-label="Scan page questions"
+              ></button>
+            </div>
+            <textarea id="customQaQuestion" class="custom-qa-textarea" rows="3" placeholder="Paste or type the application question…"></textarea>
+            <div id="customQaPicks" class="custom-qa-picks" hidden></div>
             <div class="custom-qa-actions">
               <button type="button" id="customQaGenerate" class="primary">Generate</button>
-              <button type="button" id="customQaScanPage" class="ghost" title="Scan empty questions">Scan page</button>
             </div>
             <label class="field-label" for="customQaAnswer">Answer</label>
             <textarea id="customQaAnswer" class="custom-qa-textarea" rows="4" placeholder="Generated answer appears here…"></textarea>
             <p class="custom-qa-meta" id="customQaMeta" hidden></p>
-            <div class="custom-qa-actions custom-qa-actions-secondary">
-              <button type="button" id="customQaClear" class="ghost compact" title="Clear" disabled>Clear</button>
-              <button type="button" id="customQaCopy" class="ghost" disabled>Copy</button>
-              <button type="button" id="customQaSave" class="ghost" disabled>Save to bank</button>
+            <div class="custom-qa-icon-row" role="toolbar" aria-label="Answer actions">
+              <button type="button" id="customQaClear" class="ghost icon-button" title="Clear" disabled>Clear</button>
+              <button type="button" id="customQaCopy" class="ghost icon-button" title="Copy" disabled>Copy</button>
+              <button type="button" id="customQaSave" class="ghost icon-button" title="Save to bank" disabled>Save to bank</button>
             </div>
           </div>
           <div class="qa-bank-block">

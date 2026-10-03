@@ -2952,20 +2952,31 @@ button.icon-button-labeled .icon-button-label {
   background: rgba(0, 0, 0, 0.18);
 }
 
-.custom-qa-ask-title {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-muted, rgba(255, 255, 255, 0.72));
-}
-
 .custom-qa-ask .field-label {
   display: block;
   margin: 0 0 4px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted, rgba(255, 255, 255, 0.65));
+}
+
+.custom-qa-question-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.custom-qa-question-head .field-label {
+  margin: 0;
+}
+
+.custom-qa-question-head .icon-button {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 5px;
 }
 
 .custom-qa-textarea {
@@ -2990,38 +3001,96 @@ button.icon-button-labeled .icon-button-label {
 }
 
 .custom-qa-engines {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  margin: 0 0 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin: 0 0 8px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  background: rgba(0, 0, 0, 0.28);
 }
 
-.custom-qa-engines .radio-inline {
-  display: inline-flex;
+.custom-qa-engine {
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-muted, rgba(255, 255, 255, 0.72));
   cursor: pointer;
 }
 
-.custom-qa-engines .radio-inline input {
-  accent-color: var(--accent, #f5c542);
+.custom-qa-engine input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.custom-qa-strong {
-  margin: 0 0 8px !important;
+.custom-qa-engine:has(input:checked) {
+  background: var(--accent, #f5c542);
+  color: var(--gold-ink, #1a1404);
+}
+
+.custom-qa-engine:has(input:focus-visible) {
+  outline: 1px solid var(--accent, #f5c542);
+  outline-offset: 1px;
 }
 
 .custom-qa-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
   margin: 0 0 8px;
 }
 
-.custom-qa-actions-secondary {
-  grid-template-columns: auto 1fr 1fr;
-  margin-bottom: 0;
+.custom-qa-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.custom-qa-icon-row .icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 6px;
+}
+
+.custom-qa-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 96px;
+  margin: -2px 0 8px;
+  overflow: auto;
+}
+
+.custom-qa-pick {
+  width: 100%;
+  min-height: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.custom-qa-pick[aria-pressed="true"] {
+  border-color: var(--accent, #f5c542);
+  color: var(--accent, #f5c542);
 }
 
 .custom-qa-meta {
