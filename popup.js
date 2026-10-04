@@ -624,7 +624,8 @@ const TEMPLATE_SKETCH = {
   "cambria-corporate": { layout: "rule", accent: "#1f4e79", font: "serif" },
   "skills-first": { layout: "skills", accent: "#333333", font: "sans" },
   "modern-sans": { layout: "teal", accent: "#0f766e", font: "sans" },
-  "executive-navy": { layout: "sidebar", accent: "#0b1f3a", font: "sans" }
+  "executive-navy": { layout: "sidebar", accent: "#0b1f3a", font: "sans" },
+  "orange-banner": { layout: "orange", accent: "#e8772e", font: "sans" }
 };
 
 function syncTemplatePickerLabel() {

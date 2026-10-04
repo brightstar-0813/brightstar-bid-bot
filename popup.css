@@ -1086,6 +1086,23 @@ select {
   box-shadow: inset 4px 0 0 var(--ts-accent);
 }
 
+.template-sheet[data-layout="orange"] .ts-name {
+  width: 46%;
+  background: #9aa0ab;
+}
+
+.template-sheet[data-layout="orange"] .ts-sub {
+  width: 70%;
+  background: #e8772e;
+}
+
+.template-sheet[data-layout="orange"] .ts-a::before,
+.template-sheet[data-layout="orange"] .ts-c::before {
+  width: 38%;
+  height: 8px;
+  background: #e8772e;
+}
+
 .template-sheet[data-layout="sidebar"] {
   display: grid;
   grid-template-columns: 34% 1fr;

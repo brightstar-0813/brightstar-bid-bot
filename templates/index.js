@@ -8,6 +8,7 @@ import { cambriaCorporateTemplate } from "./cambria-corporate.js";
 import { skillsFirstTemplate } from "./skills-first.js";
 import { modernSansTemplate } from "./modern-sans.js";
 import { executiveNavyTemplate } from "./executive-navy.js";
+import { orangeBannerTemplate } from "./orange-banner.js";
 import { stripClearanceFromTitle } from "../resume-json.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
@@ -21,7 +22,8 @@ export const BUILTIN_TEMPLATES = [
   cambriaCorporateTemplate,
   skillsFirstTemplate,
   modernSansTemplate,
-  executiveNavyTemplate
+  executiveNavyTemplate,
+  orangeBannerTemplate
 ];
 
 export const DEFAULT_TEMPLATE_ID = atsModernTemplate.id;

@@ -281,3 +281,52 @@ test("preview HTML annotates editable paths and applyPathEdits round-trips", asy
   assert.match(again, /Edited professional summary for ATS\./);
   assert.match(again, /Edited first bullet with Capgemini keywords\./);
 });
+
+test("Orange Banner puts company above the title and uses orange section bars", () => {
+  const html = resumeJsonToHtml(
+    {
+      name: "Jordan Taylor",
+      headline: "Software Engineer | Enterprise Integration",
+      phone: "555-0100",
+      email: "jose@example.com",
+      linkedin: "https://linkedin.com/in/example",
+      location: "Boston, MA",
+      profile: "Software specialist with experience designing reliable applications.",
+      technicalSummary: ["Builds maintainable services."],
+      experience: [
+        {
+          company: "Example Partners",
+          title: "Senior Software Specialist",
+          location: "Boston, MA",
+          dates: "2021 – Present",
+          bullets: ["Designed and delivered applications."]
+        }
+      ],
+      skills: [{ items: "JavaScript, Python, APIs" }],
+      education: [
+        {
+          school: "Example University",
+          degree: "Bachelor of Science, Computer Science",
+          location: "Boston, MA",
+          year: "2014 – 2018",
+          details: "Concentration in software engineering and accessible systems."
+        }
+      ]
+    },
+    "orange-banner"
+  );
+  assert.match(html, /class="page-bar"/);
+  assert.match(html, /class="bar"><span>Experience<\/span>/);
+  assert.match(html, /class="bar"><span>Education<\/span>/);
+  assert.match(html, /About me/);
+  assert.match(html, /Areas of expertise/);
+  assert.match(html, /JavaScript • Python • APIs/);
+  assert.match(html, /P:<\/span>/);
+  assert.match(html, /LI:<\/span>/);
+  assert.match(html, /Example Partners/);
+  assert.match(html, /Senior Software Specialist/);
+  assert.match(html, /Concentration in software engineering/);
+  const companyAt = html.indexOf("Example Partners");
+  const titleAt = html.indexOf("Senior Software Specialist");
+  assert.ok(companyAt > -1 && titleAt > companyAt);
+});
