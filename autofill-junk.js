@@ -112,6 +112,10 @@ export function isJunkQuestionLabel(label) {
   if (JUNK_QUESTION_RE.test(compact)) return true;
   if (JUNK_QUESTION_CONTAINS_RE.test(compact)) return true;
   if (compact.length > 280 && /upload|resume|autofill|parsing|drop your/i.test(compact)) return true;
+  // Script text, inbox chrome, and doubled widget labels are not application questions.
+  if (/[{}<>]|https?:|\/mail\/|\.html\b|\.assign\(|function\s*\(/i.test(compact)) return true;
+  if (/select a conversation|buy microsoft 365|olkerror/i.test(compact)) return true;
+  if (/([A-Za-z]{4,})\1/.test(compact.replace(/\s+/g, ""))) return true;
   return false;
 }
 

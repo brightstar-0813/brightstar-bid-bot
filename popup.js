@@ -1,4 +1,4 @@
-﻿import {
+import {
   DEFAULT_PROFILE_ID,
   DEFAULT_ATS_PASSWORD,
   getResumeProfiles,
@@ -277,6 +277,8 @@ const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const keepOpenBtn = document.getElementById("keepOpen");
 const openAsWindowBtn = document.getElementById("openAsWindow");
 const styleExportPasteEl = document.getElementById("styleExportPaste");
+const toggleStyleExportPasteBtn = document.getElementById("toggleStyleExportPaste");
+const styleExportPasteBody = document.getElementById("styleExportPasteBody");
 const styleExportClearBtn = document.getElementById("styleExportClear");
 const styleExportPdfBtn = document.getElementById("styleExportPdf");
 const fillFromOpenTabBtn = document.getElementById("fillFromOpenTab");
@@ -3454,10 +3456,19 @@ function renderCustomQaPicks(questions = []) {
   customQaPicksEl.hidden = false;
   customQaPicksEl.innerHTML = questions
     .map((question, index) => {
-      const hint = question.options?.length
-        ? ` title="${escapeHtml(question.options.join(", "))}"`
+      const options = (Array.isArray(question.options) ? question.options : [])
+        .map((option) => String(option || "").trim())
+        .filter(Boolean);
+      const hint = options.length ? ` title="${escapeHtml(options.join(", "))}"` : "";
+      const optionsHtml = options.length
+        ? `<span class="custom-qa-pick-options">${escapeHtml(options.join(" · "))}</span>`
         : "";
-      return `<button type="button" class="custom-qa-pick" data-idx="${index}"${hint}>${escapeHtml(question.label)}</button>`;
+      return (
+        `<button type="button" class="custom-qa-pick" data-idx="${index}"${hint}>` +
+        `<span class="custom-qa-pick-label">${escapeHtml(question.label)}</span>` +
+        optionsHtml +
+        `</button>`
+      );
     })
     .join("");
 }
@@ -3917,6 +3928,15 @@ toggleSheetPanelBtn?.addEventListener("click", () => {
 togglePacingSlackPanelBtn?.addEventListener("click", () => {
   const open = pacingSlackPanelBody?.hidden !== false;
   setPacingSlackPanelOpen(open);
+});
+function setStyleExportPasteOpen(open) {
+  if (!toggleStyleExportPasteBtn || !styleExportPasteBody) return;
+  styleExportPasteBody.hidden = !open;
+  toggleStyleExportPasteBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+toggleStyleExportPasteBtn?.addEventListener("click", () => {
+  setStyleExportPasteOpen(styleExportPasteBody?.hidden !== false);
 });
 styleExportClearBtn?.addEventListener("click", () => {
   clearStyleExport().catch((e) => setStatus(String(e.message || e)));

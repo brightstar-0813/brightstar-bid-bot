@@ -4329,6 +4329,24 @@ export async function saveCustomQaAnswer({
   };
 }
 
+function isCustomQaScanNoise(label) {
+  const raw = String(label || "").replace(/\s+/g, " ").trim();
+  if (!raw || raw.length < 2 || raw.length > 400) return true;
+  if (/[{}<>]|https?:|javascript:|\.html\b|\.assign\s*\(|function\s*\(/i.test(raw)) return true;
+  if (/([A-Za-z]{4,})\1/.test(raw.replace(/\s+/g, ""))) return true;
+  if (/\b(select a conversation|olkerror|microsoft 365)\b/i.test(raw)) return true;
+  if (/\b(completed step|current step|step \d+ of \d+|indicates a required field|search for jobs|candidate home|job alerts)\b/i.test(raw)) return true;
+  if (/english/i.test(raw) && /settings/i.test(raw)) return true;
+  if (/@/.test(raw) && !/^(e-?mail|email address)\b/i.test(raw)) return true;
+  return false;
+}
+
+function isNavChoiceList(options = []) {
+  const nav = /search for jobs|candidate home|job alerts|my applications|account settings/i;
+  const hits = options.filter((option) => nav.test(option));
+  return hits.length >= 2;
+}
+
 function customQaQuestionRows(inventory) {
   const rows = [
     ...(inventory?.unmatchedQuestions || []),
@@ -4338,30 +4356,35 @@ function customQaQuestionRows(inventory) {
   const questions = [];
   for (const row of rows) {
     const label = String(row?.label || "").replace(/\s+/g, " ").trim();
-    if (!label) continue;
+    const rawOptions = Array.isArray(row.options) ? row.options : [];
+    if (isCustomQaScanNoise(label) || isNavChoiceList(rawOptions)) continue;
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     const options = (Array.isArray(row.options) ? row.options : [])
       .map((option) => String(option || "").replace(/\s+/g, " ").trim())
-      .filter(Boolean)
+      .map((option) => {
+        if (/^(true|on)$/i.test(option)) return "Yes";
+        if (/^(false|off)$/i.test(option)) return "No";
+        return option;
+      })
+      .filter((option) => option && !/[{}<>]|https?:|\.html\b/.test(option))
       .slice(0, 8);
     questions.push({
       label: label.slice(0, 400),
       fieldType: String(row.fieldType || "text"),
-      options
+      options: [...new Set(options)]
     });
-    if (questions.length >= 12) break;
+    if (questions.length >= 40) break;
   }
   return questions;
 }
 
 /**
- * Read empty special questions on the application tab without answering them.
- * Custom Q&A uses this to fill the Question field; Generate answers it.
+ * Empty fields on the current apply page (any ATS), same inventory as the autofill panel.
+ * Custom Q&A fills the Question field from the row the user picks.
  */
 export async function listCustomQaPageQuestions(tabId = null) {
-  const { applicantInfo } = await getApplicantInfoForAutofill();
   const tab = tabId
     ? await chrome.tabs.get(tabId).catch(() => null)
     : (await getCurrentApplicationTab()) || (await resolveAssistTab());
@@ -4382,9 +4405,20 @@ export async function listCustomQaPageQuestions(tabId = null) {
     await sleep(APPLY_SETTLE_MS);
   }
 
-  await ensureAutofillScript(tab.id);
-  const inventory = await collectRemainingUnmatchedFromTab(tab.id, applicantInfo);
-  return { ok: true, questions: customQaQuestionRows(inventory) };
+  const scan = await scanFieldsOnTab(tab.id);
+  const emptyFields = (scan?.fields || []).filter(
+    (field) => field && field.matchSource !== "filled" && field.matchSource !== "optional"
+  );
+  return {
+    ok: true,
+    questions: customQaQuestionRows({
+      unmatchedQuestions: emptyFields.map((field) => ({
+        label: field.label,
+        fieldType: field.type || "text",
+        options: field.options || []
+      }))
+    })
+  };
 }
 
 /**

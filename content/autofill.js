@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-09-21.zip-company2";
+  const SCRIPT_BUILD = "2026-10-04.qa-scan4";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -1549,8 +1549,17 @@
       return true;
     }
     if (/^cd\s+\w+/i.test(raw) && raw.length < 48) return true;
-    if (/^[a-z]{1,5}(\s+[a-z]{1,4}){0,2}$/i.test(raw) && !/[?]/.test(raw) && raw.length <= 12) {
-      if (!/^(dob|ssn|url|zip|city|name|email|phone|race|sex)$/i.test(raw)) return true;
+    // Short tracker tokens only. Multi-word labels such as "First Name" are real fields.
+    if (!/[?]/.test(raw) && raw.length <= 12) {
+      const words = raw.split(/\s+/).filter(Boolean);
+      const crumbs = words.length > 1 && words.every((word) => word.length <= 3);
+      const token = words.length === 1 && words[0].length <= 5;
+      if (
+        (crumbs || token) &&
+        !/^(dob|ssn|url|zip|city|name|email|phone|race|sex)$/i.test(raw)
+      ) {
+        return true;
+      }
     }
     return false;
   }
@@ -1639,6 +1648,41 @@
     return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(labelNorm);
   }
 
+  function textFromLabelElement(labelEl) {
+    if (!labelEl) return "";
+    const clone = labelEl.cloneNode(true);
+    clone
+      .querySelectorAll(
+        "input, select, textarea, [role='radio'], [role='checkbox'], [role='radiogroup'], [data-automation-id='radioGroup'], [data-automation-id='radioBtn']"
+      )
+      .forEach((node) => node.remove());
+    return cleanLabelText(String(clone.textContent || "").replace(/[*✱]/g, " ")).replace(
+      /\s+yes\s+no\s*$/i,
+      ""
+    );
+  }
+
+  function isPageChromeLabel(text) {
+    const t = cleanLabelText(text).replace(/^\*\s*/, "");
+    if (!t) return true;
+    if (/^indicates a required field$/i.test(t)) return true;
+    if (/\b(completed step|current step|step \d+ of \d+)\b/i.test(t)) return true;
+    if (/\b(search for jobs|candidate home|job alerts)\b/i.test(t)) return true;
+    // Header account menu: "English" + "Settings" + the signed-in email, often glued together.
+    if (/english/i.test(t) && /settings/i.test(t)) return true;
+    if (/@/.test(t) && !/^(e-?mail|email address)\b/i.test(t)) return true;
+    return false;
+  }
+
+  function isPageChromeControl(el) {
+    if (!el?.closest) return false;
+    return Boolean(
+      el.closest(
+        "header, nav, [role='banner'], [role='navigation'], [data-automation-id*='progress'], [data-automation-id*='Progress'], [data-automation-id*='wizard'], [data-automation-id*='Wizard']"
+      )
+    );
+  }
+
   /**
    * Extract the question/field label above a control (Workday legend/label, fieldset,
    * formField containers, aria-labelledby, etc.).
@@ -1673,8 +1717,8 @@
         for (const labelEl of container.querySelectorAll(
           ':scope > label, :scope > legend, [data-automation-id="formLabel"], [data-automation-id*="formLabel"], label[data-automation-id]'
         )) {
-          if (labelEl.contains(el)) continue;
-          candidates.push(cleanLabelText(labelEl.textContent));
+          const t = textFromLabelElement(labelEl);
+          if (t.length >= 8 && !isPageChromeLabel(t) && !isBareChoiceOptionLabel(t)) return t;
         }
       }
 
@@ -1714,7 +1758,8 @@
     for (const c of candidates) {
       const t = cleanLabelText(c);
       if (!t || t.length < 3) continue;
-      if (/^(select one|please select|choose|--|\* indicates a required field)$/i.test(t)) continue;
+      if (isPageChromeLabel(t) || isBareChoiceOptionLabel(t)) continue;
+      if (/^(select one|please select|choose|--)$/i.test(t)) continue;
       if (t.length > best.length) best = t;
     }
     return best;
@@ -4739,6 +4784,38 @@
     return false;
   }
 
+  function optionLabelFromChoice(el) {
+    const alt = el?.parentElement?.querySelector?.(".application-answer-alternative");
+    const fromAlt = cleanLabelText(alt?.textContent || "");
+    if (fromAlt) return fromAlt;
+    const wrap = el?.closest?.("label");
+    if (wrap) {
+      const clone = wrap.cloneNode(true);
+      clone.querySelectorAll("input, select, textarea").forEach((node) => node.remove());
+      const text = cleanLabelText(clone.textContent);
+      if (text) return readableChoiceLabel(el, text);
+    }
+    return readableChoiceLabel(el, el?.getAttribute?.("aria-label") || el?.value || "");
+  }
+
+  /** Prefer the visible Yes/No text over raw values such as true, false, or on. */
+  function readableChoiceLabel(el, text) {
+    const raw = cleanLabelText(text);
+    if (raw && !/^(true|false|on|off)$/i.test(raw)) return raw;
+    const host =
+      el?.closest?.("[data-automation-id='radioBtn'], [role='radio'], [role='checkbox'], label") ||
+      el?.parentElement;
+    if (host && host !== el) {
+      const clone = host.cloneNode(true);
+      clone.querySelectorAll("input, select, textarea").forEach((node) => node.remove());
+      const visible = cleanLabelText(clone.textContent);
+      if (visible && !/^(true|false|on|off)$/i.test(visible)) return visible;
+    }
+    if (/^(true|on)$/i.test(raw)) return "Yes";
+    if (/^(false|off)$/i.test(raw)) return "No";
+    return raw;
+  }
+
   function collectControlOptions(el) {
     const tag = el.tagName.toLowerCase();
     if (tag === "select") {
@@ -4760,6 +4837,7 @@
           t = cleanLabelText(clone.textContent);
         }
         if (!t) t = cleanLabelText(r.getAttribute("aria-label") || r.value || "");
+        t = readableChoiceLabel(r, t);
         const norm = normalize(t);
         if (!norm || seen.has(norm)) continue;
         seen.add(norm);
@@ -4767,7 +4845,29 @@
       }
       return opts;
     }
-    if (el.type === "checkbox") return ["Yes", "No"];
+    if (el.type === "checkbox") {
+      if (el.name) {
+        let peers = [];
+        try {
+          peers = [
+            ...document.querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`)
+          ];
+        } catch {
+          peers = [];
+        }
+        const labels = [];
+        const seen = new Set();
+        for (const peer of peers) {
+          const text = optionLabelFromChoice(peer);
+          const key = normalize(text);
+          if (!text || !key || seen.has(key)) continue;
+          seen.add(key);
+          labels.push(text);
+        }
+        if (labels.length >= 2) return labels.slice(0, 20);
+      }
+      return ["Yes", "No"];
+    }
     return [];
   }
 
@@ -5820,7 +5920,7 @@
       if (!row) return;
       const label = sanitizeFieldLabel(row.label || "");
       if (!label || label.length < 2) return;
-      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) return;
+      if (isPageChromeLabel(label) || isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) return;
       const next = { ...row, label: label.slice(0, 200) };
       const labelNorm = normalize(label);
       const key = `${labelNorm}|${next.type}|${next.id}`;
@@ -5833,7 +5933,7 @@
     };
 
     for (const el of collectFillableControls()) {
-      if (isHistoryFilled(el)) continue;
+      if (isHistoryFilled(el) || isPageChromeControl(el)) continue;
       const type = (el.type || "").toLowerCase();
       if (type === "radio") {
         const groupKey = String(el.name || el.id || "").trim();
@@ -6051,9 +6151,239 @@
   /**
    * Re-collect still-empty unmatched fields for a second bank/AI/inventory pass.
    */
-  async function collectUnmatchedFieldsPayload(applicantInfo = {}) {
+  function isScanNoiseLabel(label) {
+    const raw = cleanLabelText(String(label || "").replace(/✱/g, " "));
+    if (!raw || raw.length < 8 || raw.length > 400) return true;
+    if (/[{}<>]|https?:|javascript:|\.html\b|\.assign\s*\(|function\s*\(/i.test(raw)) return true;
+    if (/([A-Za-z]{4,})\1/.test(raw.replace(/\s+/g, ""))) return true;
+    if (/\b(select a conversation|olkerror|microsoft 365|cookie settings)\b/i.test(raw)) return true;
+    if (isPageChromeLabel(raw)) return true;
+    if (isJunkLearnLabel(raw) || isPlaceholderFieldLabel(raw) || isInstructionalFieldLabel(raw)) return true;
+    if (isTrackingNoiseLabel(raw)) return true;
+    return false;
+  }
+
+  function cleanScanOptions(options = []) {
+    const out = [];
+    const seen = new Set();
+    for (const option of options) {
+      const text = cleanLabelText(option);
+      if (!text || text.length > 160) continue;
+      if (/[{}<>]|https?:|\.html\b/.test(text)) continue;
+      if (/^[\s.□☐☑\-]+$/.test(text)) continue;
+      const key = normalize(text);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(text);
+      if (out.length >= 8) break;
+    }
+    return out;
+  }
+
+  function questionLabelFromCard(block) {
+    if (!block) return "";
+    const labelEl =
+      block.querySelector(".application-label .text") ||
+      block.querySelector(".application-label") ||
+      block.querySelector("legend");
+    return cleanLabelText(String(labelEl?.innerText || labelEl?.textContent || "").replace(/✱/g, " "));
+  }
+
+  function pushScanQuestion(out, seen, { label, fieldType, options }) {
+    const clean = cleanLabelText(String(label || "").replace(/✱/g, " "));
+    const key = normalize(clean);
+    if (!clean || !key || seen.has(key) || isScanNoiseLabel(clean)) return false;
+    seen.add(key);
+    out.push({
+      label: clean.slice(0, 400),
+      fieldType: fieldType || "text",
+      options: cleanScanOptions(options)
+    });
+    return out.length >= 12;
+  }
+
+  function describeChoiceGroup(els) {
+    const checks = els.filter((el) => el.type === "checkbox");
+    const radios = els.filter((el) => el.type === "radio");
+    const area = els.find((el) => el.tagName === "TEXTAREA");
+    const select = els.find((el) => el.tagName === "SELECT");
+    const text = els.find(
+      (el) =>
+        el.tagName === "INPUT" &&
+        !["radio", "checkbox", "hidden", "file", "submit", "button"].includes((el.type || "").toLowerCase())
+    );
+    if (checks.length) {
+      if (checks.some((el) => el.checked)) return null;
+      return { fieldType: "checkbox", options: checks.map(optionLabelFromChoice) };
+    }
+    if (radios.length) {
+      if (radios.some((el) => el.checked)) return null;
+      return { fieldType: "radio", options: radios.map(optionLabelFromChoice) };
+    }
+    if (area) {
+      if (String(area.value || "").trim()) return null;
+      return { fieldType: "textarea", options: [] };
+    }
+    if (select) {
+      if (!isChoiceControlEmpty(select)) return null;
+      return { fieldType: "select", options: collectControlOptions(select) };
+    }
+    if (text) {
+      if (String(text.value || "").trim()) return null;
+      return { fieldType: "text", options: [] };
+    }
+    return null;
+  }
+
+  function workdayChoiceText(el) {
+    const fromAria = cleanLabelText(el.getAttribute?.("aria-label") || el.getAttribute?.("title") || "");
+    if (fromAria && fromAria.length <= 80 && !isPageChromeLabel(fromAria)) return fromAria;
+    const input = el.matches?.("input") ? el : el.querySelector?.("input[type='radio'], input[type='checkbox']");
+    if (input) {
+      const option = optionLabelFromChoice(input);
+      if (option) return option;
+    }
+    return textFromLabelElement(el);
+  }
+
+  function workdayChoiceSelected(el) {
+    if (el.getAttribute?.("aria-checked") === "true" || el.getAttribute?.("aria-pressed") === "true") return true;
+    if (el.checked) return true;
+    const input = el.matches?.("input") ? el : el.querySelector?.("input");
+    return Boolean(input?.checked);
+  }
+
+  function controlsOwnedByField(block, selector) {
+    return [...block.querySelectorAll(selector)].filter((el) => {
+      const owner = el.closest("[data-automation-id^='formField']");
+      return !owner || owner === block;
+    });
+  }
+
+  /** Workday My Information / apply steps: one question per formField, including Yes/No radios. */
+  function collectWorkdayFormQuestions() {
+    const blocks = [...document.querySelectorAll("[data-automation-id^='formField']")].filter(
+      (block) => !block.querySelector("[data-automation-id^='formField']")
+    );
+    if (!blocks.length) return [];
+    const out = [];
+    const seen = new Set();
+    for (const block of blocks) {
+      if (block.closest("[data-brightstar-autofill-panel], header, nav")) continue;
+      const labelEl = [...block.querySelectorAll("[data-automation-id='formLabel'], [data-automation-id*='formLabel'], label")].find(
+        (el) => {
+          const owner = el.closest("[data-automation-id^='formField']");
+          return !owner || owner === block;
+        }
+      );
+      const label = textFromLabelElement(labelEl) || questionLabelFromCard(block);
+      const radios = controlsOwnedByField(block, "[data-automation-id='radioBtn'], input[type='radio'], [role='radio']");
+      const checks = controlsOwnedByField(block, "[data-automation-id='checkbox'], input[type='checkbox'], [role='checkbox']");
+      let fieldType = "";
+      let options = [];
+      if (radios.length) {
+        if (radios.some(workdayChoiceSelected)) continue;
+        fieldType = "radio";
+        options = radios.map(workdayChoiceText);
+      } else if (checks.length) {
+        if (checks.some(workdayChoiceSelected)) continue;
+        fieldType = "checkbox";
+        options = checks.map(workdayChoiceText);
+      } else if (/[?]/.test(label)) {
+        const text = controlsOwnedByField(block, "textarea, input[type='text'], select")[0];
+        if (text && String(text.value || "").trim() && text.tagName !== "SELECT") continue;
+        if (text?.tagName === "SELECT" && !isChoiceControlEmpty(text)) continue;
+        fieldType = text?.tagName === "SELECT" ? "select" : "text";
+        options = text?.tagName === "SELECT" ? collectControlOptions(text) : [];
+      } else {
+        continue;
+      }
+      const done = pushScanQuestion(out, seen, { label, fieldType, options });
+      if (done) break;
+    }
+    return out;
+  }
+
+  /** Lever custom cards: one question per cards[id][fieldN], including visually hidden inputs. */
+  function collectLeverCardQuestions() {
+    const groups = new Map();
+    const nodes = document.querySelectorAll(
+      'input[name^="cards["], textarea[name^="cards["], select[name^="cards["]'
+    );
+    for (const el of nodes) {
+      const type = (el.type || "").toLowerCase();
+      if (["hidden", "file", "submit", "button"].includes(type)) continue;
+      const key = String(el.name || "").match(/^cards\[[^\]]+\]\[field\d+\]/)?.[0] || "";
+      if (!key) continue;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(el);
+    }
+    const out = [];
+    const seen = new Set();
+    for (const els of groups.values()) {
+      const block =
+        els[0].closest(".custom-question, .application-question, fieldset") || els[0].parentElement;
+      const described = describeChoiceGroup(els);
+      if (!described) continue;
+      const done = pushScanQuestion(out, seen, {
+        label: questionLabelFromCard(block) || captureQuestionText(els[0]),
+        fieldType: described.fieldType,
+        options: described.options
+      });
+      if (done) break;
+    }
+    return out;
+  }
+
+  function collectStructuredCardQuestions() {
+    const out = [];
+    const seen = new Set();
+    for (const block of document.querySelectorAll(".custom-question")) {
+      if (block.closest("[data-brightstar-autofill-panel]")) continue;
+      const controls = [
+        ...block.querySelectorAll('input, textarea, select')
+      ].filter((el) => !["hidden", "file", "submit", "button"].includes((el.type || "").toLowerCase()));
+      const described = describeChoiceGroup(controls);
+      if (!described) continue;
+      const done = pushScanQuestion(out, seen, {
+        label: questionLabelFromCard(block),
+        fieldType: described.fieldType,
+        options: described.options
+      });
+      if (done) break;
+    }
+    return out;
+  }
+
+  async function collectCustomQaQuestions(applicantInfo = {}) {
+    if (document.querySelector("[data-automation-id^='formField']")) {
+      return { ok: true, questions: collectWorkdayFormQuestions() };
+    }
+    const lever = collectLeverCardQuestions();
+    if (lever.length) return { ok: true, questions: lever };
+    const structured = collectStructuredCardQuestions();
+    if (structured.length) return { ok: true, questions: structured };
+    const payload = await collectUnmatchedFieldsPayload(applicantInfo, { openMenus: false });
+    const rows = [
+      ...(payload.unmatchedChoiceQuestions || []),
+      ...(payload.unmatchedQuestions || [])
+    ];
+    const out = [];
+    const seen = new Set();
+    for (const row of rows) {
+      const done = pushScanQuestion(out, seen, {
+        label: row?.label,
+        fieldType: row?.fieldType || "text",
+        options: row?.options
+      });
+      if (done) break;
+    }
+    return { ok: true, questions: out };
+  }
+
+  async function collectUnmatchedFieldsPayload(applicantInfo = {}, { openMenus = true } = {}) {
     const unmatchedQuestions = collectUnmatchedQuestions(applicantInfo);
-    const unmatchedChoiceQuestions = await collectUnmatchedChoiceQuestions();
+    const unmatchedChoiceQuestions = await collectUnmatchedChoiceQuestions({ openMenus });
     return {
       ok: true,
       fillableCount: collectFillableControls().length,
@@ -9913,6 +10243,12 @@
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });
       }
+      return true;
+    }
+    if (message?.type === "collect_custom_qa_questions") {
+      collectCustomQaQuestions(message.applicantInfo || {})
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;
     }
     if (message?.type === "collect_unmatched_fields") {

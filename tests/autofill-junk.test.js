@@ -35,6 +35,16 @@ test("isJunkQuestionLabel rejects upload chrome and profile duplicates", () => {
   assert.equal(isJunkQuestionLabel("udff em"), true);
   assert.equal(isJunkQuestionLabel("cd buttonfeatures"), true);
   assert.equal(isJunkQuestionLabel("Search"), true);
+  assert.equal(isJunkQuestionLabel("i select a conversation"), true);
+  assert.equal(isJunkQuestionLabel('")+"bO=2":o.assign("/mail/olkerror.html?'), true);
+  assert.equal(isJunkQuestionLabel("FocusedFocusedOtherOther"), true);
+  assert.equal(isJunkQuestionLabel("Why do you want to join CrossCountry Consulting?"), false);
+  assert.equal(
+    isJunkQuestionLabel(
+      "If you require sponsorship or visa-related assistance, please specify your current visa type and any future sponsorship needs."
+    ),
+    false
+  );
   assert.equal(
     isJunkQuestionLabel(
       "We invite applicants to share their demographic background. If you choose to complete this survey, your responses may be used to identify areas of improvement in our hiring process."

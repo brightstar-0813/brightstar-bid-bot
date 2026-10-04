@@ -437,30 +437,41 @@
             ></button>
             <ul class="template-picker-menu" id="templatePickerMenu" role="listbox" aria-label="Resume template" hidden></ul>
           </div>
-          <label class="field">
-            <span>Paste resume text</span>
-            <textarea
-              id="styleExportPaste"
-              rows="5"
-              placeholder="Paste resume text…"
-              spellcheck="false"
-            ></textarea>
-          </label>
-          <div class="style-export-actions" role="group" aria-label="Style export">
-            <button
-              type="button"
-              id="styleExportClear"
-              class="ghost compact icon-button"
-              title="Clear fields"
-              aria-label="Clear fields"
-            ></button>
-            <button
-              type="button"
-              id="styleExportPdf"
-              class="primary compact icon-button"
-              title="Export PDF"
-              aria-label="Export PDF"
-            ></button>
+          <button
+            type="button"
+            class="panel-toggle"
+            id="toggleStyleExportPaste"
+            aria-expanded="false"
+            aria-controls="styleExportPasteBody"
+          >
+            Paste resume text
+          </button>
+          <div id="styleExportPasteBody" class="panel-body style-export-paste" hidden>
+            <label class="field">
+              <textarea
+                id="styleExportPaste"
+                rows="5"
+                placeholder="Paste resume text…"
+                aria-label="Paste resume text"
+                spellcheck="false"
+              ></textarea>
+            </label>
+            <div class="style-export-actions" role="group" aria-label="Style export">
+              <button
+                type="button"
+                id="styleExportClear"
+                class="ghost compact icon-button"
+                title="Clear fields"
+                aria-label="Clear fields"
+              ></button>
+              <button
+                type="button"
+                id="styleExportPdf"
+                class="primary compact icon-button"
+                title="Export PDF"
+                aria-label="Export PDF"
+              ></button>
+            </div>
           </div>
         </section>
 
