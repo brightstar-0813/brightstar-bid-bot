@@ -3732,6 +3732,61 @@ async function readChatReadiness(tabId, provider) {
   }
 }
 
+/** ChatGPT sometimes paints the composer but fails the model picker. */
+async function readChatGptPageHealth(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const t = String(document.body?.innerText || "").slice(0, 8000);
+        return {
+          modelsFailed: /could not load chatgpt models/i.test(t),
+          historyFailed: /unable to load (?:chat )?history|could not load (?:your )?chats/i.test(t),
+          ready: /ready when you are/i.test(t)
+        };
+      }
+    });
+    return (
+      results?.[0]?.result || { modelsFailed: false, historyFailed: false, ready: false }
+    );
+  } catch {
+    return { modelsFailed: false, historyFailed: false, ready: false };
+  }
+}
+
+/**
+ * Wait out a broken ChatGPT model picker, then reload once if it is still stuck.
+ * A blank composer with this banner still has no Delete menu.
+ */
+async function recoverChatGptComposerIfBroken(tabId, provider) {
+  const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  if (p !== AI_PROVIDERS.CHATGPT) return;
+  let health = await readChatGptPageHealth(tabId);
+  if (!health.modelsFailed && !health.historyFailed) return;
+  await setStatus("ChatGPT failed to load models — waiting for the page to recover…");
+  for (let i = 0; i < 12; i += 1) {
+    await sleep(1000);
+    health = await readChatGptPageHealth(tabId);
+    if (!health.modelsFailed && !health.historyFailed) return;
+  }
+  await setStatus("ChatGPT still failed to load models — reloading the tab once…");
+  try {
+    await chrome.tabs.reload(tabId);
+    await withTimeout(
+      waitForTabComplete(tabId, 30000),
+      32000,
+      "Timed out reloading ChatGPT."
+    ).catch(() => null);
+  } catch {
+    /* send path reports a clearer error if the composer stays broken */
+  }
+  for (let i = 0; i < 20; i += 1) {
+    health = await readChatGptPageHealth(tabId);
+    if (!health.modelsFailed && !health.historyFailed) return;
+    await sleep(500);
+  }
+}
+
 /**
  * Soft-delete empty Recents "New chat" stubs that are not the active conversation.
  * ChatGPT often leaves a twin blank entry after navigate-to-/ + first message.
@@ -3995,6 +4050,13 @@ async function shouldUseInPageNewChat(tabId, provider, freshResult) {
 
 async function chatgptSendPrompt(tabId, prompt, startNewChat) {
   await ensureChatGptDomHarvest(tabId);
+  await recoverChatGptComposerIfBroken(tabId, AI_PROVIDERS.CHATGPT);
+  const health = await readChatGptPageHealth(tabId);
+  if (health.modelsFailed) {
+    throw new Error(
+      "ChatGPT could not load models. Refresh the ChatGPT tab, wait until the model picker appears, then Generate again."
+    );
+  }
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
     await setStatus("Opening a fresh ChatGPT chat…");
@@ -5490,6 +5552,17 @@ async function deleteCurrentAiConversation(
       // ignore
     }
   }
+  if (!targetChatId && (await isBlankFreshAiChat(tabId, provider).catch(() => false))) {
+    if (!skipExtras) {
+      try {
+        await chrome.storage.local.remove(["last_ai_chat_id", "last_ai_provider", "last_ai_chat_ids"]);
+      } catch {
+        /* ignore */
+      }
+      await setStatus(`No previous ${label} chat to remove — already on a new chat.`);
+    }
+    return { ok: true, via: "already-blank", chatId: "" };
+  }
   await focusTabForInput(tabId);
   await setStatus(
     targetChatId
@@ -6048,6 +6121,11 @@ async function deleteCurrentAiConversation(
           clickMatching(/delete chat|delete conversation|^delete$/i) || clickMatching(/delete/i);
         if (!clickedDelete) {
           if (await verifyDeleted(id, { polls: 2 })) return { ok: true, via: "already-gone" };
+          const hasMessages =
+            document.querySelectorAll(
+              '[data-message-author-role], [data-testid*="conversation-turn"]'
+            ).length > 0;
+          if (!id && !hasMessages) return { ok: true, via: "already-blank" };
           return { ok: false, error: "no-delete-menu" };
         }
         await sleep(550);
@@ -6125,8 +6203,23 @@ async function deleteCurrentAiConversation(
         };
       }
 
-      if (pageSaysAlreadyDeleted()) {
-        return { ok: true, via: "already-gone", chatId: "" };
+      const pageLooksLikeBlankNewChat = () => {
+        const hasMessages =
+          document.querySelectorAll(
+            '[data-message-author-role], [data-testid*="conversation-turn"]'
+          ).length > 0;
+        if (hasMessages) return false;
+        const path = String(location.pathname || "");
+        const t = String(document.body?.innerText || "").slice(0, 6000);
+        return (
+          path === "/" ||
+          /^\/(new|g\/[^/]*)\/?$/i.test(path) ||
+          /ready when you are/i.test(t)
+        );
+      };
+
+      if (pageSaysAlreadyDeleted() || pageLooksLikeBlankNewChat()) {
+        return { ok: true, via: "already-blank", chatId: "" };
       }
       const uiOnly = await chatgptDeleteViaUi("");
       return {
@@ -6280,13 +6373,26 @@ async function resetAiHistoryForNewWorkflow(reason = "workflow") {
     throw new Error(`Open ${label} in a browser tab first.`);
   }
   workflowBlankChatReady = false;
+  await recoverChatGptComposerIfBroken(tabId, provider);
   await setStatus(`New ${reason} — clearing previous ${label} chat history…`);
-  await deleteCurrentAiConversation(tabId, {
-    chatId: "",
-    skipExtras: false,
-    leaveBlank: true,
-    force: true
-  });
+  try {
+    await deleteCurrentAiConversation(tabId, {
+      chatId: "",
+      skipExtras: false,
+      leaveBlank: true,
+      force: true
+    });
+  } catch (err) {
+    const blank = await isBlankFreshAiChat(tabId, provider).catch(() => false);
+    const prior = await aiTabStillOnPriorConversation(tabId, provider).catch(() => true);
+    if (blank && !prior) {
+      await setStatus(
+        `New ${reason} — ${label} chat cleanup skipped (${String(err?.message || err)}). Using the open blank chat.`
+      );
+    } else {
+      throw err;
+    }
+  }
   if (!(await isBlankFreshAiChat(tabId, provider).catch(() => false))) {
     await ensureFreshChat(tabId, provider);
   }
