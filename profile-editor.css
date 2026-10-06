@@ -70,7 +70,7 @@ body.ctx-window.editor-page {
 .profile-editor .editor-header .brand-icon {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 0;
 }
 
 .profile-editor .editor-header h1 {
@@ -91,10 +91,14 @@ body.ctx-window.editor-page {
   gap: 8px;
 }
 
-.profile-editor .editor-header-actions .primary.compact {
-  min-width: 72px;
+.profile-editor .editor-header-actions .primary.compact.icon-button {
+  width: 34px;
+  min-width: 34px;
   height: 34px;
-  font-weight: 700;
+  padding: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .profile-toolbar {

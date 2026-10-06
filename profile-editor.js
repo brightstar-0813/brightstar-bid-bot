@@ -196,9 +196,18 @@ function wireProfileTabs() {
   });
 }
 
+const SAVE_ICON_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>';
+const SAVE_AS_MINE_ICON_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg>';
+
 function syncSaveButtonLabels() {
-  const label = isEditingBuiltin(editingPersonId) ? "Save as mine" : "Save";
-  if (savePersonTopBtn) savePersonTopBtn.textContent = label;
+  if (!savePersonTopBtn) return;
+  const mine = isEditingBuiltin(editingPersonId);
+  const label = mine ? "Save as mine" : "Save";
+  savePersonTopBtn.setAttribute("aria-label", label);
+  savePersonTopBtn.title = label;
+  savePersonTopBtn.innerHTML = mine ? SAVE_AS_MINE_ICON_SVG : SAVE_ICON_SVG;
 }
 
 function escapeHtml(s) {
@@ -635,6 +644,7 @@ async function init() {
   try {
     wireProfileTabs();
     wireProfilePicker();
+    syncSaveButtonLabels();
     await loadAndApplyTheme();
     watchThemeChanges();
     initResumeWizard(formRoot);
