@@ -3,6 +3,12 @@
  * Used by the service worker / tests; mirrored in content/autofill.js scan path.
  */
 
+export function aliasMatchesLabel(aliasNorm, labelNorm) {
+  if (!aliasNorm || !labelNorm) return false;
+  const escaped = aliasNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(labelNorm);
+}
+
 /** Profile keys that may legitimately be empty — show as Leave blank, not Needs attention. */
 export const OPTIONAL_EMPTY_PROFILE_KEYS = new Set([
   "addressLine2",

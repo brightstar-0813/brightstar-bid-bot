@@ -863,14 +863,28 @@ export function buildCustomQaFollowUpPrompt(question, jobMeta = {}) {
   );
 }
 
+/** Drop zero-width characters ChatGPT inserts inside the "ChatGPT said" label. */
+function stripInvisibleChars(text) {
+  return String(text || "")
+    .replace(/[\u200B\u200C\u200D\uFEFF\u2060]/g, "")
+    .replace(/\u00A0/g, " ");
+}
+
+const SPEAKER_LABEL =
+  /^(?:the\s+)?(?:chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|assistant|you)\s+said\b\s*[:：\-–—.]?\s*/i;
+
 /**
  * Strip common LLM wrappers from a single-answer reply.
  */
 export function cleanCustomQaAnswer(raw) {
-  let t = String(raw || "").trim();
+  let t = stripInvisibleChars(raw).trim();
   if (!t) return "";
   t = t.replace(/^```(?:text|markdown|md)?\s*/i, "").replace(/```$/i, "").trim();
-  t = t.replace(/^(?:chatgpt|claude|gpt|assistant|you)\s+said\s*[:\-–]?\s*/i, "").trim();
+  let prev = "";
+  while (t && t !== prev) {
+    prev = t;
+    t = t.replace(SPEAKER_LABEL, "").trim();
+  }
   t = t.replace(/^(here(?:'s| is)|answer|response)\s*[:\-–]\s*/i, "").trim();
   if (
     (t.startsWith('"') && t.endsWith('"')) ||

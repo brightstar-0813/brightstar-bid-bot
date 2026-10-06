@@ -11,7 +11,8 @@ import {
   isBareChoiceOptionLabel,
   isTrackingNoiseLabel,
   isInstructionalFieldLabel,
-  isPlaceholderFieldLabel
+  isPlaceholderFieldLabel,
+  isDomChromeQuestionLabel
 } from "../autofill-junk.js";
 
 test("isJunkAutofillAnswer rejects polluted answers", () => {
@@ -63,6 +64,34 @@ test("isInstructionalFieldLabel and isPlaceholderFieldLabel", () => {
   assert.equal(isInstructionalFieldLabel("Gender Identity"), false);
   assert.equal(isPlaceholderFieldLabel("Search"), true);
   assert.equal(isPlaceholderFieldLabel("Preferred First Name"), false);
+  assert.equal(isPlaceholderFieldLabel("type your response"), true);
+  assert.equal(
+    isPlaceholderFieldLabel(
+      "type your response cards bc082198 a9ec 4793 8a9f bd338042f3d field0"
+    ),
+    true
+  );
+  assert.equal(isPlaceholderFieldLabel("Choose your start date"), false);
+});
+
+test("isDomChromeQuestionLabel rejects widget ids scraped as questions", () => {
+  assert.equal(
+    isDomChromeQuestionLabel(
+      "type your response cards bc082198 a9ec 4793 8a9f bd338042f3d field0"
+    ),
+    true
+  );
+  assert.equal(isDomChromeQuestionLabel("cards bc082198 a9ec 4793 8a9f bd338042f3d field0"), true);
+  assert.equal(
+    isJunkQuestionLabel(
+      "type your response cards bc082198 a9ec 4793 8a9f bd338042f3d field0"
+    ),
+    true
+  );
+  assert.equal(
+    isJunkQuestionLabel("Have you developed integrations between Salesforce and REST APIs?"),
+    false
+  );
 });
 
 test("cleanAutofillLabelText strips char counters", () => {

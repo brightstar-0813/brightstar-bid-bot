@@ -6,7 +6,7 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-10-04.qa-scan4";
+  const SCRIPT_BUILD = "2026-10-06.qa-chrome1";
   if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
@@ -80,16 +80,36 @@
   }
 
   function isPlaceholderFieldLabel(label) {
-    return /^(search|type here|enter text|write here|your answer|select\.\.\.?|please select|choose|filter)$/i.test(
-      cleanLabelText(label)
-    );
+    const raw = cleanLabelText(label);
+    if (!raw) return true;
+    if (/^(search|select\.\.\.?|please select|choose|filter)$/i.test(raw)) return true;
+    return /^(type here|type your response|enter text|write here|your answer)\b/i.test(raw);
+  }
+
+  function isDomChromeQuestionLabel(label) {
+    const raw = cleanLabelText(label);
+    if (!raw) return true;
+    if (isPlaceholderFieldLabel(raw)) return true;
+    if (/\bfield\d+\b/i.test(raw) && /[a-f0-9]{8}/i.test(raw)) return true;
+    if (/\b[a-f0-9]{8}\s+[a-f0-9]{4}\s+[a-f0-9]{4}\s+[a-f0-9]{4}\s+[a-f0-9]{8,12}\b/i.test(raw)) {
+      return true;
+    }
+    if (
+      /\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i.test(raw) &&
+      raw.length < 96
+    ) {
+      return true;
+    }
+    return false;
   }
 
   function isJunkLearnLabel(label) {
     const raw = String(label || "").trim();
     if (!raw) return true;
     if (/^(first name|last name|email|phone|name)\*?$/i.test(raw.replace(/\s+/g, " "))) return true;
-    if (isPlaceholderFieldLabel(raw) || isInstructionalFieldLabel(raw)) return true;
+    if (isPlaceholderFieldLabel(raw) || isDomChromeQuestionLabel(raw) || isInstructionalFieldLabel(raw)) {
+      return true;
+    }
     return /upload your resume|autofill from resume|drop your resume|choose file|drag and drop|upload file|add resume|paste your resume|format paragraph|heading dropdown|find any email|parsing your resume|autofill completed|remove file/i.test(
       raw
     );
@@ -402,6 +422,13 @@
     ],
     middleName: ["middle name", "middle initial", "mi"],
     preferredName: ["preferred name", "preferred first name", "nickname", "what should we call you"],
+    fullName: [
+      "first and last name",
+      "first last name",
+      "full name",
+      "legal name",
+      "your name"
+    ],
     email: ["email", "e-mail", "email address", "work email"],
     phone: [
       "phone number",
@@ -699,6 +726,7 @@
     "phoneCountryCode",
     "phoneDeviceType",
     "phone",
+    "fullName",
     "firstName",
     "lastName",
     "middleName",
@@ -752,6 +780,7 @@
     "family-name": "lastName",
     "additional-name": "middleName",
     nickname: "preferredName",
+    name: "fullName",
     email: "email",
     tel: "phone",
     "tel-national": "phone",
@@ -1165,6 +1194,7 @@
     "lastName",
     "middleName",
     "preferredName",
+    "fullName",
     "email",
     "phone",
     "addressLine1",
@@ -1642,9 +1672,8 @@
 
   function aliasMatchesLabel(aliasNorm, labelNorm) {
     if (!aliasNorm || !labelNorm) return false;
-    // Phrase aliases may be followed by more words ("eligible to work in the US").
-    if (labelNorm.includes(aliasNorm)) return true;
     const escaped = aliasNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Whole words only. "state" must not match "states" inside "United States".
     return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(labelNorm);
   }
 
@@ -1688,6 +1717,9 @@
    * formField containers, aria-labelledby, etc.).
    */
   function questionLabelForControl(el) {
+    const own = nearestOwnFieldLabel(el);
+    if (own) return own;
+
     const candidates = [];
 
     if (el.id) {
@@ -1725,7 +1757,8 @@
       const prev = container.previousElementSibling;
       if (prev && /^(LABEL|LEGEND|P|SPAN|DIV|H\d)$/i.test(prev.tagName)) {
         const t = cleanLabelText(prev.textContent);
-        if (t.length >= 8 && t.length <= 900) candidates.push(t);
+        const isLabelTag = /^(LABEL|LEGEND)$/i.test(prev.tagName);
+        if (t.length >= 8 && t.length <= (isLabelTag ? 400 : 80) && t.length <= 900) candidates.push(t);
       }
       container = container.parentElement;
     }
@@ -1754,15 +1787,69 @@
     const aria = cleanLabelText(el.getAttribute("aria-label") || "");
     if (aria) candidates.push(aria);
 
-    let best = "";
+    const short = [];
+    const rest = [];
     for (const c of candidates) {
       const t = cleanLabelText(c);
-      if (!t || t.length < 3) continue;
+      if (!t || t.length < 3 || t.length > 220) continue;
       if (isPageChromeLabel(t) || isBareChoiceOptionLabel(t)) continue;
       if (/^(select one|please select|choose|--)$/i.test(t)) continue;
-      if (t.length > best.length) best = t;
+      if (t.length <= 80) short.push(t);
+      else rest.push(t);
     }
-    return best;
+    if (short.length) return short[0];
+    return rest[0] || "";
+  }
+
+  /** Label that belongs to this control, not a later question on the same page. */
+  function nearestOwnFieldLabel(el) {
+    const wrapping = el.closest?.("label");
+    if (wrapping) {
+      const wrapText = textFromLabelElement(wrapping);
+      if (
+        wrapText &&
+        wrapText.length >= 2 &&
+        wrapText.length <= 120 &&
+        !isPageChromeLabel(wrapText) &&
+        !isBareChoiceOptionLabel(wrapText)
+      ) {
+        return wrapText;
+      }
+    }
+    let node = el.parentElement;
+    for (let i = 0; i < 5 && node; i += 1) {
+      const controls = node.querySelectorAll("input, textarea, select");
+      if (controls.length > 4) break;
+      const labels = node.querySelectorAll(":scope > label, :scope > legend");
+      for (const labelEl of labels) {
+        if (labelEl.contains(el)) continue;
+        const t = textFromLabelElement(labelEl);
+        if (
+          t &&
+          t.length >= 2 &&
+          t.length <= 120 &&
+          !isPageChromeLabel(t) &&
+          !isBareChoiceOptionLabel(t)
+        ) {
+          return t;
+        }
+      }
+      const sib = i === 0 ? el.previousElementSibling : null;
+      if (sib && /^(LABEL|LEGEND|P|SPAN|DIV|H[1-6])$/i.test(sib.tagName)) {
+        const t = textFromLabelElement(sib);
+        if (
+          t &&
+          t.length >= 2 &&
+          t.length <= 80 &&
+          !isPageChromeLabel(t) &&
+          !isBareChoiceOptionLabel(t)
+        ) {
+          return t;
+        }
+      }
+      node = node.parentElement;
+    }
+    return "";
   }
 
   /** Direct field label — uses Workday-aware question label extraction. */
@@ -1790,12 +1877,22 @@
         // Prefer matches on the direct field label over section headers.
         let score = a.length + (onPrimary ? 1000 : 0);
 
-        // City/state/zip must win over generic address section text.
-        if (["city", "state", "zipCode", "addressLine2"].includes(key)) score += 200;
+        // City/state/zip must win over a short "Address" label, not over a long question.
+        if (["city", "state", "zipCode", "addressLine2"].includes(key)) {
+          const words = String(primary || "").split(" ").filter(Boolean).length;
+          if (words > 0 && words <= 6) score += 200;
+        }
         if (key === "addressLine1" && /\b(line 1|street|address 1|home address)\b/.test(primary)) {
           score += 150;
         }
         if (key === "phone" && /\b(extension|device type|country phone code|phone code)\b/.test(primary)) {
+          continue;
+        }
+        if (
+          (key === "lastName" || key === "firstName") &&
+          /\bfirst\b/.test(primary) &&
+          /\blast name\b/.test(primary)
+        ) {
           continue;
         }
         if (key === "workAuthorized" && /\bsponsorship\b/.test(primary)) continue;
@@ -1861,11 +1958,35 @@
   }
 
   function matchApplicantKeyFromControl(el) {
+    const inputType = String(el.type || "").toLowerCase();
+    if (inputType === "email") {
+      return workdayPolicyAllowsKey("email") ? "email" : null;
+    }
+    if (inputType === "tel") {
+      return workdayPolicyAllowsKey("phone") ? "phone" : null;
+    }
+
     const autocomplete = normalize(el.getAttribute("autocomplete") || "");
     if (autocomplete === "tel-extension") return null;
     if (AUTOCOMPLETE_FIELD_MAP[autocomplete]) {
       const acKey = AUTOCOMPLETE_FIELD_MAP[autocomplete];
-      return workdayPolicyAllowsKey(acKey) ? acKey : null;
+      const questionHint = normalize(questionLabelForControl(el));
+      const acLooksWrong =
+        ["state", "city", "zipCode", "addressLine1", "addressLine2"].includes(acKey) &&
+        questionHint &&
+        !aliasMatchesLabel(normalize(acKey === "zipCode" ? "zip" : acKey), questionHint) &&
+        (aliasMatchesLabel("email", questionHint) ||
+          aliasMatchesLabel("phone number", questionHint) ||
+          aliasMatchesLabel("phone", questionHint) ||
+          aliasMatchesLabel("first last name", questionHint) ||
+          aliasMatchesLabel("first name", questionHint) ||
+          aliasMatchesLabel("last name", questionHint) ||
+          aliasMatchesLabel("middle name", questionHint) ||
+          aliasMatchesLabel("preferred name", questionHint) ||
+          aliasMatchesLabel("full name", questionHint));
+      if (!acLooksWrong) {
+        return workdayPolicyAllowsKey(acKey) ? acKey : null;
+      }
     }
 
     const question = questionLabelForControl(el);
@@ -1970,6 +2091,7 @@
       if (isBareChoiceOptionLabel(c)) continue;
       if (isTrackingNoiseLabel(c)) continue;
       if (isPlaceholderFieldLabel(c)) continue;
+      if (isDomChromeQuestionLabel(c)) continue;
       if (isInstructionalFieldLabel(c)) continue;
       if (/^(type here|enter text|write here|your answer)\.?$/i.test(c)) continue;
       // Prefer real field labels over long section blurbs (EEO intros, etc.).
@@ -1989,7 +2111,16 @@
     }
     if (best) return best.slice(0, 1000);
 
-    return cleanLabelText(labelTextForControl(el)).slice(0, 1000);
+    const dumped = cleanLabelText(labelTextForControl(el));
+    if (
+      !dumped ||
+      isPlaceholderFieldLabel(dumped) ||
+      isDomChromeQuestionLabel(dumped) ||
+      isTrackingNoiseLabel(dumped)
+    ) {
+      return "";
+    }
+    return dumped.slice(0, 1000);
   }
 
   /**
@@ -2005,29 +2136,45 @@
         el.closest?.("fieldset") ||
         el.parentElement;
       const near = questionTextNearNode(root || el, options);
-      if (near && !isBareChoiceOptionLabel(near) && !isTrackingNoiseLabel(near)) {
+      if (
+        near &&
+        !isBareChoiceOptionLabel(near) &&
+        !isTrackingNoiseLabel(near) &&
+        !isDomChromeQuestionLabel(near)
+      ) {
         return near.slice(0, 1000);
       }
       const fromQuestion = questionLabelForControl(el);
       if (
         fromQuestion &&
         !isBareChoiceOptionLabel(fromQuestion) &&
-        !isTrackingNoiseLabel(fromQuestion)
+        !isTrackingNoiseLabel(fromQuestion) &&
+        !isDomChromeQuestionLabel(fromQuestion)
       ) {
         return fromQuestion.slice(0, 1000);
       }
       const fromAi = questionTextForAi(el);
-      if (fromAi && !isBareChoiceOptionLabel(fromAi) && !isTrackingNoiseLabel(fromAi)) {
+      if (
+        fromAi &&
+        !isBareChoiceOptionLabel(fromAi) &&
+        !isTrackingNoiseLabel(fromAi) &&
+        !isDomChromeQuestionLabel(fromAi)
+      ) {
         return fromAi.slice(0, 1000);
       }
-      return near || fromQuestion || fromAi || "";
+      return "";
     }
 
     let label = questionTextForAi(el) || questionLabelForControl(el) || "";
     label = cleanLabelText(label);
-    if (isBareChoiceOptionLabel(label) || isTrackingNoiseLabel(label)) {
+    if (
+      isBareChoiceOptionLabel(label) ||
+      isTrackingNoiseLabel(label) ||
+      isDomChromeQuestionLabel(label)
+    ) {
       const near = questionTextNearNode(el, []);
-      if (near) return near.slice(0, 1000);
+      if (near && !isDomChromeQuestionLabel(near)) return near.slice(0, 1000);
+      return "";
     }
     return label.slice(0, 1000);
   }
@@ -4109,6 +4256,7 @@
   const SKIP_AI_KNOWN_KEYS = new Set([
     "firstName",
     "lastName",
+    "fullName",
     "email",
     "phone",
     "zipCode",
@@ -4188,6 +4336,8 @@
       if (!labelNorm && !questionLabel) continue;
       if (isTrackingNoiseLabel(questionLabel) || isTrackingNoiseControl(el, questionLabel)) continue;
       if (isBareChoiceOptionLabel(questionLabel)) continue;
+      if (isPlaceholderFieldLabel(questionLabel) || isDomChromeQuestionLabel(questionLabel)) continue;
+      if (isJunkLearnLabel(questionLabel) || isScanNoiseLabel(questionLabel)) continue;
       if (shouldSkipAiField(el, labelNorm || questionLabel)) continue;
 
       const multiline = isMultilineControl(el);
@@ -4240,6 +4390,7 @@
       if (!isRichTextEmpty(el) && !essayNeedsRewrite(el, questionLabel)) continue;
       if (el.getAttribute("data-resume-bot-qid") && !essayNeedsRewrite(el, questionLabel)) continue;
       if (!questionLabel || looksLikeEditorChromeValue(questionLabel)) continue;
+      if (isPlaceholderFieldLabel(questionLabel) || isDomChromeQuestionLabel(questionLabel)) continue;
       if (shouldSkipAiField(el, questionLabel)) continue;
       if (matchApplicantKeyFromControl(el) && SKIP_AI_KNOWN_KEYS.has(matchApplicantKeyFromControl(el))) {
         continue;
@@ -4311,7 +4462,7 @@
       const label = sanitizeFieldLabel(captureQuestionText(el));
       if (!label) continue;
       if (LEARN_SENSITIVE_RE.test(label)) continue;
-      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isDomChromeQuestionLabel(label) || isInstructionalFieldLabel(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6) continue;
 
@@ -4353,7 +4504,7 @@
       if (group.kind === "start") continue;
       const label = sanitizeFieldLabel(group.question);
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
-      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isDomChromeQuestionLabel(label) || isInstructionalFieldLabel(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6) continue;
       const chipFieldType = group.kind === "yesno" ? "radio" : "select";
@@ -4391,7 +4542,7 @@
 
       const label = sanitizeFieldLabel(captureQuestionText(el));
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
-      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isDomChromeQuestionLabel(label) || isInstructionalFieldLabel(label)) continue;
       const labelNorm = normalize(label);
       if (!labelNorm || labelNorm.length < 6 || seenLabels.has(labelNorm)) continue;
 
@@ -4733,6 +4884,15 @@
     if (key === "preferredName") {
       const first = applicantInfo?.firstName;
       if (first != null && String(first).trim()) return String(first).trim();
+    }
+    if (key === "fullName") {
+      const first = String(applicantInfo?.firstName || "").trim();
+      const middle = String(applicantInfo?.middleName || "").trim();
+      const last = String(applicantInfo?.lastName || "").trim();
+      const joined = [first, middle, last].filter(Boolean).join(" ");
+      if (joined) return joined;
+      const signature = String(applicantInfo?.signatureName || applicantInfo?.name || "").trim();
+      if (signature) return signature;
     }
     if (key === "phoneDeviceType") return "mobile";
     if (key === "phoneCountryCode") {
@@ -5920,7 +6080,7 @@
       if (!row) return;
       const label = sanitizeFieldLabel(row.label || "");
       if (!label || label.length < 2) return;
-      if (isPageChromeLabel(label) || isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) return;
+      if (isPageChromeLabel(label) || isPlaceholderFieldLabel(label) || isDomChromeQuestionLabel(label) || isInstructionalFieldLabel(label)) return;
       const next = { ...row, label: label.slice(0, 200) };
       const labelNorm = normalize(label);
       const key = `${labelNorm}|${next.type}|${next.id}`;
@@ -5946,7 +6106,7 @@
       const label = sanitizeFieldLabel(displayQuestionLabel(el) || labelTextForControl(el) || "");
       if (!label || label.length < 2) continue;
       if (isTrackingNoiseLabel(label) || isTrackingNoiseControl(el, label)) continue;
-      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isDomChromeQuestionLabel(label) || isInstructionalFieldLabel(label)) continue;
       if (isBareChoiceOptionLabel(label) && (type === "radio" || type === "checkbox")) continue;
 
       // Multi-checkbox lists (agency DOC/DOD/…) share one parent question — emit once.
@@ -6025,7 +6185,7 @@
       const label = sanitizeFieldLabel(group.question || "");
       if (!label || LEARN_SENSITIVE_RE.test(label)) continue;
       if (isTrackingNoiseLabel(label) || isBareChoiceOptionLabel(label)) continue;
-      if (isPlaceholderFieldLabel(label) || isInstructionalFieldLabel(label)) continue;
+      if (isPlaceholderFieldLabel(label) || isDomChromeQuestionLabel(label) || isInstructionalFieldLabel(label)) continue;
       const options = (group.labels || []).slice(0, 24);
       const profileKey = matchApplicantKey(normalize(label), normalize(label));
 
@@ -6158,7 +6318,7 @@
     if (/([A-Za-z]{4,})\1/.test(raw.replace(/\s+/g, ""))) return true;
     if (/\b(select a conversation|olkerror|microsoft 365|cookie settings)\b/i.test(raw)) return true;
     if (isPageChromeLabel(raw)) return true;
-    if (isJunkLearnLabel(raw) || isPlaceholderFieldLabel(raw) || isInstructionalFieldLabel(raw)) return true;
+    if (isJunkLearnLabel(raw) || isPlaceholderFieldLabel(raw) || isDomChromeQuestionLabel(raw) || isInstructionalFieldLabel(raw)) return true;
     if (isTrackingNoiseLabel(raw)) return true;
     return false;
   }
@@ -7896,6 +8056,7 @@
   const PROFILE_ONLY_LEARN_KEYS = new Set([
     "firstName",
     "lastName",
+    "fullName",
     "middleName",
     "preferredName",
     "email",

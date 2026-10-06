@@ -6,6 +6,8 @@
 /** Footer and model chrome that sits under the composer, not part of the letter. */
 export function stripChatGptChrome(text) {
   return String(text || "")
+    .replace(/[\u200B\u200C\u200D\uFEFF\u2060]/g, "")
+    .replace(/^(?:the\s+)?(?:chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|assistant|you)\s+said\b\s*[:：\-–—.]?\s*/i, "")
     .replace(/The\s*ChatGPT can make mistakes\.?/gi, "")
     .replace(/ChatGPT can make mistakes\.?/gi, "")
     .replace(/Check important info\.?/gi, "")

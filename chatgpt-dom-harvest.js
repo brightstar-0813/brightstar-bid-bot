@@ -67,7 +67,12 @@
 
   function tidyChunk(text) {
     return normalizeQuotes(text)
+      .replace(/[\u200B\u200C\u200D\uFEFF\u2060]/g, "")
       .replace(/^\n+/, "")
+      .replace(
+        /^(?:the\s+)?(?:chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|assistant|you)\s+said\b\s*[:：\-–—.]?\s*/i,
+        ""
+      )
       .replace(/\s+$/g, "");
   }
 
@@ -361,6 +366,13 @@
         }
       });
       clone.querySelectorAll("#prompt-textarea, textarea, [data-testid*='composer']").forEach((node) => {
+        try {
+          node.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+      clone.querySelectorAll(".sr-only, [class*='sr-only']").forEach((node) => {
         try {
           node.remove();
         } catch {

@@ -83,9 +83,28 @@ export function isJunkAutofillAnswer(text, { questionLabel = "" } = {}) {
 
 /** Placeholder / search-chrome mistaken for the real field label. */
 export function isPlaceholderFieldLabel(label) {
-  return /^(search|type here|enter text|write here|your answer|select\.\.\.?|please select|choose|filter)$/i.test(
-    cleanAutofillLabelText(label)
-  );
+  const raw = cleanAutofillLabelText(label);
+  if (!raw) return true;
+  if (/^(search|select\.\.\.?|please select|choose|filter)$/i.test(raw)) return true;
+  return /^(type here|type your response|enter text|write here|your answer)\b/i.test(raw);
+}
+
+/** Widget ids / CSS tokens scraped as if they were the question. */
+export function isDomChromeQuestionLabel(label) {
+  const raw = cleanAutofillLabelText(label);
+  if (!raw) return true;
+  if (isPlaceholderFieldLabel(raw)) return true;
+  if (/\bfield\d+\b/i.test(raw) && /[a-f0-9]{8}/i.test(raw)) return true;
+  if (/\b[a-f0-9]{8}\s+[a-f0-9]{4}\s+[a-f0-9]{4}\s+[a-f0-9]{4}\s+[a-f0-9]{8,12}\b/i.test(raw)) {
+    return true;
+  }
+  if (
+    /\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/i.test(raw) &&
+    raw.length < 96
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Survey intros and policy blurbs — not answerable fields. */
@@ -106,7 +125,7 @@ export function isJunkQuestionLabel(label) {
   if (!raw || raw.length < 3) return true;
   if (isBareChoiceOptionLabel(raw)) return true;
   if (isTrackingNoiseLabel(raw)) return true;
-  if (isPlaceholderFieldLabel(raw)) return true;
+  if (isPlaceholderFieldLabel(raw) || isDomChromeQuestionLabel(raw)) return true;
   if (isInstructionalFieldLabel(raw)) return true;
   const compact = raw.replace(/\s+/g, " ");
   if (JUNK_QUESTION_RE.test(compact)) return true;

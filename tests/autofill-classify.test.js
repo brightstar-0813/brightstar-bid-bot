@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  aliasMatchesLabel,
   classifyEmptyProfileKey,
   classifyPasswordMatchSource,
   choiceAnswerMatchesOptions,
@@ -9,6 +10,18 @@ import {
   isShortGenericAnswer,
   shouldOverwriteQaRecord
 } from "../autofill-classify.js";
+
+test("aliasMatchesLabel does not treat United States as a state field", () => {
+  assert.equal(aliasMatchesLabel("state", "united states"), false);
+  assert.equal(aliasMatchesLabel("state", "are you legally eligible to work within the united states"), false);
+  assert.equal(aliasMatchesLabel("state", "state"), true);
+  assert.equal(aliasMatchesLabel("state", "state province"), true);
+  assert.equal(aliasMatchesLabel("mi", "middle name"), false);
+  assert.equal(aliasMatchesLabel("first last name", "first last name"), true);
+  assert.equal(aliasMatchesLabel("last name", "first last name"), true);
+  assert.equal(aliasMatchesLabel("email", "email"), true);
+  assert.equal(aliasMatchesLabel("phone number", "phone number"), true);
+});
 
 test("classifyEmptyProfileKey marks addressLine2 optional when empty", () => {
   assert.equal(classifyEmptyProfileKey("addressLine2", { required: false }), "optional");
