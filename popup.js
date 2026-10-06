@@ -39,6 +39,7 @@ import {
   formatApplicationDate,
   formatApplicationDateTime
 } from "./sheets.js";
+import { SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { showToast } from "./ui-toast.js";
 import { initEmailBidUi } from "./email-bid-ui.js";
@@ -210,6 +211,7 @@ const batchStartBtn = document.getElementById("batchStart");
 const batchPauseBtn = document.getElementById("batchPause");
 const batchSkipBtn = document.getElementById("batchSkip");
 const forceSaveChatgptBtn = document.getElementById("forceSaveChatgpt");
+const syncSheetBtn = document.getElementById("syncSheet");
 const batchStopBtn = document.getElementById("batchStop");
 const clearJobsBtn = document.getElementById("clearJobs");
 const retryErrorsBtn = document.getElementById("retryErrors");
@@ -2170,13 +2172,17 @@ function renderQueue() {
     applyBtn.type = "button";
     const inactiveJob = Boolean(job.inactive) || /^inactive job$/i.test(String(job.error || "").trim());
     const filesReady = Boolean(job.jobDir || job.hasFiles) || job.status === "done";
+    const missingFolder = String(job.error || "").includes(
+      SHEET_SYNC_MISSING_FOLDER.slice(0, 28)
+    );
     // Sheet status Ready (built, not Applied) often lands as skipped-duplicate with no local
     // jobDir on this CSV row — still allow Apply so missed apps can be finished.
     const sheetReadyContinue =
       !job.applied &&
+      !missingFolder &&
       job.status === "skipped" &&
       Boolean(String(job.jdLink || "").trim());
-    const canApply = !inactiveJob && (filesReady || sheetReadyContinue);
+    const canApply = !inactiveJob && !missingFolder && (filesReady || sheetReadyContinue);
     applyBtn.className = job.applied ? "secondary" : canApply ? "primary" : "secondary";
     applyBtn.disabled = !canApply;
     setIconButton(
@@ -2519,6 +2525,24 @@ async function removeJobFromBatch(job) {
   renderQueue();
   updateCsvSummaryFromQueue();
   setStatus(`Removed row ${job.csvRow}: ${label}.`);
+}
+
+async function syncQueueWithSheetUi() {
+  if (batchState === "running") {
+    setStatus("Pause the batch before Sync with sheet.");
+    return;
+  }
+  setStatus("Syncing queue with Google Sheet…");
+  const res = await chrome.runtime.sendMessage({ type: "sync_queue_with_sheet" });
+  if (!res?.ok) {
+    setStatus(res?.error || "Sheet sync failed.");
+    return;
+  }
+  if (Array.isArray(res.queue)) queueCache = res.queue;
+  if (Array.isArray(res.allUsJobs)) allUsJobsCache = res.allUsJobs;
+  renderQueue();
+  updateCsvSummaryFromQueue();
+  setStatus(res.status || "Sheet sync complete.");
 }
 
 async function revealJobFiles(job) {
@@ -3064,6 +3088,7 @@ async function setAllowBatch(value) {
 
 function setBusy(busy) {
   batchStartBtn.disabled = busy && batchState === "running";
+  if (syncSheetBtn) syncSheetBtn.disabled = Boolean(busy) || batchState === "running";
   if (fillFromOpenTabBtn) fillFromOpenTabBtn.disabled = busy;
   if (clearOneOffFieldsBtn) clearOneOffFieldsBtn.disabled = busy;
   document.body.classList.toggle("is-busy", Boolean(busy));
@@ -3896,6 +3921,9 @@ clearJobsBtn?.addEventListener("click", () => {
 retryErrorsBtn?.addEventListener("click", () => {
   retryErrorJobs().catch((e) => setStatus(String(e.message || e)));
 });
+syncSheetBtn?.addEventListener("click", () => {
+  syncQueueWithSheetUi().catch((e) => setStatus(String(e.message || e)));
+});
 forceSaveChatgptBtn.addEventListener("click", async () => {
   setStatus("Reading resume JSON from ChatGPT…");
   try {
@@ -4417,6 +4445,7 @@ if (batchStartBtn) setLabeledRunButton(batchStartBtn, "Start");
 if (batchPauseBtn) setLabeledRunButton(batchPauseBtn, "Pause");
 if (batchSkipBtn) setLabeledRunButton(batchSkipBtn, "Skip");
 if (batchStopBtn) setLabeledRunButton(batchStopBtn, "Stop");
+if (syncSheetBtn) setIconButton(syncSheetBtn, "sheet", "Sync with sheet");
 if (forceSaveChatgptBtn) setIconButton(forceSaveChatgptBtn, "save", "Save JSON");
 if (retryErrorsBtn) setIconButton(retryErrorsBtn, "retry", "Retry errors");
 if (clearJobsBtn) setIconButton(clearJobsBtn, "remove", "Clear queue");

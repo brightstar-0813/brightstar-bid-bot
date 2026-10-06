@@ -77,7 +77,7 @@ import {
   jobDocsId,
   putJobDocs
 } from "./job-docs-db.js";
-import { folderFitsJob, folderSegment } from "./job-folder.js";
+import { csvRowFromFolderName, folderFitsJob, folderSegment } from "./job-folder.js";
 
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
@@ -203,7 +203,7 @@ async function listJobFoldersFromDownloads() {
   let results = [];
   try {
     results = await chrome.downloads.search({
-      filenameRegex: `${folderAlt}[\\\\/](?:\\d{1,2}-\\d{1,2}_[^/]+|\\d+\\s+-\\s+[^/]+)`,
+      filenameRegex: `${folderAlt}[\\\\/](?:\\d+_\\d{1,2}-\\d{1,2}_[^/]+|\\d{1,2}-\\d{1,2}_[^/]+|\\d+\\s+-\\s+[^/]+)`,
       limit: 1000,
       orderBy: ["-startTime"]
     });
@@ -212,14 +212,18 @@ async function listJobFoldersFromDownloads() {
   }
   const byRow = new Map();
   const pathRe = new RegExp(
-    `(?:${escaped}|Resume Applications|Applications-[^/]+)\\/(?:(\\d{1,2}-\\d{1,2}_[^/]+)|(\\d+)\\s+-\\s+[^/]+)`,
+    `(?:${escaped}|Resume Applications|Applications-[^/]+)\\/(?:(\\d+_\\d{1,2}-\\d{1,2}_[^/]+)|(\\d{1,2}-\\d{1,2}_[^/]+)|(\\d+)\\s+-\\s+[^/]+)`,
     "i"
   );
   for (const row of results || []) {
     const path = String(row?.filename || "").replace(/\\/g, "/");
     const match = path.match(pathRe);
     if (!match) continue;
-    const csvRow = match[2] ? Number(match[2]) : null;
+    const csvRow = match[1]
+      ? csvRowFromFolderName(match[1]) || null
+      : match[3]
+        ? Number(match[3])
+        : null;
     const folder = match[0].replace(/\\/g, "/");
     const parts = folder.split("/");
     const name = parts.pop() || "";
@@ -262,19 +266,24 @@ export async function listJobFoldersFromDisk() {
     const appsDir = await resolveAppsOutputDir();
     const res = await sendNativeMessage({ type: "list_job_folders", outputDir: appsDir });
     if (res?.ok && Array.isArray(res.folders)) {
-      return res.folders.map((f) => ({
-        csvRow:
+      return res.folders.map((f) => {
+        const jobDir = toStoredJobDir(f.folder || f.name, appsDir);
+        const fromHost =
           f.csvRow != null && String(f.csvRow).trim() !== "" && !Number.isNaN(Number(f.csvRow))
             ? Number(f.csvRow)
-            : null,
-        jobDir: toStoredJobDir(f.folder || f.name, appsDir),
-        absPath: f.folder || "",
-        name: f.name || folderSegment(f.folder),
-        hasResume: Boolean(f.hasResume),
-        hasCover: Boolean(f.hasCover),
-        resumeName: f.resumeName || "",
-        coverName: f.coverName || ""
-      }));
+            : null;
+        const fromName = csvRowFromFolderName(jobDir || f.name || f.folder || "");
+        return {
+          csvRow: fromHost || fromName || null,
+          jobDir,
+          absPath: f.folder || "",
+          name: f.name || folderSegment(f.folder),
+          hasResume: Boolean(f.hasResume),
+          hasCover: Boolean(f.hasCover),
+          resumeName: f.resumeName || "",
+          coverName: f.coverName || ""
+        };
+      });
     }
   } catch {
     /* native host missing — fall through */

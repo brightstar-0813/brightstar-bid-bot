@@ -5,6 +5,7 @@ import {
   formatApplicationDateTime,
   fetchExistingJobLinks,
   fetchExistingSheetDedupKeys,
+  fetchSheetRows,
   buildKnownLinkSet,
   buildKnownCompanySet,
   isKnownCompany,
@@ -12,6 +13,10 @@ import {
   normalizeJobLink,
   resolveSheetTabNameForPerson
 } from "./sheets.js";
+import {
+  formatSheetSyncStatus,
+  reconcileQueueWithSheetRows
+} from "./sheet-sync.js";
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
 import {
   buildCoverLetterPrompt,
@@ -66,6 +71,7 @@ import {
   resolveUploadDocs,
   setActiveApplyJob,
   hydrateJobsWithFolders,
+  listJobFoldersFromDisk,
   locateJobFolder,
   handleProfileLearnCapture,
   highlightFieldOnTab,
@@ -8144,6 +8150,73 @@ async function hydrateQueueFromDisk() {
   return { queue: nextQueue, allUsJobs: nextAll };
 }
 
+async function syncQueueWithSheet() {
+  const batchSnap = await chrome.storage.local.get([BATCH_STATE_KEY, "generation_running"]);
+  if (batchSnap[BATCH_STATE_KEY] === "running" || batchSnap.generation_running) {
+    throw new Error("Pause the batch before Sync with sheet.");
+  }
+
+  const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
+  if (!spreadsheetUrl || !webAppUrl) {
+    throw new Error("Configure Google Sheet (spreadsheet link and Web App URL) first.");
+  }
+
+  await setStatus(`Reading ${sheetTabName || "sheet"}…`);
+  const fetched = await fetchSheetRows({
+    spreadsheetUrl,
+    webAppUrl,
+    sheetName: sheetTabName
+  });
+  const folders = await listJobFoldersFromDisk().catch(() => []);
+  const person = await getActivePerson().catch(() => null);
+  const data = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY]);
+  const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  const allUs = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  const result = reconcileQueueWithSheetRows({
+    queue,
+    allUsJobs: allUs,
+    sheetRows: fetched.rows,
+    folders,
+    person,
+    belongsToPerson: jobBelongsToPerson
+  });
+
+  await chrome.storage.local.set({
+    [QUEUE_KEY]: result.queue,
+    [ALL_US_JOBS_KEY]: result.allUsJobs
+  });
+  for (const job of result.queue) {
+    if (job?.csvRow != null && job.jobDir) {
+      await rememberApplyHistory(job.csvRow, {
+        jobDir: job.jobDir,
+        jdLink: job.jdLink || "",
+        resumeName: job.resumeName || "",
+        coverName: job.coverName || "",
+        applied: Boolean(job.applied)
+      }).catch(() => {});
+    }
+  }
+
+  await hydrateQueueFromDisk().catch(() => {});
+  const nativeHost = Boolean(nativePort);
+  const status = formatSheetSyncStatus({
+    sheetName: fetched.sheetName || sheetTabName,
+    counts: result.counts,
+    nativeHost
+  });
+  await setStatus(status);
+  const stored = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY]);
+  return {
+    ok: true,
+    sheetName: fetched.sheetName || sheetTabName,
+    counts: result.counts,
+    nativeHost,
+    status,
+    queue: Array.isArray(stored[QUEUE_KEY]) ? stored[QUEUE_KEY] : result.queue,
+    allUsJobs: Array.isArray(stored[ALL_US_JOBS_KEY]) ? stored[ALL_US_JOBS_KEY] : result.allUsJobs
+  };
+}
+
 async function pickTemplateId(jobMeta = {}, person = {}) {
   if (jobMeta.templateId) return jobMeta.templateId;
   if (person?.templateId) return person.templateId;
@@ -10388,6 +10461,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const result = await hydrateQueueFromDisk();
         safeSendResponse(sendResponse, { ok: true, ...result });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "sync_queue_with_sheet") {
+    (async () => {
+      try {
+        const result = await syncQueueWithSheet();
+        safeSendResponse(sendResponse, result);
       } catch (err) {
         safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }

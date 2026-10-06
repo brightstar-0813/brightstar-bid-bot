@@ -366,6 +366,55 @@ export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl, sheetNa
   return links;
 }
 
+const LIST_ROWS_REDEPLOY_HINT =
+  "Apps Script is missing listRows. Open apps-script/Code.gs, Save, then Deploy → Manage deployments → Edit → Version: New.";
+
+/**
+ * Full sheet rows (No, Date, Title, Company, Link, Salary, Status, Bid mode).
+ * Requires a web app deployment that supports action "listRows".
+ */
+export async function fetchSheetRows({ spreadsheetUrl, webAppUrl, sheetName = "" }) {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid Google Spreadsheet link.");
+  }
+
+  let parsed;
+  try {
+    parsed = await postSheetWebApp(webAppUrl, {
+      action: "listRows",
+      spreadsheetId,
+      sheetName: sanitizeSheetTabName(sheetName)
+    });
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (/unknown action/i.test(msg) && /listrows/i.test(msg)) {
+      throw new Error(LIST_ROWS_REDEPLOY_HINT);
+    }
+    throw err;
+  }
+
+  if (!Array.isArray(parsed?.rows)) {
+    throw new Error(LIST_ROWS_REDEPLOY_HINT);
+  }
+
+  return {
+    rows: parsed.rows.map((row) => ({
+      row: Number(row?.row) || 0,
+      jobNo: String(row?.jobNo || "").trim(),
+      date: String(row?.date || "").trim(),
+      title: String(row?.title || "").trim(),
+      company: String(row?.company || "").trim(),
+      link: String(row?.link || "").trim(),
+      salary: String(row?.salary || "").trim(),
+      status: String(row?.status || "").trim(),
+      bidMode: String(row?.bidMode || "").trim()
+    })),
+    sheetName: String(parsed?.sheetName || sheetName || "").trim(),
+    count: Number(parsed?.count) || (parsed.rows || []).length
+  };
+}
+
 /**
  * @param {string[]} links
  * @returns {Set<string>}

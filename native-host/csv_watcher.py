@@ -172,22 +172,42 @@ def apps_search_roots(output_dir: str = ""):
     return roots
 
 
+ROW_DATE_FOLDER_RE = re.compile(r"^(\d+)_\d{1,2}-\d{1,2}_")
+DATE_FOLDER_RE = re.compile(r"^\d{1,2}-\d{1,2}_")
+LEGACY_ROW_FOLDER_RE = re.compile(r"^(\d+)\s+-\s+")
+
+
+def folder_csv_row(name: str):
+    """Sheet/CSV row encoded in 19_10-6_Company-Title or legacy '19 - Company - Title'."""
+    row_date = ROW_DATE_FOLDER_RE.match(str(name or ""))
+    if row_date:
+        return int(row_date.group(1))
+    legacy = LEGACY_ROW_FOLDER_RE.match(str(name or ""))
+    if legacy:
+        return int(legacy.group(1))
+    return None
+
+
 def find_job_folder(csv_row, job_dir: str, output_dir: str = ""):
     downloads = downloads_root()
-    prefix = ""
+    row_n = None
     try:
         if csv_row is not None and str(csv_row).strip() != "":
-            prefix = f"{int(csv_row)} - "
+            row_n = int(csv_row)
     except (TypeError, ValueError):
-        prefix = ""
+        row_n = None
+    prefix = f"{row_n} - " if row_n is not None else ""
 
     def matches_row(path: Path) -> bool:
-        if not prefix:
+        if row_n is None:
             return True
         if path.name.startswith(prefix):
             return True
+        found = folder_csv_row(path.name)
+        if found == row_n:
+            return True
         # Date-based folders (e.g. 9-15_Company-Title) don't embed csvRow.
-        if re.match(r"^\d{1,2}-\d{1,2}_", path.name):
+        if DATE_FOLDER_RE.match(path.name):
             return True
         return False
 
@@ -212,7 +232,9 @@ def find_job_folder(csv_row, job_dir: str, output_dir: str = ""):
         for root in search_roots:
             try:
                 for child in root.iterdir():
-                    if child.is_dir() and child.name.startswith(prefix):
+                    if not child.is_dir():
+                        continue
+                    if child.name.startswith(prefix) or folder_csv_row(child.name) == row_n:
                         matches.append(child)
             except OSError:
                 continue
@@ -332,14 +354,14 @@ def handle_list_job_folders(output_dir: str = "") -> None:
         for child in children:
             if not child.is_dir():
                 continue
-            legacy = re.match(r"^(\d+)\s+-\s+", child.name)
-            dated = re.match(r"^(\d{1,2})-(\d{1,2})_", child.name)
-            if not legacy and not dated:
+            csv_row = folder_csv_row(child.name)
+            dated = DATE_FOLDER_RE.match(child.name)
+            if csv_row is None and not dated:
                 continue
             resume, cover = pick_pdfs(child)
             folders.append(
                 {
-                    "csvRow": int(legacy.group(1)) if legacy else None,
+                    "csvRow": csv_row,
                     "folder": str(child),
                     "name": child.name,
                     "hasResume": bool(resume),
