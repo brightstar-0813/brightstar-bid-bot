@@ -189,6 +189,8 @@ if (inlineProfileEditorEl && profileEditorPanelBody) {
 }
 
 const csvFileEl = document.getElementById("csvFile");
+const csvFileBtn = document.getElementById("csvFileBtn");
+const csvFileNameEl = document.getElementById("csvFileName");
 const csvSummaryEl = document.getElementById("csvSummary");
 const queueNowWorkingEl = document.getElementById("queueNowWorking");
 const csvRefreshBtn = document.getElementById("csvRefresh");
@@ -389,13 +391,6 @@ function syncActivePersonChip() {
   chip.textContent = selected.label;
   chip.classList.toggle("is-builtin", Boolean(selected.builtin));
   chip.title = selected.label;
-}
-
-function syncBatchPill() {
-  const el = document.getElementById("batchStatePill");
-  if (!el) return;
-  el.textContent = batchState || "idle";
-  el.dataset.state = batchState || "idle";
 }
 
 function setActiveRoleTrackUi(track, { locked = false } = {}) {
@@ -1259,7 +1254,6 @@ function updateCsvSummaryFromQueue() {
     </div>
     <p class="summary-meta">Showing ${queueCache.length} of ${allUsJobsCache.length} US jobs (${filterLabel}) · Builtin ${builtinTotal} · Himalayas ${himalayasTotal} · GH ${greenhouseTotal} · Dice ${diceTotal} · LI ${liTotal} · Jobright ${jobrightTotal} · Workday ${workdayTotal} · Etc ${etcTotal} · batch ${batchState}</p>
   `;
-  syncBatchPill();
 }
 
 function syncChannelFilterButtons() {
@@ -3093,7 +3087,6 @@ function setBusy(busy) {
   if (clearOneOffFieldsBtn) clearOneOffFieldsBtn.disabled = busy;
   document.body.classList.toggle("is-busy", Boolean(busy));
   syncOneOffActionButtons({ busy: Boolean(busy) });
-  syncBatchPill();
 }
 
 async function clearOneOffJobFields() {
@@ -3716,6 +3709,7 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
   openAtsGapsRows.clear();
   batchState = "idle";
   if (csvFileEl) csvFileEl.value = "";
+  if (csvFileNameEl) csvFileNameEl.textContent = "No file chosen";
 
   await chrome.storage.local.set({
     [QUEUE_KEY]: [],
@@ -3853,8 +3847,10 @@ personResumeFileEl?.addEventListener("change", () => {
   onMasterResumeFile(file).catch((e) => setStatus(String(e.message || e)));
 });
 
+csvFileBtn?.addEventListener("click", () => csvFileEl?.click());
 csvFileEl.addEventListener("change", () => {
   const file = csvFileEl.files?.[0];
+  if (csvFileNameEl) csvFileNameEl.textContent = file?.name || "No file chosen";
   onCsvSelected(file).catch((e) => setStatus(String(e.message || e)));
 });
 
@@ -4429,6 +4425,7 @@ if (customQaSaveBtn) setIconButton(customQaSaveBtn, "save", "Save to bank");
 
 if (addProfileBtn) setIconButton(addProfileBtn, "userPlus", "New profile");
 if (personResumeFileBtn) setIconButton(personResumeFileBtn, "fileUp", "From resume file");
+if (csvFileBtn) setIconButton(csvFileBtn, "fileUp", "Upload jobs CSV");
 if (openAsWindowBtn) setIconButton(openAsWindowBtn, "window", "Open window");
 if (keepOpenBtn) {
   setIconButton(keepOpenBtn, "panel", "Side panel");

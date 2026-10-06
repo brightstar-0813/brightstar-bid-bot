@@ -547,12 +547,21 @@
             <div class="section-copy">
               <p class="section-title">Jobs queue</p>
             </div>
-            <span id="batchStatePill" class="state-pill" data-state="idle">idle</span>
           </header>
-          <label class="field file-field">
+          <div class="field file-field resume-file-field">
             <span>Upload jobs CSV (optional)</span>
-            <input id="csvFile" type="file" accept=".csv,text/csv" />
-          </label>
+            <div class="resume-file-row">
+              <button
+                type="button"
+                id="csvFileBtn"
+                class="ghost compact icon-button"
+                title="Upload jobs CSV"
+                aria-label="Upload jobs CSV"
+              ></button>
+              <span id="csvFileName" class="resume-file-name">No file chosen</span>
+              <input id="csvFile" type="file" accept=".csv,text/csv" tabindex="-1" />
+            </div>
+          </div>
           <div class="row row-2">
             <button type="button" id="csvRefresh" class="ghost" title="Re-read CSV">
               Refresh CSV
