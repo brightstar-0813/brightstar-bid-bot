@@ -235,6 +235,28 @@ test("reads a resume turn that has no data-message-author-role", () => {
   assert.equal(counts.assistantBlocks > 0, true);
 });
 
+test("newest Q&A reply is the last assistant message, not an earlier resume bullet", () => {
+  const oldBullet =
+    "Agile ceremonies — sprint planning, architecture reviews, backlog grooming, and retrospectives — driving engineering quality and delivery accountability Coordinate with";
+  const answer =
+    "I'm interested in this Salesforce Technical Lead position because it combines hands-on Salesforce technical leadership with team development.";
+  const doc = buildDoc([
+    turn("conversation-turn-1", [
+      node({ role: "user", text: "Rewrite this resume for the Salesforce Technical Lead role" }),
+      node({ role: "assistant", text: `${oldBullet} ${"and more resume detail. ".repeat(40)}` })
+    ]),
+    turn("conversation-turn-2", [
+      node({
+        role: "user",
+        text: "Why are you interested in this position? Reply with ONLY the answer text."
+      }),
+      node({ role: "assistant", text: answer })
+    ])
+  ]);
+  const newest = sandbox.__brightstarDomHarvest.readNewestAssistantTurn(doc);
+  assert.equal(newest, answer);
+});
+
 test("treats the composer and user turns as off-limits", () => {
   const composer = {
     closest(sel) {

@@ -876,6 +876,11 @@ const SPEAKER_LABEL =
 /** Collapsed ChatGPT preview: "...Show more" or a leftover leading ellipsis. */
 const SHOW_MORE_CHROME = /^(?:[.…]{2,}|…)\s*(?:show more|show less)?\s*/i;
 const SHOW_MORE_WORDS = /^(?:show more|show less)\b\s*/i;
+/** Claude message chrome: "just now" plus a one-line status such as "Drafting a …". */
+const LEADING_TIME_CHROME =
+  /^(?:just now|(?:a|\d+)\s+(?:second|minute|hour|day)s?\s+ago)(?=\s*(?:drafting|thinking|crafting|writing|preparing|searching|looking up|working|[A-Z]))/;
+const ASSISTANT_STATUS_LINE =
+  /^(?:drafting|thinking|crafting|writing|preparing|searching|looking up|working)\b[^.!?\n]{0,220}[.!?]?\s*/i;
 
 /**
  * Strip common LLM wrappers from a single-answer reply.
@@ -887,7 +892,13 @@ export function cleanCustomQaAnswer(raw) {
   let prev = "";
   while (t && t !== prev) {
     prev = t;
-    t = t.replace(SPEAKER_LABEL, "").replace(SHOW_MORE_CHROME, "").replace(SHOW_MORE_WORDS, "").trim();
+    t = t
+      .replace(SPEAKER_LABEL, "")
+      .replace(SHOW_MORE_CHROME, "")
+      .replace(SHOW_MORE_WORDS, "")
+      .replace(LEADING_TIME_CHROME, "")
+      .replace(ASSISTANT_STATUS_LINE, "")
+      .trim();
   }
   t = t.replace(/^(here(?:'s| is)|answer|response)\s*[:\-–]\s*/i, "").trim();
   if (

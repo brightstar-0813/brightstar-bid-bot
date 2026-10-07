@@ -157,6 +157,19 @@ test("extractFreshCustomQaAnswer keeps the finished paragraph after the ask prom
   assert.equal(cleanCustomQaAnswer(`...Show more\n${answer}`), answer);
   assert.equal(cleanCustomQaAnswer(`…Show more ${answer}`), answer);
   assert.equal(extractFreshCustomQaAnswer(`...Show more ${answer}`, { prompt }), answer);
+  assert.equal(
+    cleanCustomQaAnswer(
+      `just nowDrafting a Salesforce solution example grounded in resume skills.${answer}`
+    ),
+    answer
+  );
+  assert.equal(
+    extractFreshCustomQaAnswer(
+      `just now\nDrafting a Salesforce solution example grounded in resume skills.\n${answer}`,
+      { prompt }
+    ),
+    answer
+  );
 });
 
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {

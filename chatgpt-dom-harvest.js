@@ -75,6 +75,14 @@
       )
       .replace(/^(?:[.…]{2,}|…)\s*(?:show more|show less)?\s*/i, "")
       .replace(/^(?:show more|show less)\b\s*/i, "")
+      .replace(
+        /^(?:just now|(?:a|\d+)\s+(?:second|minute|hour|day)s?\s+ago)(?=\s*(?:drafting|thinking|crafting|writing|preparing|searching|looking up|working|[A-Z]))/,
+        ""
+      )
+      .replace(
+        /^(?:drafting|thinking|crafting|writing|preparing|searching|looking up|working)\b[^.!?\n]{0,220}[.!?]?\s*/i,
+        ""
+      )
       .replace(/\s+$/g, "");
   }
 
@@ -548,14 +556,49 @@
     return t.slice(-60000);
   }
 
-  /** Last assistant turn, including a short Q&A paragraph that is not a letter. */
-  function readNewestAssistantTurn(doc) {
-    let newest = "";
-    for (const raw of assistantProsePieces(doc)) {
-      const text = tidyChunk(raw);
-      if (!text) continue;
-      newest = PROMPT_ECHO.test(text) ? tailOfProse(text) : text;
+  function nodeContains(parent, child) {
+    if (!parent || !child || parent === child) return false;
+    if (typeof parent.contains === "function") {
+      try {
+        if (parent.contains(child)) return true;
+      } catch {
+        /* parent chain below */
+      }
     }
+    let cur = child.parent || child.parentElement || null;
+    while (cur) {
+      if (cur === parent) return true;
+      cur = cur.parent || cur.parentElement || null;
+    }
+    return false;
+  }
+
+  /**
+   * Last assistant message only.
+   * assistantProsePieces appends the whole thread when nothing looks like a
+   * cover letter. That dump starts with an older resume bullet, and a Q&A
+   * reply would be saved from the beginning of the chat.
+   */
+  function readNewestAssistantTurn(doc) {
+    const nodes = queryAll(doc, ASSISTANT_SELECTOR).filter((el) => !isUserElement(el));
+    const roots = nodes.filter((el) => !nodes.some((other) => nodeContains(other, el)));
+    const pieces = [];
+    for (const el of roots.length ? roots : nodes) {
+      const text = tidyChunk(readElementProse(el, { stripCode: false }));
+      if (text) pieces.push(text);
+    }
+    if (!pieces.length) {
+      for (const turn of queryAll(doc, TURN_SELECTOR)) {
+        if (isUserElement(turn)) continue;
+        const user =
+          typeof turn.querySelector === "function" ? turn.querySelector(USER_SELECTOR) : null;
+        if (user) continue;
+        const text = tidyChunk(readElementProse(turn, { stripCode: false }));
+        if (text) pieces.push(text);
+      }
+    }
+    let newest = pieces.length ? pieces[pieces.length - 1] : tidyChunk(mainTextExcludingUser(doc));
+    if (PROMPT_ECHO.test(newest)) newest = tailOfProse(newest);
     return newest.slice(0, 20000);
   }
 
