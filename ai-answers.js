@@ -873,6 +873,10 @@ function stripInvisibleChars(text) {
 const SPEAKER_LABEL =
   /^(?:the\s+)?(?:chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|assistant|you)\s+said\b\s*[:：\-–—.]?\s*/i;
 
+/** Collapsed ChatGPT preview: "...Show more" or a leftover leading ellipsis. */
+const SHOW_MORE_CHROME = /^(?:[.…]{2,}|…)\s*(?:show more|show less)?\s*/i;
+const SHOW_MORE_WORDS = /^(?:show more|show less)\b\s*/i;
+
 /**
  * Strip common LLM wrappers from a single-answer reply.
  */
@@ -883,7 +887,7 @@ export function cleanCustomQaAnswer(raw) {
   let prev = "";
   while (t && t !== prev) {
     prev = t;
-    t = t.replace(SPEAKER_LABEL, "").trim();
+    t = t.replace(SPEAKER_LABEL, "").replace(SHOW_MORE_CHROME, "").replace(SHOW_MORE_WORDS, "").trim();
   }
   t = t.replace(/^(here(?:'s| is)|answer|response)\s*[:\-–]\s*/i, "").trim();
   if (
@@ -901,7 +905,7 @@ export function cleanCustomQaAnswer(raw) {
  * the answer; the prompt itself is not.
  */
 export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } = {}) {
-  let t = String(raw || "").trim();
+  let t = stripInvisibleChars(raw).trim();
   if (!t) return "";
   const promptTrim = String(prompt || "").trim();
   if (promptTrim.length >= 40) {

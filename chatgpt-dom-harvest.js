@@ -73,6 +73,8 @@
         /^(?:the\s+)?(?:chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|assistant|you)\s+said\b\s*[:：\-–—.]?\s*/i,
         ""
       )
+      .replace(/^(?:[.…]{2,}|…)\s*(?:show more|show less)?\s*/i, "")
+      .replace(/^(?:show more|show less)\b\s*/i, "")
       .replace(/\s+$/g, "");
   }
 
@@ -373,6 +375,13 @@
         }
       });
       clone.querySelectorAll(".sr-only, [class*='sr-only']").forEach((node) => {
+        try {
+          node.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+      clone.querySelectorAll("button, [role='button']").forEach((node) => {
         try {
           node.remove();
         } catch {

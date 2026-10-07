@@ -154,6 +154,9 @@ test("extractFreshCustomQaAnswer keeps the finished paragraph after the ask prom
   assert.equal(cleanCustomQaAnswer(`ChatGPT\u200B said:\n${answer}`), answer);
   assert.equal(cleanCustomQaAnswer(`\u200BChatGPT said\n${answer}`), answer);
   assert.equal(extractFreshCustomQaAnswer(`ChatGPT\u200B said\n${answer}`, { prompt }), answer);
+  assert.equal(cleanCustomQaAnswer(`...Show more\n${answer}`), answer);
+  assert.equal(cleanCustomQaAnswer(`…Show more ${answer}`), answer);
+  assert.equal(extractFreshCustomQaAnswer(`...Show more ${answer}`, { prompt }), answer);
 });
 
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {
