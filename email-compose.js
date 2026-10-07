@@ -8,7 +8,9 @@ import {
   classifyContactRole,
   pickPrimaryContact,
   selectTemplateForRole,
-  pickTemplateVariant
+  pickTemplateVariant,
+  loadRecentEmailStyles,
+  rememberEmailStyle
 } from "./prompts/email-templates.js";
 import {
   buildEmailComposePrompt,
@@ -132,7 +134,8 @@ function personDisplayName(person = {}) {
  *   person?: object,
  *   job?: { title?: string, company?: string, jdText?: string },
  *   resumeJson?: object|null,
- *   templateId?: number
+ *   templateId?: number,
+ *   recentIds?: string[]
  * }} opts
  */
 export function composeEmailBid(opts = {}) {
@@ -145,7 +148,7 @@ export function composeEmailBid(opts = {}) {
   const kind = classifyContactRole(primary?.role);
   const family =
     (opts.templateId && EMAIL_TEMPLATES[opts.templateId]) || selectTemplateForRole(kind);
-  const variant = pickTemplateVariant(family, job);
+  const variant = pickTemplateVariant(family, job, { recentIds: opts.recentIds || [] });
 
   const skills = pickSkills(resumeJson, job.jdText, 3);
   const title = clean(job.title) || clean(person.title) || "the open role";
@@ -221,6 +224,7 @@ export function composeEmailBid(opts = {}) {
     templateName: family.name,
     roleKind: kind,
     primaryName: greetingName,
+    styleId: variant.styleId || "",
     subject,
     body,
     toEmails,
@@ -233,8 +237,15 @@ export function composeEmailBid(opts = {}) {
  * @param {object} opts same as composeEmailBid plus runAiPrompt
  */
 export async function composeEmailBidSmart(opts = {}) {
-  const local = composeEmailBid(opts);
-  if (typeof opts.runAiPrompt !== "function") return local;
+  const recentIds =
+    Array.isArray(opts.recentIds) && opts.recentIds.length
+      ? opts.recentIds
+      : await loadRecentEmailStyles();
+  const local = composeEmailBid({ ...opts, recentIds });
+  if (typeof opts.runAiPrompt !== "function") {
+    if (local.styleId) await rememberEmailStyle(local.styleId);
+    return local;
+  }
 
   try {
     const prompt = buildEmailComposePrompt({
@@ -252,6 +263,7 @@ export async function composeEmailBidSmart(opts = {}) {
     });
     const draft = harvestEmailDraftFromAiText(aiText);
     if (draft?.subject && draft?.body) {
+      if (local.styleId) await rememberEmailStyle(local.styleId);
       return {
         ...local,
         subject: draft.subject,
@@ -264,6 +276,7 @@ export async function composeEmailBidSmart(opts = {}) {
   } catch {
     /* soft fallback */
   }
+  if (local.styleId) await rememberEmailStyle(local.styleId);
   return local;
 }
 

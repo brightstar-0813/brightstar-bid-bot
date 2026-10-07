@@ -54,7 +54,7 @@ Lives inside the **Manual bid** panel (shared job fields — no duplicate title/
 2. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
 3. **Find contacts** (search icon next to Generate Draft) via AI engine → **Email Bid modal** with To checklist (check/uncheck)  
 4. **Reply** (reply icon): type the recruiter’s name, email, and optional role, then pick a built-in reply template (rate, still interested, availability, thanks, decline). The typed email is the To row. Does not run Find contacts. **Send** saves `jd.txt` (and the last resume/cover PDF when one exists) and marks the sheet **Applied** / **Email bid**, then sends or opens Outlook/Gmail.  
-5. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block. Reply fills from the template instead.  
+5. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block. Reply fills from the template instead. Cold + Reply each keep **~10 writing styles** and **auto-rotate** (skip the last two used) so consecutive emails do not share one voice.  
 6. Attachments: last generated resume/cover **or** custom PDF. Reply attaches a resume only when one is picked in the modal.  
 7. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
 8. Progress on **bottom status bar**; sheet **Applied** + **Bid mode = Email bid** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row). Reply **Send** also writes that sheet row after saving the job files.  
@@ -69,6 +69,7 @@ Does **not** auto-run after batch/manual generate.
 - Do not claim JD buzzwords absent from resume  
 - Prefer personalized copy per primary contact; To list may include several checked recipients  
 - End with a short closing greeting (Warm regards / Thank you / Best regards) — no name/phone/LinkedIn block  
+- Auto-rotate style variants (`email_style_recent` in storage) so drafts do not look like a ping/bot blast  
 - Status reports who was emailed  
 
 ## AI chat cleanup

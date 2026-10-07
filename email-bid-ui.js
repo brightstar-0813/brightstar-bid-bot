@@ -12,7 +12,12 @@ import {
   buildWebComposeUrl,
   formatSmtpConnectError
 } from "./email-send.js";
-import { REPLY_TEMPLATES, fillReplyTemplate } from "./prompts/email-templates.js";
+import {
+  REPLY_TEMPLATES,
+  fillReplyTemplate,
+  loadRecentEmailStyles,
+  rememberEmailStyle
+} from "./prompts/email-templates.js";
 
 /**
  * @param {{
@@ -159,18 +164,21 @@ export function initEmailBidUi(deps) {
     renderToList([contact], [contact.email]);
   }
 
-  async function applySelectedReplyTemplate() {
+  async function applySelectedReplyTemplate({ rememberStyle = false } = {}) {
     const person = await getActivePerson().catch(() => null);
+    const recentIds = await loadRecentEmailStyles();
     const filled = fillReplyTemplate(replyTemplateEl?.value || "rate", {
       contact: readReplyContact(),
       job: {
         title: titleEl?.value?.trim() || "",
         company: companyEl?.value?.trim() || ""
       },
-      person
+      person,
+      recentIds
     });
     if (subjectEl) subjectEl.value = filled.subject;
     if (bodyEl) bodyEl.value = filled.body;
+    if (rememberStyle && filled.styleId) await rememberEmailStyle(filled.styleId);
     replyEdited = false;
     syncReplyRecipient();
   }
@@ -182,7 +190,7 @@ export function initEmailBidUi(deps) {
     replyEdited = false;
     const person = await getActivePerson().catch(() => null);
     draftCache = { reply: true, jobMeta: collectJobMeta(person) };
-    await applySelectedReplyTemplate();
+    await applySelectedReplyTemplate({ rememberStyle: true });
     setDraftModalOpen(true);
   }
 
@@ -717,7 +725,7 @@ export function initEmailBidUi(deps) {
   replyBtn?.addEventListener("click", () => openReply().catch((e) => setStatus(String(e.message || e))));
   replyTemplateEl?.addEventListener("change", () => {
     if (!replyMode) return;
-    applySelectedReplyTemplate().catch((e) => setStatus(String(e.message || e)));
+    applySelectedReplyTemplate({ rememberStyle: true }).catch((e) => setStatus(String(e.message || e)));
   });
   const onReplyIdentityInput = () => {
     if (!replyMode) return;

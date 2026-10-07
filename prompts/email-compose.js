@@ -101,6 +101,7 @@ RULES
 5. 120–220 words. Short paragraphs. Natural voice — avoid "I am writing to express my interest" and "I recently learned about the opportunity".
 6. Subject line specific to this role/company (not generic "Application for…").
 7. Greeting uses first name when available ("Hi ${primaryName.split(/\s+/)[0]},").
+8. Vary greeting and closing so this does not match a stock template blast (mix Hi/Hello/Hey and Warm regards/Thank you/Best regards/Thanks). Do not reuse the same opener every time.
 
 Output JSON only, no markdown fences:
 {"subject":"","body":"","angle":"one-line note of what you personalized"}`;

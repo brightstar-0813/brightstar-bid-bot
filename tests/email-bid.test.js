@@ -9,7 +9,15 @@ import {
   discoverPublicCompanyContacts
 } from "../email-contact-find.js";
 import { composeEmailBid, harvestEmailDraftFromAiText } from "../email-compose.js";
-import { fillReplyTemplate, pickTemplateVariant, selectTemplateForRole } from "../prompts/email-templates.js";
+import {
+  EMAIL_TEMPLATES,
+  REPLY_TEMPLATES,
+  fillReplyTemplate,
+  pickRotatingVariant,
+  pickTemplateVariant,
+  pushRecentStyleId,
+  selectTemplateForRole
+} from "../prompts/email-templates.js";
 import { buildEmailComposePrompt } from "../prompts/email-compose.js";
 import {
   smtpPresetForEmail,
@@ -208,10 +216,11 @@ describe("composeEmailBid", () => {
       job: { title: "Salesforce Developer", company: "RaceDog" },
       person: { name: "Sandeep Mahankali" }
     });
-    assert.match(filled.subject, /^Re: Salesforce Developer/);
-    assert.match(filled.body, /Hi Sushanth Kumar,/);
+    assert.match(filled.body, /Salesforce Developer/);
+    assert.match(filled.body, /RaceDog/);
     assert.match(filled.body, /\[Rate\]/);
     assert.match(filled.body, /\[Start date\]/);
+    assert.ok(filled.styleId);
     assert.doesNotMatch(filled.body, /@/);
     assert.doesNotMatch(filled.subject, /@/);
     assert.equal(filled.email, undefined);
@@ -219,11 +228,36 @@ describe("composeEmailBid", () => {
 
   it("does not invent a recruiter name or email when the reply contact is empty", () => {
     const filled = fillReplyTemplate("update", { contact: {}, job: {}, person: {} });
-    assert.match(filled.subject, /^Re:/);
     assert.match(filled.body, /\[Name\]/);
     assert.match(filled.body, /\[Role Title\]/);
     assert.match(filled.body, /\[Company\]/);
     assert.doesNotMatch(filled.body, /@/);
+  });
+
+  it("ships about 10 style variants for cold roles and reply purposes", () => {
+    for (const family of Object.values(EMAIL_TEMPLATES)) {
+      assert.equal(family.variants.length, 10, family.name);
+    }
+    for (const family of REPLY_TEMPLATES) {
+      assert.equal(family.variants.length, 10, family.id);
+    }
+  });
+
+  it("rotates styles and skips the last two recent ids", () => {
+    const family = selectTemplateForRole("recruiter");
+    const first = pickTemplateVariant(family, { company: "Acme", title: "SE", jdText: "aaa" });
+    const second = pickTemplateVariant(
+      family,
+      { company: "Acme", title: "SE", jdText: "aaa" },
+      { recentIds: [first.styleId] }
+    );
+    assert.notEqual(second.styleId, first.styleId);
+    const third = pickRotatingVariant(family.variants, {
+      seed: "Acme|SE|aaa",
+      recentIds: pushRecentStyleId([first.styleId], second.styleId)
+    });
+    assert.notEqual(third.styleId, first.styleId);
+    assert.notEqual(third.styleId, second.styleId);
   });
 
   it("picks different local variants for different jobs", () => {
@@ -232,7 +266,7 @@ describe("composeEmailBid", () => {
     const b = pickTemplateVariant(family, { company: "Beta", title: "PM", jdText: "zzz different" });
     assert.ok(a.subject);
     assert.ok(b.subject);
-    // Same job is stable
+    // Same job is stable when recent list is empty
     const a2 = pickTemplateVariant(family, { company: "Acme", title: "SE", jdText: "aaa" });
     assert.equal(a.subject, a2.subject);
     assert.equal(a.body, a2.body);
@@ -249,6 +283,7 @@ describe("composeEmailBid", () => {
     assert.match(draft.body, /(?:Warm regards|Thank you|Best regards|Thanks),?\s*$/i);
     assert.ok(!/Alex Lee|LinkedIn|\\d{3}[-.]\\d{3}/i.test(draft.body));
     assert.ok(buildEmailComposePrompt({ company: "Acme", title: "SE" }).includes("closing greeting"));
+    assert.ok(buildEmailComposePrompt({ company: "Acme", title: "SE" }).includes("Vary greeting"));
   });
 });
 
