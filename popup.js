@@ -209,6 +209,8 @@ const csvExtensionIdHintEl = document.getElementById("csvExtensionIdHint");
 const csvSourceSaveBtn = document.getElementById("csvSourceSave");
 const csvClearPinBtn = document.getElementById("csvClearPin");
 const queueListEl = document.getElementById("queueList");
+const queueSearchEl = document.getElementById("queueSearch");
+const queueSearchMetaEl = document.getElementById("queueSearchMeta");
 const batchStartBtn = document.getElementById("batchStart");
 const batchPauseBtn = document.getElementById("batchPause");
 const batchSkipBtn = document.getElementById("batchSkip");
@@ -346,6 +348,7 @@ let lastStatusText = "";
 let lastQueueFollowRow = null;
 let queueListScrollTop = 0;
 let queueScrollProgrammatic = false;
+let queueSearchQuery = "";
 let allUsJobsCache = [];
 let channelFilter = DEFAULT_CHANNEL_FILTER;
 let batchState = "idle";
@@ -1390,6 +1393,69 @@ function sortQueueForDisplay(jobs) {
   });
 }
 
+/** Searchable source tags for a queue row (matches visible badges). */
+function queueJobSourceTokens(job) {
+  const tags = [];
+  if (isLinkedInJob(job)) tags.push("li", "linkedin");
+  if (isDiceJob(job)) tags.push("dice");
+  if (isIndeedJob(job)) tags.push("indeed");
+  if (isJobrightJob(job)) tags.push("jobright");
+  if (isWorkdayJob(job)) tags.push("workday");
+  if (isBuiltinJob(job)) tags.push("builtin", "built-in");
+  if (isHimalayasJob(job)) tags.push("himalayas");
+  if (isGreenhouseJob(job)) tags.push("greenhouse", "gh");
+  if (job?.applied) tags.push("applied");
+  if (job?.inactive) tags.push("inactive");
+  return tags;
+}
+
+function queueJobSearchHaystack(job) {
+  return [
+    job?.csvRow,
+    job?.title,
+    job?.company,
+    job?.location,
+    job?.status,
+    job?.jdLink,
+    job?.error,
+    ...queueJobSourceTokens(job)
+  ]
+    .map((v) => String(v || "").toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getQueueSearchQuery() {
+  return String(queueSearchQuery || "").trim().toLowerCase();
+}
+
+function jobMatchesQueueSearch(job, query = getQueueSearchQuery()) {
+  if (!query) return true;
+  const haystack = queueJobSearchHaystack(job);
+  return query.split(/\s+/).every((token) => haystack.includes(token));
+}
+
+function filterQueueForDisplay(jobs) {
+  const query = getQueueSearchQuery();
+  if (!query) return jobs;
+  return jobs.filter((job) => jobMatchesQueueSearch(job, query));
+}
+
+function updateQueueSearchMeta(visibleCount, totalCount) {
+  if (!queueSearchMetaEl) return;
+  const query = getQueueSearchQuery();
+  if (!query || !totalCount) {
+    queueSearchMetaEl.hidden = true;
+    queueSearchMetaEl.textContent = "";
+    return;
+  }
+  queueSearchMetaEl.hidden = false;
+  queueSearchMetaEl.textContent =
+    visibleCount === totalCount
+      ? `${visibleCount} match${visibleCount === 1 ? "" : "es"}`
+      : `${visibleCount} of ${totalCount} match${visibleCount === 1 ? "" : "es"}`;
+}
+
 const ACTION_ICON_PATHS = {
   files: '<path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5"/>',
   apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
@@ -1969,13 +2035,30 @@ function renderQueue() {
     queueListEl.appendChild(empty);
     lastQueueFollowRow = null;
     queueListScrollTop = 0;
+    updateQueueSearchMeta(0, 0);
     renderCurrentWorkIndicator();
     return;
   }
 
   const currentRow = resolveCurrentWorkCsvRow();
+  const visibleJobs = filterQueueForDisplay(sortQueueForDisplay(queueCache));
+  updateQueueSearchMeta(visibleJobs.length, queueCache.length);
 
-  for (const job of sortQueueForDisplay(queueCache)) {
+  if (!visibleJobs.length) {
+    const empty = document.createElement("div");
+    empty.className = "queue-empty";
+    empty.innerHTML =
+      '<img src="icons/brightstar-mark.gif" alt="" class="brand-icon queue-empty-mark" /><p>No matching jobs</p><span>Try another title, company, or source</span>';
+    queueListEl.appendChild(empty);
+    renderCurrentWorkIndicator();
+    if (isBatchQueueScrollingLocked()) {
+      restoreQueueListScroll();
+      return;
+    }
+    return;
+  }
+
+  for (const job of visibleJobs) {
     const item = document.createElement("div");
     item.className = "queue-item";
     item.dataset.csvRow = String(job.csvRow);
@@ -3714,6 +3797,8 @@ async function clearJobsList({ confirmPrompt = true } = {}) {
   allUsJobsCache = [];
   openAtsGapsRows.clear();
   batchState = "idle";
+  queueSearchQuery = "";
+  if (queueSearchEl) queueSearchEl.value = "";
   if (csvFileEl) csvFileEl.value = "";
   if (csvFileNameEl) csvFileNameEl.textContent = "No file chosen";
 
@@ -3776,6 +3861,22 @@ queueListEl?.addEventListener(
   },
   { passive: true }
 );
+
+queueSearchEl?.addEventListener("input", () => {
+  queueSearchQuery = String(queueSearchEl.value || "");
+  queueListScrollTop = 0;
+  renderQueue();
+});
+
+queueSearchEl?.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!String(queueSearchEl.value || "")) return;
+  e.preventDefault();
+  queueSearchEl.value = "";
+  queueSearchQuery = "";
+  queueListScrollTop = 0;
+  renderQueue();
+});
 
 profileSelectEl.addEventListener("change", () => {
   syncActivePersonChip();

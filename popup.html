@@ -685,6 +685,29 @@
               </div>
             </div>
           </div>
+          <label class="field queue-search-field">
+            <span>Search queue</span>
+            <div class="search-field-wrap">
+              <svg class="search-field-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+                <path
+                  d="M20 20l-4-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <input
+                id="queueSearch"
+                type="search"
+                placeholder="Title, company, location, source…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+          </label>
+          <p class="hint queue-search-meta" id="queueSearchMeta" hidden></p>
           <div
             id="queueNowWorking"
             class="queue-now-working"
