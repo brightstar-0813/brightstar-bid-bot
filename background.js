@@ -7,9 +7,6 @@ import {
   fetchExistingSheetDedupKeys,
   fetchSheetRows,
   buildKnownLinkSet,
-  buildKnownCompanySet,
-  isKnownCompany,
-  normalizeCompanyName,
   normalizeJobLink,
   resolveSheetTabNameForPerson
 } from "./sheets.js";
@@ -1845,50 +1842,7 @@ async function getPreGenerateSkipReason(jobMeta = {}) {
   if (linkDup.covered) {
     return linkDup.reason || "duplicate job link";
   }
-  const companyDup = await isCompanyAlreadyCovered(
-    jobMeta.companyName || jobMeta.company || "",
-    { excludeCsvRow: jobMeta.csvRow }
-  );
-  if (companyDup.covered) {
-    return companyDup.reason || "same company already on Google Sheet";
-  }
   return "";
-}
-
-/**
- * True when this employer was already bid for the SAME person.
- * A blank company never matches. Used for generate only — Apply stays link-only.
- */
-async function isCompanyAlreadyCovered(companyName, { excludeCsvRow } = {}) {
-  const key = normalizeCompanyName(companyName || "");
-  if (!key) return { covered: false };
-
-  const person = await getActivePerson().catch(() => null);
-  const queue = await getQueue();
-  for (const j of queue) {
-    if (excludeCsvRow != null && Number(j.csvRow) === Number(excludeCsvRow)) continue;
-    if (person && !jobBelongsToPerson(j, person)) continue;
-    const kept = j.applied || j.inactive || j.status === "done" || j.status === "skipped";
-    if (!kept) continue;
-    if (normalizeCompanyName(j.company || j.companyName || "") !== key) continue;
-    return { covered: true, reason: "same company already on Google Sheet" };
-  }
-
-  const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
-  if (!spreadsheetUrl || !webAppUrl) return { covered: false };
-  try {
-    const keys = await fetchExistingSheetDedupKeys({
-      spreadsheetUrl,
-      webAppUrl,
-      sheetName: sheetTabName
-    });
-    if (isKnownCompany(companyName, buildKnownCompanySet(keys.companies || []))) {
-      return { covered: true, reason: "same company already on Google Sheet" };
-    }
-  } catch {
-    /* sheet check optional when unreachable */
-  }
-  return { covered: false };
 }
 
 /** Mark a queue row skipped for company/link coverage — no resume build, no apply. */
@@ -2197,6 +2151,15 @@ function resolveHostedApplyBoard(j = {}) {
   return "";
 }
 
+/** Older skips that matched the employer name, not the job URL. */
+function isCompanyOnlyDuplicateSkip(job) {
+  if (!job || job.applied || job.inactive) return false;
+  if (String(job.status || "") !== "skipped") return false;
+  const text = String(job.error || "");
+  if (!/company/i.test(text) || /job link/i.test(text)) return false;
+  return /duplicate|already on google sheet|already earlier in this csv/i.test(text);
+}
+
 /** Skipped as sheet/queue duplicate but not Applied — user can continue auto-apply. */
 function isSkippedSheetDuplicateJob(j) {
   if (!j || j.applied || j.inactive) return false;
@@ -2227,18 +2190,18 @@ function isHostedApplyBacklogJob(j, person = null) {
 }
 
 /**
- * Skip queue jobs whose JD link or company is already on the Google Sheet
+ * Skip queue jobs whose JD link is already on the Google Sheet
  * (or appears twice in this queue). Alerts Slack with the skipped list.
+ * A repeated company name with a new URL is not a duplicate.
  */
 async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   const { spreadsheetUrl, webAppUrl, sheetTabName } = await getSheetConfig();
   let links = [];
-  let companies = [];
   let sheetError = "";
   let sheetConfigured = Boolean(spreadsheetUrl && webAppUrl);
 
   if (sheetConfigured) {
-    await setStatus("Checking Google Sheet for companies and links already bid…");
+    await setStatus("Checking Google Sheet for job links already bid…");
     try {
       const keys = await fetchExistingSheetDedupKeys({
         spreadsheetUrl,
@@ -2246,7 +2209,6 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
         sheetName: sheetTabName
       });
       links = keys.links || [];
-      companies = keys.companies || [];
     } catch (err) {
       sheetError = String(err?.message || err);
       await setStatus(
@@ -2258,29 +2220,27 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
   }
 
   const knownLinks = buildKnownLinkSet(links);
-  const sheetCompanies = buildKnownCompanySet(companies);
   const queue = await getQueue();
   const person = await getActivePerson().catch(() => null);
   const duplicates = [];
+  const restored = [];
   const seenLinks = new Set(knownLinks);
-  const seenCompanies = new Set(sheetCompanies);
 
   for (const job of queue) {
     if (person && !jobBelongsToPerson(job, person)) continue;
+    if (isCompanyOnlyDuplicateSkip(job)) continue;
     if (!(job.status === "done" || job.status === "skipped" || job.applied || job.inactive)) {
       continue;
     }
     const linkKey = normalizeJobLink(job.jdLink || "");
     if (linkKey) seenLinks.add(linkKey);
-    const companyKey = normalizeCompanyName(job.company || job.companyName || "");
-    if (companyKey) seenCompanies.add(companyKey);
   }
 
   const next = queue.map((job) => {
-    if (job.status === "done" || job.status === "skipped") return job;
+    const companyOnlySkip = isCompanyOnlyDuplicateSkip(job);
+    if ((job.status === "done" || job.status === "skipped") && !companyOnlySkip) return job;
     if (person && job.profileId && !jobBelongsToPerson(job, person)) return job;
     const linkKey = normalizeJobLink(job.jdLink || "");
-    const companyKey = normalizeCompanyName(job.company || job.companyName || "");
 
     if (linkKey && seenLinks.has(linkKey)) {
       duplicates.push(job);
@@ -2293,23 +2253,22 @@ async function dedupeQueueAgainstSheet({ notifySlack = true } = {}) {
       };
     }
 
-    if (companyKey && seenCompanies.has(companyKey)) {
-      duplicates.push(job);
+    if (linkKey) seenLinks.add(linkKey);
+    if (companyOnlySkip) {
+      restored.push(job);
       return {
         ...job,
-        status: "skipped",
-        error: sheetCompanies.has(companyKey)
-          ? "Duplicate — same company already on Google Sheet"
-          : "Duplicate — same company already earlier in this CSV"
+        status: "pending",
+        error: "",
+        companySheetSkipLocked: false,
+        applyAttempted: false,
+        applyAttempts: 0
       };
     }
-
-    if (linkKey) seenLinks.add(linkKey);
-    if (companyKey) seenCompanies.add(companyKey);
     return person?.id ? { ...job, profileId: job.profileId || person.id } : job;
   });
 
-  if (duplicates.length) {
+  if (duplicates.length || restored.length) {
     await setQueue(next);
     if (notifySlack) {
       await trySlackDuplicates(duplicates, links.length);
@@ -8955,7 +8914,7 @@ async function runBatchLoop(outputDir) {
 
       // Validate duplicates BEFORE ChatGPT — do not build a resume we will skip.
       await setStatus(
-        `Row ${next.csvRow}: checking Google Sheet / queue for a duplicate link or company…`
+        `Row ${next.csvRow}: checking Google Sheet / queue for a duplicate job link…`
       );
       const preSkipReason = await getPreGenerateSkipReason({
         csvRow: next.csvRow,

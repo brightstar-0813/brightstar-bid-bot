@@ -8,7 +8,7 @@ import {
   resolveBidModeLabel,
   resolveSheetTabNameForPerson,
   sanitizeSheetTabName,
-  skipLaterCompanyRows,
+  partitionJobsBySheetLinks,
   BID_MODE_AUTO,
   BID_MODE_MANUAL,
   BID_MODE_EMAIL,
@@ -105,28 +105,21 @@ test("Google LLC matches Google, and a blank company does not", () => {
   assert.equal(isKnownCompany("", known), false);
 });
 
-test("a later row at the same company is a duplicate even when the link differs", () => {
-  const firstPass = skipLaterCompanyRows(
+test("duplicate jobs match the job URL, not the company name", () => {
+  const split = partitionJobsBySheetLinks(
     [
       { company: "Google", jdLink: "https://jobs.example/1" },
       { company: "Google LLC", jdLink: "https://other.example/2" },
-      { company: "", jdLink: "https://jobs.example/3" }
+      { company: "Acme", jdLink: "https://jobs.example/1?utm_source=sheet" }
     ],
-    []
+    ["https://jobs.example/1"]
   );
   assert.deepEqual(
-    firstPass.fresh.map((job) => job.jdLink),
-    ["https://jobs.example/1", "https://jobs.example/3"]
-  );
-  assert.deepEqual(
-    firstPass.duplicates.map((job) => job.jdLink),
+    split.fresh.map((job) => job.jdLink),
     ["https://other.example/2"]
   );
-
-  const alreadyOnSheet = skipLaterCompanyRows(
-    [{ company: "Acme", jdLink: "https://new.example/role" }],
-    ["Acme Inc."]
+  assert.deepEqual(
+    split.duplicates.map((job) => job.jdLink),
+    ["https://jobs.example/1", "https://jobs.example/1?utm_source=sheet"]
   );
-  assert.equal(alreadyOnSheet.fresh.length, 0);
-  assert.equal(alreadyOnSheet.duplicates.length, 1);
 });

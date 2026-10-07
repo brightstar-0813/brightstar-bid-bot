@@ -312,7 +312,7 @@ export async function markJobAppliedOnSpreadsheet({
 }
 
 /**
- * Fetch job links + companies already on the sheet (for link and company dedupe).
+ * Fetch job links already on the sheet (duplicate check is by job URL).
  * @returns {Promise<{ links: string[], companies: string[] }>}
  */
 export async function fetchExistingSheetDedupKeys({ spreadsheetUrl, webAppUrl, sheetName = "" }) {
