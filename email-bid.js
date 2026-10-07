@@ -236,10 +236,23 @@ export async function sendConfirmedEmailBid(person, draft, deps = {}) {
   }
 
   let attachments = Array.isArray(draft.attachments) ? draft.attachments : [];
-  if (!attachments.length) {
+  if (!attachments.length && draft.requireResume === false) {
+    const store = await chrome.storage.local.get([EMAIL_BID_CUSTOM_RESUME_KEY]);
+    const custom = store[EMAIL_BID_CUSTOM_RESUME_KEY] || null;
+    if (custom?.base64 && (!custom.profileId || custom.profileId === person?.id)) {
+      attachments = [
+        {
+          fileName: custom.fileName || "Resume.pdf",
+          mimeType: custom.mimeType || "application/pdf",
+          base64: custom.base64,
+          kind: "resume"
+        }
+      ];
+    }
+  } else if (!attachments.length) {
     attachments = await resolveEmailBidAttachments(person, jobMeta, deps);
   }
-  if (!attachments.length) {
+  if (!attachments.length && draft.requireResume !== false) {
     await status(
       "Email Bid — no resume PDF (generate docs first or pick a custom resume)",
       "err"

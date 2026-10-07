@@ -290,6 +290,7 @@ const clearOneOffFieldsBtn = document.getElementById("clearOneOffFields");
 const runOneOffBtn = document.getElementById("runOneOff");
 const logProfileApplyBtn = document.getElementById("logProfileApply");
 const emailBidPrepareBtn = document.getElementById("emailBidPrepare");
+const emailBidReplyBtn = document.getElementById("emailBidReply");
 const regenerateOneOffBtn = document.getElementById("regenerateOneOff");
 const confirmOneOffBtn = document.getElementById("confirmOneOff");
 const discardOneOffBtn = document.getElementById("discardOneOff");
@@ -1427,6 +1428,7 @@ const ACTION_ICON_PATHS = {
   qa: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/>',
   search:
     '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  reply: '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
   connect:
     '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7.1-7.1l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7.1 7.1l1-1"/>',
   disconnect:
@@ -1720,6 +1722,10 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
   if (emailBidPrepareBtn) {
     emailBidPrepareBtn.disabled = busy;
     setIconButton(emailBidPrepareBtn, "search", "Find contacts");
+  }
+  if (emailBidReplyBtn) {
+    emailBidReplyBtn.disabled = busy;
+    setIconButton(emailBidReplyBtn, "reply", "Reply");
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
@@ -4408,6 +4414,9 @@ if (logProfileApplyBtn) {
 }
 if (emailBidPrepareBtn) {
   setIconButton(emailBidPrepareBtn, "search", "Find contacts");
+}
+if (emailBidReplyBtn) {
+  setIconButton(emailBidReplyBtn, "reply", "Reply");
 }
 if (autofillPageBtn) {
   setIconButton(autofillPageBtn, "autofill", "Autofill");

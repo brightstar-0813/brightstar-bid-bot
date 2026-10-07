@@ -12,6 +12,7 @@ import {
   buildWebComposeUrl,
   formatSmtpConnectError
 } from "./email-send.js";
+import { REPLY_TEMPLATES, fillReplyTemplate } from "./prompts/email-templates.js";
 
 /**
  * @param {{
@@ -45,6 +46,7 @@ export function initEmailBidUi(deps) {
   const jdLinkEl = document.getElementById("jdLink");
   const jdTextEl = document.getElementById("jdText");
   const prepareBtn = document.getElementById("emailBidPrepare");
+  const replyBtn = document.getElementById("emailBidReply");
   const emailEl = document.getElementById("emailBidMailboxEmail");
   const passwordEl = document.getElementById("emailBidMailboxPassword");
   const mailboxSaveBtn = document.getElementById("emailBidMailboxSave");
@@ -55,6 +57,13 @@ export function initEmailBidUi(deps) {
   const draftHost = document.getElementById("emailBidDraftHost");
   const draftBlock = document.getElementById("emailBidDraftBlock");
   const draftCloseBtn = document.getElementById("emailBidDraftClose");
+  const replyFieldsEl = document.getElementById("emailBidReplyFields");
+  const replyTemplateEl = document.getElementById("emailBidReplyTemplate");
+  const replyNameEl = document.getElementById("emailBidReplyName");
+  const replyEmailEl = document.getElementById("emailBidReplyEmail");
+  const replyRoleEl = document.getElementById("emailBidReplyRole");
+  const modalTitleEl = document.getElementById("emailBidModalTitle");
+  const modalSubEl = draftBlock?.querySelector(".email-bid-modal-sub") || null;
   const toListEl = document.getElementById("emailBidToList");
   const toHintEl = document.getElementById("emailBidToHint");
   const subjectEl = document.getElementById("emailBidSubject");
@@ -65,12 +74,15 @@ export function initEmailBidUi(deps) {
 
   if (typeof setIconButton === "function") {
     if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts & draft (Email Bid)");
+    if (replyBtn) setIconButton(replyBtn, "reply", "Reply");
     if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect mailbox");
     if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect mailbox");
   }
 
   /** @type {null|object} */
   let draftCache = null;
+  let replyMode = false;
+  let replyEdited = false;
 
   function escapeHtml(s) {
     return String(s || "")
@@ -99,8 +111,79 @@ export function initEmailBidUi(deps) {
     if (!draftHost) return;
     draftHost.hidden = !open;
     if (open) {
-      subjectEl?.focus?.();
+      (replyMode ? replyNameEl : subjectEl)?.focus?.();
     }
+  }
+
+  function setReplyMode(on) {
+    replyMode = Boolean(on);
+    if (replyFieldsEl) replyFieldsEl.hidden = !replyMode;
+    if (modalTitleEl) modalTitleEl.textContent = replyMode ? "Reply" : "Email Bid";
+    if (modalSubEl) {
+      modalSubEl.textContent = replyMode
+        ? "Type the contact, pick a template, then send"
+        : "Review recipients, then send";
+    }
+  }
+
+  function ensureReplyTemplateOptions() {
+    if (!replyTemplateEl || replyTemplateEl.dataset.ready === "1") return;
+    replyTemplateEl.replaceChildren();
+    for (const template of REPLY_TEMPLATES) {
+      const opt = document.createElement("option");
+      opt.value = template.id;
+      opt.textContent = template.name;
+      replyTemplateEl.appendChild(opt);
+    }
+    replyTemplateEl.dataset.ready = "1";
+  }
+
+  function readReplyContact() {
+    return {
+      name: String(replyNameEl?.value || "").trim(),
+      email: String(replyEmailEl?.value || "").trim().toLowerCase(),
+      role: String(replyRoleEl?.value || "").trim()
+    };
+  }
+
+  function replyEmailOk(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ""));
+  }
+
+  function syncReplyRecipient() {
+    const contact = readReplyContact();
+    if (!contact.email) {
+      renderToList([], []);
+      return;
+    }
+    renderToList([contact], [contact.email]);
+  }
+
+  async function applySelectedReplyTemplate() {
+    const person = await getActivePerson().catch(() => null);
+    const filled = fillReplyTemplate(replyTemplateEl?.value || "rate", {
+      contact: readReplyContact(),
+      job: {
+        title: titleEl?.value?.trim() || "",
+        company: companyEl?.value?.trim() || ""
+      },
+      person
+    });
+    if (subjectEl) subjectEl.value = filled.subject;
+    if (bodyEl) bodyEl.value = filled.body;
+    replyEdited = false;
+    syncReplyRecipient();
+  }
+
+  async function openReply() {
+    ensureBidPanelOpen();
+    ensureReplyTemplateOptions();
+    setReplyMode(true);
+    replyEdited = false;
+    const person = await getActivePerson().catch(() => null);
+    draftCache = { reply: true, jobMeta: collectJobMeta(person) };
+    await applySelectedReplyTemplate();
+    setDraftModalOpen(true);
   }
 
   function onDraftModalKey(e) {
@@ -184,6 +267,7 @@ export function initEmailBidUi(deps) {
   }
 
   function applyDraft(draft) {
+    setReplyMode(false);
     draftCache = draft || null;
     if (!draft) {
       setDraftModalOpen(false);
@@ -202,7 +286,12 @@ export function initEmailBidUi(deps) {
     if (toListEl) toListEl.innerHTML = "";
     if (toHintEl) toHintEl.textContent = "";
     if (customResumeEl) customResumeEl.value = "";
+    if (replyNameEl) replyNameEl.value = "";
+    if (replyEmailEl) replyEmailEl.value = "";
+    if (replyRoleEl) replyRoleEl.value = "";
+    replyEdited = false;
     draftCache = null;
+    setReplyMode(false);
     setDraftModalOpen(false);
   }
 
@@ -327,7 +416,7 @@ export function initEmailBidUi(deps) {
     }
   }
 
-  async function resolveResumeAttachment() {
+  async function resolveResumeAttachment({ customOnly = false } = {}) {
     const person = await getActivePerson().catch(() => null);
     const store = await chrome.storage.local.get([EMAIL_BID_CUSTOM_RESUME_KEY]);
     const custom = store[EMAIL_BID_CUSTOM_RESUME_KEY];
@@ -341,6 +430,7 @@ export function initEmailBidUi(deps) {
         base64: String(custom.base64).replace(/^data:[^;]+;base64,/, "")
       };
     }
+    if (customOnly) return null;
     const res = await chrome.runtime
       .sendMessage({
         type: "email_bid_resume_attachment",
@@ -523,7 +613,7 @@ export function initEmailBidUi(deps) {
       return;
     }
 
-    const att = await resolveResumeAttachment();
+    const att = await resolveResumeAttachment({ customOnly: replyMode });
     let downloadedName = "";
     if (att) {
       try {
@@ -554,10 +644,12 @@ export function initEmailBidUi(deps) {
     setDraftModalOpen(false);
 
     const jobMeta = draftCache?.jobMeta || collectJobMeta(person);
-    // Treat web-compose handoff as the Email Bid "send" for sheet purposes (SMTP often blocked).
-    chrome.runtime
-      .sendMessage({ type: "email_bid_record_sheet", jobMeta })
-      .catch(() => {});
+    // Cold outreach marks the sheet. A reply can be about a different job than the panel.
+    if (!replyMode) {
+      chrome.runtime
+        .sendMessage({ type: "email_bid_record_sheet", jobMeta })
+        .catch(() => {});
+    }
     chrome.runtime
       .sendMessage({ type: "email_bid_cleanup_chats", quiet: true })
       .catch(() => {});
@@ -574,7 +666,11 @@ export function initEmailBidUi(deps) {
     }
     const toEmails = selectedRecipients();
     if (!toEmails.length) {
-      setStatus("Select at least one recipient in To.");
+      setStatus(replyMode ? "Enter the recruiter's email." : "Select at least one recipient in To.");
+      return;
+    }
+    if (replyMode && !replyEmailOk(toEmails[0])) {
+      setStatus("Enter a real email address in Email (name@company.com).");
       return;
     }
     const subject = subjectEl?.value?.trim() || "";
@@ -582,6 +678,17 @@ export function initEmailBidUi(deps) {
     if (!subject || !body) {
       setStatus("Subject and message are required.");
       return;
+    }
+    if (replyMode) {
+      setStatus("Reply · saving files and updating the sheet…");
+      const committed = await chrome.runtime
+        .sendMessage({
+          type: "email_bid_reply_commit",
+          jobMeta: collectJobMeta(person)
+        })
+        .catch((err) => ({ ok: false, error: String(err?.message || err) }));
+      if (committed?.status) setStatus(String(committed.status));
+      else if (committed?.error) setStatus(`Reply · files/sheet: ${committed.error}`);
     }
     const box = await getProfileMailbox(person?.id || "", from).catch(() => null);
     if (!box?.connected) {
@@ -596,7 +703,9 @@ export function initEmailBidUi(deps) {
       toEmails,
       subject,
       body,
-      jobMeta
+      jobMeta,
+      skipSheet: replyMode,
+      requireResume: !replyMode
     });
     if (!res?.ok) {
       setBusy(false);
@@ -605,6 +714,26 @@ export function initEmailBidUi(deps) {
   }
 
   prepareBtn?.addEventListener("click", () => prepare().catch((e) => setStatus(String(e.message || e))));
+  replyBtn?.addEventListener("click", () => openReply().catch((e) => setStatus(String(e.message || e))));
+  replyTemplateEl?.addEventListener("change", () => {
+    if (!replyMode) return;
+    applySelectedReplyTemplate().catch((e) => setStatus(String(e.message || e)));
+  });
+  const onReplyIdentityInput = () => {
+    if (!replyMode) return;
+    if (replyEdited) syncReplyRecipient();
+    else applySelectedReplyTemplate().catch((e) => setStatus(String(e.message || e)));
+  };
+  replyNameEl?.addEventListener("input", onReplyIdentityInput);
+  replyRoleEl?.addEventListener("input", onReplyIdentityInput);
+  replyEmailEl?.addEventListener("input", () => {
+    if (replyMode) syncReplyRecipient();
+  });
+  const markReplyEdited = () => {
+    if (replyMode) replyEdited = true;
+  };
+  subjectEl?.addEventListener("input", markReplyEdited);
+  bodyEl?.addEventListener("input", markReplyEdited);
   confirmBtn?.addEventListener("click", () => confirmSend().catch((e) => setStatus(String(e.message || e))));
   openWebBtn?.addEventListener("click", () => openWebCompose().catch((e) => setStatus(String(e.message || e))));
   toggleMailboxBtn?.addEventListener("click", () => {

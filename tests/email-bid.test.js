@@ -9,7 +9,7 @@ import {
   discoverPublicCompanyContacts
 } from "../email-contact-find.js";
 import { composeEmailBid, harvestEmailDraftFromAiText } from "../email-compose.js";
-import { pickTemplateVariant, selectTemplateForRole } from "../prompts/email-templates.js";
+import { fillReplyTemplate, pickTemplateVariant, selectTemplateForRole } from "../prompts/email-templates.js";
 import { buildEmailComposePrompt } from "../prompts/email-compose.js";
 import {
   smtpPresetForEmail,
@@ -196,6 +196,34 @@ describe("composeEmailBid", () => {
     assert.match(composed.body, /(?:Warm regards|Thank you|Best regards|Thanks),?\s*$/i);
     assert.ok(!/Best regards,[\s\S]*Alex Lee/i.test(composed.body));
     assert.ok(!/I recently learned about/i.test(composed.body));
+  });
+
+  it("fills a reply template from the typed contact and leaves the rate blank", () => {
+    const filled = fillReplyTemplate("rate", {
+      contact: {
+        name: "Sushanth Kumar",
+        email: "s.kumar@racedogtechnologies.com",
+        role: "Sr. IT recruiter"
+      },
+      job: { title: "Salesforce Developer", company: "RaceDog" },
+      person: { name: "Sandeep Mahankali" }
+    });
+    assert.match(filled.subject, /^Re: Salesforce Developer/);
+    assert.match(filled.body, /Hi Sushanth Kumar,/);
+    assert.match(filled.body, /\[Rate\]/);
+    assert.match(filled.body, /\[Start date\]/);
+    assert.doesNotMatch(filled.body, /@/);
+    assert.doesNotMatch(filled.subject, /@/);
+    assert.equal(filled.email, undefined);
+  });
+
+  it("does not invent a recruiter name or email when the reply contact is empty", () => {
+    const filled = fillReplyTemplate("update", { contact: {}, job: {}, person: {} });
+    assert.match(filled.subject, /^Re:/);
+    assert.match(filled.body, /\[Name\]/);
+    assert.match(filled.body, /\[Role Title\]/);
+    assert.match(filled.body, /\[Company\]/);
+    assert.doesNotMatch(filled.body, /@/);
   });
 
   it("picks different local variants for different jobs", () => {

@@ -2993,6 +2993,79 @@ async function exportStyledResumePdf(jsonText, { templateId = "", jobMeta = {} }
   return { ok: true, status: result.status, savedDir: result.savedDir, templateId: tid, resumeData };
 }
 
+/**
+ * Reply Send: jd.txt plus any resume/cover already on hand, then sheet Applied.
+ * Does not generate a new resume.
+ */
+async function saveReplyJobFiles(jobMeta = {}) {
+  const person = await getActivePerson().catch(() => null);
+  const jobTitle = String(jobMeta.jobTitle || jobMeta.title || "").trim();
+  const companyName = String(jobMeta.companyName || jobMeta.company || "").trim();
+  if (!jobTitle && !companyName) {
+    return {
+      ok: false,
+      reason: "no-job-identity",
+      status: "Reply · add a job title or company before saving files."
+    };
+  }
+  const meta = {
+    ...jobMeta,
+    jobTitle,
+    companyName,
+    jdLink: String(jobMeta.jdLink || "").trim(),
+    jdText: String(jobMeta.jdText || "").trim(),
+    salary: String(jobMeta.salary || "").trim(),
+    profileId: jobMeta.profileId || person?.id || "",
+    personName: person?.name || person?.label || "",
+    resumeFilePrefix: normalizeResumeFilePrefix(
+      jobMeta.resumeFilePrefix || person?.resumeFilePrefix,
+      person?.name || person?.label || ""
+    ),
+    bidSource: "email-bid",
+    outputDir: await resolveOutputDir(
+      jobMeta.outputDir || (person ? outputDirFromPerson(person) : "")
+    )
+  };
+  const { jobDir } = await saveJdTxtOnly(meta);
+  const saved = ["jd.txt"];
+  const nameToken = outputNameToken(meta, {});
+  const store = await chrome.storage.local.get(["email_bid_custom_resume"]);
+  const custom = store.email_bid_custom_resume || null;
+  const last = await getLastGeneratedDocs().catch(() => null);
+  const customOk = custom?.base64 && (!custom.profileId || custom.profileId === person?.id);
+  const resume = customOk ? custom : last?.resume;
+  if (resume?.base64) {
+    const fileName = `${nameToken}_Resume.pdf`;
+    const b64 = String(resume.base64).replace(/^data:[^;]+;base64,/, "");
+    await downloadBase64File(
+      b64,
+      resume.mimeType || "application/pdf",
+      joinDownloadPath(jobDir, fileName)
+    );
+    saved.push(fileName);
+  }
+  if (last?.coverLetter?.base64) {
+    const fileName = `${nameToken}_Cover Letter.pdf`;
+    const b64 = String(last.coverLetter.base64).replace(/^data:[^;]+;base64,/, "");
+    await downloadBase64File(b64, "application/pdf", joinDownloadPath(jobDir, fileName));
+    saved.push(fileName);
+  }
+  const sheetResult = await recordEmailBidSheetApplied(meta);
+  let sheetNote = "";
+  if (sheetResult?.skipped && sheetResult?.reason === "no-sheet") {
+    sheetNote = " · sheet not configured";
+  } else if (sheetResult?.ok === false) {
+    sheetNote = ` · sheet failed: ${String(sheetResult.error || sheetResult.reason || "unknown").slice(0, 80)}`;
+  } else if (sheetResult?.appended) {
+    sheetNote = " · sheet Applied (new row)";
+  } else if (sheetResult?.ok !== false) {
+    sheetNote = " · sheet Applied";
+  }
+  const status = `Saved ${saved.join(", ")} → Downloads / ${jobDir}${sheetNote}`;
+  await setStatus(status);
+  return { ok: true, jobDir, saved, sheetResult, status };
+}
+
 /** Write jd.txt only under the person's Downloads job folder. */
 async function saveJdTxtOnly(jobMeta = {}) {
   const outputDir = await resolveOutputDir(jobMeta.outputDir);
@@ -11905,9 +11978,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           bidSource: "email-bid",
           profileId: person.id || ""
         };
-        const deps = buildEmailBidDeps(person, jobMeta);
+        const deps = buildEmailBidDeps(person, jobMeta, {
+          writeSheet: message.skipSheet !== true
+        });
         let attachments = message.attachments || [];
-        if (!attachments.length) {
+        if (!attachments.length && message.requireResume !== false) {
           attachments = await resolveEmailBidAttachments(person, jobMeta, deps);
         }
         const result = await sendConfirmedEmailBid(
@@ -11917,7 +11992,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             subject: message.subject || message.draft?.subject || "",
             body: message.body || message.draft?.body || "",
             jobMeta,
-            attachments
+            attachments,
+            requireResume: message.requireResume !== false
           },
           deps
         );
@@ -11956,6 +12032,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return false;
+  }
+
+  if (type === "email_bid_reply_commit") {
+    (async () => {
+      try {
+        const result = await saveReplyJobFiles(message.jobMeta || {});
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        const msg = String(err?.message || err);
+        await setStatus(`Reply · save failed: ${msg}`);
+        safeSendResponse(sendResponse, { ok: false, error: msg });
+      }
+    })();
+    return true;
   }
 
   if (type === "email_bid_record_sheet") {

@@ -53,10 +53,11 @@ Lives inside the **Manual bid** panel (shared job fields — no duplicate title/
 1. Shared job fields + Fill from tab / Clear  
 2. Mailbox: **email + password** Connect for SMTP when the network allows it. If Connect TLS-times-out (common), use **Open in Outlook / Gmail** web compose (HTTPS) — attach resume in the browser, then Send. Personal Outlook.com often cannot use password SMTP.  
 3. **Find contacts** (search icon next to Generate Draft) via AI engine → **Email Bid modal** with To checklist (check/uncheck)  
-4. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block.  
-5. Attachments: last generated resume/cover **or** custom PDF  
-6. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
-7. Progress on **bottom status bar**; sheet **Applied** + **Bid mode = Email bid** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row)  
+4. **Reply** (reply icon): type the recruiter’s name, email, and optional role, then pick a built-in reply template (rate, still interested, availability, thanks, decline). The typed email is the To row. Does not run Find contacts. **Send** saves `jd.txt` (and the last resume/cover PDF when one exists) and marks the sheet **Applied** / **Email bid**, then sends or opens Outlook/Gmail.  
+5. Subject + body — **AI writes a short human cover-letter email** for this job (resume-grounded); local variants are the fallback. No signature block. Reply fills from the template instead.  
+6. Attachments: last generated resume/cover **or** custom PDF. Reply attaches a resume only when one is picked in the modal.  
+7. **Confirm & Send** (SMTP when connected) or **Open in Outlook / Gmail** (downloads resume to `Downloads/EmailBid` and best-effort auto-attach)  
+8. Progress on **bottom status bar**; sheet **Applied** + **Bid mode = Email bid** on successful SMTP send **or** Open in Outlook/Gmail handoff (upsert by job link — no pre-send Ready row). Reply **Send** also writes that sheet row after saving the job files.  
 
 To-list rows: checkbox left; **name**, **email**, then **role · phone** on one detail line (left-aligned, scannable).
 

@@ -228,6 +228,109 @@ export function selectTemplateForRole(kind) {
   return EMAIL_TEMPLATES[1];
 }
 
+/** Replies to mail that already arrived. Cold-intro families stay above. */
+export const REPLY_TEMPLATES = [
+  {
+    id: "rate",
+    name: "Rate confirmation",
+    subject: "Re: [Role Title] — rate confirmation",
+    body: `Hi [Name],
+
+Confirming the pay rate we discussed for the [Role Title] role at [Company]: [Rate].
+
+I'm available to start [Start date] and can complete any remaining paperwork.
+
+Thank you,`
+  },
+  {
+    id: "update",
+    name: "Still interested",
+    subject: "Re: [Role Title] at [Company]",
+    body: `Hi [Name],
+
+Thanks for checking in. I'm still interested in the [Role Title] role at [Company] and available to move forward.
+
+Please tell me the next step.
+
+Thank you,`
+  },
+  {
+    id: "availability",
+    name: "Availability",
+    subject: "Re: [Role Title] — availability",
+    body: `Hi [Name],
+
+I'm available to talk about the [Role Title] role at [Company].
+
+Times that work: [Times].
+
+Thank you,`
+  },
+  {
+    id: "thanks",
+    name: "Thanks, resume attached",
+    subject: "Re: [Role Title] — resume attached",
+    body: `Hi [Name],
+
+Thank you for reaching out about the [Role Title] role at [Company]. My resume is attached.
+
+Happy to answer any questions.
+
+Thank you,`
+  },
+  {
+    id: "decline",
+    name: "Not moving forward",
+    subject: "Re: [Role Title]",
+    body: `Hi [Name],
+
+Thank you for thinking of me for the [Role Title] role at [Company]. I'm going to pass on this one.
+
+I appreciate the note.
+
+Best regards,`
+  }
+];
+
+/**
+ * Fill known reply tokens. Leave [Rate], [Start date], and [Times] for the user.
+ * Does not insert an email address.
+ * @param {string} id
+ * @param {{ contact?: { name?: string, role?: string }, job?: { title?: string, jobTitle?: string, company?: string, companyName?: string }, person?: { name?: string, signatureName?: string, firstName?: string, lastName?: string } }} [ctx]
+ */
+export function fillReplyTemplate(id, ctx = {}) {
+  const family = REPLY_TEMPLATES.find((t) => t.id === id) || REPLY_TEMPLATES[0];
+  const contact = ctx.contact || {};
+  const job = ctx.job || {};
+  const person = ctx.person || {};
+  const yourName = String(
+    person.name ||
+      person.signatureName ||
+      [person.firstName, person.lastName].filter(Boolean).join(" ") ||
+      ""
+  ).trim();
+  const known = {
+    "[Name]": String(contact.name || "").trim(),
+    "[Role Title]": String(job.title || job.jobTitle || "").trim(),
+    "[Company]": String(job.company || job.companyName || "").trim(),
+    "[Your Name]": yourName
+  };
+  const fill = (text) => {
+    let out = String(text || "");
+    for (const [token, value] of Object.entries(known)) {
+      if (!value) continue;
+      out = out.split(token).join(value);
+    }
+    return out;
+  };
+  return {
+    id: family.id,
+    name: family.name,
+    subject: fill(family.subject),
+    body: fill(family.body)
+  };
+}
+
 /**
  * Stable per-job variant index so the same job stays consistent but different jobs diverge.
  * @param {EmailTemplateFamily} family

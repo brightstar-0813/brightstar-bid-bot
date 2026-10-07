@@ -889,6 +889,13 @@
               ></button>
               <button
                 type="button"
+                id="emailBidReply"
+                class="ghost icon-button"
+                title="Reply"
+                aria-label="Reply"
+              ></button>
+              <button
+                type="button"
                 id="logProfileApply"
                 class="ghost icon-button manual-tools-end"
                 title="Log apply"
@@ -993,6 +1000,25 @@
                 ×
               </button>
             </div>
+
+            <section id="emailBidReplyFields" class="email-bid-modal-section" aria-label="Reply" hidden>
+              <label class="field">
+                <span>Template</span>
+                <select id="emailBidReplyTemplate"></select>
+              </label>
+              <label class="field">
+                <span>Name</span>
+                <input id="emailBidReplyName" type="text" autocomplete="name" />
+              </label>
+              <label class="field">
+                <span>Email</span>
+                <input id="emailBidReplyEmail" type="email" autocomplete="off" placeholder="name@company.com" />
+              </label>
+              <label class="field">
+                <span>Role <em>(optional)</em></span>
+                <input id="emailBidReplyRole" type="text" autocomplete="off" placeholder="Recruiter" />
+              </label>
+            </section>
 
             <section class="email-bid-modal-section" aria-label="Recipients">
               <div class="email-bid-modal-section-head">
