@@ -15,6 +15,7 @@ import {
   isAshbyJob,
   isBuiltinJob,
   isGreenhouseJob,
+  describeJobSource,
   isHimalayasJob,
   isLeverJob,
   normalizeChannelFilter
@@ -45,6 +46,19 @@ test("adapter registry maps hosts and policies", () => {
 
   assert.ok(stepBudgetForSite("workday", 12) >= 16);
   assert.ok(getAdapter("greenhouse")?.emailOtp);
+});
+
+test("every job has a visible source label", () => {
+  assert.deepEqual(describeJobSource({ jdLink: "https://www.dice.com/job-detail/abc" }).label, "Dice");
+  assert.deepEqual(
+    describeJobSource({ jdLink: "https://himalayas.app/companies/acme/jobs/1" }).label,
+    "Himalayas"
+  );
+  assert.equal(describeJobSource({ jdLink: "https://jobs.ashbyhq.com/acme/1" }).label, "Ashby");
+  assert.equal(describeJobSource({ jdLink: "https://jobs.lever.co/acme/1" }).label, "Lever");
+  assert.equal(describeJobSource({ jdLink: "https://boards.greenhouse.io/acme/jobs/1" }).label, "Greenhouse");
+  assert.equal(describeJobSource({ jdLink: "https://careers.example.com/jobs/1" }).label, "Other");
+  assert.equal(describeJobSource({}).label, "Other");
 });
 
 test("Ashby and Lever jobs belong to Other; Builtin and Himalayas have their own filters", () => {

@@ -54,6 +54,7 @@ import {
   isBuiltinJob,
   isHimalayasJob,
   isGreenhouseJob,
+  describeJobSource,
   normalizeChannelFilter
 } from "./csv.js";
 import { extractMasterResumeFromFile, MASTER_RESUME_ACCEPT } from "./master-resume-file.js";
@@ -1393,17 +1394,9 @@ function sortQueueForDisplay(jobs) {
   });
 }
 
-/** Searchable source tags for a queue row (matches visible badges). */
+/** Searchable source tags for a queue row (matches the visible source badge). */
 function queueJobSourceTokens(job) {
-  const tags = [];
-  if (isLinkedInJob(job)) tags.push("li", "linkedin");
-  if (isDiceJob(job)) tags.push("dice");
-  if (isIndeedJob(job)) tags.push("indeed");
-  if (isJobrightJob(job)) tags.push("jobright");
-  if (isWorkdayJob(job)) tags.push("workday");
-  if (isBuiltinJob(job)) tags.push("builtin", "built-in");
-  if (isHimalayasJob(job)) tags.push("himalayas");
-  if (isGreenhouseJob(job)) tags.push("greenhouse", "gh");
+  const tags = [...describeJobSource(job).tokens];
   if (job?.applied) tags.push("applied");
   if (job?.inactive) tags.push("inactive");
   return tags;
@@ -2142,54 +2135,11 @@ function renderQueue() {
         atsGapsWrap = gapsPanel;
       }
     }
-    if (isLinkedInJob(job)) {
-      const liBadge = document.createElement("span");
-      liBadge.className = "badge badge-li";
-      liBadge.textContent = "LI";
-      badges.appendChild(liBadge);
-    }
-    if (isDiceJob(job)) {
-      const diceBadge = document.createElement("span");
-      diceBadge.className = "badge badge-dice";
-      diceBadge.textContent = "Dice";
-      badges.appendChild(diceBadge);
-    }
-    if (isIndeedJob(job)) {
-      const indeedBadge = document.createElement("span");
-      indeedBadge.className = "badge badge-indeed";
-      indeedBadge.textContent = "Indeed";
-      badges.appendChild(indeedBadge);
-    }
-    if (isJobrightJob(job)) {
-      const jrBadge = document.createElement("span");
-      jrBadge.className = "badge badge-jobright";
-      jrBadge.textContent = "Jobright";
-      badges.appendChild(jrBadge);
-    }
-    if (isWorkdayJob(job)) {
-      const wdBadge = document.createElement("span");
-      wdBadge.className = "badge badge-workday";
-      wdBadge.textContent = "Workday";
-      badges.appendChild(wdBadge);
-    }
-    if (isBuiltinJob(job)) {
-      const builtinBadge = document.createElement("span");
-      builtinBadge.className = "badge badge-builtin";
-      builtinBadge.textContent = "Builtin";
-      badges.appendChild(builtinBadge);
-    }
-    if (isHimalayasJob(job)) {
-      const himalayasBadge = document.createElement("span");
-      himalayasBadge.className = "badge badge-himalayas";
-      himalayasBadge.textContent = "Himalayas";
-      badges.appendChild(himalayasBadge);
-    }
-    if (isGreenhouseJob(job)) {
-      const ghBadge = document.createElement("span");
-      ghBadge.className = "badge badge-greenhouse";
-      ghBadge.textContent = "Greenhouse";
-      badges.appendChild(ghBadge);
-    }
+    const source = describeJobSource(job);
+    const sourceBadge = document.createElement("span");
+    sourceBadge.className = `badge ${source.className}`;
+    sourceBadge.textContent = source.label;
+    badges.appendChild(sourceBadge);
     if (job.applied) {
       const appliedBadge = document.createElement("span");
       appliedBadge.className = "badge badge-applied";

@@ -2685,6 +2685,26 @@ input[type="file"]::file-selector-button {
   color: #c7d2fe;
 }
 
+.badge-ashby {
+  background: #3f1d2e;
+  color: #f9a8d4;
+}
+
+.badge-lever {
+  background: #1f2937;
+  color: #e5e7eb;
+}
+
+.badge-jobgether {
+  background: #134e4a;
+  color: #99f6e4;
+}
+
+.badge-source {
+  background: var(--pill-muted-bg);
+  color: var(--pill-muted-fg);
+}
+
 .workflow-steps {
   display: flex;
   flex-wrap: wrap;

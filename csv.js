@@ -568,6 +568,29 @@ export function filterJobsByChannel(jobs, filter = "dice") {
   return list.filter((j) => isOtherChannelJob(j));
 }
 
+const JOB_SOURCE_RULES = [
+  { test: isDiceJob, label: "Dice", className: "badge-dice", tokens: ["dice"] },
+  { test: isHimalayasJob, label: "Himalayas", className: "badge-himalayas", tokens: ["himalayas"] },
+  { test: isGreenhouseJob, label: "Greenhouse", className: "badge-greenhouse", tokens: ["greenhouse", "gh"] },
+  { test: isLinkedInJob, label: "LinkedIn", className: "badge-li", tokens: ["linkedin", "li"] },
+  { test: isIndeedJob, label: "Indeed", className: "badge-indeed", tokens: ["indeed"] },
+  { test: isJobrightJob, label: "Jobright", className: "badge-jobright", tokens: ["jobright"] },
+  { test: isWorkdayJob, label: "Workday", className: "badge-workday", tokens: ["workday"] },
+  { test: isBuiltinJob, label: "Builtin", className: "badge-builtin", tokens: ["builtin", "built-in"] },
+  { test: isAshbyJob, label: "Ashby", className: "badge-ashby", tokens: ["ashby"] },
+  { test: isLeverJob, label: "Lever", className: "badge-lever", tokens: ["lever"] },
+  { test: isJobgetherJob, label: "Jobgether", className: "badge-jobgether", tokens: ["jobgether"] }
+];
+
+/** Visible board name for every queue row, including boards without their own filter. */
+export function describeJobSource(job = {}) {
+  const found = JOB_SOURCE_RULES.find((rule) => rule.test(job));
+  if (found) {
+    return { label: found.label, className: found.className, tokens: found.tokens };
+  }
+  return { label: "Other", className: "badge-source", tokens: ["other", "etc"] };
+}
+
 /** True when the job has no dedicated source button (includes Ashby and Lever). */
 function isOtherChannelJob(job) {
   return (
