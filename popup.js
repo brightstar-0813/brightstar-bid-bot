@@ -2869,13 +2869,8 @@ const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 
 async function clearStyleExport() {
   if (styleExportPasteEl) styleExportPasteEl.value = "";
-  if (jobTitleEl) jobTitleEl.value = "";
-  if (companyNameEl) companyNameEl.value = "";
-  if (jdLinkEl) jdLinkEl.value = "";
-  if (jdTextEl) jdTextEl.value = "";
   await chrome.storage.local.remove(STYLE_EXPORT_PASTE_KEY).catch(() => {});
-  await persistJobFields().catch(() => {});
-  setStatus("Cleared paste and job details.");
+  setStatus("Cleared pasted resume text.");
 }
 
 async function openStyleExportPreview(templateId = "") {
@@ -4502,7 +4497,7 @@ function initThemePicker() {
 }
 
 if (styleExportClearBtn) {
-  setIconButton(styleExportClearBtn, "remove", "Clear fields");
+  setIconButton(styleExportClearBtn, "remove", "Clear paste");
 }
 if (styleExportPdfBtn) {
   setIconButton(styleExportPdfBtn, "pdf", "Export PDF");

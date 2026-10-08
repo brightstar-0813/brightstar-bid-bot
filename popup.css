@@ -266,16 +266,16 @@ h1 {
 }
 
 .style-export-paste .field {
-  margin-bottom: 0;
+  margin-bottom: 8px;
 }
 
 .style-export-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
-  margin: 4px 0 2px;
+  margin: 2px 0 0;
 }
 
 .style-export-actions > .icon-button {
@@ -1295,7 +1295,8 @@ button.primary:hover,
 }
 
 .panel-body + .panel-toggle,
-#manualPanelBody > #toggleEmailBidMailbox {
+#manualPanelBody > #toggleEmailBidMailbox,
+#manualPanelBody > #toggleStyleExportPaste {
   margin-top: 6px;
 }
 
