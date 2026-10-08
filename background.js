@@ -7220,6 +7220,12 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     return freshQaAnswer(plain) || freshQaAnswer(lastText);
   }
 
+  // A leftover batch Skip/Stop flag must not abort a panel Custom Q&A ask.
+  // An explicit Skip during this wait still aborts, after one harvest attempt.
+  if (replyKind === "answer" && !expectResumeJson && !isRunning && batchControl.skipCurrent) {
+    batchControl.skipCurrent = false;
+  }
+
   // Ignore any previous job's harvested JSON / ready flag.
   if (expectResumeJson) {
     await chrome.storage.local
@@ -7238,6 +7244,10 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     await chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
 
     if (batchControl.skipCurrent) {
+      if (replyKind === "answer" && !expectResumeJson) {
+        const rescued = await readSettledQaAnswer();
+        if (rescued) return rescued;
+      }
       throw new Error("__SKIP__");
     }
 

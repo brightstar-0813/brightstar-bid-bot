@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   answerCertificationQuestion,
   bankAnswerFitsQuestion,
+  buildCustomQaAgentPrompt,
   buildCustomQaFollowUpPrompt,
   buildCustomQaJobKey,
   cleanCustomQaAnswer,
@@ -170,6 +171,36 @@ test("extractFreshCustomQaAnswer keeps the finished paragraph after the ask prom
     ),
     answer
   );
+});
+
+test("extractFreshCustomQaAnswer keeps a reply that repeats a resume sentence from the prompt", () => {
+  const answer =
+    "I bring 11+ years of Salesforce engineering and architecture experience, including MuleSoft Integration Cloud, REST and SOAP APIs, integration patterns, data modeling, and security. I've designed and delivered scalable solutions across consumer services, education, manufacturing, and nonprofit environments, translating business needs into maintainable systems and collaborating with stakeholders through delivery and support.";
+  const prompt = buildCustomQaAgentPrompt({
+    question: "What about your background makes you a good fit for this role?",
+    resumeText: answer,
+    jobMeta: {
+      jobTitle: "Salesforce Integration",
+      companyName: "Acme",
+      jdText: "Salesforce integration, MuleSoft, REST and SOAP."
+    }
+  });
+  const previous = JSON.stringify({ profile: answer, name: "Candidate" });
+  assert.ok(prompt.includes(answer.slice(0, 80)));
+  assert.ok(previous.includes(answer.slice(0, 80)));
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt, previous }), answer);
+  assert.equal(
+    extractFreshCustomQaAnswer(`${prompt}\n\nShow more\n\n${answer}`, { prompt, previous }),
+    answer
+  );
+  assert.equal(
+    extractFreshCustomQaAnswer(
+      "This chat is for ONE job application. Keep using this same conversation … Show more",
+      { prompt }
+    ),
+    ""
+  );
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt, previous: answer }), "");
 });
 
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {

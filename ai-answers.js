@@ -915,6 +915,10 @@ export function cleanCustomQaAnswer(raw) {
  * or an earlier resume JSON blob. A finished paragraph after the prompt is
  * the answer; the prompt itself is not.
  */
+function compactQaText(text) {
+  return stripInvisibleChars(text).replace(/\s+/g, " ").trim();
+}
+
 export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } = {}) {
   let t = stripInvisibleChars(raw).trim();
   if (!t) return "";
@@ -941,9 +945,32 @@ export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } =
   if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON|CONTEXT \(JSON\)/i.test(t)) {
     return "";
   }
-  const head = t.slice(0, 80);
-  if (head && String(previous || "").includes(head)) return "";
-  if (promptTrim.length >= 40 && promptTrim.includes(head)) return "";
+  const answerCompact = compactQaText(t).replace(/(?:\s*[.…]{2,}|\s*…)+\s*$/g, "").trim();
+  const promptCompact = compactQaText(promptTrim);
+  // Collapsed user bubble ("This chat is for ONE job… Show more") is the ask, not the reply.
+  // A real answer may repeat a resume sentence that also sits inside CONTEXT JSON — keep that.
+  if (promptCompact.length >= 40 && answerCompact) {
+    if (promptCompact.startsWith(answerCompact)) return "";
+    if (
+      answerCompact.length < 400 &&
+      promptCompact.includes(answerCompact) &&
+      /this chat is for one job application|keep using this same conversation|reply with only the answer text/i.test(
+        answerCompact
+      )
+    ) {
+      return "";
+    }
+  }
+  const prevCompact = compactQaText(previous);
+  if (prevCompact && answerCompact === prevCompact) return "";
+  if (
+    prevCompact &&
+    answerCompact.length > 80 &&
+    prevCompact.endsWith(answerCompact) &&
+    answerCompact.length >= prevCompact.length * 0.8
+  ) {
+    return "";
+  }
   return t;
 }
 
