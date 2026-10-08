@@ -1,0 +1,217 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  answerCertificationQuestion,
+  bankAnswerFitsQuestion,
+  buildCustomQaAgentPrompt,
+  buildCustomQaFollowUpPrompt,
+  buildCustomQaJobKey,
+  cleanCustomQaAnswer,
+  compactApplicantContext,
+  buildCustomQaPayload,
+  extractFreshCustomQaAnswer,
+  normalizeSkillList,
+  normalizeRecentRoles
+} from "../ai-answers.js";
+
+const CERTS = [
+  "Salesforce Certified Administrator",
+  "Salesforce Certified Application Architect",
+  "Salesforce Certified Platform App Builder"
+];
+
+test("answerCertificationQuestion returns Yes/No from profile certs", () => {
+  assert.equal(
+    answerCertificationQuestion(
+      "Do you hold any current Salesforce Platform Developer certifications?",
+      CERTS
+    ),
+    "No"
+  );
+  assert.equal(
+    answerCertificationQuestion(
+      "Do you hold any current Salesforce Platform App Builder certifications?",
+      CERTS
+    ),
+    "Yes"
+  );
+  assert.equal(
+    answerCertificationQuestion("Do you hold any Salesforce certifications?", CERTS),
+    "Yes"
+  );
+  assert.equal(
+    answerCertificationQuestion("Do you hold any Salesforce certifications?", []),
+    "No"
+  );
+});
+
+test("bankAnswerFitsQuestion accepts Yes/No for hold-cert prompts", () => {
+  assert.equal(
+    bankAnswerFitsQuestion("Do you hold any current Salesforce Platform Developer certifications?", "No"),
+    true
+  );
+  assert.equal(
+    bankAnswerFitsQuestion("Do you hold any current Salesforce Platform Developer certifications?", "Yes"),
+    true
+  );
+});
+
+test("bankAnswerFitsQuestion rejects bare Yes/No on non-question labels", () => {
+  assert.equal(bankAnswerFitsQuestion("English US (English US)", "Yes"), false);
+  assert.equal(bankAnswerFitsQuestion("Preferred language", "No"), false);
+  assert.equal(bankAnswerFitsQuestion("Are you authorized to work in the US?", "Yes"), true);
+  assert.equal(bankAnswerFitsQuestion("Choose Password:", "secret"), false);
+});
+
+test("compactApplicantContext includes role, skills, and certs", () => {
+  const ctx = compactApplicantContext({
+    firstName: "Edrwin",
+    currentEmployer: "Accenture",
+    currentJobTitle: "Salesforce Developer",
+    workAuthorized: "yes",
+    needsSponsorship: "no",
+    certifications: CERTS,
+    skills: ["Apex", "LWC", "Flow"],
+    recentRoles: [{ company: "Accenture", title: "SF Dev", current: true }]
+  });
+  assert.equal(ctx.currentEmployer, "Accenture");
+  assert.equal(ctx.currentJobTitle, "Salesforce Developer");
+  assert.deepEqual(ctx.certifications, CERTS);
+  assert.ok(ctx.skills.includes("Apex"));
+  assert.equal(ctx.recentRoles[0].company, "Accenture");
+});
+
+test("buildCustomQaPayload exposes knownFacts for grounding", () => {
+  const payload = buildCustomQaPayload({
+    question: "Do you require sponsorship?",
+    applicantInfo: {
+      firstName: "Edrwin",
+      needsSponsorship: "no",
+      workAuthorized: "yes",
+      certifications: CERTS,
+      currentJobTitle: "Developer",
+      currentEmployer: "Accenture"
+    },
+    resumeText: "Resume body with Apex experience"
+  });
+  assert.equal(payload.knownFacts.needsSponsorship, "no");
+  assert.ok(payload.knownFacts.certifications.length >= 3);
+  assert.match(payload.knownFacts.currentRole, /Accenture/);
+  assert.equal(payload.candidateProfile.firstName, "Edrwin");
+  assert.ok(String(payload.resumeExcerpt || "").includes("Apex"));
+});
+
+test("buildCustomQaJobKey is stable per profile + job link", () => {
+  const a = buildCustomQaJobKey("p1", {
+    jdLink: "https://boards.greenhouse.io/acme/jobs/1/",
+    jobTitle: "Dev",
+    companyName: "Acme"
+  });
+  const b = buildCustomQaJobKey("p1", {
+    jdLink: "https://boards.greenhouse.io/acme/jobs/1",
+    jobTitle: "Other"
+  });
+  const c = buildCustomQaJobKey("p2", { jdLink: "https://boards.greenhouse.io/acme/jobs/1" });
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+});
+
+test("buildCustomQaFollowUpPrompt includes job JD excerpt", () => {
+  const prompt = buildCustomQaFollowUpPrompt("Are you authorized to work in the US?", {
+    jobTitle: "Salesforce Developer",
+    companyName: "Acme",
+    jdLink: "https://boards.greenhouse.io/acme/jobs/1",
+    jdText: "Build Apex and LWC for enterprise CRM. Must be authorized to work in the US."
+  });
+  assert.match(prompt, /same conversation/i);
+  assert.match(prompt, /Are you authorized to work in the US\?/);
+  assert.match(prompt, /Salesforce Developer/);
+  assert.match(prompt, /Acme/);
+  assert.match(prompt, /JOB DESCRIPTION/i);
+  assert.match(prompt, /Build Apex and LWC/);
+  assert.doesNotMatch(prompt, /CONTEXT \(JSON\)/);
+});
+
+test("extractFreshCustomQaAnswer keeps the finished paragraph after the ask prompt", () => {
+  const prompt = buildCustomQaFollowUpPrompt("Name 5 requirements from the job description that align to your background", {
+    jobTitle: "Senior Salesforce Developer",
+    companyName: "LanceSoft",
+    jdText: "Apex, LWC, Flow, REST/SOAP, CI/CD"
+  });
+  const answer =
+    "Apex development, Lightning Web Components, Salesforce Flow and declarative automation, REST/SOAP API and middleware integrations, and CI/CD with automated testing and deployment validation.";
+  const mixed = `${prompt}\n\nShow more\n\n${answer}\nChatGPT can make mistakes. Check important info.`;
+  assert.equal(extractFreshCustomQaAnswer(mixed, { prompt }), answer);
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt }), answer);
+  assert.equal(extractFreshCustomQaAnswer(prompt, { prompt }), "");
+  assert.equal(cleanCustomQaAnswer(`"${answer}"`), answer);
+  assert.equal(
+    extractFreshCustomQaAnswer(`ChatGPT said: ${answer}`, { prompt }),
+    answer
+  );
+  assert.equal(cleanCustomQaAnswer(`Claude said:\n${answer}`), answer);
+  assert.equal(cleanCustomQaAnswer(`ChatGPT said\n${answer}`), answer);
+  assert.equal(cleanCustomQaAnswer(`ChatGPT\u200B said:\n${answer}`), answer);
+  assert.equal(cleanCustomQaAnswer(`\u200BChatGPT said\n${answer}`), answer);
+  assert.equal(extractFreshCustomQaAnswer(`ChatGPT\u200B said\n${answer}`, { prompt }), answer);
+  assert.equal(cleanCustomQaAnswer(`...Show more\n${answer}`), answer);
+  assert.equal(cleanCustomQaAnswer(`…Show more ${answer}`), answer);
+  assert.equal(extractFreshCustomQaAnswer(`...Show more ${answer}`, { prompt }), answer);
+  assert.equal(
+    cleanCustomQaAnswer(
+      `just nowDrafting a Salesforce solution example grounded in resume skills.${answer}`
+    ),
+    answer
+  );
+  assert.equal(
+    extractFreshCustomQaAnswer(
+      `just now\nDrafting a Salesforce solution example grounded in resume skills.\n${answer}`,
+      { prompt }
+    ),
+    answer
+  );
+});
+
+test("extractFreshCustomQaAnswer keeps a reply that repeats a resume sentence from the prompt", () => {
+  const answer =
+    "I bring 11+ years of Salesforce engineering and architecture experience, including MuleSoft Integration Cloud, REST and SOAP APIs, integration patterns, data modeling, and security. I've designed and delivered scalable solutions across consumer services, education, manufacturing, and nonprofit environments, translating business needs into maintainable systems and collaborating with stakeholders through delivery and support.";
+  const prompt = buildCustomQaAgentPrompt({
+    question: "What about your background makes you a good fit for this role?",
+    resumeText: answer,
+    jobMeta: {
+      jobTitle: "Salesforce Integration",
+      companyName: "Acme",
+      jdText: "Salesforce integration, MuleSoft, REST and SOAP."
+    }
+  });
+  const previous = JSON.stringify({ profile: answer, name: "Candidate" });
+  assert.ok(prompt.includes(answer.slice(0, 80)));
+  assert.ok(previous.includes(answer.slice(0, 80)));
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt, previous }), answer);
+  assert.equal(
+    extractFreshCustomQaAnswer(`${prompt}\n\nShow more\n\n${answer}`, { prompt, previous }),
+    answer
+  );
+  assert.equal(
+    extractFreshCustomQaAnswer(
+      "This chat is for ONE job application. Keep using this same conversation … Show more",
+      { prompt }
+    ),
+    ""
+  );
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt, previous: answer }), "");
+});
+
+test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {
+  assert.deepEqual(normalizeSkillList(["Apex", "Apex", "LWC"]).slice(0, 2), ["Apex", "LWC"]);
+  assert.deepEqual(
+    normalizeSkillList([{ category: "Core", items: ["Flow", "SOQL"] }]),
+    ["Flow", "SOQL"]
+  );
+  assert.equal(
+    normalizeRecentRoles([{ company: "Capgemini", title: "Consultant", bullets: ["a", "b"] }])[0]
+      .company,
+    "Capgemini"
+  );
+});
