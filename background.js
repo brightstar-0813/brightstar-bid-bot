@@ -3770,16 +3770,37 @@ async function readChatReadiness(tabId, provider) {
   }
 }
 
+function gptSessionFaultDetail(message) {
+  const msg = String(message || "");
+  if (!msg.startsWith("__GPT_SESSION__:")) return "";
+  return msg.slice("__GPT_SESSION__:".length).trim() || "ChatGPT could not load models";
+}
+
 /** ChatGPT sometimes paints the composer but fails the model picker. */
 async function readChatGptPageHealth(tabId) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
-        const t = String(document.body?.innerText || "").slice(0, 8000);
+        const chunks = [];
+        const main = document.querySelector("main");
+        if (main) chunks.push(String(main.innerText || "").slice(0, 6000));
+        for (const el of document.querySelectorAll(
+          '[role="alert"], [role="status"], [role="dialog"], [class*="toast"], [class*="Toast"]'
+        )) {
+          chunks.push(String(el.innerText || el.textContent || "").slice(0, 500));
+        }
+        const t = chunks.join("\n");
+        const sessionFault =
+          /could not load (?:chatgpt )?models?/i.test(t) ||
+          /can(?:not|'t) load (?:the )?(?:chatgpt )?models?/i.test(t) ||
+          /unable to load (?:the )?(?:chatgpt )?models?/i.test(t) ||
+          /failed to load (?:chatgpt )?models?/i.test(t) ||
+          /unable to load (?:chat )?history/i.test(t) ||
+          /could not load (?:your )?chats/i.test(t);
         return {
-          modelsFailed: /could not load chatgpt models/i.test(t),
-          historyFailed: /unable to load (?:chat )?history|could not load (?:your )?chats/i.test(t),
+          modelsFailed: sessionFault,
+          historyFailed: false,
           ready: /ready when you are/i.test(t)
         };
       }
@@ -4090,10 +4111,8 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat) {
   await ensureChatGptDomHarvest(tabId);
   await recoverChatGptComposerIfBroken(tabId, AI_PROVIDERS.CHATGPT);
   const health = await readChatGptPageHealth(tabId);
-  if (health.modelsFailed) {
-    throw new Error(
-      "ChatGPT could not load models. Refresh the ChatGPT tab, wait until the model picker appears, then Generate again."
-    );
+  if (health.modelsFailed || health.historyFailed) {
+    throw new Error("__GPT_SESSION__:ChatGPT could not load models");
   }
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
@@ -7281,6 +7300,20 @@ async function automateChatGpt(tabId, prompt, options = {}) {
       }
     }
 
+    // A model-picker / history banner means the session is stuck. Refresh once
+    // here; if it is still broken, let the batch retry without sitting out the
+    // full reply timeout. Do not reload after a reply has already started.
+    if (provider === AI_PROVIDERS.CHATGPT && !sawGeneration) {
+      const health = await readChatGptPageHealth(tabId);
+      if (health.modelsFailed || health.historyFailed) {
+        await recoverChatGptComposerIfBroken(tabId, provider);
+        const again = await readChatGptPageHealth(tabId);
+        if (again.modelsFailed || again.historyFailed) {
+          throw new Error("__GPT_SESSION__:ChatGPT could not load models");
+        }
+      }
+    }
+
     // Ready flag from content.js = JSON complete on page → generate files now.
     if (expectResumeJson) {
       try {
@@ -9188,6 +9221,37 @@ async function runBatchLoop(outputDir) {
         if (msg === "__SKIP__" || batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(next.csvRow, { status: "skipped", error: "" });
+          continue;
+        }
+        const sessionFault = gptSessionFaultDetail(msg);
+        if (sessionFault) {
+          const refreshes = Number(next.sessionRefreshes || 0) + 1;
+          if (refreshes >= 2) {
+            await updateQueueJob(next.csvRow, {
+              status: "error",
+              attempts: Number(next.attempts || 0) + 1,
+              sessionRefreshes: refreshes,
+              error: `${sessionFault} — session refresh did not clear it`.slice(0, 240)
+            });
+            await setStatus(
+              `Row ${next.csvRow}: ChatGPT still could not load models after a refresh. Next job…`
+            );
+            await armInactiveProbeForNextGenerateJob();
+            await cooldownBeforeNextJob({
+              aiTabId: err?.aiTabId ?? null,
+              aiChatId: err?.aiChatId || "",
+              reason: "next job after session refresh"
+            });
+            continue;
+          }
+          await updateQueueJob(next.csvRow, {
+            status: "pending",
+            sessionRefreshes: refreshes,
+            error: "ChatGPT session refreshed — retrying"
+          });
+          await setStatus(
+            `Row ${next.csvRow}: refreshed the ChatGPT tab. Retrying this row; batch keeps going…`
+          );
           continue;
         }
         if (batchControl.stop) {
@@ -11669,7 +11733,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await setStatus(result.status || "Draft ready — review preview, then Confirm.");
       } catch (err) {
         await chrome.storage.local.set({ generation_running: false });
-        const msg = String(err?.message || err);
+        const msg = gptSessionFaultDetail(err?.message || err) || String(err?.message || err);
         if (msg.startsWith("__DUPLICATE_SKIP__:")) {
           const reason = msg.slice("__DUPLICATE_SKIP__:".length) || "duplicate job link";
           if (meta.csvRow != null && meta.csvRow !== "") {
