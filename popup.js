@@ -1223,6 +1223,7 @@ function updateCsvSummaryFromQueue() {
       !isGreenhouseJob(j)
   ).length;
   const done = queueCache.filter((j) => j.status === "done").length;
+  const applied = queueCache.filter((j) => j.applied).length;
   const pending = queueCache.filter((j) => j.status === "pending").length;
   const errors = queueCache.filter((j) => j.status === "error" || j.status === "failed").length;
   const skipped = queueCache.filter((j) => j.status === "skipped").length;
@@ -1253,6 +1254,7 @@ function updateCsvSummaryFromQueue() {
     <div class="stat-grid">
       <span class="stat"><em>${queueCache.length}</em> queue</span>
       <span class="stat"><em>${done}</em> done</span>
+      <span class="stat${applied ? " is-ok" : ""}"><em>${applied}</em> applied</span>
       <span class="stat"><em>${pending}</em> pending</span>
       <span class="stat"><em>${skipped}</em> skipped</span>
       <span class="stat${errors ? " is-bad" : ""}"><em>${errors}</em> error</span>

@@ -2928,7 +2928,7 @@ button.icon-button-labeled .icon-button-label {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -2955,6 +2955,10 @@ button.icon-button-labeled .icon-button-label {
 
 .stat.is-bad em {
   color: var(--err-fg);
+}
+
+.stat.is-ok em {
+  color: var(--ok);
 }
 
 .summary-meta {
