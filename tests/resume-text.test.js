@@ -302,7 +302,7 @@ test("Orange Banner puts company above the title and uses orange section bars", 
           bullets: ["Designed and delivered applications."]
         }
       ],
-      skills: [{ items: "JavaScript, Python, APIs" }],
+      skills: [{ category: "Languages", items: "JavaScript, Python, APIs" }],
       education: [
         {
           school: "Example University",
@@ -320,7 +320,9 @@ test("Orange Banner puts company above the title and uses orange section bars", 
   assert.match(html, /class="bar"><span>Education<\/span>/);
   assert.match(html, /About me/);
   assert.match(html, /Areas of expertise/);
-  assert.match(html, /JavaScript • Python • APIs/);
+  assert.match(html, /class="skills-table"/);
+  assert.match(html, /Languages/);
+  assert.match(html, /JavaScript, Python, APIs/);
   assert.match(html, /P:<\/span>/);
   assert.match(html, /LI:<\/span>/);
   assert.match(html, /Example Partners/);

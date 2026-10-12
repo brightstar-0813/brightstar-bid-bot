@@ -4,6 +4,7 @@ import {
   escapeHtml,
   pathAttr,
   renderCerts,
+  renderSkills,
   renderTechnicalSummary,
   richHtml,
   wrapHtmlDocument
@@ -138,7 +139,38 @@ const CSS = `
     ul { margin: 2px 0 0; padding-left: 16px; }
     li { margin: 0 0 2px; }
 
-    .expertise { margin: 0; }
+    .skills-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 2px 0 0;
+      font-size: 10pt;
+    }
+
+    .skills-table th,
+    .skills-table td {
+      padding: 2px 8px 2px 0;
+      vertical-align: top;
+      text-align: left;
+      border-bottom: 1px solid #f3d3c0;
+    }
+
+    .skills-table th {
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: #e8772e;
+      border-bottom: 1.5px solid #e8772e;
+    }
+
+    .skills-table .skill-cat {
+      width: 28%;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .skills-table .skill-items { width: 72%; }
 
     .edu { margin: 0 0 8px; }
 
@@ -243,20 +275,6 @@ function renderEducation(education) {
     .join("\n");
 }
 
-function renderExpertise(skills) {
-  const rows = (skills || [])
-    .map((row, si) => {
-      const items = String(row?.items || "")
-        .split(/\s*[•|]\s*|\s*,\s*/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-      if (!items.length) return "";
-      return `<span${pathAttr(`skills.${si}.items`)}>${items.map((item) => richHtml(item)).join(" • ")}</span>`;
-    })
-    .filter(Boolean);
-  if (!rows.length) return "";
-  return `<p class="expertise">${rows.join(" • ")}</p>`;
-}
 
 export const orangeBannerTemplate = {
   id: "orange-banner",
@@ -268,7 +286,7 @@ export const orangeBannerTemplate = {
     const profile = String(data.profile || "").trim();
     const tech = renderTechnicalSummary(data.technicalSummary);
     const jobs = renderJobs(data.experience);
-    const skills = renderExpertise(data.skills);
+    const skills = renderSkills(data.skills);
     const edu = renderEducation(data.education);
     const certs = (data.certifications || []).length ? renderCerts(data.certifications) : "";
     const contact = labeledContact(data);
