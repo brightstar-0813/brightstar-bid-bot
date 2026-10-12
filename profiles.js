@@ -12,6 +12,7 @@ import {
 import { PROMPT as coverLetterDePrompt } from "./prompts/cover-letter-de.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
+  getRoleTrack,
   getTrackAtsAppendix,
   getTrackCoverLetterTemplate,
   getTrackPromptTemplate,
@@ -391,6 +392,22 @@ export {
   parseRequiredExperienceFromPrompt,
   promptHasFixedCompanyHistory
 };
+
+const PROFILE_MENU_TRACK_SUFFIX =
+  /\s*\((?:salesforce|data engineering|full stack|ai\s*\/\s*ml|sf|de|fs|ai|custom)\)\s*$/i;
+
+/** Picker label: person name plus the engineering-track acronym, e.g. "D'Mario Lewis (SF)". */
+export function profileMenuLabel(profile) {
+  if (!profile) return "";
+  let base = String(profile.label || profile.name || "Profile").trim();
+  let stripped = base.replace(PROFILE_MENU_TRACK_SUFFIX, "").trim();
+  while (stripped !== base) {
+    base = stripped;
+    stripped = base.replace(PROFILE_MENU_TRACK_SUFFIX, "").trim();
+  }
+  const code = getRoleTrack(resolveRoleTrackForPerson(profile)).shortLabel || "SF";
+  return `${base} (${code})`;
+}
 
 export const DEFAULT_PROFILE_ID = "dmario-lewis";
 

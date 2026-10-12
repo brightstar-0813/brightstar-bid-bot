@@ -13,6 +13,7 @@ import {
 import { enforceJdSkills, rolesMissingJdSkills } from "../resume-json.js";
 import {
   BUILTIN_PROFILES,
+  profileMenuLabel,
   resolvePromptTemplateForTrack,
   resolveCoverLetterTemplateForTrack,
   resolveResumePrompt
@@ -112,6 +113,20 @@ test("rolesMissingJdSkills uses track catalog", () => {
   };
   const gaps = rolesMissingJdSkills(resume, jd, { roleTrack: "fs", roles: 2, minBullets: 2 });
   assert.ok(gaps.length > 0);
+});
+
+test("profile menu label puts the track acronym beside the name", () => {
+  const byId = (id) => BUILTIN_PROFILES.find((p) => p.id === id);
+  assert.equal(profileMenuLabel(byId("dmario-lewis")), "D'Mario Lewis (SF)");
+  assert.equal(profileMenuLabel(byId("sandeep-mahankali")), "Sandeep Mahankali (SF)");
+  assert.equal(profileMenuLabel(byId("raquel-oliveira")), "Raquel Silva (SF)");
+  assert.equal(profileMenuLabel(byId("raquel-oliveira-de")), "Raquel Silva De Oliveira (DE)");
+  assert.equal(profileMenuLabel(byId("jessel-tampus-de")), "Jessel Tampus (DE)");
+  assert.equal(
+    profileMenuLabel({ label: "Jane Doe (custom)", name: "Jane Doe", roleTrack: "fs", builtin: false }),
+    "Jane Doe (FS)"
+  );
+  assert.equal(profileMenuLabel({ name: "Ada Lovelace", roleTrack: "ai" }), "Ada Lovelace (AI)");
 });
 
 test("built-in resume profiles keep career facts and no resume prompt", () => {

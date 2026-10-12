@@ -14,7 +14,8 @@ import {
   getPersonSheetConfig,
   DEFAULT_PROFILE_ID,
   resolveCoverLetterTemplateForTrack,
-  applyUsApplicantDefaults
+  applyUsApplicantDefaults,
+  profileMenuLabel
 } from "./profiles.js";
 import {
   fillPersonForm,
@@ -136,7 +137,7 @@ export function createInlineProfileEditor(opts) {
     for (const profile of profilesCache) {
       const opt = document.createElement("option");
       opt.value = profile.id;
-      opt.textContent = profile.builtin ? profile.label : `${profile.label} (custom)`;
+      opt.textContent = profileMenuLabel(profile);
       selectEl.appendChild(opt);
     }
 

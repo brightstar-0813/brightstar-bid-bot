@@ -16,7 +16,8 @@ import {
   setPersonSheetConfig,
   syncActivePersonOutputContext,
   applyUsApplicantDefaults,
-  resolveSheetTabNameForPerson
+  resolveSheetTabNameForPerson,
+  profileMenuLabel
 } from "./profiles.js";
 import {
   getSessionRoleTrack,
@@ -393,9 +394,9 @@ function syncActivePersonChip() {
     return;
   }
   chip.hidden = false;
-  chip.textContent = selected.label;
+  chip.textContent = profileMenuLabel(selected);
   chip.classList.toggle("is-builtin", Boolean(selected.builtin));
-  chip.title = selected.label;
+  chip.title = profileMenuLabel(selected);
 }
 
 function setActiveRoleTrackUi(track, { locked = false } = {}) {
@@ -678,7 +679,7 @@ function populateProfileSelect(selectedId) {
   for (const profile of profilesCache) {
     const option = document.createElement("option");
     option.value = profile.id;
-    option.textContent = profile.builtin ? profile.label : `${profile.label} (custom)`;
+    option.textContent = profileMenuLabel(profile);
     profileSelectEl.appendChild(option);
   }
   const validIds = new Set(profilesCache.map((p) => p.id));
@@ -3381,7 +3382,8 @@ async function refreshQaBank() {
 }
 
 function activePersonLabel() {
-  return profilesCache.find((p) => p.id === profileSelectEl.value)?.label || "active person";
+  const selected = profilesCache.find((p) => p.id === profileSelectEl.value);
+  return selected ? profileMenuLabel(selected) : "active person";
 }
 
 async function openQaEditor() {

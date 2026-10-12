@@ -10,7 +10,8 @@ import {
   getPersonSheetConfig,
   DEFAULT_PROFILE_ID,
   resolveCoverLetterTemplateForTrack,
-  applyUsApplicantDefaults
+  applyUsApplicantDefaults,
+  profileMenuLabel
 } from "./profiles.js";
 import {
   fillPersonForm,
@@ -220,7 +221,7 @@ function escapeHtml(s) {
 
 function profileOptionLabel(profile) {
   if (!profile) return "Add a new profile";
-  return profile.builtin ? profile.label : `${profile.label} (custom)`;
+  return profileMenuLabel(profile);
 }
 
 function setProfilePickerOpen(open) {
