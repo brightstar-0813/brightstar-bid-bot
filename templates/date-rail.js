@@ -15,7 +15,7 @@ import {
  * Dates sit in a narrow left rail so each role stays one compact block.
  */
 const CSS = `
-    @page { size: A4; margin: 12mm 14mm; }
+    @page { size: A4; margin: 10mm 12mm; }
 
     * { box-sizing: border-box; }
 
@@ -70,18 +70,27 @@ const CSS = `
 
     .tech-summary, .certifications { margin: 0; padding-left: 15px; }
 
-    .job {
+    .job, .edu-col {
       display: grid;
-      grid-template-columns: 34mm 1fr;
-      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 10px;
       margin: 0 0 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #d1d5db;
     }
 
+    .job-body { grid-column: 1; grid-row: 1; min-width: 0; }
+
     .job-dates {
-      font-size: 9pt;
+      grid-column: 2;
+      grid-row: 1;
+      align-self: start;
+      font-size: 10pt;
+      font-weight: 700;
       line-height: 1.3;
-      color: #4b5563;
+      color: #111;
       text-align: right;
+      white-space: nowrap;
     }
 
     .job-title {
@@ -101,8 +110,8 @@ const CSS = `
 
 export const dateRailTemplate = {
   id: "date-rail",
-  label: "14 · Date Rail",
-  description: "Dates in a left column · title and company on the right · compact roles.",
+  label: "10 · Date Rail",
+  description: "Date on the title line · role text uses the full width.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";
     const headline = String(data.headline || "").trim();

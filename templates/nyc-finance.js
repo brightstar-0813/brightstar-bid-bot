@@ -77,7 +77,7 @@ const CSS = `
       letter-spacing: 1.3px;
       text-transform: uppercase;
       color: #0b1f3a;
-      border-bottom: 1.5px solid #0b1f3a;
+      border-bottom: 2px solid #d4b56a;
     }
 
     p { margin: 0 0 4px; text-align: justify; }
@@ -136,6 +136,7 @@ const CSS = `
       background: #0b1f3a;
       color: #fff;
       font-weight: 700;
+      border-bottom: 3px solid #d4b56a;
     }
 
     .skills-table .skill-cat { width: 28%; font-weight: 700; color: #0b1f3a; }
@@ -154,7 +155,7 @@ const CSS = `
 
 export const nycFinanceTemplate = {
   id: "nyc-finance",
-  label: "5 · NYC Finance",
+  label: "4 · NYC Finance",
   description: "Navy header band · Calibri · US banks, capital markets, and fintech senior IC.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

@@ -44,7 +44,7 @@ const CSS = `
       margin: 0 0 2px;
       font-size: 22.5pt;
       font-weight: 700;
-      letter-spacing: 0;
+      letter-spacing: 1.5px;
       color: #000;
       text-align: center;
     }
@@ -127,9 +127,9 @@ const CSS = `
     p.role-title {
       margin: 0;
       font-size: 10.8pt;
-      font-weight: 700;
+      font-weight: 400;
       color: #000;
-      font-style: normal;
+      font-style: italic;
     }
 
     p.role-meta {
@@ -165,7 +165,8 @@ const CSS = `
 
     .skills-table th {
       font-weight: 700;
-      background: #e8e8e8;
+      background: #111;
+      color: #fff;
       font-size: 9.5pt;
     }
 

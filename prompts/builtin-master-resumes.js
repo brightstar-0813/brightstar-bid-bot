@@ -424,3 +424,74 @@ Federal University of Pernambuco | Bachelor of Science in Computer Science | Rec
 
 CERTIFICATIONS
 None.`;
+
+export const EVERTON_JULIO_SF_MASTER = `Everton Julio
+Senior Salesforce Engineer / Salesforce Architect
+Recife, Pernambuco, Brazil | +55 81 92007-7894 | ievertonsilva94@gmail.com
+https://www.linkedin.com/in/everton-julio-sf
+
+SUMMARY
+11+ years of overall technology experience, including 9+ years delivering Salesforce administration, development, and architecture across consulting, healthcare, and digital-product teams.
+
+SKILLS
+Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Data Cloud, Agentforce, Einstein AI, Nonprofit Cloud, Health Cloud, Salesforce Platform.
+Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
+Flow and Flow Builder, approval processes, validation rules, workflow automation.
+Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
+REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
+Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance.
+Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
+Reports, dashboards, UAT, production support, code reviews.
+Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+
+EXPERIENCE
+Atrium — Senior Salesforce Engineer / Architect | Bozeman, Montana, United States | Remote | Mar 2024 - Present
+Technology consultancy delivering Salesforce, Snowflake, data, and AI programs, including custom AI agents.
+
+Penrod — Salesforce Developer / Integration Specialist | Broomfield, Colorado, United States | Remote | Jan 2021 - Feb 2024
+Healthcare and life-sciences consultancy building Salesforce, Snowflake, and Google Cloud solutions for patient intake, at-home care, and clinical workflows.
+
+DreamExperience — Salesforce Administrator | Recife, Pernambuco, Brazil | On-site | Sep 2017 - Jan 2020
+Brazilian Salesforce consulting partner implementing Sales Cloud, Service Cloud, Marketing Cloud, and Experience Cloud. Joined Grupo Pitang in 2020.
+
+Pitang — Software Engineer Intern / Junior CRM Developer | Recife, Pernambuco, Brazil | On-site | Jan 2015 - Jul 2017
+Recife technology firm delivering custom software, CRM, analytics, and agile digital-transformation projects.
+
+EDUCATION
+Universidade Federal de Pernambuco (UFPE) | Bachelor of Computer Science | Recife, Pernambuco, Brazil | Apr 2011 - Sep 2015
+
+CERTIFICATIONS
+None.`;
+
+export const EVERTON_JULIO_DE_MASTER = `Everton Julio Da Silva
+Senior Data Engineer
+Recife, Pernambuco, Brazil | +55 81 92007-7894 | ievertonsilva94@gmail.com
+https://www.linkedin.com/in/everton-julio-de
+
+SUMMARY
+11+ years of overall technology experience, including 10+ years delivering data engineering, ETL/ELT, and analytics platforms for healthcare, agricultural software, and scientific computing teams.
+
+SKILLS
+Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
+
+EXPERIENCE
+Prominence Advisors — Senior Data Engineer | Chicago, Illinois, United States | Remote | Sep 2024 - Present
+Healthcare data consultancy automating pipelines, cloud migrations, and governed data products for analytics, AI, and clinical quality reporting.
+
+phData — Senior Data Engineer | Minneapolis, Minnesota, United States | Remote | Apr 2020 - Jul 2024
+Data and AI engineering partner building Snowflake, Spark, cloud migration, and production data platforms.
+
+Unimed Recife — Data Engineer | Recife, Pernambuco, Brazil | On-site | Sep 2018 - Jan 2020
+Healthcare cooperative in the Unimed system, operating hospitals, laboratories, and emergency services in Recife.
+
+Granular — Backend Developer / Junior Data Engineer | Champaign, Illinois, United States | On-site | Apr 2016 - Jun 2018
+Agricultural software company building farm-management analytics. Acquired by DuPont in 2017.
+
+Wolfram — Software Engineer Intern | Champaign, Illinois, United States | On-site | Mar 2015 - Mar 2016
+Scientific computing company behind Mathematica and the Wolfram Language.
+
+EDUCATION
+University of Illinois Urbana-Champaign | Bachelor of Computer Science | Champaign, Illinois, United States | Aug 2011 - May 2015
+
+CERTIFICATIONS
+None.`;

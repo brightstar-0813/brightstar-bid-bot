@@ -66,7 +66,11 @@ const CSS = `
       text-decoration: none;
     }
 
-    section { margin: 0 0 10px; }
+    section {
+      margin: 0 0 10px;
+      padding-left: 10px;
+      border-left: 3px solid #0f766e;
+    }
 
     h2 {
       margin: 0 0 6px;
@@ -134,7 +138,7 @@ const CSS = `
 
 export const modernSansTemplate = {
   id: "modern-sans",
-  label: "9 · Modern US Sans",
+  label: "7 · Modern US Sans",
   description: "Segoe · teal accent · US product/SaaS senior engineer.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

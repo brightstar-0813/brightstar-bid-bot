@@ -620,19 +620,14 @@ async function openProfileEditorFromPopup({ tab = "apply", presetId = "", profil
 const TEMPLATE_SKETCH = {
   "times-classic": { layout: "classic", accent: "#111111", font: "serif" },
   "ats-modern": { layout: "rule", accent: "#1f4e79", font: "sans" },
-  "consulting-classic": { layout: "serif", accent: "#222222", font: "serif" },
   "sv-senior": { layout: "experience", accent: "#111111", font: "sans" },
   "nyc-finance": { layout: "band", accent: "#0b1f3a", font: "sans" },
   "harvard-rule": { layout: "double", accent: "#111111", font: "serif" },
-  "cambria-corporate": { layout: "rule", accent: "#1f4e79", font: "serif" },
-  "skills-first": { layout: "skills", accent: "#333333", font: "sans" },
+  "skills-first": { layout: "skills", accent: "#111111", font: "sans" },
   "modern-sans": { layout: "teal", accent: "#0f766e", font: "sans" },
-  "executive-navy": { layout: "sidebar", accent: "#0b1f3a", font: "sans" },
+  "executive-navy": { layout: "sidebar", accent: "#071e38", font: "sans" },
   "orange-banner": { layout: "orange", accent: "#e8772e", font: "sans" },
-  "compact-slate": { layout: "compact", accent: "#1c2834", font: "sans" },
-  "split-contact": { layout: "split", accent: "#3d4f66", font: "sans" },
-  "date-rail": { layout: "rail", accent: "#1f2937", font: "sans" },
-  "brief-grid": { layout: "brief", accent: "#1f4e79", font: "sans" }
+  "date-rail": { layout: "rail", accent: "#1f2937", font: "sans" }
 };
 
 function syncTemplatePickerLabel() {

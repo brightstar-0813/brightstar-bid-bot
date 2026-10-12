@@ -101,7 +101,12 @@ const CSS = `
       font-weight: 700;
     }
 
-    .skills-table .skill-cat { width: 26%; font-weight: 700; }
+    .skills-table .skill-cat {
+      width: 32%;
+      font-weight: 700;
+      background: #f4f4f4;
+      color: #111;
+    }
 
     .edu-row {
       display: flex;
@@ -118,7 +123,7 @@ const CSS = `
 
 export const skillsFirstTemplate = {
   id: "skills-first",
-  label: "8 · Skills-First Technical",
+  label: "6 · Skills-First Technical",
   description: "Arial · inverted-bar headings · skills table before experience for US ATS.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

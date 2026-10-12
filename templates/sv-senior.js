@@ -67,14 +67,14 @@ const CSS = `
     section { margin: 0 0 7px; }
 
     h2 {
-      margin: 0 0 3px;
+      margin: 8px 0 3px;
       padding: 0;
-      font-size: 11pt;
+      font-size: 10pt;
       font-weight: 700;
-      letter-spacing: 0;
-      text-transform: none;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
       color: #111;
-      border-bottom: 0.75px solid #222;
+      border: 0;
     }
 
     p { margin: 0 0 3px; }
@@ -91,8 +91,10 @@ const CSS = `
     .job-title {
       margin: 0;
       font-size: 10.5pt;
-      font-weight: 700;
+      font-weight: 500;
     }
+
+    .job-title span:last-child { font-weight: 800; }
 
     .job-dates {
       flex: 0 0 auto;
@@ -141,7 +143,7 @@ const CSS = `
 
 export const svSeniorTemplate = {
   id: "sv-senior",
-  label: "4 · Silicon Valley",
+  label: "3 · Silicon Valley",
   description: "Arial · experience-first · US Big Tech L5–L7 / Staff-track.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

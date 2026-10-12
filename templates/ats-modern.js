@@ -32,7 +32,7 @@ const CSS = `
     header.top {
       margin: 0 0 8px;
       padding-bottom: 6px;
-      border-bottom: 1.5px solid #1f4e79;
+      border-bottom: 3px solid #1f4e79;
     }
 
     h1 {
@@ -66,8 +66,9 @@ const CSS = `
       font-weight: 700;
       color: #1f4e79;
       text-transform: uppercase;
-      letter-spacing: 0.4px;
-      border-bottom: 1px solid #1f4e79;
+      letter-spacing: 0.6px;
+      padding-bottom: 2px;
+      border-bottom: 2.5px solid #1f4e79;
     }
 
     p { margin: 0 0 4px; }

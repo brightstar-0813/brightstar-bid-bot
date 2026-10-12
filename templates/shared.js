@@ -718,13 +718,14 @@ export function wrapHtmlDocument({ title, css, body }) {
   <title>${escapeHtml(title)}</title>
   <style>
 ${css}
-    /* Body copy fills the column. Last line stays left so PDF print does not stretch leftover words. */
+    /* Body copy fills the column. Last line stays left so PDF print does not stretch leftover words.
+       Do not hyphenate: Chrome splits words like "enterprise" in the middle of a line. */
     p, li {
       text-align: justify;
       text-justify: inter-word;
       text-align-last: left;
-      hyphens: auto;
-      -webkit-hyphens: auto;
+      hyphens: manual;
+      -webkit-hyphens: manual;
     }
   </style>
 </head>

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { plainTextToResumeData } from "../resume-text.js";
-import { getAllTemplates, resumeJsonToHtml } from "../templates/index.js";
+import { getAllTemplates, getTemplateById, resumeJsonToHtml } from "../templates/index.js";
 
 function resumeWithEducation(eduBody) {
   return `DAVID LEANDRO DE OLIVEIRA
@@ -359,7 +359,7 @@ test("concise professional templates keep skill categories and role content", ()
       }
     ]
   };
-  const ids = ["compact-slate", "split-contact", "date-rail", "brief-grid"];
+  const ids = ["date-rail", "skills-first", "ats-modern"];
   const labels = getAllTemplates().map((template) => template.id);
   for (const id of ids) {
     assert.ok(labels.includes(id), id);
@@ -371,8 +371,15 @@ test("concise professional templates keep skill categories and role content", ()
     assert.match(html, /Senior Software Specialist/);
     assert.doesNotMatch(html, /JavaScript • Python/);
   }
-  assert.match(resumeJsonToHtml(data, "split-contact"), /class="contact-block"/);
   assert.match(resumeJsonToHtml(data, "date-rail"), /class="job-dates"/);
-  assert.match(resumeJsonToHtml(data, "brief-grid"), /class="skills-table"/);
-  assert.match(resumeJsonToHtml(data, "compact-slate"), /class="skill-inline"/);
+  assert.match(resumeJsonToHtml(data, "skills-first"), /class="skills-table"/);
+  assert.match(resumeJsonToHtml(data, "ats-modern"), /class="skill-inline"/);
+});
+
+test("retired template ids resolve to a kept layout", () => {
+  assert.equal(getTemplateById("compact-slate").id, "ats-modern");
+  assert.equal(getTemplateById("split-contact").id, "ats-modern");
+  assert.equal(getTemplateById("cambria-corporate").id, "ats-modern");
+  assert.equal(getTemplateById("consulting-classic").id, "times-classic");
+  assert.equal(getTemplateById("brief-grid").id, "skills-first");
 });

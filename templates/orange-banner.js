@@ -36,8 +36,8 @@ const CSS = `
     }
 
     .page-bar {
-      height: 22px;
-      margin: 0 -16mm 14px;
+      height: 8px;
+      margin: 0 -16mm 8px;
       background: #e6e6e6;
     }
 
@@ -59,7 +59,7 @@ const CSS = `
     }
 
     .contact {
-      margin: 0 0 10px;
+      margin: 0 0 6px;
       font-size: 10pt;
       color: #e8772e;
     }
@@ -278,7 +278,7 @@ function renderEducation(education) {
 
 export const orangeBannerTemplate = {
   id: "orange-banner",
-  label: "11 · Orange Banner",
+  label: "9 · Orange Banner",
   description: "Calibri · gray name · orange bars for Experience and Education.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

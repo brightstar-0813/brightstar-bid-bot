@@ -68,12 +68,13 @@ const CSS = `
 
     h2 {
       margin: 0 0 4px;
-      padding: 0 0 2px;
-      font-size: 11pt;
+      padding: 0;
+      font-size: 13pt;
       font-weight: 700;
-      letter-spacing: 1.6px;
-      text-transform: uppercase;
-      border-bottom: 1px solid #111;
+      letter-spacing: 0.12em;
+      font-variant: small-caps;
+      text-transform: none;
+      border: 0;
     }
 
     p { margin: 0 0 4px; text-align: justify; }
@@ -125,7 +126,7 @@ const CSS = `
 
 export const harvardRuleTemplate = {
   id: "harvard-rule",
-  label: "6 · Harvard Rule",
+  label: "5 · Harvard Rule",
   description: "Garamond · centered name · double rule · US senior IC / MBA hybrid.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

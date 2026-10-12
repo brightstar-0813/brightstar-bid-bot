@@ -33,7 +33,7 @@ const CSS = `
     }
 
     aside {
-      background: #0e2a4c;
+      background: #071e38;
       color: #f4f1e8;
       padding: 16mm 8mm 14mm;
     }
@@ -57,7 +57,7 @@ const CSS = `
     }
 
     .aside-rule {
-      height: 2px;
+      height: 3px;
       background: #f5c542;
       border: 0;
       margin: 0 0 12px;
@@ -177,9 +177,11 @@ const CSS = `
     .job-dates {
       flex: 0 0 auto;
       white-space: nowrap;
-      font-size: 9pt;
-      font-weight: 700;
-      color: #5c6d82;
+      font-size: 10pt;
+      font-weight: 800;
+      color: #0e2a4c;
+      background: #f6f1e4;
+      padding: 1px 6px;
     }
 
     .job-title {
@@ -271,7 +273,7 @@ function renderJobs(jobs) {
 
 export const executiveNavyTemplate = {
   id: "executive-navy",
-  label: "10 · Executive Navy",
+  label: "8 · Executive Navy",
   description: "Navy sidebar · gold accent · US Staff / Principal / engineering manager.",
   render(data) {
     const name = String(data.name || "Resume").trim() || "Resume";

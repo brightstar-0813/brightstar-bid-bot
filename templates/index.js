@@ -1,37 +1,27 @@
 import { timesClassicTemplate } from "./times-classic.js";
 import { atsModernTemplate } from "./ats-modern.js";
-import { consultingClassicTemplate } from "./consulting-classic.js";
 import { svSeniorTemplate } from "./sv-senior.js";
 import { nycFinanceTemplate } from "./nyc-finance.js";
 import { harvardRuleTemplate } from "./harvard-rule.js";
-import { cambriaCorporateTemplate } from "./cambria-corporate.js";
 import { skillsFirstTemplate } from "./skills-first.js";
 import { modernSansTemplate } from "./modern-sans.js";
 import { executiveNavyTemplate } from "./executive-navy.js";
 import { orangeBannerTemplate } from "./orange-banner.js";
-import { compactSlateTemplate } from "./compact-slate.js";
-import { splitContactTemplate } from "./split-contact.js";
 import { dateRailTemplate } from "./date-rail.js";
-import { briefGridTemplate } from "./brief-grid.js";
 import { stripClearanceFromTitle } from "../resume-json.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
 export const BUILTIN_TEMPLATES = [
   timesClassicTemplate,
   atsModernTemplate,
-  consultingClassicTemplate,
   svSeniorTemplate,
   nycFinanceTemplate,
   harvardRuleTemplate,
-  cambriaCorporateTemplate,
   skillsFirstTemplate,
   modernSansTemplate,
   executiveNavyTemplate,
   orangeBannerTemplate,
-  compactSlateTemplate,
-  splitContactTemplate,
-  dateRailTemplate,
-  briefGridTemplate
+  dateRailTemplate
 ];
 
 export const DEFAULT_TEMPLATE_ID = atsModernTemplate.id;
@@ -43,7 +33,12 @@ const TEMPLATE_ID_ALIASES = {
   "classic-blue": "ats-modern",
   "modern-timeline": "modern-sans",
   "uk-city": "nyc-finance",
-  "eu-structured": "harvard-rule"
+  "eu-structured": "harvard-rule",
+  "consulting-classic": "times-classic",
+  "cambria-corporate": "ats-modern",
+  "compact-slate": "ats-modern",
+  "split-contact": "ats-modern",
+  "brief-grid": "skills-first"
 };
 
 export function getAllTemplates() {
