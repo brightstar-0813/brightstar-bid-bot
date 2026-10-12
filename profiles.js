@@ -1,12 +1,13 @@
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import {
   CARLOS_CAPULONG_MASTER,
-  DAVID_OLIVEIRA_SF_MASTER,
   DMARIO_LEWIS_MASTER,
+  JESSEL_TAMPUS_DE_MASTER,
+  JESSEL_TAMPUS_SF_MASTER,
   MICHAEL_IBEA_MASTER,
-  SANDEEP_MAHANKALI_MASTER,
-  SANDEEP_UNNIKRISHNAN_MASTER,
-  VICTOR_HOLANDA_MASTER
+  RAQUEL_OLIVEIRA_DE_MASTER,
+  RAQUEL_OLIVEIRA_SF_MASTER,
+  SANDEEP_MAHANKALI_MASTER
 } from "./prompts/builtin-master-resumes.js";
 import { PROMPT as coverLetterDePrompt } from "./prompts/cover-letter-de.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
@@ -114,48 +115,6 @@ export const BUILTIN_PROFILES = [
       "Christian Reformed Church in North America",
       "Bostwick Lake Congregation UCC",
       "Wolverine World Wide"
-    ]
-  },
-  {
-    id: "sandeep-unnikrishnan",
-    label: "Sandeep Unnikrishnan",
-    roleTrack: "sf",
-    promptTemplate: "",
-    templateId: "ats-modern",
-    resumeFilePrefix: "Unnikrishnan_Resume",
-    sheetTabName: "Unnikrishnan-SF",
-    outputDir: "Unnikrishnan-SF",
-    builtin: true,
-    kind: "resume",
-    name: "Sandeep Unnikrishnan",
-    email: "sandeep.unnikrishnan@outlook.com",
-    phone: "+1 (317) 563-1795",
-    linkedin: "https://www.linkedin.com/in/sandeep-unnikrishnan-a5a68453/",
-    portfolio: "",
-    password: DEFAULT_ATS_PASSWORD,
-    location: "Round Rock, Texas, United States",
-    address: "3723 Castle Rock Dr",
-    zip: "78681",
-    gender: "",
-    ethnicity: "",
-    disability: "No, I do not have a disability",
-    veteran: "I am not a protected veteran",
-    citizenship: "US Citizen",
-    workAuthorized: "Yes",
-    sponsorship: "No",
-    hispanicLatino: "",
-    signatureTitle: "Senior Salesforce Architect | Senior Salesforce Engineer",
-    masterResume: SANDEEP_UNNIKRISHNAN_MASTER,
-    coverLetterPrompt: coverLetterPrompt,
-    autofillExtras: {},
-    requiredExperience: [
-      "Labcorp",
-      "M&T Bank",
-      "Visa",
-      "Activision Blizzard",
-      "Vantiv",
-      "Charles Schwab",
-      "Wipro Technologies"
     ]
   },
   {
@@ -282,25 +241,25 @@ export const BUILTIN_PROFILES = [
     ]
   },
   {
-    id: "david-oliveira",
-    label: "David Leandro de Oliveira (Salesforce)",
+    id: "raquel-oliveira",
+    label: "Raquel Silva (Salesforce)",
     roleTrack: "sf",
     promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Oliveira_Resume",
-    sheetTabName: "David-SF",
-    outputDir: "David-SF",
+    sheetTabName: "Raquel-SF",
+    outputDir: "Raquel-SF",
     builtin: true,
     kind: "resume",
-    name: "David Leandro de Oliveira",
-    email: "davidoliveira2308l@gmail.com",
-    phone: "+55 61 8212 1297",
-    linkedin: "https://www.linkedin.com/in/davidleandro",
+    name: "Raquel Silva De Oliveira",
+    email: "iraquelsilva95@gmail.com",
+    phone: "+55 81 92007-8168",
+    linkedin: "https://www.linkedin.com/in/raquel-silva-shiny",
     portfolio: "",
     password: DEFAULT_ATS_PASSWORD,
-    location: "Paulista, Pernambuco, Brazil",
-    address: "",
-    zip: "",
+    location: "Jaboatão dos Guararapes, Pernambuco, Brazil",
+    address: "Rua Ilhéus, Residencial Corais G, Nº 780, Piedade",
+    zip: "54420-150",
     gender: "",
     ethnicity: "",
     disability: "No, I do not have a disability",
@@ -309,38 +268,32 @@ export const BUILTIN_PROFILES = [
     workAuthorized: "Yes",
     sponsorship: "Yes",
     hispanicLatino: "",
-    signatureTitle: "Senior Salesforce Engineer",
-    masterResume: DAVID_OLIVEIRA_SF_MASTER,
+    signatureTitle: "Senior Salesforce Engineer / Salesforce Architect",
+    masterResume: RAQUEL_OLIVEIRA_SF_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
-    requiredExperience: [
-      "Intrado",
-      "S&P Global",
-      "AI/R Everymind",
-      "Pismo",
-      "Concrete Solutions"
-    ]
+    requiredExperience: ["Levora", "Elera", "Lab065 Digital Solutions"]
   },
   {
-    id: "david-oliveira-de",
-    label: "David Leandro de Oliveira (Data Engineering)",
+    id: "raquel-oliveira-de",
+    label: "Raquel Silva De Oliveira (Data Engineering)",
     roleTrack: "de",
     promptTemplate: "",
     templateId: "ats-modern",
     resumeFilePrefix: "Oliveira_Resume",
-    sheetTabName: "David-DE",
-    outputDir: "David-DE",
+    sheetTabName: "Raquel-DE",
+    outputDir: "Raquel-DE",
     builtin: true,
     kind: "resume",
-    name: "David Leandro de Oliveira",
-    email: "davidoliveira2308l@gmail.com",
-    phone: "+55 61 8212 1297",
-    linkedin: "https://www.linkedin.com/in/davidleandrodeoliveria0823/",
+    name: "Raquel Silva De Oliveira",
+    email: "iraquelsilva95@gmail.com",
+    phone: "+55 81 92007-8168",
+    linkedin: "https://www.linkedin.com/in/raquel-oliveira-silver",
     portfolio: "",
     password: DEFAULT_ATS_PASSWORD,
-    location: "Paulista, Pernambuco, Brazil",
-    address: "",
-    zip: "",
+    location: "Jaboatão dos Guararapes, Pernambuco, Brazil",
+    address: "Rua Ilhéus, Residencial Corais G, Nº 780, Piedade",
+    zip: "54420-150",
     gender: "",
     ethnicity: "",
     disability: "No, I do not have a disability",
@@ -350,64 +303,31 @@ export const BUILTIN_PROFILES = [
     sponsorship: "Yes",
     hispanicLatino: "",
     signatureTitle: "Senior Analytics Engineer / Senior Data Engineer",
-    masterResume: `David Leandro de Oliveira
-Senior Data Engineer / Senior Analytics Engineer
-Paulista, Pernambuco, Brazil | +55 61 8212 1297 | davidoliveira2308l@gmail.com
-https://www.linkedin.com/in/davidleandrodeoliveria0823/
-
-SUMMARY
-Senior Data Engineer with 9+ years designing and optimizing scalable data platforms, backend services, and analytics workflows for SaaS, fintech, cybersecurity, retail, and enterprise environments. Strong in reliable pipelines, cloud data architecture, API-driven systems, and production analytics layers for reporting and operational visibility.
-
-SKILLS
-Python, SQL, Java, JavaScript, TypeScript, Bash; Apache Airflow, dbt, ELT/ETL, data modeling, data warehousing, incremental loads, data quality testing, data lineage; AWS, S3, Lambda, Redshift, Docker, Terraform, GitHub Actions, CI/CD, Linux; Snowflake, PostgreSQL, MySQL, SQL Server, MongoDB; REST APIs, Spring Boot, FastAPI, Flask, microservices; dimensional modeling, BI layers, reporting pipelines; pytest, JUnit, dbt tests. Also familiar with Kafka, Flink, Hadoop, NiFi, SSIS/SSRS, Azure Data Factory, BigQuery, GCP, Azure.
-
-EXPERIENCE
-Clevertech — Analytics Engineer | New York, United States | Remote | Jan 2024 - Present
-dbt, Snowflake, Python, SQL analytics for US SaaS clients; dimensional models for subscriptions, accounts, billing, product usage; ELT from databases/APIs/cloud storage; dbt tests, freshness, GitHub Actions CI; warehouse optimization; Python API extraction utilities; Airflow observability; AWS/S3 and Terraform-supported environments.
-
-Softbinator Technologies — Senior Data Engineer | Bucharest, Romania | Remote | Mar 2021 - Nov 2023
-Python, SQL, Airflow, Snowflake, AWS S3, dbt, Redshift, Docker for fintech, SaaS, e-commerce, logistics clients; warehouse models and ELT; Airflow DAGs with retries/alerts/backfills; API/file/DB ingestion; warehouse optimization; Terraform and GitHub Actions; dbt tests and CI.
-
-Concrete Solutions — Backend Engineer / Data Engineer | São Paulo, Brazil | On-site | Aug 2018 - Feb 2021
-Java, Spring Boot, Python, SQL, PostgreSQL, AWS S3, Redshift, Airflow for retail and financial services; REST microservices; ELT to AWS analytics; query tuning; incremental processing; Docker and CI/CD collaboration.
-
-Tempest Security Intelligence — Software Engineer Intern / Backend Developer | Recife, Pernambuco, Brazil | On-site | Jan 2017 - Jun 2018
-Java, Python, SQL, Linux, REST APIs for cybersecurity platforms; security log normalization; SQL reporting; backend utilities and small Python automation.
-
-EDUCATION
-Federal University of Pernambuco — Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017 | Recife, Brazil
-
-CERTIFICATIONS
-None.`,
+    masterResume: RAQUEL_OLIVEIRA_DE_MASTER,
     coverLetterPrompt: coverLetterDePrompt,
     autofillExtras: {},
-    requiredExperience: [
-      "Clevertech",
-      "Softbinator Technologies",
-      "Concrete Solutions",
-      "Tempest Security Intelligence"
-    ]
+    requiredExperience: ["Origen Tech", "SysTech", "TDW BI Solutions", "Studio Network"]
   },
   {
-    id: "victor-holanda",
-    label: "Victor Barros de Holanda",
+    id: "jessel-tampus",
+    label: "Jessel Megalbio Tampus (Salesforce)",
     roleTrack: "sf",
     promptTemplate: "",
     templateId: "ats-modern",
-    resumeFilePrefix: "Holanda_Resume",
-    sheetTabName: "Victor-SF",
-    outputDir: "Victor-SF",
+    resumeFilePrefix: "Tampus_Resume",
+    sheetTabName: "Jessel-SF",
+    outputDir: "Jessel-SF",
     builtin: true,
     kind: "resume",
-    name: "Victor Barros de Holanda",
-    email: "victor.holanda201@gmail.com",
-    phone: "+55 81 9573 5610",
-    linkedin: "https://www.linkedin.com/in/victorstardev1996",
+    name: "Jessel Megalbio Tampus",
+    email: "ijesstampus98@gmail.com",
+    phone: "+63 968 789 5103",
+    linkedin: "https://www.linkedin.com/in/jess-tampus-silver",
     portfolio: "",
     password: DEFAULT_ATS_PASSWORD,
-    location: "Paulista, Pernambuco, Brazil",
-    address: "",
-    zip: "",
+    location: "Gitagum, Northern Mindanao, Philippines",
+    address: "Zone 7, Barangay Burnay, Gitagum, Misamis Oriental",
+    zip: "9020",
     gender: "",
     ethnicity: "",
     disability: "No, I do not have a disability",
@@ -416,11 +336,45 @@ None.`,
     workAuthorized: "Yes",
     sponsorship: "Yes",
     hispanicLatino: "",
-    signatureTitle: "Senior Salesforce Engineer",
-    masterResume: VICTOR_HOLANDA_MASTER,
+    signatureTitle: "Senior Salesforce Engineer / CRM Platform Engineer",
+    masterResume: JESSEL_TAMPUS_SF_MASTER,
     coverLetterPrompt: coverLetterPrompt,
     autofillExtras: {},
-    requiredExperience: ["EPAM Systems", "Endava", "BairesDev", "Accenture"]
+    requiredExperience: ["CloudMasonry", "Staff Domain", "ShopBack"]
+  },
+  {
+    id: "jessel-tampus-de",
+    label: "Jessel Tampus (Data Engineering)",
+    roleTrack: "de",
+    promptTemplate: "",
+    templateId: "ats-modern",
+    resumeFilePrefix: "Tampus_Resume",
+    sheetTabName: "Jessel-DE",
+    outputDir: "Jessel-DE",
+    builtin: true,
+    kind: "resume",
+    name: "Jessel Tampus",
+    email: "ijesstampus98@gmail.com",
+    phone: "+63 968 789 5103",
+    linkedin: "https://www.linkedin.com/in/jessel-tampus-shiny",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Gitagum, Northern Mindanao, Philippines",
+    address: "Zone 7, Barangay Burnay, Gitagum, Misamis Oriental",
+    zip: "9020",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Analytics Engineer / Senior Data Engineer",
+    masterResume: JESSEL_TAMPUS_DE_MASTER,
+    coverLetterPrompt: coverLetterDePrompt,
+    autofillExtras: {},
+    requiredExperience: ["Venatus", "North Labs", "White Cloak Technologies", "CatzMedia"]
   },
   {
     id: COVER_LETTER_PROFILE_ID,
@@ -604,15 +558,29 @@ export function trimPromptToBudget(prompt, { maxChars = MAX_RESUME_PROMPT_CHARS 
   return `${text.slice(0, Math.floor(maxChars * 0.35)).trimEnd()}\n\n[…prompt truncated…]\n\n${text.slice(-(Math.floor(maxChars * 0.6))).trimStart()}`;
 }
 
-const REMOVED_PERSON_IDS = new Set(["matthew-dale-hoffman", "edrwin-revolorio"]);
-const REMOVED_PERSON_NAME = /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio/i;
+const REMOVED_PERSON_IDS = new Set([
+  "matthew-dale-hoffman",
+  "edrwin-revolorio",
+  "sandeep-unnikrishnan",
+  "david-oliveira",
+  "david-oliveira-de",
+  "victor-holanda"
+]);
+const REMOVED_PERSON_ID_PREFIXES = [
+  "matthew-dale-hoffman",
+  "sandeep-unnikrishnan",
+  "david-oliveira",
+  "victor-holanda"
+];
+const REMOVED_PERSON_NAME =
+  /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio|sandeep\s+unnikrishnan|david\s+leandro\s+de\s+oliveira|victor\s+barros\s+de\s+holanda/i;
 
 function isRemovedPersonId(id) {
   const raw = String(id || "");
   const lower = raw.toLowerCase();
   return (
     REMOVED_PERSON_IDS.has(raw) ||
-    lower.startsWith("matthew-dale-hoffman") ||
+    REMOVED_PERSON_ID_PREFIXES.some((prefix) => lower.startsWith(prefix)) ||
     lower.includes("edrwin") ||
     lower.includes("revolorio")
   );

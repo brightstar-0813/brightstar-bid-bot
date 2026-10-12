@@ -39,48 +39,6 @@ CERTIFICATIONS
 - Salesforce Certified Administrator (SCA)
 No developer-track, architect-track, or consultant-track Salesforce certification.`;
 
-export const SANDEEP_UNNIKRISHNAN_MASTER = `Sandeep Unnikrishnan
-Senior Salesforce Architect | Senior Salesforce Engineer
-Round Rock, Texas, United States | +1 (317) 563-1795 | sandeep.unnikrishnan@outlook.com
-https://www.linkedin.com/in/sandeep-unnikrishnan-a5a68453/
-
-SUMMARY
-17+ years delivering Salesforce solutions across healthcare diagnostics, commercial banking, digital payments, entertainment, payment processing, wealth management, and IT consulting.
-
-SKILLS
-Salesforce clouds and products: Health Cloud, Data Cloud, Financial Services Cloud, Sales Cloud, Service Cloud, Experience Cloud, Revenue Cloud, Agentforce, Marketing Cloud, Commerce Cloud, CRM Analytics, Field Service, Consumer Goods Cloud, Nonprofit Cloud, Salesforce Platform, MuleSoft Integration Cloud.
-Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
-Flow and Flow Builder, approval processes, validation rules, workflow automation.
-Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
-MuleSoft and API-led integration, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
-Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance.
-Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
-Reports, dashboards, CRM Analytics, UAT, production support, code reviews.
-Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
-Healthcare diagnostics and laboratory CRM; commercial banking and wealth; digital payments and card processing; entertainment consumer CRM.
-
-EXPERIENCE
-Labcorp — Senior Salesforce Architect | Burlington, North Carolina, United States | Remote | Jun 2024 - Present
-M&T Bank — Staff Salesforce Engineer | Buffalo, New York, United States | Remote | Dec 2021 - Jun 2024
-Visa — Staff Salesforce Engineer | Senior Salesforce Engineer | Austin, Texas, United States | Aug 2016 - Dec 2021
-Activision Blizzard — Senior Salesforce Developer | Santa Monica, California, United States | Apr 2014 - Aug 2016
-Vantiv — Salesforce Onsite Lead Developer | Cincinnati, Ohio, United States | On-Site | 2013 - 2014
-Charles Schwab — Salesforce Technical Consultant | Onsite Coordinator | Denver, Colorado, United States | On-Site | Aug 2013 - Nov 2013
-Wipro Technologies — Salesforce Developer | Senior Salesforce Engineer | Bangalore, Karnataka, India | On-Site | Jun 2009 - Jan 2013
-Visa and Activision Blizzard have no recorded work mode.
-
-EDUCATION
-Cochin University of Science and Technology | Bachelor of Technology (BTech), Information Technology | Kochi, Kerala, India | Jan 2004 - Dec 2008
-
-CERTIFICATIONS
-- Salesforce Certified Platform Integration Architect
-- Salesforce Certified Agentforce Specialist
-- Salesforce Certified JavaScript Developer
-- Salesforce Certified Platform App Builder
-- Salesforce Certified Platform Developer
-- Salesforce Certified Agentforce Service Consultant
-- Salesforce Certified Platform Administrator`;
-
 export const SANDEEP_MAHANKALI_MASTER = `Sandeep Mahankali
 Senior Salesforce Technical Architect | Senior Salesforce Engineer
 Round Rock, Texas, United States | +1 (669) 223-1191 | msandeep129@outlook.com
@@ -196,73 +154,126 @@ National University of Singapore (NUS) | Bachelor of Computing in Computer Scien
 CERTIFICATIONS
 None.`;
 
-export const DAVID_OLIVEIRA_SF_MASTER = `David Leandro de Oliveira
-Senior Salesforce Engineer
-Paulista, Pernambuco, Brazil | +55 61 8212 1297 | davidoliveira2308l@gmail.com
-https://www.linkedin.com/in/davidleandro
+export const RAQUEL_OLIVEIRA_SF_MASTER = `Raquel Silva De Oliveira
+Senior Salesforce Engineer / Salesforce Architect
+Jaboatão dos Guararapes, Pernambuco, Brazil | +55 81 92007-8168 | iraquelsilva95@gmail.com
+https://www.linkedin.com/in/raquel-silva-shiny
 
 SUMMARY
-11+ years of overall technology experience, including 8+ years delivering Salesforce solutions across public safety communications, financial data platforms, AI-enabled CRM consulting, payments, and digital product teams.
+8+ years of overall technology experience, including 7 years delivering Salesforce solutions across CRM consulting, implementation, and administration.
 
 SKILLS
-Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Data Cloud, Agentforce, Einstein AI, Nonprofit Cloud, Health Cloud, CRM Analytics, Salesforce Platform, MuleSoft Integration Cloud.
+Salesforce clouds and products: Sales Cloud, Service Cloud, Marketing Cloud, Revenue Cloud, Experience Cloud, Salesforce Platform.
 Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
 Flow and Flow Builder, approval processes, validation rules, workflow automation.
 Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
-MuleSoft and Anypoint, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
-Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance.
+REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, ERP integrations including SAP and TOTVS Protheus.
+Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation.
 Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
-Reports, dashboards, CRM Analytics, UAT, production support, code reviews.
-Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+Reports, dashboards, UAT, production support, code reviews.
+Solution design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
 Platform administration, configuration, security model, and Salesforce fundamentals.
 
 EXPERIENCE
-Intrado — Senior Salesforce Engineer | Colorado, United States | Remote | Jun 2024 - Present
-S&P Global — Salesforce Developer | New York, New York, United States | Remote | Dec 2022 - May 2024
-AI/R Everymind — Salesforce Developer | São Paulo, Brazil | Hybrid | Oct 2019 - Sep 2022
-Pismo — Salesforce Administrator | Recife, Brazil | On-site | Sep 2017 - Sep 2019
-Concrete Solutions — Software Engineer Intern | Recife, Brazil | On-site | Sep 2014 - Aug 2017
+Levora — Senior Salesforce Engineer / Technical Architect | São Paulo, São Paulo, Brazil | Nov 2023 - Aug 2026
+Elera — Salesforce Developer / Salesforce Administrator | São Paulo, São Paulo, Brazil | Aug 2019 - Oct 2023
+Lab065 Digital Solutions — Software Engineer Intern / Junior Salesforce Developer | Curitiba, Paraná, Brazil | Mar 2017 - Oct 2018
+No recorded work mode for these employers.
+Levora is a São Paulo Salesforce consultancy working across Sales Cloud, Service Cloud, Marketing Cloud, and Revenue Cloud, including CRM integrations with ERP platforms such as SAP and TOTVS. Elera implements and maintains technology and business-intelligence solutions, with Salesforce work in Sales Cloud, Service Cloud, Marketing Cloud, Apex, and Lightning Web Components.
 
 EDUCATION
-Federal University of Pernambuco | Bachelor of Science in Computer Science | Recife, Brazil | Mar 2013 - Aug 2017
-Grade: 8.2 / 10
+Universidade Federal de Pernambuco (UFPE) | Bachelor's Degree in Computer Science | May 2013 - Dec 2017
 
 CERTIFICATIONS
 None.`;
 
-export const VICTOR_HOLANDA_MASTER = `Victor Barros de Holanda
-Senior Salesforce Engineer
-Paulista, Pernambuco, Brazil | +55 81 9573 5610 | victor.holanda201@gmail.com
-https://www.linkedin.com/in/victorstardev1996
+export const RAQUEL_OLIVEIRA_DE_MASTER = `Raquel Silva De Oliveira
+Senior Data Engineer / Senior Analytics Engineer
+Jaboatão dos Guararapes, Pernambuco, Brazil | +55 81 92007-8168 | iraquelsilva95@gmail.com
+https://www.linkedin.com/in/raquel-oliveira-silver
 
 SUMMARY
-10+ years of overall technology experience, including 7+ years delivering Salesforce solutions across global digital engineering, automation-led CRM delivery, nearshore product engineering, and consulting.
+10 years of overall technology experience, including 8 years delivering data engineering, ETL/ELT, and analytics platforms for consulting, enterprise IT, and digital product teams.
 
 SKILLS
-Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Data Cloud, Agentforce, Einstein AI, Nonprofit Cloud, Health Cloud, CRM Analytics, Salesforce Platform, MuleSoft Integration Cloud.
-Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
-Flow and Flow Builder, approval processes, validation rules, workflow automation.
-Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
-MuleSoft and Anypoint, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
-Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance.
-Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
-Reports, dashboards, CRM Analytics, UAT, production support, code reviews.
-Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes, data quality; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
 
 EXPERIENCE
-EPAM Systems — Senior Salesforce Engineer | Newtown, Pennsylvania, United States | Remote | Sep 2024 - Present
-Endava — Senior Salesforce Developer & Automation Engineer | Bucharest, Romania | Remote | Jul 2022 - Jun 2024
-BairesDev — Salesforce Developer | Integration Engineer | Recife, Pernambuco, Brazil | Hybrid | Dec 2018 - May 2022
-Accenture — Software Engineer Intern / Junior CRM Developer | Kyoto, Kyoto Prefecture, Japan | On-site | May 2016 - Oct 2018
+Origen Tech — Senior Data Engineer / Data Platform Architect | Miami, Florida, United States | Remote | Aug 2024 - Sep 2026
+US SAP consulting and products firm. Data platform work alongside cloud, AI, and enterprise reporting environments for multinational clients, including Brazil and broader Latin America compliance and trade operations.
+
+SysTech — Data Engineer | Brasília, Distrito Federal, Brazil | Remote | Feb 2021 - May 2024
+Brazilian IT hardware, software, and services firm serving government and corporate clients, with a United States branch. Data engineering for enterprise infrastructure and digital-transformation programs.
+
+TDW BI Solutions — Junior Data Engineer / ETL Developer | São Paulo, São Paulo, Brazil | On-site | Aug 2018 - Nov 2020
+Brazilian business-intelligence consultancy focused on data warehousing, analytics, and high-volume MPP environments.
+
+Studio Network — Software Engineer Intern / Junior Backend Developer | São Carlos, São Paulo, Brazil | On-site | Sep 2016 - Jun 2018
+São Carlos digital studio building websites, e-commerce, dashboards, custom online systems, and API integrations.
 
 EDUCATION
-Kyoto University | Bachelor of Engineering in Computer Science | Kyoto, Japan | Apr 2014 - Mar 2018
-Grade: 3.3 / 4.0
+Universidade de São Paulo (USP) | Bachelor's Degree in Computer Science | São Carlos, São Paulo, Brazil | Feb 2012 - Dec 2016
 
 CERTIFICATIONS
-- Salesforce Certified Platform Data Architect — Issued Oct 2025
-- Salesforce Certified Agentforce Specialist — Issued May 2025
-- Salesforce Certified Data 360 Consultant — Issued Sep 2024
-- Salesforce Certified Platform Developer — Issued Jul 2023
-- Salesforce Certified Platform Administrator — Issued Apr 2023
-- Salesforce Certified Platform Foundations — Issued Apr 2023`;
+None.`;
+
+export const JESSEL_TAMPUS_SF_MASTER = `Jessel Megalbio Tampus
+Senior Salesforce Engineer / CRM Platform Engineer
+Gitagum, Northern Mindanao, Philippines | +63 968 789 5103 | ijesstampus98@gmail.com
+https://www.linkedin.com/in/jess-tampus-silver
+
+SUMMARY
+8+ years of overall technology experience, including 5+ years delivering Salesforce development, administration, and integration work across consulting, offshore operations, and ecommerce.
+
+SKILLS
+Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Marketing Cloud, Revenue Cloud, CPQ, Data Cloud, Agentforce, Commerce Cloud, Field Service, Health Cloud, Salesforce Platform, MuleSoft.
+Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
+Flow and Flow Builder, approval processes, validation rules, workflow automation, marketing automation.
+Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
+MuleSoft, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
+Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation.
+Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
+Reports, dashboards, UAT, production support, code reviews.
+Solution design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+Platform administration, configuration, security model, and Salesforce fundamentals.
+
+EXPERIENCE
+CloudMasonry — Senior Salesforce Developer / Integration & Automation Specialist | Chicago, Illinois, United States | Remote | Sep 2024 - Present
+Staff Domain — Salesforce Developer / Admin / Integration Specialist | Pasig City, Metro Manila, Philippines | Remote | May 2021 - Jul 2024
+ShopBack — Software Engineer Intern / Junior CRM Developer | Singapore | On-site | Aug 2018 - Mar 2021
+CloudMasonry is a US and UK Salesforce consultancy. Staff Domain provides offshore recruitment and operational management. ShopBack is an Asia-Pacific shopping, rewards, and payments platform.
+
+EDUCATION
+Singapore Institute of Technology | Bachelor of Engineering in Information and Communication Technology, software engineering | Apr 2016 - Sep 2020
+
+CERTIFICATIONS
+None.`;
+
+export const JESSEL_TAMPUS_DE_MASTER = `Jessel Tampus
+Senior Data Engineer / Senior Analytics Engineer
+Gitagum, Northern Mindanao, Philippines | +63 968 789 5103 | ijesstampus98@gmail.com
+https://www.linkedin.com/in/jessel-tampus-shiny
+
+SUMMARY
+8+ years of overall technology experience, including 6+ years delivering ETL/ELT, cloud data platforms, and analytics engineering for software, advisory, and digital-product teams.
+
+SKILLS
+Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure, Databricks; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
+
+EXPERIENCE
+Venatus — Senior Data Engineer / Analytics Engineer | London, England, United Kingdom | Remote | Sep 2024 - Present
+
+North Labs — Data Engineer / Cloud Data Engineer | Minneapolis, Minnesota, United States | Remote | Oct 2021 - Jul 2024
+Technology advisory and data practice. Cloud data engineering across Snowflake, Databricks, AWS, analytics, and machine-learning platforms.
+
+White Cloak Technologies — Junior ETL Developer / Backend Developer | Metro Manila, Philippines | On-site | Nov 2019 - Jun 2021
+Philippine software studio delivering backend APIs, web and mobile systems, and agile project teams.
+
+CatzMedia — Software Engineer Intern | Bukit Jalil, Kuala Lumpur, Malaysia | On-site | Mar 2018 - Oct 2019
+Malaysian digital studio building websites, custom systems, ecommerce, mobile apps, and AI assistants.
+
+EDUCATION
+Asia Pacific University of Technology & Innovation | Bachelor's Degree in Mathematics and Computer Science | Bukit Jalil, Kuala Lumpur, Malaysia | Sep 2016 - Sep 2019
+
+CERTIFICATIONS
+None.`;

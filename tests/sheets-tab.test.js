@@ -32,8 +32,8 @@ test("defaultSheetTabNameForPerson uses Firstname-TRACK", () => {
     "Sandeep-SF"
   );
   assert.equal(
-    defaultSheetTabNameForPerson({ name: "David Leandro de Oliveira", roleTrack: "de" }),
-    "David-DE"
+    defaultSheetTabNameForPerson({ name: "Jessel Tampus", roleTrack: "de" }),
+    "Jessel-DE"
   );
   assert.equal(defaultSheetTabNameForPerson({ name: "Edrwin" }), "Edrwin-SF");
   assert.equal(defaultSheetTabNameForPerson({}), "Profile-SF");

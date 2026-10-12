@@ -9,6 +9,10 @@ import { skillsFirstTemplate } from "./skills-first.js";
 import { modernSansTemplate } from "./modern-sans.js";
 import { executiveNavyTemplate } from "./executive-navy.js";
 import { orangeBannerTemplate } from "./orange-banner.js";
+import { compactSlateTemplate } from "./compact-slate.js";
+import { splitContactTemplate } from "./split-contact.js";
+import { dateRailTemplate } from "./date-rail.js";
+import { briefGridTemplate } from "./brief-grid.js";
 import { stripClearanceFromTitle } from "../resume-json.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
@@ -23,7 +27,11 @@ export const BUILTIN_TEMPLATES = [
   skillsFirstTemplate,
   modernSansTemplate,
   executiveNavyTemplate,
-  orangeBannerTemplate
+  orangeBannerTemplate,
+  compactSlateTemplate,
+  splitContactTemplate,
+  dateRailTemplate,
+  briefGridTemplate
 ];
 
 export const DEFAULT_TEMPLATE_ID = atsModernTemplate.id;

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { plainTextToResumeData } from "../resume-text.js";
-import { resumeJsonToHtml } from "../templates/index.js";
+import { getAllTemplates, resumeJsonToHtml } from "../templates/index.js";
 
 function resumeWithEducation(eduBody) {
   return `DAVID LEANDRO DE OLIVEIRA
@@ -331,4 +331,48 @@ test("Orange Banner puts company above the title and uses orange section bars", 
   const companyAt = html.indexOf("Example Partners");
   const titleAt = html.indexOf("Senior Software Specialist");
   assert.ok(companyAt > -1 && titleAt > companyAt);
+});
+
+test("concise professional templates keep skill categories and role content", () => {
+  const data = {
+    name: "Jordan Taylor",
+    headline: "Software Engineer",
+    phone: "555-0100",
+    email: "jordan@example.com",
+    location: "Boston, MA",
+    profile: "Software specialist with experience designing reliable applications.",
+    experience: [
+      {
+        company: "Example Partners",
+        title: "Senior Software Specialist",
+        location: "Boston, MA",
+        dates: "2021 – Present",
+        bullets: ["Designed and delivered applications."]
+      }
+    ],
+    skills: [{ category: "Languages", items: "JavaScript, Python" }],
+    education: [
+      {
+        school: "Example University",
+        degree: "Bachelor of Science, Computer Science",
+        year: "2014 – 2018"
+      }
+    ]
+  };
+  const ids = ["compact-slate", "split-contact", "date-rail", "brief-grid"];
+  const labels = getAllTemplates().map((template) => template.id);
+  for (const id of ids) {
+    assert.ok(labels.includes(id), id);
+    const html = resumeJsonToHtml(data, id);
+    assert.match(html, /Jordan Taylor/);
+    assert.match(html, /Languages/);
+    assert.match(html, /JavaScript, Python/);
+    assert.match(html, /Example Partners/);
+    assert.match(html, /Senior Software Specialist/);
+    assert.doesNotMatch(html, /JavaScript • Python/);
+  }
+  assert.match(resumeJsonToHtml(data, "split-contact"), /class="contact-block"/);
+  assert.match(resumeJsonToHtml(data, "date-rail"), /class="job-dates"/);
+  assert.match(resumeJsonToHtml(data, "brief-grid"), /class="skills-table"/);
+  assert.match(resumeJsonToHtml(data, "compact-slate"), /class="skill-inline"/);
 });

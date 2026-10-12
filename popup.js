@@ -627,7 +627,11 @@ const TEMPLATE_SKETCH = {
   "skills-first": { layout: "skills", accent: "#333333", font: "sans" },
   "modern-sans": { layout: "teal", accent: "#0f766e", font: "sans" },
   "executive-navy": { layout: "sidebar", accent: "#0b1f3a", font: "sans" },
-  "orange-banner": { layout: "orange", accent: "#e8772e", font: "sans" }
+  "orange-banner": { layout: "orange", accent: "#e8772e", font: "sans" },
+  "compact-slate": { layout: "compact", accent: "#1c2834", font: "sans" },
+  "split-contact": { layout: "split", accent: "#3d4f66", font: "sans" },
+  "date-rail": { layout: "rail", accent: "#1f2937", font: "sans" },
+  "brief-grid": { layout: "brief", accent: "#1f4e79", font: "sans" }
 };
 
 function syncTemplatePickerLabel() {

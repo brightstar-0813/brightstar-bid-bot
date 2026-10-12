@@ -322,15 +322,16 @@ export function jdRequiredSkills(jdText, roleTrack = "sf") {
 export function resolveRoleTrackForPerson(person) {
   if (person?.roleTrack) return normalizeRoleTrackId(person.roleTrack);
   const id = String(person?.id || "");
-  if (id === "david-oliveira-de") return "de";
+  if (id === "raquel-oliveira-de" || id === "jessel-tampus-de") {
+    return "de";
+  }
   if (
     id === "dmario-lewis" ||
-    id === "sandeep-unnikrishnan" ||
     id === "sandeep-mahankali" ||
     id === "michael-ibea" ||
     id === "carlos-capulong" ||
-    id === "david-oliveira" ||
-    id === "victor-holanda"
+    id === "raquel-oliveira" ||
+    id === "jessel-tampus"
   ) {
     return "sf";
   }

@@ -51,7 +51,7 @@ test("resolveEffectiveRoleTrack prefers session override", () => {
 
 test("resolveEffectiveRoleTrack ignores session override for built-in profiles", () => {
   const sfBuiltin = { id: "dmario-lewis", roleTrack: "sf", builtin: true };
-  const deBuiltin = { id: "david-oliveira-de", roleTrack: "de", builtin: true };
+  const deBuiltin = { id: "raquel-oliveira-de", roleTrack: "de", builtin: true };
   assert.equal(resolveEffectiveRoleTrack(sfBuiltin, "de"), "sf");
   assert.equal(resolveEffectiveRoleTrack(sfBuiltin, "fs"), "sf");
   assert.equal(resolveEffectiveRoleTrack(deBuiltin, "sf"), "de");
@@ -74,12 +74,13 @@ test("isRoleTrackLockedForPerson locks built-ins and saved customs", () => {
 test("resolveRoleTrackForPerson infers sf for built-in Salesforce profiles", () => {
   assert.equal(resolveRoleTrackForPerson({ id: "dmario-lewis" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ id: "sandeep-mahankali" }), "sf");
-  assert.equal(resolveRoleTrackForPerson({ id: "sandeep-unnikrishnan" }), "sf");
+  assert.equal(resolveRoleTrackForPerson({ id: "raquel-oliveira" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ roleTrack: "de" }), "de");
 });
 
-test("resolveRoleTrackForPerson infers de for built-in David DE profile", () => {
-  assert.equal(resolveRoleTrackForPerson({ id: "david-oliveira-de" }), "de");
+test("resolveRoleTrackForPerson infers de for built-in data-engineering profiles", () => {
+  assert.equal(resolveRoleTrackForPerson({ id: "raquel-oliveira-de" }), "de");
+  assert.equal(resolveRoleTrackForPerson({ id: "jessel-tampus-de" }), "de");
 });
 
 test("enforceJdSkills adds DE tools to skills rows", () => {
@@ -141,7 +142,7 @@ test("resolveResumePrompt defaults to the track senior prompt", () => {
 });
 
 test("resolveResumePrompt uses v3 on every track and vector only on SF", () => {
-  const person = { id: "david-oliveira-de", promptTemplate: "", roleTrack: "de" };
+  const person = { id: "raquel-oliveira-de", promptTemplate: "", roleTrack: "de" };
   assert.equal(resolveResumePrompt(person, "de", "v3"), resumeV3Prompt);
   assert.equal(resolveResumePrompt(person, "ai", "v3"), resumeV3Prompt);
   assert.equal(resolveResumePrompt(person, "sf", "vector"), sfTestPrompt);
@@ -185,7 +186,7 @@ test("ATS recruiter pass requires exact JD spellings in recent-role bullets", ()
 });
 
 test("resolveResumePrompt ignores Vector on a non-SF track", () => {
-  const person = { id: "david-oliveira-de", promptTemplate: "", roleTrack: "de" };
+  const person = { id: "raquel-oliveira-de", promptTemplate: "", roleTrack: "de" };
   assert.equal(resolveResumePrompt(person, "de", "test"), getRoleTrack("de").prompt);
   assert.equal(resolveResumePrompt(person, "de", "v1"), getRoleTrack("de").prompt);
 });
