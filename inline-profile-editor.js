@@ -358,10 +358,13 @@ export function createInlineProfileEditor(opts) {
     });
 
     openFullEditorBtn?.addEventListener("click", () => {
+      const selected = String(selectEl?.value || "").trim();
       const id =
-        selectEl?.value === NEW_PROFILE_ID ? "" : String(selectEl?.value || editingPersonId || "").trim();
+        !selected || selected === NEW_PROFILE_ID
+          ? NEW_PROFILE_ID
+          : selected;
       openProfileEditor({
-        profileId: id || "",
+        profileId: id,
         tab: activeTab === "batch" ? "batch" : activeTab
       }).catch((err) => opts.setStatus?.(String(err?.message || err), "err"));
     });
