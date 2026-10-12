@@ -277,3 +277,150 @@ Asia Pacific University of Technology & Innovation | Bachelor's Degree in Mathem
 
 CERTIFICATIONS
 None.`;
+
+export const DAVID_OLIVEIRA_SF_MASTER = `David Leandro de Oliveira
+Senior Salesforce Engineer | Salesforce Architect
+Paulista, Pernambuco, Brazil | +55 61 8212 1297 | davidoliveira2308l@gmail.com
+https://www.linkedin.com/in/davidstardev0823/
+
+SUMMARY
+12+ years of overall technology experience, including 12+ years delivering Salesforce and CRM solutions across digital product studios, payments, Salesforce consulting, financial data, and public-safety communications.
+
+SKILLS
+Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Data Cloud, Agentforce, Einstein AI, Nonprofit Cloud, Health Cloud, Salesforce Platform.
+Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
+Flow and Flow Builder, approval processes, validation rules, workflow automation.
+Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
+REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
+Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance.
+Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
+Reports, dashboards, UAT, production support, code reviews.
+Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+
+EXPERIENCE
+Intrado — Senior Salesforce Engineer / Technical Consultant / Architect | Colorado, United States | Remote | Jun 2024 - Present
+Public-safety technology company providing 911, NG911, E911, GIS, emergency communications, and incident-management platforms.
+
+S&P Global — Senior Salesforce Developer / CRM Platform Engineer | New York, New York, United States | Remote | Dec 2022 - May 2024
+Financial data and analytics firm providing benchmarks, credit ratings, commodities information, and ESG insights.
+
+AI/R Everymind — Salesforce Developer | São Paulo, Brazil | Hybrid | Oct 2019 - Sep 2022
+Salesforce consultancy covering Salesforce Industries, Customer 360, Commerce Cloud, Tableau CRM, Data Cloud, and Slack.
+
+Pismo — Salesforce Administrator / Developer | Recife, Brazil | On-site | Sep 2017 - Sep 2019
+Cloud-native payments and core-banking platform used by banks, marketplaces, and fintechs for card issuing and digital banking.
+
+Concrete Solutions — Software Engineer Intern / Junior CRM Developer | Recife, Brazil | On-site | Sep 2014 - Aug 2017
+Accenture digital-product studio in Brazil delivering web, mobile, and cloud software with agile teams.
+
+EDUCATION
+Federal University of Pernambuco | Bachelor of Science in Computer Science | Recife, Brazil | Mar 2013 - Aug 2017
+
+CERTIFICATIONS
+None.`;
+
+export const DAVID_OLIVEIRA_DE_MASTER = `David de Oliveira
+Senior Analytics Engineer / Senior Data Engineer
+Paulista, Pernambuco, Brazil | +55 61 8212 1297 | davidoliveira2308l@gmail.com
+https://www.linkedin.com/in/davidleandrodeoliveria95/
+
+SUMMARY
+9+ years of overall technology experience, including 8+ years delivering data engineering, ETL/ELT, and analytics platforms for security, digital-product, and software-engineering teams.
+
+SKILLS
+Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
+
+EXPERIENCE
+Clevertech — Analytics Engineer | New York, United States | Remote | Jan 2024 - Present
+
+Softbinator Technologies — Senior Data Engineer | Bucharest, Romania | Remote | Mar 2021 - Nov 2023
+Romanian software engineering company building distributed product teams for fintech, healthcare, media, ecommerce, and blockchain.
+
+Concrete Solutions — Backend Engineer / Data Engineer | São Paulo, Brazil | On-site | Aug 2018 - Feb 2021
+Accenture digital-product studio in Brazil delivering web, mobile, and cloud software with agile teams.
+
+Tempest Security Intelligence — Software Engineer Intern / Backend Developer | Recife, Pernambuco, Brazil | On-site | Jan 2017 - Jun 2018
+Brazilian cybersecurity firm focused on digital-fraud prevention, threat intelligence, managed security, and application security.
+
+EDUCATION
+Federal University of Pernambuco | Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017
+
+CERTIFICATIONS
+None.`;
+
+export const VICTOR_HOLANDA_SF_MASTER = `Victor Barros de Holanda
+Senior Salesforce Engineer
+Paulista, Pernambuco, Brazil | +55 81 95735610 | victor.holanda201@gmail.com
+https://www.linkedin.com/in/victorstardev1996
+
+SUMMARY
+10+ years of overall technology experience, including 10+ years delivering Salesforce development, administration, and integration work across consulting and nearshore engineering teams.
+
+SKILLS
+Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Data Cloud, Agentforce, Einstein AI, Nonprofit Cloud, Health Cloud, Salesforce Platform.
+Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
+Flow and Flow Builder, approval processes, validation rules, workflow automation.
+Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
+REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
+Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance.
+Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
+Reports, dashboards, UAT, production support, code reviews.
+Solution design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+Platform administration, configuration, security model, and Salesforce fundamentals.
+
+EXPERIENCE
+EPAM Systems — Senior Salesforce Engineer | Newtown, Pennsylvania, United States | Remote | Sep 2024 - Present
+Global software and platform engineering firm delivering product engineering, consulting, and AI transformation programs.
+
+Endava — Senior Salesforce Developer / Automation & Integration Engineer | Bucharest, Romania | Remote | Jul 2022 - Jun 2024
+Digital engineering consultancy delivering agile software, cloud, automation, and data platforms.
+
+BairesDev — Salesforce Developer / Admin | Recife, Pernambuco, Brazil | Hybrid | Dec 2018 - May 2022
+Nearshore software engineering firm building custom software, CRM, and digital products with teams across the Americas.
+
+Accenture — Software Engineer Intern / Junior Salesforce Developer | Recife, Pernambuco, Brazil | On-site | May 2016 - Oct 2018
+Global consulting and technology firm delivering systems integration, application services, and digital transformation.
+
+EDUCATION
+Federal University of Pernambuco | Bachelor of Science in Computer Science | Apr 2014 - Mar 2018
+
+CERTIFICATIONS
+- Salesforce Certified Platform Data Architect — Oct 2025
+- Salesforce Certified Agentforce Specialist — May 2025
+- Salesforce Certified Data 360 Consultant — Sep 2024
+- Salesforce Certified Platform Developer — Jul 2023
+- Salesforce Certified Platform Administrator — Apr 2023
+- Salesforce Certified Platform Foundations — Apr 2023`;
+
+export const VICTOR_HOLANDA_DE_MASTER = `Victor de Holanda
+Senior Data Engineer
+Paulista, Pernambuco, Brazil | +55 81 95735610 | victor.holanda201@gmail.com
+https://www.linkedin.com/in/victor-barros-de
+
+SUMMARY
+10+ years of overall technology experience, including 8+ years delivering data engineering, ETL/ELT, and analytics platforms for innovation centers, fintech-adjacent product teams, and marketplace companies.
+
+SKILLS
+Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
+
+EXPERIENCE
+Deliveroo — Senior Data Engineer | London, United Kingdom | Remote | Nov 2024 - Present
+Food and grocery delivery marketplace operating restaurant, grocery, and rider logistics across multiple countries.
+
+Toptal — Senior Analytics Engineer / AI Consultant | New York, United States | Remote | Sep 2022 - Sep 2024
+Remote software talent network contracting engineers across product, data, and platform work.
+
+Zup Innovation — Data Engineer | São Paulo, Brazil | Hybrid | Sep 2019 - Aug 2022
+Brazilian technology company building cloud-native and distributed systems, including the StackSpot developer platform.
+
+Neurotech — Backend Engineer / Data Engineer | Recife, Pernambuco, Brazil | On-site | Mar 2018 - Jul 2019
+Brazilian decision-intelligence company (now Trillia) delivering analytics, AI, and data-driven decision systems.
+
+CESAR — Software Engineer Intern / Backend Developer | Recife, Pernambuco, Brazil | On-site | Jun 2016 - Feb 2018
+Brazilian innovation center in Recife delivering software, user experience, IoT, and consulting for enterprise customers.
+
+EDUCATION
+Federal University of Pernambuco | Bachelor of Science in Computer Science | Recife, Brazil | Mar 2014 - Dec 2017
+
+CERTIFICATIONS
+None.`;
