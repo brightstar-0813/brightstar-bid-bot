@@ -4586,6 +4586,28 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         return (block.innerText || block.textContent || "").trim();
       };
 
+      const readLatestBeforeText = () => {
+        try {
+          const fromApi = globalThis.__brightstarDomHarvest?.readNewestAssistantTurn?.(document);
+          const text = String(fromApi || "").trim();
+          if (text) return text;
+        } catch {
+          /* fall through to the last assistant node */
+        }
+        const nodes = Array.from(
+          document.querySelectorAll(
+            [
+              "[data-message-author-role='assistant']",
+              "[data-message-role='assistant']",
+              "[data-turn='assistant']",
+              '[data-testid="assistant-message"]'
+            ].join(", ")
+          )
+        );
+        const last = nodes[nodes.length - 1];
+        return last ? readAssistantBlock(last) : "";
+      };
+
       if (shouldStartNewChat) {
         const usersNow = countUserBlocks();
         const assistantsNow = getAssistantBlocks().length;
@@ -4606,7 +4628,7 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
 
       const blocks = getAssistantBlocks();
       const blocksBefore = blocks.length;
-      const latestBefore = blocks.length ? readAssistantBlock(blocks[blocks.length - 1]) : "";
+      const latestBefore = readLatestBeforeText();
       const usersBefore = countUserBlocks();
 
       let input = null;
@@ -4751,6 +4773,7 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
 }
 
 async function claudeSendPrompt(tabId, prompt, startNewChat) {
+  await ensureChatGptDomHarvest(tabId);
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
     await setStatus("Opening a fresh Claude chat…");
@@ -4968,6 +4991,28 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
             );
           };
 
+          const readPriorAssistantText = () => {
+            try {
+              const fromApi = globalThis.__brightstarDomHarvest?.readNewestAssistantTurn?.(document);
+              const text = String(fromApi || "").trim();
+              if (text) return text;
+            } catch {
+              /* fall through to the last assistant node */
+            }
+            const nodes = Array.from(
+              document.querySelectorAll(
+                '[data-testid="assistant-message"], [data-testid="assistant"], [data-message-author-role="assistant"], [class*="font-claude-message"]'
+              )
+            );
+            const last = nodes[nodes.length - 1];
+            return String(last?.innerText || last?.textContent || "").trim();
+          };
+
+          const assistantCount = () =>
+            document.querySelectorAll(
+              '[data-testid="assistant-message"], [data-testid="assistant"], [class*="font-claude-message"]'
+            ).length;
+
           const composerEmpty = () => {
             const el = findInput();
             const n = (el?.innerText || el?.textContent || "").trim().length;
@@ -5040,6 +5085,10 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
             }
           }
 
+          // Snapshot before Send so a later harvest can reject this turn.
+          const blocksBefore = assistantCount();
+          const latestBefore = readPriorAssistantText();
+
           let input = null;
           for (let i = 0; i < 40; i += 1) {
             input = findInput();
@@ -5051,10 +5100,8 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
           // Do not re-paste while Claude is already generating.
           if (isGenerating()) {
             return {
-              blocksBefore: document.querySelectorAll(
-                '[data-testid="assistant-message"], [data-testid="assistant"], [class*="font-claude-message"]'
-              ).length,
-              latestBefore: "",
+              blocksBefore,
+              latestBefore,
               alreadyGenerating: true
             };
           }
@@ -5162,10 +5209,8 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
           }
 
           return {
-            blocksBefore: document.querySelectorAll(
-              '[data-testid="assistant-message"], [data-testid="assistant"], [class*="font-claude-message"]'
-            ).length,
-            latestBefore: ""
+            blocksBefore,
+            latestBefore
           };
         }
       });
@@ -7239,6 +7284,21 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     return freshQaAnswer(plain) || freshQaAnswer(lastText);
   }
 
+  function noteQaAnswer(answerNow, generating) {
+    if (!answerNow) {
+      if (generating) qaStableHits = 0;
+      return "";
+    }
+    if (answerNow === qaStableText) qaStableHits += 1;
+    else {
+      qaStableText = answerNow;
+      qaStableHits = 1;
+    }
+    if (qaStableHits >= 2 && !generating) return answerNow;
+    if (qaStableHits >= 3) return answerNow;
+    return "";
+  }
+
   // A leftover batch Skip/Stop flag must not abort a panel Custom Q&A ask.
   // An explicit Skip during this wait still aborts, after one harvest attempt.
   if (replyKind === "answer" && !expectResumeJson && !isRunning && batchControl.skipCurrent) {
@@ -7425,19 +7485,11 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     // Custom Q&A: a finished one-paragraph answer is not a cover letter.
     // Accept it once it stops changing, even if the stop control is still up.
+    // Do not settle the turn that was already on screen before Send.
     if (replyKind === "answer" && !expectResumeJson) {
-      const answerNow = await readSettledQaAnswer();
-      if (!answerNow) {
-        if (state.generating) qaStableHits = 0;
-      } else {
-        if (answerNow === qaStableText) qaStableHits += 1;
-        else {
-          qaStableText = answerNow;
-          qaStableHits = 1;
-        }
-        if (qaStableHits >= 2 && !state.generating) return answerNow;
-        if (qaStableHits >= 3) return answerNow;
-      }
+      const moved = sawGeneration || state.blockCount > blocksBefore;
+      const ready = noteQaAnswer(moved ? await readSettledQaAnswer() : "", state.generating);
+      if (ready) return ready;
     }
 
     // Structured object already harvested — prefer it over any stale lastText.
@@ -7683,16 +7735,9 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     if (!expectResumeJson) {
       if (replyKind === "answer") {
-        const answer = await readSettledQaAnswer();
-        if (answer) {
-          if (answer === qaStableText) qaStableHits += 1;
-          else {
-            qaStableText = answer;
-            qaStableHits = 1;
-          }
-          if (qaStableHits >= 2 && !state.generating) return answer;
-          if (qaStableHits >= 3) return answer;
-        }
+        const moved = sawGeneration || state.blockCount > blocksBefore;
+        const ready = noteQaAnswer(moved ? await readSettledQaAnswer() : "", state.generating);
+        if (ready) return ready;
         continue;
       }
       // Prefer the newest assistant turn — poller used to keep returning resume JSON.

@@ -241,6 +241,28 @@ test("Q&A harvest keeps the newest paragraph when an older letter is still in th
   assert.equal(looksLikeCoverLetterBody(answer), false);
 });
 
+test("rejects a job posting whose privacy footer says consideration", () => {
+  const posting = [
+    "Has a working laptop/desktop and high-speed internet connection. Responsibilities Gather, Analyse and Document Business Requirements, Use cases, and Business Processes.",
+    "What we aim to give: Work-life Integration Work-from-home Job Opportunities Flexible Schedules Competitive Salary.",
+    "Data Privacy Consent By submitting your application for this job, you are authorizing JWay Group to collect and use your personal data, and to retain your personal data for consideration of future job opportunities.",
+    "Originally posted on Himalayas"
+  ].join(" ");
+  assert.equal(looksLikeCoverLetterBody(posting), false);
+  assert.equal(extractCoverLetterText(posting), "");
+  const promptThenPosting = [
+    "OUTPUT RULES",
+    "Return PLAIN TEXT only.",
+    "Start with: Dear Hiring Manager,",
+    "Do NOT return JSON.",
+    "",
+    "JD",
+    posting
+  ].join("\n");
+  assert.equal(extractCoverLetterText(promptThenPosting), "");
+  assert.equal(looksLikeCoverLetterBody(promptThenPosting), false);
+});
+
 test("rejects resume JSON that has no letter after it", () => {
   assert.equal(extractCoverLetterText(resumeJson), "");
   assert.equal(looksLikeCoverLetterBody(resumeJson), false);

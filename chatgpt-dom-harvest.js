@@ -422,6 +422,10 @@
     if (/"experience"\s*:/.test(s) && /"technicalSummary"|"certifications"\s*:/.test(s)) return false;
     if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
     if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON/i.test(s)) return false;
+    if (/originally posted on|data privacy consent|by submitting your application|what we aim to give|has a working laptop\/desktop/i.test(s)) {
+      return false;
+    }
+    if (!/\bI(?:['’](?:m|ve|d|ll))?\b/.test(s)) return false;
     let paras = s
       .split(/\n+/)
       .map((p) => p.trim())
@@ -434,7 +438,9 @@
     }
     const bodyLen = paras.reduce((n, p) => n + p.length, 0);
     if (paras.length < 2 || bodyLen < 160) return false;
-    return /thank you|consideration|welcome the opportunity|i would welcome|happy to discuss/i.test(s.slice(-600));
+    return /thank you|for your consideration|welcome the (?:opportunity|chance)|i would welcome|happy to discuss/i.test(
+      s.slice(-600)
+    );
   }
 
   function remainderAfterKnownTurns(turn) {

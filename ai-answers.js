@@ -962,14 +962,21 @@ export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } =
     }
   }
   const prevCompact = compactQaText(previous);
-  if (prevCompact && answerCompact === prevCompact) return "";
-  if (
-    prevCompact &&
-    answerCompact.length > 80 &&
-    prevCompact.endsWith(answerCompact) &&
-    answerCompact.length >= prevCompact.length * 0.8
-  ) {
-    return "";
+  if (prevCompact && answerCompact) {
+    if (answerCompact === prevCompact) return "";
+    if (
+      answerCompact.length > 80 &&
+      prevCompact.endsWith(answerCompact) &&
+      answerCompact.length >= prevCompact.length * 0.8
+    ) {
+      return "";
+    }
+    // A scorecard or other earlier turn can sit inside a longer snapshot.
+    // Keep a reply that repeats a resume sentence already quoted in the ask prompt.
+    if (prevCompact.includes(answerCompact)) {
+      const echoedFromPrompt = promptCompact.length >= 40 && promptCompact.includes(answerCompact);
+      if (!echoedFromPrompt) return "";
+    }
   }
   return t;
 }

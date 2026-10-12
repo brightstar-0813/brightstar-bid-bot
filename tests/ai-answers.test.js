@@ -203,6 +203,35 @@ test("extractFreshCustomQaAnswer keeps a reply that repeats a resume sentence fr
   assert.equal(extractFreshCustomQaAnswer(answer, { prompt, previous: answer }), "");
 });
 
+test("extractFreshCustomQaAnswer ignores an ATS scorecard already in the chat", () => {
+  const scorecard =
+    "ATS Score ATS Match Score — StemWave Target Role: Salesforce Systems Administrator / Salesforce Application Systems Analyst Overall Estimated ATS Score: 94/100 The resume is highly aligned with this JD.";
+  const answer =
+    "A Household Account in Salesforce Nonprofit Success Pack (NPSP) represents a group of people who live together and are connected as a household, such as a family or shared residence. It helps fundraisers see the complete relationship with that household by organizing individual contacts, donations, interactions, and engagement history in one place.";
+  const prompt = buildCustomQaFollowUpPrompt(
+    "In 2-3 sentences, explain what a Household Account is in NPSP, written as you would for a new fundraiser who has never used Salesforce.",
+    {
+      jobTitle: "Salesforce Systems Administrator",
+      companyName: "StemWave",
+      jdText: "Nonprofit Success Pack household accounts and donor history."
+    }
+  );
+  const earlierThread = `Resume JSON was saved.\n\n${scorecard}`;
+  assert.equal(extractFreshCustomQaAnswer(scorecard, { prompt, previous: scorecard }), "");
+  assert.equal(extractFreshCustomQaAnswer(scorecard, { prompt, previous: earlierThread }), "");
+  assert.equal(
+    extractFreshCustomQaAnswer(`${scorecard}\n\n${prompt}\n\n${answer}`, { prompt, previous: scorecard }),
+    answer
+  );
+  assert.equal(
+    extractFreshCustomQaAnswer(`${earlierThread}\n\n${prompt}\n\n${answer}`, {
+      prompt,
+      previous: earlierThread
+    }),
+    answer
+  );
+});
+
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {
   assert.deepEqual(normalizeSkillList(["Apex", "Apex", "LWC"]).slice(0, 2), ["Apex", "LWC"]);
   assert.deepEqual(

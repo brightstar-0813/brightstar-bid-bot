@@ -33,6 +33,13 @@ function letterBodyChunks(text) {
     .filter((p) => p.length > 40 && !/^dear\s+/i.test(p));
 }
 
+/** Job-board scrapes and consent footers are not a letter, even when they say "consideration". */
+function isJobPostingDump(text) {
+  return /originally posted on|data privacy consent|by submitting your application|what we aim to give|has a working laptop\/desktop/i.test(
+    String(text || "")
+  );
+}
+
 export function looksLikeCoverLetterBody(text) {
   const s = stripChatGptChrome(text);
   // Resume JSON dumped into the "letter" slot.
@@ -40,13 +47,19 @@ export function looksLikeCoverLetterBody(text) {
   if (/^\s*\{/.test(s) && /"name"\s*:/.test(s)) return false;
   // Salutation glued to the ChatGPT footer is not a finished letter.
   if (/ChatGPT can make mistakes|Check important info|Latest response|Thinking effort/i.test(s)) return false;
+  if (isJobPostingDump(s)) return false;
+  // A posting is third-person requirements. A letter speaks as the candidate.
+  if (!/\bI(?:['’](?:m|ve|d|ll))?\b/.test(s)) return false;
   const paras = letterBodyChunks(s);
   const bodyLen = paras.reduce((n, p) => n + p.length, 0);
   if (paras.length < 2 || bodyLen < 160) return false;
   // The closing is the last thing ChatGPT writes. A salutation, or a letter
   // that has not reached that line yet, is not ready to download.
+  // Bare "consideration" also matches privacy text ("consideration of future job opportunities").
   const tail = s.slice(-600);
-  return /thank you|consideration|welcome the opportunity|i would welcome|happy to discuss/i.test(tail);
+  return /thank you|for your consideration|welcome the (?:opportunity|chance)|i would welcome|happy to discuss/i.test(
+    tail
+  );
 }
 
 function findBalancedObjectEnd(input, start) {
