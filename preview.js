@@ -4,6 +4,8 @@ import {
   getTemplateById,
   resumeJsonToHtml,
   TEMPLATE_ACCENT_KEY,
+  TEMPLATE_ACCENTS,
+  accentById,
   resolveAccentId
 } from "./templates/index.js";
 import { applyPathEdits } from "./templates/shared.js";
@@ -19,6 +21,8 @@ const ONE_OFF_DRAFT_KEY = "one_off_draft";
 const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
 
 const templateSelectEl = document.getElementById("templateSelect");
+const accentSwatchesEl = document.getElementById("templateAccentSwatches");
+const accentNameEl = document.getElementById("templateAccentName");
 const useStyleBtn = document.getElementById("useStyle");
 const pageEl = document.getElementById("page");
 const ledeEl = document.getElementById("previewLede");
@@ -44,6 +48,7 @@ let editMode = false;
 let dirty = false;
 /** When true, ignore storage-driven re-renders that would wipe mid-edit. */
 let skipStorageRefresh = false;
+let templateAccentMap = {};
 
 function setStatus(message, tone = "") {
   const text = String(message || "").trim();
@@ -296,10 +301,8 @@ async function renderPreview({ keepWorkingCopy = false } = {}) {
     workingResumeData = cloneResume(data);
   }
   const renderData = workingResumeData || data;
-  const accentStored = await chrome.storage.local.get(TEMPLATE_ACCENT_KEY);
-  const accentMap = accentStored[TEMPLATE_ACCENT_KEY];
   const html = resumeJsonToHtml(renderData, templateId, {
-    accentId: resolveAccentId(templateId, accentMap && typeof accentMap === "object" ? accentMap : {})
+    accentId: resolveAccentId(templateId, templateAccentMap)
   });
   pageEl.srcdoc = html;
   if (ledeEl) {
@@ -329,6 +332,51 @@ async function renderPreview({ keepWorkingCopy = false } = {}) {
     );
   }
   updateEditChrome();
+  renderTemplateAccents();
+}
+
+function renderTemplateAccents() {
+  if (!accentSwatchesEl) return;
+  const accentId = resolveAccentId(templateId, templateAccentMap);
+  const storedId = accentById(templateAccentMap[templateId]) ? templateAccentMap[templateId] : "";
+  const activeId = storedId || accentId;
+  if (!accentSwatchesEl.childElementCount) {
+    for (const accent of TEMPLATE_ACCENTS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "accent-swatch";
+      button.dataset.accentId = accent.id;
+      button.style.background = accent.hex;
+      button.title = accent.label;
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-label", accent.label);
+      accentSwatchesEl.appendChild(button);
+    }
+  }
+  for (const button of accentSwatchesEl.querySelectorAll(".accent-swatch")) {
+    const on = button.dataset.accentId === activeId;
+    button.classList.toggle("is-selected", on);
+    button.setAttribute("aria-checked", on ? "true" : "false");
+  }
+  if (accentNameEl) {
+    const label = accentById(activeId)?.label;
+    accentNameEl.textContent = label ? `Accent · ${label}` : "Accent";
+  }
+}
+
+async function loadTemplateAccents() {
+  const stored = await chrome.storage.local.get(TEMPLATE_ACCENT_KEY);
+  const map = stored[TEMPLATE_ACCENT_KEY];
+  templateAccentMap = map && typeof map === "object" ? map : {};
+  renderTemplateAccents();
+}
+
+async function chooseTemplateAccent(accentId) {
+  if (!accentById(accentId)) return;
+  templateAccentMap = { ...templateAccentMap, [templateId]: accentId };
+  renderTemplateAccents();
+  await chrome.storage.local.set({ [TEMPLATE_ACCENT_KEY]: templateAccentMap });
+  await renderPreview({ keepWorkingCopy: editMode });
 }
 
 async function initSource() {
@@ -514,6 +562,14 @@ downloadDocxBtn?.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+accentSwatchesEl?.addEventListener("click", (event) => {
+  const button = event.target.closest(".accent-swatch");
+  if (!button) return;
+  chooseTemplateAccent(button.dataset.accentId).catch((err) =>
+    setStatus(String(err?.message || err), "err")
+  );
+});
+
 templateSelectEl.addEventListener("change", () => {
   const run = async () => {
     if (editMode && dirty) {
@@ -583,8 +639,13 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes[TEMPLATE_ACCENT_KEY] && !(skipStorageRefresh && dirty)) {
-    renderPreview({ keepWorkingCopy: editMode }).catch(() => {});
+  if (changes[TEMPLATE_ACCENT_KEY]) {
+    const map = changes[TEMPLATE_ACCENT_KEY].newValue;
+    templateAccentMap = map && typeof map === "object" ? map : {};
+    renderTemplateAccents();
+    if (!(skipStorageRefresh && dirty)) {
+      renderPreview({ keepWorkingCopy: editMode }).catch(() => {});
+    }
   }
   if (changes.selected_template_id && !(skipStorageRefresh && dirty)) {
     const next = String(changes.selected_template_id.newValue || "").trim();
@@ -685,6 +746,7 @@ initSource()
     const stored = await chrome.storage.local.get("selected_template_id");
     const active = String(stored.selected_template_id || templateId || DEFAULT_TEMPLATE_ID).trim();
     if (active) await persistActiveTemplate(active);
+    await loadTemplateAccents();
     return renderPreview();
   })
   .catch((err) => setStatus(`Preview failed: ${String(err?.message || err)}`, "err"));

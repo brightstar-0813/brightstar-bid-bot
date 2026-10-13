@@ -185,6 +185,59 @@ body.is-editing #editResume {
   max-width: 240px;
 }
 
+.accent-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.accent-label {
+  color: var(--ink-soft);
+  font-size: var(--font-size-ui-sm);
+  font-weight: 650;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.accent-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+button.accent-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  background: var(--control-bg);
+}
+
+button.accent-swatch:hover {
+  filter: brightness(1.08);
+}
+
+button.accent-swatch.is-selected {
+  box-shadow: 0 0 0 2px #fff, inset 0 0 0 1px rgba(0, 0, 0, 0.28);
+}
+
+button.accent-swatch.is-selected::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 5px;
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg);
+}
+
 select,
 button {
   border: 1px solid var(--control-border);

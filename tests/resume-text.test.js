@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { plainTextToResumeData } from "../resume-text.js";
-import { getAllTemplates, getTemplateById, resumeJsonToHtml } from "../templates/index.js";
+import {
+  getAllTemplates,
+  getTemplateById,
+  resumeJsonToHtml,
+  TEMPLATE_ACCENTS
+} from "../templates/index.js";
 
 function resumeWithEducation(eduBody) {
   return `DAVID LEANDRO DE OLIVEIRA
@@ -380,12 +385,28 @@ test("accent color tints template rules without replacing body text", () => {
   const data = { name: "Ada Lovelace", profile: "Engineer." };
   const plain = resumeJsonToHtml(data, "ats-modern");
   const burgundy = resumeJsonToHtml(data, "ats-modern", { accentId: "burgundy" });
-  assert.equal(plain.includes("#7a2e3b"), false);
-  assert.match(burgundy, /#7a2e3b/);
+  assert.equal(plain.includes("#8b2332"), false);
+  assert.match(burgundy, /#8b2332/i);
   assert.match(burgundy, /h1, h2/);
   const classic = resumeJsonToHtml(data, "times-classic", { accentId: "burgundy" });
-  assert.match(classic, /h2 \{ color: #7a2e3b/);
+  assert.match(classic, /h2 \{ color: #8b2332/i);
   assert.match(classic, /color: #000/);
+});
+
+test("resume style ships eight enterprise accent colors", () => {
+  assert.equal(TEMPLATE_ACCENTS.length, 8);
+  const hexes = TEMPLATE_ACCENTS.map((row) => row.hex.toLowerCase());
+  assert.deepEqual(hexes, [
+    "#1f4e79",
+    "#0a2540",
+    "#5b6770",
+    "#0d7377",
+    "#1e7a46",
+    "#8b2332",
+    "#5b2c6f",
+    "#8a5a2b"
+  ]);
+  assert.equal(new Set(hexes).size, 8);
 });
 
 test("retired template ids resolve to a kept layout", () => {

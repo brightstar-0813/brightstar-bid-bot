@@ -1,15 +1,19 @@
 /** Accent colors for the Resume style picker. Each template remembers its own id. */
 export const TEMPLATE_ACCENT_KEY = "template_accent_by_id";
 
+/**
+ * Eight print-safe enterprise accents. Dark enough for headings, and far enough
+ * apart that neighboring swatches do not blend.
+ */
 export const TEMPLATE_ACCENTS = [
-  { id: "blue", label: "Blue", hex: "#1f4e79" },
-  { id: "navy", label: "Navy", hex: "#0b1f3a" },
-  { id: "slate", label: "Slate", hex: "#4b5563" },
-  { id: "teal", label: "Teal", hex: "#0f766e" },
-  { id: "green", label: "Green", hex: "#1f6b4a" },
-  { id: "purple", label: "Purple", hex: "#5b3a7a" },
-  { id: "burgundy", label: "Burgundy", hex: "#7a2e3b" },
-  { id: "bronze", label: "Bronze", hex: "#8a5a2b" }
+  { id: "blue", label: "Blue", hex: "#1F4E79" },
+  { id: "navy", label: "Navy", hex: "#0A2540" },
+  { id: "slate", label: "Slate", hex: "#5B6770" },
+  { id: "teal", label: "Teal", hex: "#0D7377" },
+  { id: "green", label: "Green", hex: "#1E7A46" },
+  { id: "burgundy", label: "Burgundy", hex: "#8B2332" },
+  { id: "purple", label: "Purple", hex: "#5B2C6F" },
+  { id: "bronze", label: "Bronze", hex: "#8A5A2B" }
 ];
 
 /** Built-in accent when the person has not picked one for that template. */
