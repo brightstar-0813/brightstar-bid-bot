@@ -232,6 +232,20 @@ test("extractFreshCustomQaAnswer ignores an ATS scorecard already in the chat", 
   );
 });
 
+test("extractFreshCustomQaAnswer keeps a reply under a collapsed ask", () => {
+  const answer =
+    "I delivered Salesforce automation solutions using Flow, Apex, and integrated platform capabilities to reduce manual business processes, improve data accuracy, and streamline user workflows. I built automated processes around record updates, approvals, validations, and integrations, helping teams work more efficiently and improving operational visibility.";
+  const prompt = buildCustomQaFollowUpPrompt("Briefly describe an automation solution you personally delivered", {
+    jobTitle: "Salesforce Developer",
+    companyName: "Acme",
+    jdText: "Flow, Apex, and business process automation."
+  });
+  const collapsed = `OUTPUT RULES Prefer real roles. This chat is for ONE job application. Keep using this same conversation Show more\n${answer}`;
+  const previous = `${"Prior resume experience with Flow and Apex across several employers. ".repeat(12)}${answer}`;
+  assert.equal(extractFreshCustomQaAnswer(collapsed, { prompt, previous }), answer);
+  assert.equal(extractFreshCustomQaAnswer(answer, { prompt, previous }), answer);
+});
+
 test("normalizeSkillList and normalizeRecentRoles flatten resume shapes", () => {
   assert.deepEqual(normalizeSkillList(["Apex", "Apex", "LWC"]).slice(0, 2), ["Apex", "LWC"]);
   assert.deepEqual(

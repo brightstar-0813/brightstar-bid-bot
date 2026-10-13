@@ -586,6 +586,22 @@
    * reply would be saved from the beginning of the chat.
    */
   function readNewestAssistantTurn(doc) {
+    const turns = queryAll(doc, TURN_SELECTOR);
+    const lastTurn = turns.length ? turns[turns.length - 1] : null;
+    if (lastTurn && !isUserElement(lastTurn)) {
+      const fromTurn = tidyChunk(readElementProse(lastTurn, { stripCode: false }));
+      const showSplit = fromTurn.split(/show more/i);
+      const afterAsk = showSplit.length > 1 ? showSplit[showSplit.length - 1].trim() : "";
+      const promptOnly =
+        (PROMPT_ECHO.test(fromTurn) || /this chat is for one job application/i.test(fromTurn)) &&
+        (afterAsk.length < 20 || PROMPT_ECHO.test(afterAsk));
+      // User bubble and reply often share one turn, and the reply may have no assistant role.
+      // A collapsed ask with no reply yet must not replace the previous assistant message.
+      if (!promptOnly && (afterAsk.length > 20 || (fromTurn.length > 20 && !PROMPT_ECHO.test(fromTurn)))) {
+        const newest = afterAsk.length > 20 ? afterAsk : fromTurn;
+        return newest.slice(0, 20000);
+      }
+    }
     const nodes = queryAll(doc, ASSISTANT_SELECTOR).filter((el) => !isUserElement(el));
     const roots = nodes.filter((el) => !nodes.some((other) => nodeContains(other, el)));
     const pieces = [];

@@ -238,6 +238,28 @@ test("Q&A harvest keeps the newest paragraph when an older letter is still in th
   });
   assert.equal(readNewestAssistantTurn(doc), answer);
   assert.equal(readNewestAssistantProse(doc), culligan);
+  const sameTurn = node({
+    tag: "div",
+    children: [
+      node({
+        tag: "article",
+        testid: "conversation-turn-2",
+        children: [node({ role: "assistant", text: culligan })]
+      }),
+      node({
+        tag: "article",
+        testid: "conversation-turn-6",
+        children: [
+          node({
+            role: "user",
+            text: "This chat is for ONE job application. Keep using this same conversation Show more"
+          }),
+          node({ text: answer })
+        ]
+      })
+    ]
+  });
+  assert.equal(readNewestAssistantTurn(sameTurn), answer);
   assert.equal(looksLikeCoverLetterBody(answer), false);
 });
 

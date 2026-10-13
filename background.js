@@ -7487,8 +7487,11 @@ async function automateChatGpt(tabId, prompt, options = {}) {
     // Accept it once it stops changing, even if the stop control is still up.
     // Do not settle the turn that was already on screen before Send.
     if (replyKind === "answer" && !expectResumeJson) {
-      const moved = sawGeneration || state.blockCount > blocksBefore;
-      const ready = noteQaAnswer(moved ? await readSettledQaAnswer() : "", state.generating);
+      // A new paragraph is enough. Block count and the stop button stay up on
+      // the current ChatGPT UI, so waiting on them reports Send as failed
+      // after the reply is already on screen. Stale prior turns are rejected
+      // by extractFreshCustomQaAnswer via latestBefore.
+      const ready = noteQaAnswer(await readSettledQaAnswer(), state.generating);
       if (ready) return ready;
     }
 
@@ -7735,8 +7738,7 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     if (!expectResumeJson) {
       if (replyKind === "answer") {
-        const moved = sawGeneration || state.blockCount > blocksBefore;
-        const ready = noteQaAnswer(moved ? await readSettledQaAnswer() : "", state.generating);
+        const ready = noteQaAnswer(await readSettledQaAnswer(), state.generating);
         if (ready) return ready;
         continue;
       }

@@ -919,6 +919,22 @@ function compactQaText(text) {
   return stripInvisibleChars(text).replace(/\s+/g, " ").trim();
 }
 
+const QA_PROMPT_ECHO = /OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON|CONTEXT \(JSON\)/i;
+
+/** Collapsed ask bubble ends in "Show more"; the reply is the text after that. */
+function peelQaPromptEcho(text) {
+  let t = String(text || "").trim();
+  if (!t) return "";
+  const cuts = ["Reply with ONLY the answer text.", "Show more", "Show less"];
+  for (const cut of cuts) {
+    const idx = t.lastIndexOf(cut);
+    if (idx < 0) continue;
+    const after = t.slice(idx + cut.length).trim();
+    if (after.length >= 20 && !QA_PROMPT_ECHO.test(after)) return after;
+  }
+  return t;
+}
+
 export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } = {}) {
   let t = stripInvisibleChars(raw).trim();
   if (!t) return "";
@@ -932,6 +948,7 @@ export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } =
       if (idx >= 0) t = t.slice(idx + marker.length).trim();
     }
   }
+  t = peelQaPromptEcho(t);
   t = t
     .replace(/\bShow more\b/gi, " ")
     .replace(/ChatGPT can make mistakes[\s\S]*$/i, "")
@@ -942,9 +959,7 @@ export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } =
   if (/^(yes|no)\.?$/i.test(t)) return t.replace(/\.$/, "");
   if (t.length < 20) return "";
   if (/"experience"\s*:/.test(t) && /"name"\s*:/.test(t)) return "";
-  if (/OUTPUT RULES|MASTER RESUME|Return PLAIN TEXT only|Do NOT return JSON|CONTEXT \(JSON\)/i.test(t)) {
-    return "";
-  }
+  if (QA_PROMPT_ECHO.test(t)) return "";
   const answerCompact = compactQaText(t).replace(/(?:\s*[.…]{2,}|\s*…)+\s*$/g, "").trim();
   const promptCompact = compactQaText(promptTrim);
   // Collapsed user bubble ("This chat is for ONE job… Show more") is the ask, not the reply.
@@ -971,12 +986,8 @@ export function extractFreshCustomQaAnswer(raw, { prompt = "", previous = "" } =
     ) {
       return "";
     }
-    // A scorecard or other earlier turn can sit inside a longer snapshot.
-    // Keep a reply that repeats a resume sentence already quoted in the ask prompt.
-    if (prevCompact.includes(answerCompact)) {
-      const echoedFromPrompt = promptCompact.length >= 40 && promptCompact.includes(answerCompact);
-      if (!echoedFromPrompt) return "";
-    }
+    // A new reply may quote a resume sentence that also sits in the prior turn.
+    // Only the prior turn itself (equal, or nearly all of that snapshot) is stale.
   }
   return t;
 }
