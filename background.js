@@ -109,7 +109,12 @@ import {
 } from "./resume-json.js";
 import { formatRequiredEmployersList } from "./experience-rules.js";
 import { openProfileEditor } from "./open-profile-editor.js";
-import { DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import {
+  DEFAULT_TEMPLATE_ID,
+  TEMPLATE_ACCENT_KEY,
+  accentById,
+  resolveAccentId
+} from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
 import {
@@ -2881,7 +2886,12 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
   let html = "";
   try {
     await setStatus("Building resume HTML…");
-    html = resumeJsonToHtml(resumeData, templateId);
+    const accentId = Object.prototype.hasOwnProperty.call(jobMeta, "templateAccent")
+      ? accentById(jobMeta.templateAccent)
+        ? jobMeta.templateAccent
+        : ""
+      : await pickTemplateAccent(templateId, {});
+    html = resumeJsonToHtml(resumeData, templateId, { accentId });
   } catch (err) {
     throw new Error(`Resume HTML render failed: ${String(err?.message || err)}`);
   }
@@ -8050,11 +8060,13 @@ async function runGenerationPipeline({ jobMeta, jsonText }) {
     jobMeta?.resumeFilePrefix || person?.resumeFilePrefix,
     person?.name || person?.label || data?.name || ""
   );
+  const templateId = await pickTemplateId(jobMeta || {}, person || {});
   const enrichedMeta = {
     ...(jobMeta || {}),
     resumeFilePrefix,
     personName: person?.name || person?.label || data?.name || "",
-    templateId: await pickTemplateId(jobMeta || {}, person || {}),
+    templateId,
+    templateAccent: await pickTemplateAccent(templateId, jobMeta || {}),
     outputDir: await resolveOutputDir(jobMeta?.outputDir || "")
   };
   return saveResumeAndCoverLetter(tab?.id, rawText, data, enrichedMeta, {
@@ -8344,6 +8356,16 @@ async function pickTemplateId(jobMeta = {}, person = {}) {
   if (person?.templateId) return person.templateId;
   const stored = await chrome.storage.local.get("selected_template_id");
   return stored.selected_template_id || DEFAULT_TEMPLATE_ID;
+}
+
+/** Color chosen for this template. A job that already recorded one keeps it. */
+async function pickTemplateAccent(templateId, jobMeta = {}) {
+  if (Object.prototype.hasOwnProperty.call(jobMeta, "templateAccent")) {
+    return accentById(jobMeta.templateAccent) ? jobMeta.templateAccent : "";
+  }
+  const stored = await chrome.storage.local.get(TEMPLATE_ACCENT_KEY);
+  const map = stored[TEMPLATE_ACCENT_KEY];
+  return resolveAccentId(templateId, map && typeof map === "object" ? map : {});
 }
 
 /**
@@ -8795,9 +8817,11 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
     jobMeta.resumeFilePrefix || person.resumeFilePrefix,
     person.name || person.label || resumeData?.name || ""
   );
+  const templateIdForJob = await pickTemplateId(jobMeta, person);
   const enrichedMeta = {
     ...jobMeta,
-    templateId: await pickTemplateId(jobMeta, person),
+    templateId: templateIdForJob,
+    templateAccent: await pickTemplateAccent(templateIdForJob, jobMeta),
     resumeFilePrefix,
     personName: person.name || person.label || "",
     // Person folder (+ shared root) is source of truth — do not keep a stale Start override.

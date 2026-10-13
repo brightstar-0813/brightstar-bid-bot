@@ -9,6 +9,15 @@ import { executiveNavyTemplate } from "./executive-navy.js";
 import { orangeBannerTemplate } from "./orange-banner.js";
 import { dateRailTemplate } from "./date-rail.js";
 import { stripClearanceFromTitle } from "../resume-json.js";
+import { accentOverrideCss } from "./accent.js";
+
+export {
+  TEMPLATE_ACCENTS,
+  TEMPLATE_ACCENT_KEY,
+  accentById,
+  defaultAccentIdForTemplate,
+  resolveAccentId
+} from "./accent.js";
 
 /** Built-in resume PDF/HTML templates. Add new files here and register them. */
 export const BUILTIN_TEMPLATES = [
@@ -59,6 +68,7 @@ export function getTemplateById(templateId) {
  * Drops GPT placeholder headlines / schema echo that make resumes look broken.
  * @param {object} data - Parsed resume JSON
  * @param {string} [templateId] - Template id from BUILTIN_TEMPLATES
+ * @param {{ accentId?: string }} [options]
  */
 function sanitizeResumeData(raw) {
   const data = { ...(raw || {}) };
@@ -97,12 +107,17 @@ function sanitizeResumeData(raw) {
   return data;
 }
 
-export function resumeJsonToHtml(data, templateId) {
+export function resumeJsonToHtml(data, templateId, options = {}) {
   const clean = sanitizeResumeData(data);
-  let html = getTemplateById(templateId).render(clean);
+  const template = getTemplateById(templateId);
+  let html = template.render(clean);
   const align = clean?.headingAlign === "center" ? "center" : clean?.headingAlign === "left" ? "left" : "";
   if (align) {
     html = html.replace("</style>", `    h2 { text-align: ${align}; }\n  </style>`);
+  }
+  const accentCss = accentOverrideCss(template.id, options.accentId);
+  if (accentCss) {
+    html = html.replace("</style>", `${accentCss}\n  </style>`);
   }
   return html;
 }

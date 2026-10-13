@@ -33,7 +33,14 @@ import {
   requiredExperienceToText
 } from "./experience-rules.js";
 import { ATS_TARGET_SCORE, describeAtsGaps } from "./ats-score.js";
-import { getAllTemplates, DEFAULT_TEMPLATE_ID } from "./templates/index.js";
+import {
+  getAllTemplates,
+  DEFAULT_TEMPLATE_ID,
+  TEMPLATE_ACCENTS,
+  TEMPLATE_ACCENT_KEY,
+  resolveAccentId,
+  accentById
+} from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import {
   extractSpreadsheetId,
@@ -151,6 +158,9 @@ const statusEl = document.getElementById("status");
 const profileSelectEl = document.getElementById("profileSelect");
 const templateSelectEl = document.getElementById("templateSelect");
 const templatePickerTrigger = document.getElementById("templatePickerTrigger");
+const templateAccentSwatchesEl = document.getElementById("templateAccentSwatches");
+const templateAccentNameEl = document.getElementById("templateAccentName");
+let templateAccentMap = {};
 const templatePickerMenu = document.getElementById("templatePickerMenu");
 let closeTemplatePicker = () => {};
 const addProfileBtn = document.getElementById("addProfile");
@@ -699,6 +709,52 @@ async function refreshTemplates(selectedId) {
     (await chrome.storage.local.get("selected_template_id")).selected_template_id ||
     DEFAULT_TEMPLATE_ID;
   populateTemplateSelect(preferred);
+  await loadTemplateAccents();
+}
+
+function renderTemplateAccents() {
+  if (!templateAccentSwatchesEl) return;
+  const templateId = templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
+  const accentId = resolveAccentId(templateId, templateAccentMap);
+  const storedId = accentById(templateAccentMap[templateId]) ? templateAccentMap[templateId] : "";
+  const activeId = storedId || accentId;
+  if (!templateAccentSwatchesEl.childElementCount) {
+    for (const accent of TEMPLATE_ACCENTS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "accent-swatch";
+      button.dataset.accentId = accent.id;
+      button.style.background = accent.hex;
+      button.title = accent.label;
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-label", accent.label);
+      templateAccentSwatchesEl.appendChild(button);
+    }
+  }
+  for (const button of templateAccentSwatchesEl.querySelectorAll(".accent-swatch")) {
+    const on = button.dataset.accentId === activeId;
+    button.classList.toggle("is-selected", on);
+    button.setAttribute("aria-checked", on ? "true" : "false");
+  }
+  if (templateAccentNameEl) {
+    templateAccentNameEl.textContent = accentById(activeId)?.label || "Default";
+  }
+}
+
+async function loadTemplateAccents() {
+  const stored = await chrome.storage.local.get(TEMPLATE_ACCENT_KEY);
+  const map = stored[TEMPLATE_ACCENT_KEY];
+  templateAccentMap = map && typeof map === "object" ? map : {};
+  renderTemplateAccents();
+}
+
+async function chooseTemplateAccent(accentId) {
+  const templateId = templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
+  if (!accentById(accentId)) return;
+  templateAccentMap = { ...templateAccentMap, [templateId]: accentId };
+  await chrome.storage.local.set({ [TEMPLATE_ACCENT_KEY]: templateAccentMap });
+  renderTemplateAccents();
+  chrome.runtime.sendMessage({ type: "template_preview_show", templateId }).catch(() => {});
 }
 
 async function syncOutputDirFromPerson(person) {
@@ -3840,7 +3896,14 @@ profileSelectEl.addEventListener("change", () => {
 templateSelectEl.addEventListener("change", () => {
   const templateId = templateSelectEl.value;
   chrome.storage.local.set({ selected_template_id: templateId }).catch(() => {});
+  renderTemplateAccents();
   chrome.runtime.sendMessage({ type: "template_preview_show", templateId }).catch(() => {});
+});
+
+templateAccentSwatchesEl?.addEventListener("click", (event) => {
+  const button = event.target.closest(".accent-swatch");
+  if (!button) return;
+  chooseTemplateAccent(button.dataset.accentId).catch((err) => setStatus(String(err?.message || err)));
 });
 
 function setManualPanelOpen(open, { persist = true } = {}) {

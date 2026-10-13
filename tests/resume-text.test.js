@@ -376,6 +376,18 @@ test("concise professional templates keep skill categories and role content", ()
   assert.match(resumeJsonToHtml(data, "ats-modern"), /class="skill-inline"/);
 });
 
+test("accent color tints template rules without replacing body text", () => {
+  const data = { name: "Ada Lovelace", profile: "Engineer." };
+  const plain = resumeJsonToHtml(data, "ats-modern");
+  const burgundy = resumeJsonToHtml(data, "ats-modern", { accentId: "burgundy" });
+  assert.equal(plain.includes("#7a2e3b"), false);
+  assert.match(burgundy, /#7a2e3b/);
+  assert.match(burgundy, /h1, h2/);
+  const classic = resumeJsonToHtml(data, "times-classic", { accentId: "burgundy" });
+  assert.match(classic, /h2 \{ color: #7a2e3b/);
+  assert.match(classic, /color: #000/);
+});
+
 test("retired template ids resolve to a kept layout", () => {
   assert.equal(getTemplateById("compact-slate").id, "ats-modern");
   assert.equal(getTemplateById("split-contact").id, "ats-modern");

@@ -2,7 +2,9 @@ import {
   DEFAULT_TEMPLATE_ID,
   getAllTemplates,
   getTemplateById,
-  resumeJsonToHtml
+  resumeJsonToHtml,
+  TEMPLATE_ACCENT_KEY,
+  resolveAccentId
 } from "./templates/index.js";
 import { applyPathEdits } from "./templates/shared.js";
 import { isPlainResumePath, sanitizeRichHtml } from "./resume-rich.js";
@@ -294,7 +296,11 @@ async function renderPreview({ keepWorkingCopy = false } = {}) {
     workingResumeData = cloneResume(data);
   }
   const renderData = workingResumeData || data;
-  const html = resumeJsonToHtml(renderData, templateId);
+  const accentStored = await chrome.storage.local.get(TEMPLATE_ACCENT_KEY);
+  const accentMap = accentStored[TEMPLATE_ACCENT_KEY];
+  const html = resumeJsonToHtml(renderData, templateId, {
+    accentId: resolveAccentId(templateId, accentMap && typeof accentMap === "object" ? accentMap : {})
+  });
   pageEl.srcdoc = html;
   if (ledeEl) {
     ledeEl.hidden = false;
@@ -577,6 +583,9 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes[TEMPLATE_ACCENT_KEY] && !(skipStorageRefresh && dirty)) {
+    renderPreview({ keepWorkingCopy: editMode }).catch(() => {});
+  }
   if (changes.selected_template_id && !(skipStorageRefresh && dirty)) {
     const next = String(changes.selected_template_id.newValue || "").trim();
     if (next && next !== templateId) {
