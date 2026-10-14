@@ -78,7 +78,7 @@ JSON SCHEMA
 }
 
 JSON RULES
-- Include EVERY employer from master resume. profile: 6–7 sentences on the target role, seniority, warehouse, pipelines, and impact, using the JD's exact tool names.
+- Include EVERY employer from master resume. profile: a unique life-like story of 6–7 sentences. No first-person pronouns (I, me, my, we, our). No personal name at all — not "Abir", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say "my name is". Write the way a person talks about a lifelong pull toward the craft: learning a tool deepens respect for the technology, and that respect makes the next skill worth learning. The aim is to make someone's day-to-day work better, then do that again on the next system. Change the opening and the sentence lengths from job to job. Do not copy a stock life-goal paragraph. Weave the JD's exact product and tool names into the story. Do not swap them for synonyms and do not dump them as a comma list. Use only facts the master resume already supports. Do not invent metrics, employers, or mission statements.
 - education: copy school/degree/year/details from the master resume. details = school location only. Never invent honors, coursework, thesis, or final-year projects.
 - technicalSummary: full-sentence highlights that naturally include the JD's top data stack — not a one-word tool list.
 - skills: use real categories only (ETL & Data Pipeline Development, Database, Data Lake & Warehouse, Big Data & Cloud, Data Orchestration, Data Modeling & Transformation, etc.).

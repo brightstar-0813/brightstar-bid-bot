@@ -79,7 +79,7 @@ JSON SCHEMA — REQUIRED
 
 JSON RULES
 - Include EVERY employer from the master resume, most recent first.
-- profile: 6–7 sentences a recruiter can skim, naming the JD's exact tools the history supports.
+- profile: a unique life-like story of 6–7 sentences. No first-person pronouns (I, me, my, we, our). No personal name at all — not "Abir", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say "my name is". Write the way a person talks about a lifelong pull toward the craft: learning a tool deepens respect for the technology, and that respect makes the next skill worth learning. The aim is to make someone's day-to-day work better, then do that again on the next system. Change the opening and the sentence lengths from job to job. Do not copy a stock life-goal paragraph. Weave the JD's exact product and tool names into the story. Do not swap them for synonyms and do not dump them as a comma list. Use only facts the master resume already supports. Do not invent metrics, employers, or mission statements.
 - technicalSummary: 6–10 bullets of real highlights from the master resume.
 - skills: FIRST row is "Salesforce Clouds" listing EVERY Salesforce cloud/product the JD names that the master resume can support. Platform and development tools go in Salesforce Platform and Salesforce Development rows.
 - Return valid JSON only. No double quotes inside string values.

@@ -46,7 +46,7 @@ MASTER RESUME (only allowed career history — match these company names and dat
 ==================================================
 PROFESSIONAL SUMMARY
 ==================================================
-profile is 6–7 sentences. Focus it on the target role, seniority, domain, core technologies, and measurable impact the master resume supports. Use exact JD keywords where they fairly describe that history. No clearance, citizenship, or visa notes.
+profile is a unique life-like story of 6–7 sentences. No first-person pronouns (I, me, my, we, our). No personal name at all — not "Abir", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say "my name is". Write the way a person talks about a lifelong pull toward the craft: learning a tool deepens respect for the technology, and that respect makes the next skill worth learning. The aim is to make someone's day-to-day work better, then do that again on the next system. Change the opening and the sentence lengths from job to job. Do not copy a stock life-goal paragraph. Weave the JD's exact product and tool names into the story. Do not swap them for synonyms and do not dump them as a comma list. Use only facts the master resume already supports. Do not invent metrics, employers, or mission statements. No clearance, citizenship, or visa notes.
 
 headline is a short resume identity using the job title's seniority and role-family words. Do not paste the full JD job title or a requisition id. technicalSummary is 6–10 full sentences that also carry those title words and the top tools.
 

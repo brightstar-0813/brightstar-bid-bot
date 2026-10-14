@@ -195,6 +195,10 @@ test("ATS recruiter pass requires exact JD spellings in recent-role bullets", ()
   assert.match(ATS_RECRUITER_PASS, /exact spelling/i);
   assert.match(ATS_RECRUITER_PASS, /two most recent roles/i);
   assert.match(ATS_RECRUITER_PASS, /6–7 sentences/);
+  assert.match(ATS_RECRUITER_PASS, /life-like story/i);
+  assert.match(ATS_RECRUITER_PASS, /No first-person pronouns/);
+  assert.match(ATS_RECRUITER_PASS, /No personal name/);
+  assert.match(ATS_RECRUITER_PASS, /exact product and tool names/i);
   for (const id of ["sf", "de", "fs", "ai"]) {
     assert.match(getRoleTrack(id).atsAppendix, /ATS \+ RECRUITER PASS/);
   }
