@@ -1,5 +1,6 @@
 import { getRoleTrack, jdRequiredSkills, normalizeRoleTrackId } from "./role-tracks.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
+import { DE_ENTERPRISE_PROJECT_BANK } from "./prompts/de-enterprise-projects.js";
 import { stripClearanceFromTitle } from "./resume-json.js";
 import {
   coverTerms,
@@ -296,9 +297,13 @@ export function buildAtsScoreRetryPrompt(
   const score = evaluation?.score ?? 0;
   const bank =
     projectBank ||
-    (trackId === "sf" ? SF_ENTERPRISE_PROJECT_BANK : "");
+    (trackId === "sf"
+      ? SF_ENTERPRISE_PROJECT_BANK
+      : trackId === "de"
+        ? DE_ENTERPRISE_PROJECT_BANK
+        : "");
   const excerpts =
-    trackId === "sf"
+    trackId === "sf" || trackId === "de"
       ? selectProjectBankExcerpts({ jdText, missingProducts, bank })
       : "";
   const primaryCategory = track.primarySkillsCategory || "Technical Skills";
@@ -350,9 +355,9 @@ export function buildAtsScoreRetryPrompt(
     "",
     "HOW TO RAISE ATS (in priority order):",
     `1. Rewrite the TWO most recent roles so each reads as ${workstreamLabel}: business problem → ${stackPhrase} → what YOU built → integration/security/scale → outcome. Show internals: ${internalsHint}`,
-    trackId === "sf"
-      ? "2. Pull architecture patterns from the PROJECT BANK excerpts below (SF track). Treat them as pattern reference only — never invent new employers, never paste project titles as company names, never claim the verified vendor case studies as your employment."
-      : `2. Expand bullets with track-credible ${domainLabel} evidence already implied by the master history — never invent employers, dates, clearances, degrees, or certifications.`,
+    trackId === "sf" || trackId === "de"
+      ? "2. Rewrite the two most recent roles as hands-on work that matches this JD. Pull architecture patterns from the PROJECT BANK excerpts below. Treat them as pattern reference only — never invent new employers, never paste project titles as company names, never claim the verified vendor case studies as your employment."
+      : `2. Rewrite the two most recent roles as hands-on work that matches this JD. Expand bullets with track-credible ${domainLabel} evidence already implied by the master history — never invent employers, dates, clearances, degrees, or certifications.`,
     `3. Put missing products into real skills categories (e.g. "${primaryCategory}" and sibling catalog rows). Never invent a keyword-dump category.`,
     "4. Choose a short resume-identity headline that reflects JD seniority and key words — do NOT paste the JD job title verbatim. Never append clearance, Public Trust, Secret, TS/SCI, citizenship, or visa wording. Keep technicalSummary as full-sentence highlights (no one-word stubs).",
     "",
@@ -793,6 +798,7 @@ export function buildGapsRebuildPrompt({
     "- Never create a JD Keywords / keyword-dump skills row. Never paste the JD title into headline. No clearance or citizenship language.",
     `- Put must-have tools in real skills categories (e.g. "${primaryCategory}") with EXACT JD spellings.`,
     "- Prove tools in the TWO most recent roles with concrete bullets (feature → what you built → outcome).",
+    "- Write those two roles as hands-on work that matches this JD. When a project bank was in the opening prompt, keep using its most suitable patterns inside existing employers only.",
     track?.bulletInternalsHint ? `- Internals hint: ${track.bulletInternalsHint}` : "",
     missingProducts.length
       ? `- Skills & tech to ADD (skills row + prove in bullets):\n${missingProducts

@@ -42,6 +42,7 @@ import {
   shouldApplyStrongHumanize
 } from "./prompts/humanize-resume.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
+import { DE_ENTERPRISE_PROJECT_BANK } from "./prompts/de-enterprise-projects.js";
 import { PROMPT as sfTestPrompt, SF_TEST_HEADLINE_OVERRIDE } from "./prompts/sf-test.js";
 import { PROMPT as resumeV3Prompt } from "./prompts/resume-v3.js";
 import {
@@ -718,7 +719,8 @@ export function applyPlaceholders(
     location = "",
     address = "",
     headline = "",
-    sfProjectBank = SF_ENTERPRISE_PROJECT_BANK
+    sfProjectBank = SF_ENTERPRISE_PROJECT_BANK,
+    deProjectBank = DE_ENTERPRISE_PROJECT_BANK
   } = {}
 ) {
   return String(template || "")
@@ -727,6 +729,7 @@ export function applyPlaceholders(
     .replaceAll("{COMPANY}", companyName)
     .replaceAll("{MASTER_RESUME}", masterResume)
     .replaceAll("{SF_PROJECT_BANK}", sfProjectBank)
+    .replaceAll("{DE_PROJECT_BANK}", deProjectBank)
     .replaceAll("{NAME}", name)
     .replaceAll("{EMAIL}", email)
     .replaceAll("{PHONE}", phone)
@@ -743,6 +746,24 @@ const SF_PROJECT_BANK_APPENDIX =
   "Treat as PROJECT PATTERN AND ARCHITECTURE REFERENCE only — never as the candidate's claimed employers or official project titles.\n" +
   "Adapt patterns into EXISTING employers; never invent employers or paste bank titles as companies.\n\n" +
   "{SF_PROJECT_BANK}";
+
+const DE_PROJECT_BANK_APPENDIX =
+  "\n\n==================================================\n" +
+  "ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY\n" +
+  "==================================================\n" +
+  "Treat as PROJECT PATTERN AND ARCHITECTURE REFERENCE only — never as the candidate's claimed employers or official project titles.\n" +
+  "Adapt patterns into EXISTING employers; never invent employers or paste bank titles as companies.\n\n" +
+  "{DE_PROJECT_BANK}";
+
+/** Opening-prompt rule for every track. Present before any ATS score exists. */
+export const HANDS_ON_JD_MATCH_BLOCK =
+  "==================================================\n" +
+  "HANDS-ON JD MATCH (opening prompt — write the first draft this way)\n" +
+  "==================================================\n" +
+  "Write the two most recent roles as hands-on work that matches THIS job description.\n" +
+  "When a project bank is included above, use the most suitable projects as architecture patterns only.\n" +
+  "Adapt those patterns into EXISTING employers from the master resume.\n" +
+  "Never paste bank company names as the candidate's employers, titles, or claimed engagements.";
 
 /** Prefer a JD-scored bank excerpt (~4–6k) over dumping the full library. */
 export function resolveSfProjectBankForJd(jdText = "", { maxChars = 5500, maxProjects = 5 } = {}) {
@@ -768,13 +789,42 @@ export function ensureSfProjectBankInTemplate(template, roleTrack) {
   return `${text.trimEnd()}${SF_PROJECT_BANK_APPENDIX}`;
 }
 
+/** Prefer a JD-scored DE bank excerpt over dumping the full library. */
+export function resolveDeProjectBankForJd(jdText = "", { maxChars = 5500, maxProjects = 5 } = {}) {
+  const products = jdRequiredSkills(jdText, "de").map((product) => product.name);
+  const excerpt = selectProjectBankExcerpts({
+    jdText,
+    missingProducts: products,
+    bank: DE_ENTERPRISE_PROJECT_BANK,
+    maxProjects,
+    maxChars
+  });
+  return excerpt || String(DE_ENTERPRISE_PROJECT_BANK || "").slice(0, maxChars);
+}
+
+/** Append built-in DE project bank when the template lacks {DE_PROJECT_BANK}. */
+export function ensureDeProjectBankInTemplate(template, roleTrack) {
+  const track = normalizeRoleTrackId(roleTrack);
+  const text = String(template || "");
+  if (track !== "de") return text;
+  if (text.includes("{DE_PROJECT_BANK}") || text.includes("ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY")) {
+    return text;
+  }
+  return `${text.trimEnd()}${DE_PROJECT_BANK_APPENDIX}`;
+}
+
 /** Soft cap for total prompt size — trim bank first when humanize + person prompt bloat. */
 export const MAX_RESUME_PROMPT_CHARS = 52000;
 
 export function trimPromptToBudget(prompt, { maxChars = MAX_RESUME_PROMPT_CHARS } = {}) {
   const text = String(prompt || "");
   if (text.length <= maxChars) return text;
-  const bankStart = text.indexOf("ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY");
+  const bankHeaders = [
+    "ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY",
+    "ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY"
+  ];
+  const bankStarts = bankHeaders.map((header) => text.indexOf(header)).filter((index) => index >= 0);
+  const bankStart = bankStarts.length ? Math.min(...bankStarts) : -1;
   const bankMarker = "{SF_PROJECT_BANK}";
   // Prefer trimming after the bank header / between bank body and later appendices.
   if (bankStart >= 0) {
@@ -1168,7 +1218,10 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
     extras.resumePromptId != null ? extras.resumePromptId : await getResumePromptId()
   );
   const resolvedTemplate = resolveResumePrompt(person, roleTrack, resumePromptId);
-  const promptTemplate = ensureSfProjectBankInTemplate(resolvedTemplate, roleTrack);
+  const promptTemplate = ensureDeProjectBankInTemplate(
+    ensureSfProjectBankInTemplate(resolvedTemplate, roleTrack),
+    roleTrack
+  );
   if (!promptTemplate) {
     throw new Error("Selected profile has no prompt content.");
   }
@@ -1190,6 +1243,13 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
           maxProjects: Number(extras.sfBankMaxProjects) > 0 ? Number(extras.sfBankMaxProjects) : 5
         })
       : "";
+  const deProjectBank =
+    roleTrack === "de"
+      ? resolveDeProjectBankForJd(jdText, {
+          maxChars: Number(extras.deBankMaxChars) > 0 ? Number(extras.deBankMaxChars) : 5500,
+          maxProjects: Number(extras.deBankMaxProjects) > 0 ? Number(extras.deBankMaxProjects) : 5
+        })
+      : "";
   const body = applyPlaceholders(
     promptTemplate,
     {
@@ -1199,14 +1259,16 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
         companyName: extras.companyName || "",
         masterResume: extras.masterResume
       }),
-      sfProjectBank: sfProjectBank || SF_ENTERPRISE_PROJECT_BANK
+      sfProjectBank: roleTrack === "sf" ? sfProjectBank || SF_ENTERPRISE_PROJECT_BANK : "",
+      deProjectBank: roleTrack === "de" ? deProjectBank || DE_ENTERPRISE_PROJECT_BANK : ""
     }
   );
   const mustProve = buildMustProveBlock(jdText, roleTrack, {
     companyName: extras.companyName || ""
   });
   const atsAppendix = getTrackAtsAppendix(roleTrack);
-  let prompt = mustProve ? `${body}\n\n${mustProve}\n\n${atsAppendix}` : `${body}\n\n${atsAppendix}`;
+  const opening = `${body}\n\n${HANDS_ON_JD_MATCH_BLOCK}`;
+  let prompt = mustProve ? `${opening}\n\n${mustProve}\n\n${atsAppendix}` : `${opening}\n\n${atsAppendix}`;
 
   const humanizeMode = normalizeStrongHumanizeMode(
     extras.strongHumanizeMode != null

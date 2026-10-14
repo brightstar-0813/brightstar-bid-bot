@@ -270,3 +270,59 @@ test("first-pass Salesforce bank ranks catalog products from the JD", async () =
   assert.match(first, /Service Cloud|Data Cloud|Agentforce/);
   assert.ok(excerpt.length <= 5500);
 });
+
+test("first prompt includes hands-on JD match and the track bank", async () => {
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async () => ({}),
+        set: async () => {}
+      }
+    }
+  };
+  const { buildPrompt } = await import("../profiles.js");
+  const deJd = "Senior Data Engineer. Snowflake, dbt, and Apache Airflow pipelines.";
+  const dePrompt = await buildPrompt("david-oliveira-de", deJd, {
+    resumePromptId: "track",
+    strongHumanizeMode: "off",
+    roleTrack: "de",
+    jobTitle: "Senior Data Engineer"
+  });
+  assert.match(dePrompt, /HANDS-ON JD MATCH/);
+  assert.match(dePrompt, /ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY/);
+  assert.match(dePrompt, /Snowflake|dbt|Airflow/);
+  assert.match(dePrompt, /never paste bank company names/i);
+  assert.doesNotMatch(dePrompt, /ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY/);
+
+  const sfPrompt = await buildPrompt("dmario-lewis", "Salesforce Service Cloud role.", {
+    resumePromptId: "track",
+    strongHumanizeMode: "off",
+    roleTrack: "sf",
+    jobTitle: "Salesforce Architect"
+  });
+  assert.match(sfPrompt, /HANDS-ON JD MATCH/);
+  assert.match(sfPrompt, /ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY/);
+  assert.doesNotMatch(sfPrompt, /ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY/);
+
+  for (const track of ["fs", "ai"]) {
+    const prompt = await buildPrompt("dmario-lewis", "Build production software for this role.", {
+      resumePromptId: "track",
+      strongHumanizeMode: "off",
+      roleTrack: track,
+      jobTitle: "Senior Engineer"
+    });
+    assert.match(prompt, /HANDS-ON JD MATCH/);
+    assert.doesNotMatch(prompt, /ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY/);
+    assert.doesNotMatch(prompt, /ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY/);
+  }
+});
+
+test("DE bank excerpt prefers warehouse projects for a Snowflake JD", async () => {
+  const { resolveDeProjectBankForJd } = await import("../profiles.js");
+  const excerpt = resolveDeProjectBankForJd(
+    "Senior Data Engineer building Snowflake, dbt, and Apache Airflow pipelines."
+  );
+  const first = excerpt.split(/(?=^\d+\.\s+)/m).map((part) => part.trim()).filter(Boolean)[0];
+  assert.match(first, /Siemens|WesTrac|JetBlue|Symend|SD Worx/);
+  assert.ok(excerpt.length <= 5500);
+});

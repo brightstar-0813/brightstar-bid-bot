@@ -284,7 +284,7 @@ test("JD Keywords dump does not prop up ATS after boost", () => {
   assert.ok(evaluation.score < 80, `dump-only coverage must not clear 80 after strip, got ${evaluation.score}`);
 });
 
-test("DE and FS ATS retry prompts forbid JD Keywords without PROJECT BANK", () => {
+test("DE and FS ATS retry prompts forbid JD Keywords; DE repeats the project bank", () => {
   const deEval = evaluateAtsScore(
     {
       name: "Candidate",
@@ -305,7 +305,9 @@ test("DE and FS ATS retry prompts forbid JD Keywords without PROJECT BANK", () =
   );
   assert.ok(/HARD FORBIDDEN/i.test(dePrompt));
   assert.ok(/JD Keywords/i.test(dePrompt));
-  assert.ok(!/PROJECT BANK/i.test(dePrompt));
+  assert.ok(/PROJECT BANK/i.test(dePrompt));
+  assert.ok(/hands-on work that matches this JD/i.test(dePrompt));
+  assert.ok(/Snowflake|dbt|Airflow/i.test(dePrompt));
   assert.ok(/data-platform|pipeline workstream|data stack/i.test(dePrompt));
 
   const fsPrompt = buildAtsScoreRetryPrompt(
@@ -320,6 +322,7 @@ test("DE and FS ATS retry prompts forbid JD Keywords without PROJECT BANK", () =
   assert.ok(/HARD FORBIDDEN/i.test(fsPrompt));
   assert.ok(/JD Keywords/i.test(fsPrompt));
   assert.ok(!/PROJECT BANK/i.test(fsPrompt));
+  assert.ok(/hands-on work that matches this JD/i.test(fsPrompt));
   assert.ok(/product \/ platform workstream|application stack/i.test(fsPrompt));
 });
 

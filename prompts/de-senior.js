@@ -90,6 +90,15 @@ HARD FORBIDDEN
 - Never append a comma-separated JD word salad to skills, profile, or bullets.
 - Prove JD terms inside real skills categories, profile sentences, and project bullets only.
 
+==================================================
+ENTERPRISE DATA ENGINEERING PROJECTS REFERENCE LIBRARY
+==================================================
+Treat the following as a PROJECT PATTERN AND ARCHITECTURE REFERENCE only — not as the candidate's claimed employers, clients, or official project titles.
+Use the most suitable projects for THIS job description. Adapt them into the two most recent employers as hands-on work.
+Never paste Siemens, JetBlue, Netflix, or any other bank company as an employer.
+
+{DE_PROJECT_BANK}
+
 JOB TITLE
 {JOB_TITLE}
 
