@@ -806,18 +806,15 @@ const REMOVED_PERSON_IDS = new Set([
   "matthew-dale-hoffman",
   "edrwin-revolorio",
   "sandeep-unnikrishnan",
-  "david-oliveira",
-  "david-oliveira-de",
   "victor-holanda"
 ]);
 const REMOVED_PERSON_ID_PREFIXES = [
   "matthew-dale-hoffman",
   "sandeep-unnikrishnan",
-  "david-oliveira",
   "victor-holanda"
 ];
 const REMOVED_PERSON_NAME =
-  /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio|sandeep\s+unnikrishnan|david\s+leandro\s+de\s+oliveira|victor\s+barros\s+de\s+holanda/i;
+  /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio|sandeep\s+unnikrishnan|victor\s+barros\s+de\s+holanda/i;
 
 function isRemovedPersonId(id) {
   const raw = String(id || "");
@@ -864,7 +861,7 @@ export async function getCustomProfiles() {
 export async function getAllProfiles() {
   const custom = await getCustomProfiles();
   return [
-    ...BUILTIN_PROFILES,
+    ...BUILTIN_PROFILES.filter((p) => !isRemovedPerson(p)),
     ...custom.map((p) => ({ ...p, builtin: false, kind: p.kind || "resume" }))
   ];
 }

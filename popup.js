@@ -2818,6 +2818,12 @@ async function onProfileChange() {
     experience_validation_rules: rules,
     experience_validation_person: person.name || person.label || ""
   });
+  // If purge/storage overrode the selection mid-flight, keep the dropdown honest.
+  const storedId = String((await getActivePersonId().catch(() => "")) || "").trim();
+  if (storedId && profileSelectEl && profileSelectEl.value !== storedId) {
+    profileSelectEl.value = storedId;
+    syncActivePersonChip();
+  }
 }
 
 async function copyAppsScript() {
@@ -4666,6 +4672,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (nextId && prevId && nextId !== prevId) {
       chrome.runtime.sendMessage({ type: "clear_one_off_draft" }).catch(() => {});
       renderOneOffDraft(null);
+    }
+    if (nextId) {
+      refreshProfiles(nextId)
+        .then(() => loadActivePersonIntoForm())
+        .catch((e) => setStatus(String(e.message || e)));
     }
   }
 });
