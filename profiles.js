@@ -855,16 +855,14 @@ export function trimPromptToBudget(prompt, { maxChars = MAX_RESUME_PROMPT_CHARS 
 const REMOVED_PERSON_IDS = new Set([
   "matthew-dale-hoffman",
   "edrwin-revolorio",
-  "sandeep-unnikrishnan",
-  "victor-holanda"
+  "sandeep-unnikrishnan"
 ]);
 const REMOVED_PERSON_ID_PREFIXES = [
   "matthew-dale-hoffman",
-  "sandeep-unnikrishnan",
-  "victor-holanda"
+  "sandeep-unnikrishnan"
 ];
 const REMOVED_PERSON_NAME =
-  /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio|sandeep\s+unnikrishnan|victor\s+barros\s+de\s+holanda/i;
+  /matthew\s+dale\s+hoffman|edrwin(?:\s+s\.?)?\s+revolorio|sandeep\s+unnikrishnan/i;
 
 function isRemovedPersonId(id) {
   const raw = String(id || "");
