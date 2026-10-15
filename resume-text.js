@@ -469,6 +469,21 @@ function parseEducation(lines) {
       ) {
         school = parts[0];
       }
+      // "School | City, Region, Country" — keep place in details, school name alone.
+      let schoolPlace = "";
+      if (school && /\s*\|\s*/.test(school)) {
+        const bits = school
+          .split(/\s*\|\s*/)
+          .map((b) => b.trim())
+          .filter(Boolean);
+        if (bits.length >= 2) {
+          const place = bits.slice(1).join(" | ");
+          if (isEduCityLine(place) || EDU_LOCATION_RE.test(place) || EDU_PLACE_LINE_RE.test(place)) {
+            school = bits[0];
+            schoolPlace = place;
+          }
+        }
+      }
       const honours =
         parts.find(
           (p) =>
@@ -478,6 +493,7 @@ function parseEducation(lines) {
             /\b(honou?rs?|cum laude|distinction|upper division|lower division)\b/i.test(p)
         ) || "";
       const details =
+        schoolPlace ||
         parts.find(
           (p) => p !== school && p !== degree && p !== year && p !== honours && isEduCityLine(p)
         ) ||
@@ -559,11 +575,53 @@ function looksLikeCompanyLine(line) {
 const GEO_LOCATION_ANCHOR_RE =
   /\b(remote|hybrid|on-?site|usa|u\.?s\.?a\.?|united states|united kingdom|brazil|canada|india|germany|australia|philippines|hong kong|pennsylvania|colorado|cavite|california|texas|illinois|pernambuco|recife|new york|longmont|philadelphia|imus|sheung wan)\b/i;
 
+const WORK_MODE_RE = /^(remote|hybrid|on-?site)$/i;
+
+function isWorkModeSegment(seg) {
+  return WORK_MODE_RE.test(String(seg || "").trim());
+}
+
+/** Place or work-mode fragment inside a pipe-separated role meta line. */
+function isPlaceOrModeSegment(seg) {
+  const t = String(seg || "").trim();
+  if (!t || t.length > 80) return false;
+  if (isWorkModeSegment(t)) return true;
+  if (DATE_RANGE_RE.test(t) || looksLikeJobTitle(t)) return false;
+  if (GEO_LOCATION_ANCHOR_RE.test(t)) return true;
+  return /^[A-Za-z .'-]+,\s*[A-Za-z .'-]+/.test(t) && t.length < 80;
+}
+
+/**
+ * "Deliveroo | London, United Kingdom | Remote" → company + location.
+ * Pure place lines ("London, United Kingdom | Remote") return null.
+ */
+function splitCompanyLocationPipeLine(line) {
+  const t = stripMarkdownDecor(line);
+  if (!t || !/\s*\|\s*/.test(t) || t.length > 120) return null;
+  const bits = t
+    .split(/\s*\|\s*/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (bits.length < 2) return null;
+  const first = bits[0];
+  const rest = bits.slice(1);
+  if (!first || looksLikeJobTitle(first) || DATE_RANGE_RE.test(first)) return null;
+  if (isPlaceOrModeSegment(first) || isLocationLine(first)) return null;
+  if (!rest.every(isPlaceOrModeSegment)) return null;
+  if (first.split(/\s+/).length > 10) return null;
+  return {
+    company: first.slice(0, 120),
+    location: rest.join(" | ").slice(0, 120)
+  };
+}
+
 function isLocationLine(line) {
   const t = stripMarkdownDecor(line);
   if (!t || t.length > 100) return false;
   if (DATE_RANGE_RE.test(t) && !/\|/.test(t)) return false;
-  if (/^(remote|hybrid|on-?site)$/i.test(t)) return true;
+  // Company | City | Remote is employer meta, not a bare location line.
+  if (splitCompanyLocationPipeLine(t)) return false;
+  if (WORK_MODE_RE.test(t)) return true;
   if (/\b(remote|hybrid|on-?site)\b/i.test(t) && (/\|/.test(t) || /,/.test(t))) return true;
   if (GEO_LOCATION_ANCHOR_RE.test(t) && t.length < 90) return true;
   // City, State / City, Country — require a geographic anchor so project phrases are not locations.
@@ -580,7 +638,10 @@ function isLocationLine(line) {
 
 function looksLikeProjectLine(line) {
   const t = stripMarkdownDecor(line);
-  if (!t || t.length > 90 || t.length < 8) return false;
+  if (!t || t.length < 8) return false;
+  // Explicit project labels stay project even when long.
+  if (/^project\s+focus\s*:/i.test(t)) return true;
+  if (t.length > 90) return false;
   if (DATE_RANGE_RE.test(t) || isLocationLine(t) || TITLE_WORD_RE.test(t)) return false;
   if (/[.]$/.test(t)) return false;
   if (t.split(/\s+/).length > 12) return false;
@@ -676,6 +737,14 @@ function parseExperience(lines) {
         if (datePrefix) cur.dates = datePrefix[0].trim().slice(0, 60);
         continue;
       }
+      if (!cur.company || !cur.location) {
+        const fromPipe = splitCompanyLocationPipeLine(t);
+        if (fromPipe) {
+          if (!cur.company) cur.company = fromPipe.company;
+          if (!cur.location) cur.location = fromPipe.location;
+          continue;
+        }
+      }
       if (!cur.location && isLocationLine(t)) {
         cur.location = t.slice(0, 80);
         continue;
@@ -689,10 +758,10 @@ function parseExperience(lines) {
         continue;
       }
       if (!cur.project && looksLikeProjectLine(t) && kept.length === 0) {
-        cur.project = t.slice(0, 120);
+        cur.project = t.slice(0, 200);
         continue;
       }
-      if (looksLikeDateMetaLine(t) || isLocationLine(t)) continue;
+      if (looksLikeDateMetaLine(t) || isLocationLine(t) || splitCompanyLocationPipeLine(t)) continue;
       kept.push(t);
     }
     cur.bullets = kept;
@@ -799,32 +868,48 @@ function parseExperience(lines) {
       }
     }
 
+    // "Company | City | Remote" — keep employer separate from place/mode
+    const companyLoc = splitCompanyLocationPipeLine(plain);
+    if (companyLoc && !(collectingDuties(cur) && isDutyProse(trimmed))) {
+      if (
+        roleCompleteEnoughToClose(cur) ||
+        (cur && cur.company && cur.title && (cur.dates || cur.location || cur.project))
+      ) {
+        push();
+      }
+      const job = ensureJob();
+      if (!job.company || (!(job.bullets || []).length && !job.dates && !job.project)) {
+        job.company = companyLoc.company;
+        if (companyLoc.location && !job.location) job.location = companyLoc.location;
+      } else {
+        push();
+        cur = emptyJob();
+        cur.company = companyLoc.company;
+        cur.location = companyLoc.location;
+      }
+      continue;
+    }
+
     // Location (before duties)
     if (isLocationLine(plain) && cur && !(cur.bullets || []).length) {
       const loc = plain.slice(0, 120);
       if (!cur.location) cur.location = loc;
-      else if (!cur.location.includes(plain) && /^(remote|hybrid|on-?site)$/i.test(plain)) {
+      else if (!cur.location.includes(plain) && WORK_MODE_RE.test(plain)) {
         cur.location = `${cur.location} | ${plain}`.slice(0, 120);
       }
       continue;
     }
 
-    // Title fills open job missing title
-    if (looksLikeJobTitle(plain) && cur && cur.company && !cur.title && !(cur.bullets || []).length) {
-      cur.title = plain.slice(0, 160);
-      continue;
-    }
-
-    // Project line before duties
+    // Project line before duties (or Project Focus: after meta)
     if (
       looksLikeProjectLine(plain) &&
       cur &&
       (cur.company || cur.title) &&
       !cur.project &&
       !(cur.bullets || []).length &&
-      (cur.dates || cur.location || cur.title)
+      (cur.dates || cur.location || cur.title || cur.company)
     ) {
-      cur.project = plain.slice(0, 160);
+      cur.project = plain.slice(0, 200);
       continue;
     }
 
@@ -854,19 +939,28 @@ function parseExperience(lines) {
       continue;
     }
 
-    // Title without company yet (rare) or title after company handled above
-    if (looksLikeJobTitle(plain) && !(cur && cur.bullets && cur.bullets.length)) {
-      const job = ensureJob();
-      if (!job.title) {
-        job.title = plain.slice(0, 120);
+    // Title: fill open company-first job, start a new role, or open title-first job
+    if (looksLikeJobTitle(plain)) {
+      if (cur && cur.company && !cur.title && !(cur.bullets || []).length) {
+        cur.title = plain.slice(0, 160);
         continue;
       }
-      if (job.title && job.company && (job.dates || job.location)) {
-        // Title for a new role
+      if (
+        cur &&
+        cur.title &&
+        (cur.company || cur.dates || cur.location || cur.project || (cur.bullets || []).length)
+      ) {
         push();
         cur = emptyJob();
         cur.title = plain.slice(0, 120);
         continue;
+      }
+      if (!(cur && (cur.bullets || []).length)) {
+        const job = ensureJob();
+        if (!job.title) {
+          job.title = plain.slice(0, 120);
+          continue;
+        }
       }
     }
 

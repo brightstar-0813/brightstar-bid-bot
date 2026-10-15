@@ -32,6 +32,117 @@ Salesforce Clouds: Sales Cloud, Service Cloud
 `;
 }
 
+test("title-first pipe meta roles keep company, location, project, and five jobs", () => {
+  const dash = "\u2013";
+  const text = `Victor de Holanda
+Senior Data Engineer | Azure Databricks Engineer | Cloud Data Platforms
+Paulista, Pernambuco, Brazil | +55 81 95735610 | victor.holanda201@gmail.com | LinkedIn
+Professional Summary
+Senior Data Engineer with nearly 10 years of experience in backend development and data engineering.
+Technical Skills
+Programming Languages: Python, PySpark, SQL, Scala, Java
+Visualization & Reporting: Power BI, SSRS, BI Data Models, Analytical Reporting
+Professional Experience
+Senior Data Engineer
+Deliveroo | London, United Kingdom | Remote
+November 2024 ${dash} Present
+Project Focus: Delivery Marketplace Data Lakehouse and Operational Analytics
+- Engineered PySpark and SQL pipelines using Azure Databricks.
+Senior Analytics Engineer / AI Consultant
+Toptal | New York, United States | Remote
+September 2022 ${dash} September 2024
+Project Focus: Enterprise Analytics Modernization and Financial Data Reconciliation
+- Developed enterprise analytics pipelines using Azure Databricks.
+Data Engineer
+Zup Innovation | Sao Paulo, Brazil | Hybrid
+September 2019 ${dash} August 2022
+Project Focus: Enterprise Application Data Integration and Cloud Analytics Platform
+- Engineered ETL/ELT pipelines using Python, SQL, and PySpark.
+Backend Engineer / Data Engineer
+Neurotech | Recife, Pernambuco, Brazil | On-site
+March 2018 ${dash} July 2019
+Project Focus: Credit and Risk Decision-Support Data Processing
+- Developed Python and SQL-based data processing workflows.
+Software Engineer Intern / Backend Developer
+CESAR | Recife, Pernambuco, Brazil | On-site
+June 2016 ${dash} February 2018
+Project Focus: Enterprise Backend Services and Application Data Integration
+- Developed Java-based backend application functionality.
+Education
+Bachelor of Science in Computer Science
+Federal University of Pernambuco (UFPE) | Recife, Pernambuco, Brazil
+March 2014 ${dash} December 2017
+`;
+  const data = plainTextToResumeData(text);
+  assert.equal(data.name, "Victor de Holanda");
+  assert.match(data.headline, /Senior Data Engineer/i);
+  assert.match(data.location, /Paulista,\s*Pernambuco,\s*Brazil/i);
+  assert.match(data.phone, /\+55/);
+  assert.equal(data.email, "victor.holanda201@gmail.com");
+  assert.equal(data.experience.length, 5);
+
+  const expected = [
+    {
+      company: /Deliveroo/i,
+      title: /^Senior Data Engineer$/i,
+      dates: /November 2024/,
+      location: /London,\s*United Kingdom\s*\|\s*Remote/i,
+      project: /Delivery Marketplace/i,
+      bullet: /PySpark/
+    },
+    {
+      company: /Toptal/i,
+      title: /Senior Analytics Engineer/i,
+      dates: /September 2022/,
+      location: /New York,\s*United States\s*\|\s*Remote/i,
+      project: /Enterprise Analytics Modernization/i,
+      bullet: /enterprise analytics/i
+    },
+    {
+      company: /Zup Innovation/i,
+      title: /^Data Engineer$/i,
+      dates: /September 2019/,
+      location: /Sao Paulo,\s*Brazil\s*\|\s*Hybrid/i,
+      project: /Enterprise Application Data Integration/i,
+      bullet: /ETL/
+    },
+    {
+      company: /Neurotech/i,
+      title: /Backend Engineer/i,
+      dates: /March 2018/,
+      location: /Recife,\s*Pernambuco,\s*Brazil\s*\|\s*On-site/i,
+      project: /Credit and Risk/i,
+      bullet: /Python/
+    },
+    {
+      company: /CESAR/i,
+      title: /Software Engineer Intern/i,
+      dates: /June 2016/,
+      location: /Recife,\s*Pernambuco,\s*Brazil\s*\|\s*On-site/i,
+      project: /Enterprise Backend Services/i,
+      bullet: /Java/
+    }
+  ];
+  expected.forEach((want, i) => {
+    const job = data.experience[i];
+    assert.match(job.company, want.company, `company[${i}]`);
+    assert.match(job.title, want.title, `title[${i}]`);
+    assert.match(job.dates, want.dates, `dates[${i}]`);
+    assert.match(job.location, want.location, `location[${i}]`);
+    assert.match(job.project, want.project, `project[${i}]`);
+    assert.equal(job.bullets.length, 1, `bullets[${i}]`);
+    assert.match(job.bullets[0], want.bullet, `bullet[${i}]`);
+  });
+
+  assert.equal(data.education.length, 1);
+  const edu = data.education[0];
+  assert.match(edu.school, /Federal University of Pernambuco \(UFPE\)/i);
+  assert.doesNotMatch(edu.school, /Recife/);
+  assert.match(edu.details, /Recife,\s*Pernambuco,\s*Brazil/i);
+  assert.match(edu.year, /March 2014/);
+  assert.match(edu.year, /2017/);
+});
+
 test("blank-line education paste keeps school, degree, city, and dates together", () => {
   const data = plainTextToResumeData(
     resumeWithEducation(`Bachelor of Science in Computer Science

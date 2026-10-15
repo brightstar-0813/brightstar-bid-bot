@@ -82,6 +82,8 @@ function cleanLinkedin(raw) {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
+const NAME_PARTICLE_RE = /^(de|da|do|dos|das|van|von|del|la|le|di|du)$/i;
+
 function looksLikePersonName(line) {
   let s = String(line || "").trim();
   s = s.replace(/,?\s*(PMP|MBA|Ph\.?D\.?|CPA|CISSP|Jr\.?|Sr\.?|III|II|IV)\s*$/i, "").trim();
@@ -98,10 +100,12 @@ function looksLikePersonName(line) {
     return false;
   }
   const words = s.split(/\s+/).filter(Boolean);
-  if (words.length < 2 || words.length > 4) return false;
+  if (words.length < 2 || words.length > 5) return false;
   if (words.some((w) => TITLE_WORD.test(w))) return false;
   if (words.some((w) => /^(USA|UK|UAE|Inc|LLC|Ltd)$/i.test(w))) return false;
-  return words.every((w) => /^[A-Z][a-zA-Z'’.\-]*$/.test(w) || /^[A-Z]{2,}$/.test(w));
+  return words.every(
+    (w) => NAME_PARTICLE_RE.test(w) || /^[A-Z][a-zA-Z'’.\-]*$/.test(w) || /^[A-Z]{2,}$/.test(w)
+  );
 }
 
 function looksLikeHeadline(line) {
@@ -115,7 +119,7 @@ function looksLikeHeadline(line) {
 
 function extractLocation(header) {
   const cityState = String(header || "").match(
-    /\b([A-Z][A-Za-z .'-]{2,30},\s*(?:[A-Z]{2}|[A-Z][A-Za-z .'-]{3,20})(?:,\s*United States)?)\b/
+    /\b([A-Z][A-Za-z .'-]{2,30},\s*(?:[A-Z]{2}|[A-Z][A-Za-z .'-]{3,20})(?:,\s*(?:United States|United Kingdom|Brazil|Canada|India|Germany|Australia|Philippines|Hong Kong))?)\b/
   );
   if (!cityState) return "";
   const loc = cityState[1].replace(/\s+/g, " ").trim();
