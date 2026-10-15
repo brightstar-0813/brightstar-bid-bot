@@ -22,7 +22,7 @@ import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
 import { PROMPT as resumeV3Prompt } from "../prompts/resume-v3.js";
 import { effectiveResumePromptId, normalizeResumePromptId } from "../prompts/resume-catalog.js";
-import { ATS_RECRUITER_PASS } from "../role-tracks.js";
+import { ATS_RECRUITER_PASS, profileStoryAngle, profileStoryBlock } from "../role-tracks.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
   assert.equal(normalizeRoleTrackId(""), "sf");
@@ -199,9 +199,49 @@ test("ATS recruiter pass requires exact JD spellings in recent-role bullets", ()
   assert.match(ATS_RECRUITER_PASS, /No first-person pronouns/);
   assert.match(ATS_RECRUITER_PASS, /No personal name/);
   assert.match(ATS_RECRUITER_PASS, /exact product and tool names/i);
+  assert.match(ATS_RECRUITER_PASS, /Banned openings/);
+  assert.match(ATS_RECRUITER_PASS, /has been the thread/);
+  assert.doesNotMatch(ATS_RECRUITER_PASS, /talks about a lifelong pull/);
+  assert.doesNotMatch(ATS_RECRUITER_PASS, /deepens respect for the technology/);
   for (const id of ["sf", "de", "fs", "ai"]) {
     assert.match(getRoleTrack(id).atsAppendix, /ATS \+ RECRUITER PASS/);
+    assert.doesNotMatch(getRoleTrack(id).prompt, /talks about a lifelong pull/);
   }
+});
+
+test("profile story angle changes with the job and lands in the prompt", async () => {
+  const first = profileStoryAngle("Deliveroo", "Senior Data Engineer");
+  const second = profileStoryAngle("Toptal", "Analytics Engineer");
+  const ids = new Set([first.id, second.id]);
+  if (ids.size < 2) {
+    const third = profileStoryAngle("Neurotech", "Backend Engineer");
+    ids.add(third.id);
+  }
+  assert.ok(ids.size >= 2);
+  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), new RegExp(`Angle id: ${first.id}`));
+  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), /has been the thread/);
+
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async () => ({}),
+        set: async () => {}
+      }
+    }
+  };
+  const { buildPrompt } = await import("../profiles.js");
+  const prompt = await buildPrompt("dmario-lewis", "Salesforce Service Cloud role.", {
+    strongHumanizeMode: "off",
+    companyName: "Deliveroo",
+    jobTitle: "Senior Data Engineer",
+    roleTrack: "sf"
+  });
+  assert.match(prompt, /PROFILE STORY ANGLE/);
+  assert.match(prompt, new RegExp(`Angle id: ${first.id}`));
+  assert.match(prompt, /has been the thread/);
+  const angleAt = prompt.lastIndexOf("PROFILE STORY ANGLE");
+  const passAt = prompt.lastIndexOf("ATS + RECRUITER PASS");
+  assert.ok(angleAt > passAt);
 });
 
 test("resolveResumePrompt ignores Vector on a non-SF track", () => {

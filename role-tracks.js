@@ -98,6 +98,76 @@ const AI_SKILL_CATALOG = [
 ];
 
 /**
+ * Shared profile rules. The assigned angle (appended per job) chooses the idea.
+ * This text must not prescribe one curiosity-to-respect arc.
+ */
+export const PROFILE_STORY_RULE =
+  "profile is a unique life-like story of 6–7 sentences. No first-person pronouns (I, me, my, we, our). No personal name at all — not \"Abir\", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say \"my name is\". Follow only the PROFILE STORY ANGLE assigned for this job. Do not reuse that angle as a template on the next job. One feeling must sit next to one concrete technical tension (a limit, a number that would not agree, a sync that arrived late, too much custom code, a schema change, or a person downstream who felt the system). Weave the JD's exact product and tool names into that tension. Do not swap them for synonyms and do not dump them as a comma list. No tool tour, no industry list, no closing mission sentence. Use only facts the master resume already supports. Do not invent metrics, employers, or mission statements. Banned openings and shapes: \"has been the thread\", \"What began with\", \"opened another dimension\", \"that same curiosity\", \"the continuing goal\", \"lifelong pull\", \"deepens respect\", \"everyday work easier\", \"more useful, easier to maintain\". No gap disclaimers, clearance, citizenship, or visa notes.";
+
+const PROFILE_STORY_ANGLES = [
+  {
+    id: "limit-taught",
+    text: "A platform limit once let a load look finished when it was not. Write the embarrassment of trusting the green run, then the care of checking that limit before the next change. Name the JD tools that enforce the limit. Do not tour the rest of the stack."
+  },
+  {
+    id: "number-disagree",
+    text: "Two outputs showed different totals for the same day. Write the unease of not knowing which number a business would trust, then the reconciliation (keys, counts, late rows) that made them match. Name the JD tools used in that check."
+  },
+  {
+    id: "late-arrival",
+    text: "A record showed up after the batch had already closed. Write the irritation of reprocessing a full set, then the relief of an incremental merge that absorbed the late row. Name the JD tools on that path."
+  },
+  {
+    id: "too-much-code",
+    text: "Custom code made the next change feel risky when a narrower path would have held the rule. Write the reluctance to delete working code, then the cleaner boundary that replaced it. Name the JD tools on each side of that choice."
+  },
+  {
+    id: "schema-shift",
+    text: "A source changed shape and a downstream report went quiet. Write the dread of a silent break, then the validation that caught the next change before anyone asked. Name the JD tools in that check."
+  },
+  {
+    id: "person-downstream",
+    text: "Someone who uses the system waited on a screen or a number. Write their impatience, then the specific query, model, or automation that shortened the wait. Name the JD tools on that path. Do not invent a named person."
+  },
+  {
+    id: "ownership-blur",
+    text: "Two systems both thought they owned the same record. Write the friction of duplicate updates, then the key or interface that made one of them the source. Name the JD tools in that handoff."
+  },
+  {
+    id: "hidden-fix",
+    text: "A fix nobody would notice unless it failed again: a merge, a retry, a partition, or a test around a limit. Write the satisfaction of a night that stayed quiet. Name the JD tools inside that fix. Do not end with a moral about being useful."
+  }
+];
+
+function profileStoryHash(company, title) {
+  const key = `${String(company || "").trim()}|${String(title || "").trim()}`.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 33 + key.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+/** One story idea for this company + title. Empty inputs still pick a stable angle. */
+export function profileStoryAngle(company = "", title = "") {
+  const index = profileStoryHash(company, title) % PROFILE_STORY_ANGLES.length;
+  return PROFILE_STORY_ANGLES[index];
+}
+
+/** Block appended after the ATS pass so this job's angle wins. */
+export function profileStoryBlock(company = "", title = "") {
+  const angle = profileStoryAngle(company, title);
+  return `
+==================================================
+PROFILE STORY ANGLE (this job only — overrides any earlier profile arc)
+==================================================
+Angle id: ${angle.id}
+${angle.text}
+Write 6–7 sentences from this idea only. ${PROFILE_STORY_RULE}
+`.trim();
+}
+
+/**
  * Closing pass for every resume prompt. The local scorer is mostly exact-term
  * coverage: keywords anywhere, title words in headline/profile/summary, and
  * must-have tools proved inside the two most recent roles' bullets.
@@ -108,7 +178,7 @@ ATS + RECRUITER PASS (overrides earlier lines that say to avoid JD wording)
 ==================================================
 A recruiter skims the summary and the first two jobs. The scorer fails the resume when a JD tool is paraphrased or listed only in Skills.
 
-- profile is a unique life-like story of 6–7 sentences. No first-person pronouns (I, me, my, we, our). No personal name at all — not "Abir", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say "my name is". Write the way a person talks about a lifelong pull toward the craft: learning a tool deepens respect for the technology, and that respect makes the next skill worth learning. The aim is to make someone's day-to-day work better, then do that again on the next system. Change the opening and the sentence lengths from job to job. Do not copy a stock life-goal paragraph. Weave the JD's exact product and tool names into the story. Do not swap them for synonyms and do not dump them as a comma list. Use only facts the master resume already supports. Do not invent metrics, employers, or mission statements. No gap disclaimers, clearance, citizenship, or visa notes.
+- ${PROFILE_STORY_RULE}
 - Headline is a resume identity. Do NOT paste the JD job title verbatim, and do not include a requisition id. Profile and technicalSummary MUST still contain the distinctive words from that job title.
 - Keep every tool, product, platform, method, and repeated responsibility noun in the JD's exact spelling. Do not swap Lightning Web Components for "UI", Snowflake for "warehouse", or RAG for "search".
 - Those exact terms go in real skills categories AND in experience bullets. Skills alone do not count as proof.

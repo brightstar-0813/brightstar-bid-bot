@@ -20,6 +20,7 @@ import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
 import {
   getRoleTrack,
   getTrackAtsAppendix,
+  profileStoryBlock,
   getTrackCoverLetterTemplate,
   getTrackPromptTemplate,
   isTrackDefaultCoverLetter,
@@ -1266,7 +1267,10 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   });
   const atsAppendix = getTrackAtsAppendix(roleTrack);
   const opening = `${body}\n\n${HANDS_ON_JD_MATCH_BLOCK}`;
-  let prompt = mustProve ? `${opening}\n\n${mustProve}\n\n${atsAppendix}` : `${opening}\n\n${atsAppendix}`;
+  const story = profileStoryBlock(extras.companyName || "", extras.jobTitle || "");
+  let prompt = mustProve
+    ? `${opening}\n\n${mustProve}\n\n${atsAppendix}\n\n${story}`
+    : `${opening}\n\n${atsAppendix}\n\n${story}`;
 
   const humanizeMode = normalizeStrongHumanizeMode(
     extras.strongHumanizeMode != null
