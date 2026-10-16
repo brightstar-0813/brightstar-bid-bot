@@ -160,10 +160,13 @@ import {
 import {
   AI_PROVIDER_KEY,
   AI_PROVIDERS,
+  CODEX_HOME_URL,
   aiProviderHomeUrl,
   aiProviderLabel,
   aiProviderNewChatUrl,
   isAiProviderUrl,
+  isChatGptUrl,
+  isCodexUrl,
   isDeleteAiChatHistoryEnabled,
   normalizeAiProvider
 } from "./ai-provider.js";
@@ -941,6 +944,48 @@ async function ensureAiTab(provider) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return chrome.tabs.get(tab.id);
+}
+
+const CODEX_TAB_KEY = "custom_qa_codex_tab_id";
+
+/** Open or reuse the ChatGPT Codex tab used by Custom Q&A. Does not touch the resume engine tab. */
+async function ensureCodexTab() {
+  const stored = await chrome.storage.local.get([CODEX_TAB_KEY]);
+  const savedId = stored[CODEX_TAB_KEY];
+  if (typeof savedId === "number") {
+    const saved = await chrome.tabs.get(savedId).catch(() => null);
+    if (saved?.id && isChatGptUrl(saved.url || "")) return saved;
+  }
+
+  const tabs = await chrome.tabs.query({});
+  const codexTabs = tabs.filter((tab) => isCodexUrl(tab.url) && typeof tab.id === "number");
+  codexTabs.sort((a, b) => {
+    if (!!b.active !== !!a.active) return (b.active ? 1 : 0) - (a.active ? 1 : 0);
+    return (b.lastAccessed || 0) - (a.lastAccessed || 0);
+  });
+  let tab = codexTabs[0] || null;
+  if (!tab) {
+    await setStatus("No Codex tab open — opening one…");
+    tab = await chrome.tabs.create({ url: CODEX_HOME_URL, active: true });
+    if (typeof tab?.id !== "number") {
+      throw new Error("Open ChatGPT Codex in a browser tab first.");
+    }
+    try {
+      await withTimeout(waitForTabComplete(tab.id, 30000), 32000, "Timed out opening Codex.");
+    } catch {
+      // Slow load is fine — the composer wait below covers it.
+    }
+    for (let i = 0; i < 40; i += 1) {
+      const state = await readChatReadiness(tab.id, AI_PROVIDERS.CHATGPT);
+      if (state.hasInput) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    tab = await chrome.tabs.get(tab.id);
+  }
+  if (typeof tab?.id === "number") {
+    await chrome.storage.local.set({ [CODEX_TAB_KEY]: tab.id }).catch(() => {});
+  }
+  return tab;
 }
 
 /** @deprecated Prefer ensureAiTab — kept for older call sites during transition. */
@@ -4030,10 +4075,10 @@ async function dismissEmptyNewChatStubs(tabId, provider, { keepChatId = "" } = {
  * only when navigation never left a prior /c/... conversation.
  * @returns {{ ok: boolean, navigated: boolean }}
  */
-async function ensureFreshChat(tabId, provider) {
+async function ensureFreshChat(tabId, provider, freshChatUrl = "") {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
-  const label = aiProviderLabel(p);
-  const base = aiProviderNewChatUrl(p);
+  const label = freshChatUrl ? "Codex" : aiProviderLabel(p);
+  const base = String(freshChatUrl || "").trim() || aiProviderNewChatUrl(p);
 
   const waitForBlankComposer = async (attempts = 40) => {
     for (let i = 0; i < attempts; i += 1) {
@@ -4126,29 +4171,38 @@ async function shouldUseInPageNewChat(tabId, provider, freshResult) {
   return aiTabStillOnPriorConversation(tabId, provider);
 }
 
-async function chatgptSendPrompt(tabId, prompt, startNewChat) {
+async function chatgptSendPrompt(tabId, prompt, startNewChat, { freshChatUrl = "", rememberGlobalChat = true } = {}) {
   await ensureChatGptDomHarvest(tabId);
   await recoverChatGptComposerIfBroken(tabId, AI_PROVIDERS.CHATGPT);
   const health = await readChatGptPageHealth(tabId);
   if (health.modelsFailed || health.historyFailed) {
     throw new Error("__GPT_SESSION__:ChatGPT could not load models");
   }
+  const codex = Boolean(String(freshChatUrl || "").trim());
   let needsInPageNewChat = Boolean(startNewChat);
   if (startNewChat) {
-    await setStatus("Opening a fresh ChatGPT chat…");
-    const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT);
+    await setStatus(codex ? "Opening a fresh Codex chat…" : "Opening a fresh ChatGPT chat…");
+    const fresh = await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT, freshChatUrl);
     needsInPageNewChat = await shouldUseInPageNewChat(tabId, AI_PROVIDERS.CHATGPT, fresh);
     if (await aiTabStillOnPriorConversation(tabId, AI_PROVIDERS.CHATGPT)) {
-      await setStatus("ChatGPT is still on the previous chat — opening a new one again…");
-      await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT);
+      await setStatus(
+        codex
+          ? "Codex is still on the previous chat — opening a new one again…"
+          : "ChatGPT is still on the previous chat — opening a new one again…"
+      );
+      await ensureFreshChat(tabId, AI_PROVIDERS.CHATGPT, freshChatUrl);
     }
     if (await aiTabStillOnPriorConversation(tabId, AI_PROVIDERS.CHATGPT)) {
       throw new Error(
-        "ChatGPT is still on the previous chat. Not sending this prompt into it."
+        codex
+          ? "Codex is still on the previous chat. Not sending this prompt into it."
+          : "ChatGPT is still on the previous chat. Not sending this prompt into it."
       );
     }
     // Blank /c/<id> shells count toward cleanup if a twin is created later.
-    await rememberAiChatFromTab(tabId, AI_PROVIDERS.CHATGPT).catch(() => "");
+    if (rememberGlobalChat) {
+      await rememberAiChatFromTab(tabId, AI_PROVIDERS.CHATGPT).catch(() => "");
+    }
   }
 
   const usersBeforeSend = await readChatReadiness(tabId, AI_PROVIDERS.CHATGPT)
@@ -5251,12 +5305,17 @@ async function claudeSendPrompt(tabId, prompt, startNewChat) {
   throw lastError || new Error("Claude Send failed.");
 }
 
-async function aiSendPrompt(tabId, prompt, startNewChat) {
-  const provider = await getStoredAiProvider();
+async function aiSendPrompt(tabId, prompt, startNewChat, sendOptions = null) {
+  const provider = sendOptions?.provider
+    ? normalizeAiProvider(sendOptions.provider)
+    : await getStoredAiProvider();
   if (provider === AI_PROVIDERS.CLAUDE) {
     return claudeSendPrompt(tabId, prompt, startNewChat);
   }
-  return chatgptSendPrompt(tabId, prompt, startNewChat);
+  return chatgptSendPrompt(tabId, prompt, startNewChat, {
+    freshChatUrl: sendOptions?.freshChatUrl || "",
+    rememberGlobalChat: sendOptions?.rememberGlobalChat !== false
+  });
 }
 
 /** Read the current Claude/ChatGPT conversation id from the tab URL. */
@@ -7257,21 +7316,32 @@ async function pageShowsResumeMarkers(tabId) {
 }
 
 async function automateChatGpt(tabId, prompt, options = {}) {
-  const provider = await getStoredAiProvider();
-  const providerLabel = aiProviderLabel(provider);
+  const provider = options.provider
+    ? normalizeAiProvider(options.provider)
+    : await getStoredAiProvider();
+  const providerLabel = options.providerLabel || aiProviderLabel(provider);
   const startNewChat = options.newChat !== false;
   const label = options.statusLabel || `Waiting for ${providerLabel} response...`;
   const expectResumeJson = Boolean(options.expectResumeJson);
   const replyKind = options.replyKind === "answer" ? "answer" : "letter";
+  const rememberGlobalChat = options.rememberGlobalChat !== false;
 
-  const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat);
+  const { blocksBefore, latestBefore } = await aiSendPrompt(tabId, prompt, startNewChat, {
+    provider,
+    freshChatUrl: options.freshChatUrl || "",
+    rememberGlobalChat
+  });
 
   // Capture /c/<id> after send so mid-poll failures (rate limit, timeout) and
   // twin empty shells can still be deleted during inter-job cooldown.
-  const activeChatId = await rememberAiChatFromTab(tabId, provider).catch(() => "");
-  // Drop leftover empty "New chat" Recents stubs from / navigation (twin issue).
-  if (startNewChat || activeChatId) {
-    await dismissEmptyNewChatStubs(tabId, provider, { keepChatId: activeChatId }).catch(() => 0);
+  // Codex Q&A opts out so it does not replace the resume chat id.
+  let activeChatId = "";
+  if (rememberGlobalChat) {
+    activeChatId = await rememberAiChatFromTab(tabId, provider).catch(() => "");
+    // Drop leftover empty "New chat" Recents stubs from / navigation (twin issue).
+    if (startNewChat || activeChatId) {
+      await dismissEmptyNewChatStubs(tabId, provider, { keepChatId: activeChatId }).catch(() => 0);
+    }
   }
 
   // Active polling budget (rate-limit cooldowns do NOT count against this).
@@ -11202,8 +11272,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const strongModel = Boolean(message.strongModel);
         const skipBank = Boolean(message.skipBank);
 
-        if (engine === "chatgpt" || engine === "agent" || engine === "claude") {
-          const prep = await prepareCustomQaAsk({ question, skipBank });
+        if (engine === "chatgpt" || engine === "agent" || engine === "claude" || engine === "codex") {
+          const codex = engine === "codex";
+          const prep = await prepareCustomQaAsk({
+            question,
+            skipBank,
+            engine: codex ? "codex" : ""
+          });
           if (prep.bankHit) {
             const via =
               prep.bankHit.source === "profile"
@@ -11213,20 +11288,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             safeSendResponse(sendResponse, prep.bankHit);
             return;
           }
-          const provider = await getStoredAiProvider();
-          const providerLabel = aiProviderLabel(provider);
+          const provider = codex ? AI_PROVIDERS.CHATGPT : await getStoredAiProvider();
+          const providerLabel = codex ? "Codex" : aiProviderLabel(provider);
           const reuseChat = Boolean(prep.reuseChat);
           await setStatus(
             reuseChat
               ? `Custom Q&A: continuing ${providerLabel} chat for this job…`
               : `Custom Q&A: starting ${providerLabel} chat with this job’s JD + profile…`
           );
-          const tab = await ensureAiTab(provider);
+          const tab = codex ? await ensureCodexTab() : await ensureAiTab(provider);
           const raw = await automateChatGpt(tab.id, prep.prompt, {
             // One chat per job apply: reuse while job key matches; seed once with JD+resume.
             newChat: !reuseChat,
             expectResumeJson: false,
             replyKind: "answer",
+            provider: codex ? AI_PROVIDERS.CHATGPT : undefined,
+            providerLabel: codex ? "Codex" : "",
+            freshChatUrl: codex ? CODEX_HOME_URL : "",
+            rememberGlobalChat: !codex,
             statusLabel: reuseChat
               ? `Custom Q&A follow-up via ${providerLabel}…`
               : `Custom Q&A via ${providerLabel} (new job chat)…`
@@ -11235,11 +11314,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!answer) {
             throw new Error(`${providerLabel} returned an empty answer. Try again.`);
           }
-          await markCustomQaAgentSession(prep.jobKey, { seeded: true }).catch(() => null);
+          await markCustomQaAgentSession(prep.jobKey, {
+            seeded: true,
+            engine: codex ? "codex" : ""
+          }).catch(() => null);
+          const answerSource = codex
+            ? "codex"
+            : provider === AI_PROVIDERS.CLAUDE
+              ? "claude"
+              : "chatgpt";
           await saveCustomQaAnswer({
             question,
             answer,
-            source: provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt"
+            source: answerSource
           }).catch(() => null);
           await setStatus(
             reuseChat
@@ -11249,7 +11336,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           safeSendResponse(sendResponse, {
             ok: true,
             answer,
-            source: provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt",
+            source: answerSource,
             profileId: prep.profileId,
             personLabel: prep.personLabel,
             jobKey: prep.jobKey || "",

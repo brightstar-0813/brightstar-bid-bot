@@ -2388,9 +2388,19 @@ async function saveCustomQaSession(patch = {}) {
  * Decide whether Custom Q&A should continue the existing AI chat for this job
  * or seed a new chat with JD + profile/resume context.
  */
-export async function resolveCustomQaChatReuse(jobKey = "") {
+export async function resolveCustomQaChatReuse(jobKey = "", { engine = "" } = {}) {
   const key = String(jobKey || "").trim();
   const session = await loadCustomQaSession();
+  if (engine === "codex") {
+    const seeded = Boolean(key && session.codexJobKey === key && session.codexSeeded);
+    return {
+      reuseChat: seeded,
+      useFollowUp: seeded,
+      jobKey: key,
+      session,
+      chatId: ""
+    };
+  }
   let chatId = "";
   try {
     const stored = await chrome.storage.local.get(["last_ai_chat_id"]);
@@ -4207,7 +4217,7 @@ export async function answerCustomQaAsk({
 }
 
 /** Shared prep for ChatGPT/Claude Custom Q&A (bank hit or agent prompt). */
-export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
+export async function prepareCustomQaAsk({ question, skipBank = false, engine = "" } = {}) {
   const q = String(question || "").trim();
   if (!q) throw new Error("Enter or paste a question first.");
 
@@ -4274,7 +4284,7 @@ export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
   }
 
   const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
-  const chatMode = await resolveCustomQaChatReuse(jobKey);
+  const chatMode = await resolveCustomQaChatReuse(jobKey, { engine });
   // Follow-ups still include this job's JD excerpt (one chat per job).
   const prompt = chatMode.useFollowUp
     ? buildCustomQaFollowUpPrompt(q, ctx.jobMeta)
@@ -4300,10 +4310,17 @@ export async function prepareCustomQaAsk({ question, skipBank = false } = {}) {
 }
 
 /** Mark Custom Q&A agent chat as seeded for this job after a successful ask. */
-export async function markCustomQaAgentSession(jobKey, { seeded = true } = {}) {
+export async function markCustomQaAgentSession(jobKey, { seeded = true, engine = "" } = {}) {
   const key = String(jobKey || "").trim();
   if (!key) return null;
   const prev = await loadCustomQaSession();
+  if (engine === "codex") {
+    const same = prev.codexJobKey === key;
+    return saveCustomQaSession({
+      codexJobKey: key,
+      codexSeeded: Boolean(seeded) || (same && Boolean(prev.codexSeeded))
+    });
+  }
   const same = prev.jobKey === key;
   const openaiMessages = same ? prev.openaiMessages || [] : [];
   return saveCustomQaSession({

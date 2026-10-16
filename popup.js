@@ -332,12 +332,15 @@ const customQaQuestionEl = document.getElementById("customQaQuestion");
 const customQaAnswerEl = document.getElementById("customQaAnswer");
 const customQaMetaEl = document.getElementById("customQaMeta");
 const customQaGenerateBtn = document.getElementById("customQaGenerate");
+const customQaAskAgainBtn = document.getElementById("customQaAskAgain");
 const customQaScanPageBtn = document.getElementById("customQaScanPage");
 const customQaPicksEl = document.getElementById("customQaPicks");
 const customQaCopyBtn = document.getElementById("customQaCopy");
 const customQaSaveBtn = document.getElementById("customQaSave");
 const customQaClearBtn = document.getElementById("customQaClear");
 let customQaPickCache = [];
+/** Last Custom Q&A source. Ask again is only for bank or profile facts. */
+let customQaLastSource = "";
 const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
@@ -3608,6 +3611,7 @@ function applyCustomQaPick(question, index = -1) {
   if (!text || !customQaQuestionEl) return;
   customQaQuestionEl.value = text;
   if (customQaAnswerEl) customQaAnswerEl.value = "";
+  customQaLastSource = "";
   setCustomQaMeta("");
   if (customQaPicksEl) {
     for (const button of customQaPicksEl.querySelectorAll(".custom-qa-pick")) {
@@ -3650,8 +3654,15 @@ async function scanCustomQaQuestions() {
 }
 
 function selectedCustomQaEngine() {
-  const el = document.querySelector('input[name="customQaEngine"]:checked');
-  return el?.value === "chatgpt" ? "chatgpt" : "openai";
+  const value = document.querySelector('input[name="customQaEngine"]:checked')?.value;
+  if (value === "chatgpt" || value === "codex") return value;
+  return "openai";
+}
+
+function customQaEngineBusyLabel(engine, { again = false } = {}) {
+  if (engine === "codex") return again ? "Custom Q&A · asking Codex again…" : "Custom Q&A · Codex…";
+  if (engine === "chatgpt") return again ? "Custom Q&A · asking AI tab again…" : "Custom Q&A · AI tab…";
+  return again ? "Custom Q&A · asking OpenAI again…" : "Custom Q&A…";
 }
 
 function syncCustomQaAskControls() {
@@ -3664,6 +3675,12 @@ function syncCustomQaAskControls() {
   if (customQaGenerateBtn) {
     customQaGenerateBtn.disabled = busy || !autofillEnabledCache;
   }
+  const canAskAgain =
+    !busy &&
+    autofillEnabledCache &&
+    hasQuestion &&
+    (customQaLastSource === "bank" || customQaLastSource === "profile");
+  if (customQaAskAgainBtn) customQaAskAgainBtn.disabled = !canAskAgain;
   if (customQaScanPageBtn) {
     customQaScanPageBtn.disabled = busy || !autofillEnabledCache;
   }
@@ -3672,6 +3689,7 @@ function syncCustomQaAskControls() {
 function clearCustomQaAsk() {
   if (customQaQuestionEl) customQaQuestionEl.value = "";
   if (customQaAnswerEl) customQaAnswerEl.value = "";
+  customQaLastSource = "";
   renderCustomQaPicks([]);
   setCustomQaMeta("");
   syncCustomQaAskControls();
@@ -3706,7 +3724,7 @@ function toggleCustomQaAskPanel({ focus = true } = {}) {
   }
 }
 
-async function generateCustomQaAsk() {
+async function generateCustomQaAsk({ skipBank = false } = {}) {
   if (!autofillEnabledCache) {
     setStatus("Autofill is off.");
     return;
@@ -3723,21 +3741,24 @@ async function generateCustomQaAsk() {
   }
   const engine = selectedCustomQaEngine();
   if (customQaGenerateBtn) customQaGenerateBtn.dataset.busy = "1";
+  customQaLastSource = "";
   syncCustomQaAskControls();
   if (customQaAnswerEl) customQaAnswerEl.value = "";
   setCustomQaMeta("");
   try {
-    setStatus(engine === "chatgpt" ? "Custom Q&A · AI tab…" : "Custom Q&A…");
+    setStatus(customQaEngineBusyLabel(engine, { again: skipBank }));
     const res = await chrome.runtime.sendMessage({
       type: "custom_qa_ask",
       question,
-      engine
+      engine,
+      skipBank
     });
     if (!res?.ok) {
       setStatus(res?.error || "Custom Q&A generate failed.");
       return;
     }
     if (customQaAnswerEl) customQaAnswerEl.value = String(res.answer || "").trim();
+    customQaLastSource = String(res.source || "");
     const who = res.personLabel ? ` · ${res.personLabel}` : "";
     const src =
       res.source === "bank"
@@ -3748,7 +3769,9 @@ async function generateCustomQaAsk() {
             ? `OpenAI${res.model ? ` · ${res.model}` : ""}${res.reusedThread ? " · same job thread" : ""}${who}`
             : res.source === "claude"
               ? `Claude tab${res.reusedChat ? " · same job chat" : ""}${who}`
-              : `ChatGPT tab${res.reusedChat ? " · same job chat" : ""}${who}`;
+              : res.source === "codex"
+                ? `Codex tab${res.reusedChat ? " · same job chat" : ""}${who}`
+                : `ChatGPT tab${res.reusedChat ? " · same job chat" : ""}${who}`;
     setCustomQaMeta(src);
     setStatus(`Custom Q&A ready (${src}).`);
   } finally {
@@ -3782,7 +3805,8 @@ async function saveCustomQaAskToBank() {
       type: "custom_qa_save",
       question,
       answer,
-      source: engine === "chatgpt" ? "custom_ask_agent" : "custom_ask"
+      source:
+        engine === "codex" ? "custom_ask_codex" : engine === "chatgpt" ? "custom_ask_agent" : "custom_ask"
     });
     if (!res?.ok) {
       setStatus(res?.error || "Save to bank failed.");
@@ -4159,6 +4183,9 @@ autoApplyPageBtn.addEventListener("click", autoApplyThisPage);
 customQaPageBtn?.addEventListener("click", () => toggleCustomQaAskPanel({ focus: true }));
 customQaGenerateBtn?.addEventListener("click", () => {
   generateCustomQaAsk().catch((e) => setStatus(String(e.message || e)));
+});
+customQaAskAgainBtn?.addEventListener("click", () => {
+  generateCustomQaAsk({ skipBank: true }).catch((e) => setStatus(String(e.message || e)));
 });
 customQaScanPageBtn?.addEventListener("click", () => {
   scanCustomQaQuestions().catch((e) => setStatus(String(e.message || e)));

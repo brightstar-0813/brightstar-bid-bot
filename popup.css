@@ -3153,7 +3153,7 @@ button.icon-button-labeled .icon-button-label {
 
 .custom-qa-engines {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 3px;
   margin: 0 0 8px;
   padding: 3px;
@@ -3198,7 +3198,7 @@ button.icon-button-labeled .icon-button-label {
 
 .custom-qa-actions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin: 0 0 8px;
 }

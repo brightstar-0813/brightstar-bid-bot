@@ -754,6 +754,10 @@
                 <input type="radio" name="customQaEngine" value="chatgpt" />
                 <span>AI tab</span>
               </label>
+              <label class="custom-qa-engine" title="ChatGPT Codex tab">
+                <input type="radio" name="customQaEngine" value="codex" />
+                <span>Codex</span>
+              </label>
             </div>
             <div class="custom-qa-question-head">
               <label class="field-label" for="customQaQuestion">Question</label>
@@ -769,6 +773,7 @@
             <div id="customQaPicks" class="custom-qa-picks" hidden></div>
             <div class="custom-qa-actions">
               <button type="button" id="customQaGenerate" class="primary">Generate</button>
+              <button type="button" id="customQaAskAgain" class="ghost" disabled>Ask again</button>
             </div>
             <label class="field-label" for="customQaAnswer">Answer</label>
             <textarea id="customQaAnswer" class="custom-qa-textarea" rows="4" placeholder="Generated answer appears here…"></textarea>
