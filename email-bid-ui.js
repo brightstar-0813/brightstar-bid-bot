@@ -67,6 +67,8 @@ export function initEmailBidUi(deps) {
   const replyNameEl = document.getElementById("emailBidReplyName");
   const replyEmailEl = document.getElementById("emailBidReplyEmail");
   const replyRoleEl = document.getElementById("emailBidReplyRole");
+  const replyTitleEl = document.getElementById("emailBidReplyTitle");
+  const replyCompanyEl = document.getElementById("emailBidReplyCompany");
   const modalTitleEl = document.getElementById("emailBidModalTitle");
   const modalSubEl = draftBlock?.querySelector(".email-bid-modal-sub") || null;
   const toListEl = document.getElementById("emailBidToList");
@@ -126,7 +128,7 @@ export function initEmailBidUi(deps) {
     if (modalTitleEl) modalTitleEl.textContent = replyMode ? "Reply" : "Email Bid";
     if (modalSubEl) {
       modalSubEl.textContent = replyMode
-        ? "Type the contact, pick a template, then send"
+        ? "Type the contact, title, and company, pick a template, then send"
         : "Review recipients, then send";
     }
   }
@@ -151,6 +153,37 @@ export function initEmailBidUi(deps) {
     };
   }
 
+  function readReplyJob() {
+    return {
+      title: String(replyTitleEl?.value || "").trim(),
+      company: String(replyCompanyEl?.value || "").trim()
+    };
+  }
+
+  function seedReplyJobFields() {
+    if (replyTitleEl && !readReplyJob().title && titleEl?.value?.trim()) {
+      replyTitleEl.value = titleEl.value.trim();
+    }
+    if (replyCompanyEl && !readReplyJob().company && companyEl?.value?.trim()) {
+      replyCompanyEl.value = companyEl.value.trim();
+    }
+  }
+
+  function syncReplyJobFields() {
+    const { title, company } = readReplyJob();
+    if (titleEl) titleEl.value = title;
+    if (companyEl) companyEl.value = company;
+    if (replyMode && draftCache?.reply && draftCache.jobMeta) {
+      draftCache.jobMeta = {
+        ...draftCache.jobMeta,
+        title,
+        jobTitle: title,
+        company,
+        companyName: company
+      };
+    }
+  }
+
   function replyEmailOk(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ""));
   }
@@ -167,12 +200,10 @@ export function initEmailBidUi(deps) {
   async function applySelectedReplyTemplate({ rememberStyle = false } = {}) {
     const person = await getActivePerson().catch(() => null);
     const recentIds = await loadRecentEmailStyles();
+    syncReplyJobFields();
     const filled = fillReplyTemplate(replyTemplateEl?.value || "rate", {
       contact: readReplyContact(),
-      job: {
-        title: titleEl?.value?.trim() || "",
-        company: companyEl?.value?.trim() || ""
-      },
+      job: readReplyJob(),
       person,
       recentIds
     });
@@ -188,6 +219,7 @@ export function initEmailBidUi(deps) {
     ensureReplyTemplateOptions();
     setReplyMode(true);
     replyEdited = false;
+    seedReplyJobFields();
     const person = await getActivePerson().catch(() => null);
     draftCache = { reply: true, jobMeta: collectJobMeta(person) };
     await applySelectedReplyTemplate({ rememberStyle: true });
@@ -688,6 +720,7 @@ export function initEmailBidUi(deps) {
       return;
     }
     if (replyMode) {
+      syncReplyJobFields();
       setStatus("Reply · saving files and updating the sheet…");
       const committed = await chrome.runtime
         .sendMessage({
@@ -729,11 +762,17 @@ export function initEmailBidUi(deps) {
   });
   const onReplyIdentityInput = () => {
     if (!replyMode) return;
-    if (replyEdited) syncReplyRecipient();
-    else applySelectedReplyTemplate().catch((e) => setStatus(String(e.message || e)));
+    if (replyEdited) {
+      syncReplyJobFields();
+      syncReplyRecipient();
+    } else {
+      applySelectedReplyTemplate().catch((e) => setStatus(String(e.message || e)));
+    }
   };
   replyNameEl?.addEventListener("input", onReplyIdentityInput);
   replyRoleEl?.addEventListener("input", onReplyIdentityInput);
+  replyTitleEl?.addEventListener("input", onReplyIdentityInput);
+  replyCompanyEl?.addEventListener("input", onReplyIdentityInput);
   replyEmailEl?.addEventListener("input", () => {
     if (replyMode) syncReplyRecipient();
   });

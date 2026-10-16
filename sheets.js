@@ -264,6 +264,26 @@ export async function appendJobToSpreadsheet({
 }
 
 /**
+ * Fields a Reply / Email Bid row can send. A link is optional.
+ * Title, company, or link is enough; date, Applied time, and bid mode are always set.
+ * @param {object} [jobMeta]
+ */
+export function emailBidSheetFields(jobMeta = {}) {
+  const jobTitle = String(jobMeta?.title || jobMeta?.jobTitle || "").trim();
+  const companyName = String(jobMeta?.company || jobMeta?.companyName || "").trim();
+  const jdLink = String(jobMeta?.jdLink || jobMeta?.jobLink || "").trim();
+  return {
+    jobTitle,
+    companyName,
+    jdLink,
+    salary: String(jobMeta?.salary || "").trim(),
+    jobNo: jobMeta?.csvRow != null ? jobMeta.csvRow : jobMeta?.jobNo || "",
+    bidSource: jobMeta?.bidSource || "email-bid",
+    canRecord: Boolean(jobTitle || companyName || jdLink)
+  };
+}
+
+/**
  * Set Status to "Applied M/D/YYYY h:mm AM/PM" on the existing row (matched by job link).
  * Column B stays the resume-build date. If the job is not on the sheet yet, appends a row.
  */

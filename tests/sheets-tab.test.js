@@ -5,6 +5,8 @@ import {
   buildSheetRowTsv,
   defaultSheetTabNameForPerson,
   isKnownCompany,
+  emailBidSheetFields,
+  formatAppliedStatus,
   resolveBidModeLabel,
   resolveSheetTabNameForPerson,
   sanitizeSheetTabName,
@@ -122,4 +124,19 @@ test("duplicate jobs match the job URL, not the company name", () => {
     split.duplicates.map((job) => job.jdLink),
     ["https://jobs.example/1", "https://jobs.example/1?utm_source=sheet"]
   );
+});
+
+test("email bid sheet row can be title and company only", () => {
+  const fields = emailBidSheetFields({
+    title: "Salesforce Developer",
+    company: "Comtec"
+  });
+  assert.equal(fields.canRecord, true);
+  assert.equal(fields.jobTitle, "Salesforce Developer");
+  assert.equal(fields.companyName, "Comtec");
+  assert.equal(fields.jdLink, "");
+  assert.equal(fields.bidSource, "email-bid");
+  assert.equal(resolveBidModeLabel(fields.bidSource), BID_MODE_EMAIL);
+  assert.match(formatAppliedStatus(new Date(2026, 9, 16, 17, 37)), /Applied 10\/16\/2026 5:37 PM/);
+  assert.equal(emailBidSheetFields({}).canRecord, false);
 });
