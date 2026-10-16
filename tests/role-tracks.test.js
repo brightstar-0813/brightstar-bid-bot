@@ -22,7 +22,7 @@ import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
 import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
 import { PROMPT as resumeV3Prompt } from "../prompts/resume-v3.js";
 import { effectiveResumePromptId, normalizeResumePromptId } from "../prompts/resume-catalog.js";
-import { ATS_RECRUITER_PASS, profileStoryAngle, profileStoryBlock } from "../role-tracks.js";
+import { ATS_RECRUITER_PASS, PROFILE_VOICES, profileStoryAngle, profileStoryBlock } from "../role-tracks.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
   assert.equal(normalizeRoleTrackId(""), "sf");
@@ -195,21 +195,34 @@ test("ATS recruiter pass requires exact JD spellings in recent-role bullets", ()
   assert.match(ATS_RECRUITER_PASS, /exact spelling/i);
   assert.match(ATS_RECRUITER_PASS, /two most recent roles/i);
   assert.match(ATS_RECRUITER_PASS, /6–7 sentences/);
-  assert.match(ATS_RECRUITER_PASS, /life-like story/i);
+  assert.match(ATS_RECRUITER_PASS, /life story/i);
+  assert.match(ATS_RECRUITER_PASS, /assigned voice/i);
+  assert.doesNotMatch(ATS_RECRUITER_PASS, /how the work took hold/i);
+  assert.match(ATS_RECRUITER_PASS, /not an employer-by-employer chronology/i);
+  assert.match(ATS_RECRUITER_PASS, /at most one employer/i);
   assert.match(ATS_RECRUITER_PASS, /No first-person pronouns/);
   assert.match(ATS_RECRUITER_PASS, /No personal name/);
   assert.match(ATS_RECRUITER_PASS, /exact product and tool names/i);
   assert.match(ATS_RECRUITER_PASS, /Banned openings/);
   assert.match(ATS_RECRUITER_PASS, /has been the thread/);
+  assert.match(ATS_RECRUITER_PASS, /has not let go/);
+  assert.match(ATS_RECRUITER_PASS, /the pattern still holds/);
+  assert.doesNotMatch(ATS_RECRUITER_PASS, /life-like story/i);
   assert.doesNotMatch(ATS_RECRUITER_PASS, /talks about a lifelong pull/);
   assert.doesNotMatch(ATS_RECRUITER_PASS, /deepens respect for the technology/);
   for (const id of ["sf", "de", "fs", "ai"]) {
     assert.match(getRoleTrack(id).atsAppendix, /ATS \+ RECRUITER PASS/);
-    assert.doesNotMatch(getRoleTrack(id).prompt, /talks about a lifelong pull/);
+    assert.match(getRoleTrack(id).prompt, /life story/i);
+    assert.match(getRoleTrack(id).prompt, /assigned profile voice/i);
+    assert.doesNotMatch(getRoleTrack(id).prompt, /how the work took hold/i);
   }
+  assert.match(getRoleTrack("de").prompt, /experience, not in profile/);
 });
 
 test("profile story angle changes with the job and lands in the prompt", async () => {
+  assert.equal(PROFILE_VOICES.length, 10);
+  const voiceIds = new Set(PROFILE_VOICES.map((voice) => voice.id));
+  assert.equal(voiceIds.size, 10);
   const first = profileStoryAngle("Deliveroo", "Senior Data Engineer");
   const second = profileStoryAngle("Toptal", "Analytics Engineer");
   const ids = new Set([first.id, second.id]);
@@ -218,8 +231,13 @@ test("profile story angle changes with the job and lands in the prompt", async (
     ids.add(third.id);
   }
   assert.ok(ids.size >= 2);
-  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), new RegExp(`Angle id: ${first.id}`));
-  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), /has been the thread/);
+  assert.notEqual(first.text, second.text);
+  assert.match(first.text, /^Voice:/);
+  assert.match(second.text, /^Voice:/);
+  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), new RegExp(`Voice id: ${first.id}`));
+  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), /has not let go/);
+  assert.match(profileStoryBlock("Deliveroo", "Senior Data Engineer"), /Do not reuse another voice's opening/);
+  assert.doesNotMatch(profileStoryBlock("Deliveroo", "Senior Data Engineer"), /how the work took hold/);
 
   globalThis.chrome = {
     storage: {
@@ -236,10 +254,11 @@ test("profile story angle changes with the job and lands in the prompt", async (
     jobTitle: "Senior Data Engineer",
     roleTrack: "sf"
   });
-  assert.match(prompt, /PROFILE STORY ANGLE/);
-  assert.match(prompt, new RegExp(`Angle id: ${first.id}`));
+  assert.match(prompt, /PROFILE VOICE/);
+  assert.match(prompt, new RegExp(`Voice id: ${first.id}`));
   assert.match(prompt, /has been the thread/);
-  const angleAt = prompt.lastIndexOf("PROFILE STORY ANGLE");
+  assert.doesNotMatch(prompt, /how the work took hold/);
+  const angleAt = prompt.lastIndexOf("PROFILE VOICE");
   const passAt = prompt.lastIndexOf("ATS + RECRUITER PASS");
   assert.ok(angleAt > passAt);
 });
