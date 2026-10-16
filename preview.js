@@ -394,7 +394,9 @@ async function initSource() {
   ).trim();
 
   const querySource = String(params.get("source") || "").trim().toLowerCase();
-  if (querySource === "draft" && hasDraft) {
+  if (querySource === "sample") {
+    source = "sample";
+  } else if (querySource === "draft" && hasDraft) {
     source = "draft";
     if (draftTemplateId) templateId = draftTemplateId;
   } else if (querySource === "paste" && hasPaste) {

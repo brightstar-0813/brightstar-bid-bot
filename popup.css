@@ -116,6 +116,54 @@ h1 {
   flex: 0 0 auto;
 }
 
+.main-tabs {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--topbar-bg);
+}
+
+.main-tab {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.main-tab:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--section-bg) 70%, transparent);
+}
+
+.main-tab.is-active {
+  color: var(--accent);
+  background: var(--section-bg);
+  box-shadow: var(--shadow);
+}
+
+.main-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.main-panel[hidden] {
+  display: none;
+}
+
 .app-body {
   flex: 1;
   min-height: 0;
@@ -927,6 +975,10 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+#previewSampleStyle {
+  margin-top: 8px;
 }
 
 .accent-swatch {
@@ -3376,6 +3428,8 @@ body.ctx-window .app-body {
 
 body.ctx-panel .topbar,
 body.ctx-window .topbar,
+body.ctx-panel .main-tabs,
+body.ctx-window .main-tabs,
 body.ctx-panel .status-bar,
 body.ctx-window .status-bar {
   padding-left: 16px;

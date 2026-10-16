@@ -138,6 +138,7 @@ const DEFAULT_CHANNEL_FILTER = "dice";
 const MANUAL_PANEL_OPEN_KEY = "manual_panel_open";
 const PROFILE_EDITOR_PANEL_OPEN_KEY = "profile_editor_panel_open";
 const ALLOW_BATCH_KEY = "allow_batch_process";
+const MAIN_TAB_KEY = "popup_main_tab";
 /** @deprecated Migrated into ALLOW_BATCH_KEY; still read for older installs. */
 const LEGACY_BID_MARKET_KEY = "bid_market";
 const ALLOW_BATCH = { YES: "yes", NO: "no" };
@@ -160,6 +161,7 @@ const templateSelectEl = document.getElementById("templateSelect");
 const templatePickerTrigger = document.getElementById("templatePickerTrigger");
 const templateAccentSwatchesEl = document.getElementById("templateAccentSwatches");
 const templateAccentNameEl = document.getElementById("templateAccentName");
+const previewSampleStyleBtn = document.getElementById("previewSampleStyle");
 let templateAccentMap = {};
 const templatePickerMenu = document.getElementById("templatePickerMenu");
 let closeTemplatePicker = () => {};
@@ -262,6 +264,12 @@ const manualSectionTitleEl = document.getElementById("manualSectionTitle");
 const allowBatchYesBtn = document.getElementById("allowBatchYes");
 const allowBatchNoBtn = document.getElementById("allowBatchNo");
 let allowBatchCache = DEFAULT_ALLOW_BATCH;
+const mainTabButtons = [...document.querySelectorAll("[data-main-tab]")];
+const mainPanels = {
+  bid: document.getElementById("mainPanelBid"),
+  settings: document.getElementById("mainPanelSettings")
+};
+let mainTabCache = "bid";
 const toggleManualPanelBtn = document.getElementById("toggleManualPanel");
 const manualPanelBody = document.getElementById("manualPanelBody");
 const jobTitleEl = document.getElementById("jobTitle");
@@ -490,6 +498,7 @@ function setPersonImportNotice(message, { ok = true } = {}) {
   personImportNoticeEl.hidden = false;
   personImportNoticeEl.textContent = message;
   personImportNoticeEl.className = `person-import-notice ${ok ? "ok" : "err"}`;
+  showMainTab("settings");
   try {
     personImportNoticeEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
   } catch {
@@ -619,6 +628,7 @@ async function importPersonFromResumeText(text, { sourceLabel = "resume" } = {})
 }
 
 async function openProfileEditorFromPopup({ tab = "apply", presetId = "", profileId = "" } = {}) {
+  showMainTab("settings");
   const id =
     String(profileId || "").trim() ||
     profileSelectEl?.value ||
@@ -1104,6 +1114,7 @@ async function runIndeedGrab({ autoApply = true } = {}) {
     status: "running",
     message: "Started."
   });
+  showMainTab("bid");
   jobsSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
   await applyChannelFilter("indeed").catch(() => {});
 }
@@ -1133,6 +1144,7 @@ async function loadSettings() {
     PROFILE_EDITOR_PANEL_OPEN_KEY,
     ALLOW_BATCH_KEY,
     LEGACY_BID_MARKET_KEY,
+    MAIN_TAB_KEY,
     "generation_status",
     "generation_running",
     QUEUE_KEY,
@@ -1190,6 +1202,7 @@ async function loadSettings() {
   renderHumanizeMode(data[STRONG_HUMANIZE_MODE_KEY]);
   const allowBatch = resolveAllowBatch(data);
   renderAllowBatch(allowBatch, { expandManual: false });
+  renderMainTab(data[MAIN_TAB_KEY], { persist: false });
   setManualPanelOpen(
     Boolean(data[MANUAL_PANEL_OPEN_KEY]) || !isAllowBatchEnabled(allowBatch),
     { persist: false }
@@ -2941,6 +2954,34 @@ async function openStyleExportPreview(templateId = "") {
   setStatus("Opened resume preview.");
 }
 
+async function openSampleStylePreview() {
+  const tid = String(templateSelectEl?.value || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
+  const url = chrome.runtime.getURL(
+    `preview.html?source=sample&template=${encodeURIComponent(tid)}`
+  );
+  const stored = (await chrome.storage.local.get(PREVIEW_WINDOW_KEY))[PREVIEW_WINDOW_KEY];
+  if (stored != null) {
+    try {
+      await chrome.windows.update(stored, { focused: true, drawAttention: true });
+      await chrome.runtime
+        .sendMessage({ type: "template_preview_show", templateId: tid, source: "sample" })
+        .catch(() => {});
+      setStatus("Sample preview focused.");
+      return;
+    } catch {
+      // Window was closed.
+    }
+  }
+  const created = await chrome.windows.create({
+    url,
+    type: "popup",
+    width: 980,
+    height: 1040
+  });
+  await chrome.storage.local.set({ [PREVIEW_WINDOW_KEY]: created.id });
+  setStatus("Opened sample resume preview.");
+}
+
 async function exportStyleExportPdf() {
   const raw = String(styleExportPasteEl?.value || "").trim();
   if (!raw) {
@@ -3143,6 +3184,34 @@ function isAllowBatchEnabled(value = allowBatchCache) {
   return normalizeAllowBatch(value) === ALLOW_BATCH.YES;
 }
 
+function normalizeMainTab(value) {
+  return value === "settings" ? "settings" : "bid";
+}
+
+function renderMainTab(tab, { persist = false } = {}) {
+  const next = normalizeMainTab(tab);
+  mainTabCache = next;
+  for (const btn of mainTabButtons) {
+    const active = btn.dataset.mainTab === next;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  for (const [id, panel] of Object.entries(mainPanels)) {
+    if (!panel) continue;
+    const active = id === next;
+    panel.hidden = !active;
+    panel.classList.toggle("is-active", active);
+  }
+  const body = document.querySelector(".app-body");
+  if (body) body.scrollTop = 0;
+  if (persist) chrome.storage.local.set({ [MAIN_TAB_KEY]: next }).catch(() => {});
+}
+
+function showMainTab(tab) {
+  if (normalizeMainTab(tab) === mainTabCache) return;
+  renderMainTab(tab, { persist: true });
+}
+
 function renderAllowBatch(value, { expandManual = false } = {}) {
   allowBatchCache = normalizeAllowBatch(value);
   const batchOff = !isAllowBatchEnabled(allowBatchCache);
@@ -3166,9 +3235,9 @@ function renderAllowBatch(value, { expandManual = false } = {}) {
     indeedSectionEl.setAttribute("aria-hidden", "true");
   }
 
-  if (jobsStepNumEl) jobsStepNumEl.textContent = "4";
-  if (applyStepNumEl) applyStepNumEl.textContent = batchOff ? "4" : "5";
-  if (manualStepNumEl) manualStepNumEl.textContent = batchOff ? "5" : "6";
+  if (jobsStepNumEl) jobsStepNumEl.textContent = "1";
+  if (applyStepNumEl) applyStepNumEl.textContent = batchOff ? "1" : "2";
+  if (manualStepNumEl) manualStepNumEl.textContent = batchOff ? "2" : "3";
   if (manualSectionTitleEl) {
     manualSectionTitleEl.textContent = "Manual bid";
   }
@@ -3948,6 +4017,10 @@ templateAccentSwatchesEl?.addEventListener("click", (event) => {
   chooseTemplateAccent(button.dataset.accentId).catch((err) => setStatus(String(err?.message || err)));
 });
 
+previewSampleStyleBtn?.addEventListener("click", () => {
+  openSampleStylePreview().catch((err) => setStatus(String(err?.message || err)));
+});
+
 function setManualPanelOpen(open, { persist = true } = {}) {
   const isOpen = Boolean(open);
   manualPanelBody.hidden = !isOpen;
@@ -4515,6 +4588,9 @@ allowBatchYesBtn?.addEventListener("click", () => {
 allowBatchNoBtn?.addEventListener("click", () => {
   setAllowBatch(ALLOW_BATCH.NO).catch((e) => setStatus(String(e.message || e)));
 });
+for (const btn of mainTabButtons) {
+  btn.addEventListener("click", () => showMainTab(btn.dataset.mainTab));
+}
 
 for (const el of [
   jobTitleEl,
