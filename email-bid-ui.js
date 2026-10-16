@@ -15,6 +15,7 @@ import {
 import {
   REPLY_TEMPLATES,
   fillReplyTemplate,
+  applyReplyJobTokens,
   loadRecentEmailStyles,
   rememberEmailStyle
 } from "./prompts/email-templates.js";
@@ -63,6 +64,7 @@ export function initEmailBidUi(deps) {
   const draftBlock = document.getElementById("emailBidDraftBlock");
   const draftCloseBtn = document.getElementById("emailBidDraftClose");
   const replyFieldsEl = document.getElementById("emailBidReplyFields");
+  const replyJobFieldsEl = document.getElementById("emailBidReplyJobFields");
   const replyTemplateEl = document.getElementById("emailBidReplyTemplate");
   const replyNameEl = document.getElementById("emailBidReplyName");
   const replyEmailEl = document.getElementById("emailBidReplyEmail");
@@ -90,6 +92,8 @@ export function initEmailBidUi(deps) {
   let draftCache = null;
   let replyMode = false;
   let replyEdited = false;
+  let patchedReplyTitle = "";
+  let patchedReplyCompany = "";
 
   function escapeHtml(s) {
     return String(s || "")
@@ -125,6 +129,7 @@ export function initEmailBidUi(deps) {
   function setReplyMode(on) {
     replyMode = Boolean(on);
     if (replyFieldsEl) replyFieldsEl.hidden = !replyMode;
+    if (replyJobFieldsEl) replyJobFieldsEl.hidden = !replyMode;
     if (modalTitleEl) modalTitleEl.textContent = replyMode ? "Reply" : "Email Bid";
     if (modalSubEl) {
       modalSubEl.textContent = replyMode
@@ -154,34 +159,62 @@ export function initEmailBidUi(deps) {
   }
 
   function readReplyJob() {
+    const replyTitle = String(replyTitleEl?.value || "").trim();
+    const replyCompany = String(replyCompanyEl?.value || "").trim();
     return {
-      title: String(replyTitleEl?.value || "").trim(),
-      company: String(replyCompanyEl?.value || "").trim()
+      title: replyTitle || String(titleEl?.value || "").trim(),
+      company: replyCompany || String(companyEl?.value || "").trim()
     };
   }
 
   function seedReplyJobFields() {
-    if (replyTitleEl && !readReplyJob().title && titleEl?.value?.trim()) {
+    if (replyTitleEl && !String(replyTitleEl.value || "").trim() && titleEl?.value?.trim()) {
       replyTitleEl.value = titleEl.value.trim();
     }
-    if (replyCompanyEl && !readReplyJob().company && companyEl?.value?.trim()) {
+    if (replyCompanyEl && !String(replyCompanyEl.value || "").trim() && companyEl?.value?.trim()) {
       replyCompanyEl.value = companyEl.value.trim();
     }
   }
 
   function syncReplyJobFields() {
-    const { title, company } = readReplyJob();
-    if (titleEl) titleEl.value = title;
-    if (companyEl) companyEl.value = company;
+    const title = String(replyTitleEl?.value || "").trim();
+    const company = String(replyCompanyEl?.value || "").trim();
+    if (titleEl && title) titleEl.value = title;
+    if (companyEl && company) companyEl.value = company;
+    const job = readReplyJob();
     if (replyMode && draftCache?.reply && draftCache.jobMeta) {
       draftCache.jobMeta = {
         ...draftCache.jobMeta,
-        title,
-        jobTitle: title,
-        company,
-        companyName: company
+        title: job.title,
+        jobTitle: job.title,
+        company: job.company,
+        companyName: job.company
       };
     }
+  }
+
+  function patchReplyDraftJob() {
+    const job = readReplyJob();
+    const previous = { title: patchedReplyTitle, company: patchedReplyCompany };
+    if (subjectEl) {
+      subjectEl.value = applyReplyJobTokens(subjectEl.value, {
+        title: job.title,
+        company: job.company,
+        previousTitle: previous.title,
+        previousCompany: previous.company
+      });
+    }
+    if (bodyEl) {
+      bodyEl.value = applyReplyJobTokens(bodyEl.value, {
+        title: job.title,
+        company: job.company,
+        previousTitle: previous.title,
+        previousCompany: previous.company
+      });
+    }
+    patchedReplyTitle = job.title;
+    patchedReplyCompany = job.company;
+    syncReplyJobFields();
   }
 
   function replyEmailOk(email) {
@@ -209,6 +242,9 @@ export function initEmailBidUi(deps) {
     });
     if (subjectEl) subjectEl.value = filled.subject;
     if (bodyEl) bodyEl.value = filled.body;
+    const job = readReplyJob();
+    patchedReplyTitle = job.title;
+    patchedReplyCompany = job.company;
     if (rememberStyle && filled.styleId) await rememberEmailStyle(filled.styleId);
     replyEdited = false;
     syncReplyRecipient();
@@ -219,6 +255,8 @@ export function initEmailBidUi(deps) {
     ensureReplyTemplateOptions();
     setReplyMode(true);
     replyEdited = false;
+    patchedReplyTitle = "";
+    patchedReplyCompany = "";
     seedReplyJobFields();
     const person = await getActivePerson().catch(() => null);
     draftCache = { reply: true, jobMeta: collectJobMeta(person) };
@@ -771,8 +809,28 @@ export function initEmailBidUi(deps) {
   };
   replyNameEl?.addEventListener("input", onReplyIdentityInput);
   replyRoleEl?.addEventListener("input", onReplyIdentityInput);
-  replyTitleEl?.addEventListener("input", onReplyIdentityInput);
-  replyCompanyEl?.addEventListener("input", onReplyIdentityInput);
+  const onReplyJobInput = () => {
+    if (!replyMode) return;
+    patchReplyDraftJob();
+  };
+  replyTitleEl?.addEventListener("input", onReplyJobInput);
+  replyCompanyEl?.addEventListener("input", onReplyJobInput);
+  const mirrorSharedJobField = (replyInput, sharedInput) => {
+    if (!replyInput || !sharedInput) return;
+    const shared = String(sharedInput.value || "").trim();
+    const reply = String(replyInput.value || "").trim();
+    if (!reply || (shared && (shared.startsWith(reply) || reply.startsWith(shared)))) {
+      replyInput.value = sharedInput.value;
+    }
+  };
+  const onSharedJobInput = () => {
+    if (!replyMode || draftHost?.hidden) return;
+    mirrorSharedJobField(replyTitleEl, titleEl);
+    mirrorSharedJobField(replyCompanyEl, companyEl);
+    patchReplyDraftJob();
+  };
+  titleEl?.addEventListener("input", onSharedJobInput);
+  companyEl?.addEventListener("input", onSharedJobInput);
   replyEmailEl?.addEventListener("input", () => {
     if (replyMode) syncReplyRecipient();
   });

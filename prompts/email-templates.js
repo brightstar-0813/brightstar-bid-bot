@@ -1265,6 +1265,29 @@ export function fillReplyTemplate(id, ctx = {}) {
 }
 
 /**
+ * Write a job title and company into a subject or message.
+ * Replaces [Role Title] and [Company], and a previous title or company already inserted there.
+ * @param {string} text
+ * @param {{ title?: string, company?: string, previousTitle?: string, previousCompany?: string }} [job]
+ */
+export function applyReplyJobTokens(text, job = {}) {
+  let out = String(text || "");
+  const title = String(job.title || "").trim();
+  const company = String(job.company || "").trim();
+  const previousTitle = String(job.previousTitle || "").trim();
+  const previousCompany = String(job.previousCompany || "").trim();
+  if (title) {
+    out = out.split("[Role Title]").join(title);
+    if (previousTitle && previousTitle !== title) out = out.split(previousTitle).join(title);
+  }
+  if (company) {
+    out = out.split("[Company]").join(company);
+    if (previousCompany && previousCompany !== company) out = out.split(previousCompany).join(company);
+  }
+  return out;
+}
+
+/**
  * Pick a cold-outreach variant; rotates and skips recent style ids when provided.
  * @param {EmailTemplateFamily} family
  * @param {{ company?: string, title?: string, jdText?: string }} job

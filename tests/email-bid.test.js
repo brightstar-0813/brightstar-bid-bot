@@ -12,6 +12,7 @@ import { composeEmailBid, harvestEmailDraftFromAiText } from "../email-compose.j
 import {
   EMAIL_TEMPLATES,
   REPLY_TEMPLATES,
+  applyReplyJobTokens,
   fillReplyTemplate,
   pickRotatingVariant,
   pickTemplateVariant,
@@ -224,6 +225,24 @@ describe("composeEmailBid", () => {
     assert.doesNotMatch(filled.body, /@/);
     assert.doesNotMatch(filled.subject, /@/);
     assert.equal(filled.email, undefined);
+  });
+
+  it("writes title and company into the reply subject and message", () => {
+    const subject = applyReplyJobTokens("Resume for [Role Title] — Sandeep Mahankali", {
+      title: "Salesforce Architect",
+      company: "Comtec"
+    });
+    const body = applyReplyJobTokens(
+      "Thank you for contacting me regarding [Role Title] at [Company].",
+      { title: "Salesforce Architect", company: "Comtec" }
+    );
+    assert.equal(subject, "Resume for Salesforce Architect — Sandeep Mahankali");
+    assert.equal(body, "Thank you for contacting me regarding Salesforce Architect at Comtec.");
+    const revised = applyReplyJobTokens(subject, {
+      title: "Salesforce Developer",
+      previousTitle: "Salesforce Architect"
+    });
+    assert.equal(revised, "Resume for Salesforce Developer — Sandeep Mahankali");
   });
 
   it("does not invent a recruiter name or email when the reply contact is empty", () => {

@@ -3290,8 +3290,14 @@ async function fillFromOpenTab() {
       setStatus(res?.error || "Could not scrape this tab.");
       return;
     }
-    if (res.jobTitle) jobTitleEl.value = res.jobTitle;
-    if (res.companyName) companyNameEl.value = res.companyName;
+    if (res.jobTitle) {
+      jobTitleEl.value = res.jobTitle;
+      jobTitleEl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    if (res.companyName) {
+      companyNameEl.value = res.companyName;
+      companyNameEl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     if (res.jdLink) jdLinkEl.value = res.jdLink;
     if (res.jdText) jdTextEl.value = res.jdText;
     await persistJobFields();
