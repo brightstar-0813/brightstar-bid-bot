@@ -1267,7 +1267,10 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   });
   const atsAppendix = getTrackAtsAppendix(roleTrack);
   const opening = `${body}\n\n${HANDS_ON_JD_MATCH_BLOCK}`;
-  const story = profileStoryBlock(extras.companyName || "", extras.jobTitle || "");
+  const story = profileStoryBlock(extras.companyName || "", extras.jobTitle || "", {
+    jdText,
+    roleTrack
+  });
   let prompt = mustProve
     ? `${opening}\n\n${mustProve}\n\n${atsAppendix}\n\n${story}`
     : `${opening}\n\n${atsAppendix}\n\n${story}`;

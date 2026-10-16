@@ -98,81 +98,27 @@ const AI_SKILL_CATALOG = [
 ];
 
 /**
- * Shared limits only. The assigned voice chooses rhythm, opening, and diction.
- * Do not put one life-story formula in this string.
+ * Shared summary contract. Same professional shape for every job.
+ * Uniqueness comes from this JD's work, tools, and connected systems.
  */
 export const PROFILE_STORY_RULE =
-  "Profile is a life story of 6–7 sentences from the master resume, written only in the assigned voice. It is not an employer-by-employer chronology. No first-person pronouns (I, me, my, we, our). No personal name at all — not \"Abir\", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say \"my name is\". Follow only the assigned profile voice, including its rhythm, opening, and diction. Do not reuse another voice's opening. Do not narrate employers in order. Do not open on a first year or \"the first org.\" Name at most one employer. Weave the JD's exact product and tool names into that life story. Do not swap them for synonyms and do not dump them as a comma list. No tool tour, no industry list, no closing moral unless the assigned voice asks for none. Use only facts the master resume already supports. Do not invent metrics, employers, or mission statements. Banned openings and shapes: \"has been the thread\", \"What began with\", \"opened another dimension\", \"that same curiosity\", \"the continuing goal\", \"lifelong pull\", \"deepens respect\", \"everyday work easier\", \"more useful, easier to maintain\", \"has not let go\", \"the pattern still holds\", \"worth learning\", \"respect it\", \"earlier chapters\", \"the best fit\", \"start again\", \"workday easier\", \"slowing somebody down\". No gap disclaimers, clearance, citizenship, or visa notes.";
+  "Profile is a new professional summary written only for this job. Do not copy or paraphrase the summary already on the master resume. Ignore that paragraph. It is not an employer-by-employer chronology. No first-person pronouns (I, me, my, we, our). No personal name at all — not \"Abir\", and not the candidate's name. No he, she, him, or her. Do not greet the reader and do not say \"my name is\". Sentence 1: seniority and the years already stated on the master resume, then the work this job actually needs (development, production support, integrations, automation, quoting, release governance, or whatever this JD emphasizes). Years come only from the master resume. Do not invent a number. Sentence 2: a strong hands-on background with this job's tools, using the JD's exact product and tool names. Sentence 3: the environment and the external systems this job connects to, only when the career history already supports those systems. Then one or two sentences that give a life-like account of that same work: a real workflow, what broke, and what was supported. Not a memoir and not an employer tour. Name at most one employer. A summary that would still be true for a different JD on the same track is a failed draft. Do not invent metrics, employers, systems, or mission statements. Banned openings and shapes: \"has been the thread\", \"What began with\", \"opened another dimension\", \"that same curiosity\", \"the continuing goal\", \"lifelong pull\", \"deepens respect\", \"everyday work easier\", \"more useful, easier to maintain\", \"has not let go\", \"the pattern still holds\", \"worth learning\", \"respect it\", \"earlier chapters\", \"the best fit\", \"start again\", \"workday easier\", \"slowing somebody down\". No gap disclaimers, clearance, citizenship, or visa notes.";
 
-/** Ten distinct summary voices. Hash(company, title) picks one and keeps it stable. */
-export const PROFILE_VOICES = [
-  {
-    id: "blunt",
-    text: "Voice: blunt. Short sentences, most under 15 words. Open on the technical fact. One later clause may say why it still matters. Avoid essay words such as journey, craft, and chapter."
-  },
-  {
-    id: "scene",
-    text: "Voice: scene. One moment at the desk, present tense. The path shows up in what the hands already know how to do. Do not summarize the career. Name the JD tools inside that moment."
-  },
-  {
-    id: "question",
-    text: "Voice: question. Open with the question the work kept asking. Answer it with tools and a concrete check, not a moral. Do not start with a year or a first job."
-  },
-  {
-    id: "contrast",
-    text: "Voice: contrast. Open with two clauses that disagree: what looked finished, and what was not. The life story is the habit of checking. Do not list employers."
-  },
-  {
-    id: "skip",
-    text: "Voice: skip. One early fact and one current fact. Leave the middle years out. No \"then at the next company.\" Name the JD tools only in the current fact."
-  },
-  {
-    id: "coworker",
-    text: "Voice: coworker. Explain the job the way someone would to a coworker on a call. Plain words. No essay cadence, no \"the pattern,\" no closing lesson."
-  },
-  {
-    id: "limit",
-    text: "Voice: limit. A constraint the person learned to live with (a governor, a late row, a quota). Warm, not proud. Do not praise the technology. Name the JD tools that enforce the constraint."
-  },
-  {
-    id: "tuesday",
-    text: "Voice: tuesday. Someone else's ordinary day: a wait, a refresh, a number they needed. The life story is choosing to care about that wait. Do not invent a named person. Do not say workday easier."
-  },
-  {
-    id: "unfinished",
-    text: "Voice: unfinished. End on what is still being watched. No closing moral and no \"start again.\" The life story is the unfinished watch, not a tour of past employers."
-  },
-  {
-    id: "objects",
-    text: "Voice: objects. Records, screens, files, and exact tool names. Almost no abstractions. The life story is which objects they kept returning to. Do not use words like passion, craft, or journey."
-  }
-];
-
-function profileStoryHash(company, title) {
-  const key = `${String(company || "").trim()}|${String(title || "").trim()}`.toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < key.length; i += 1) {
-    hash = (hash * 33 + key.charCodeAt(i)) >>> 0;
-  }
-  return hash;
-}
-
-/** One summary voice for this company + title. Empty inputs still pick a stable voice. */
-export function profileStoryAngle(company = "", title = "") {
-  const index = profileStoryHash(company, title) % PROFILE_VOICES.length;
-  return PROFILE_VOICES[index];
-}
-
-/** Block appended after the ATS pass so this job's voice wins. */
-export function profileStoryBlock(company = "", title = "") {
-  const voice = profileStoryAngle(company, title);
+/** Block appended after the ATS pass so this job's summary wins. */
+export function profileStoryBlock(company = "", title = "", { jdText = "", roleTrack = "sf" } = {}) {
+  const products = jdRequiredSkills(jdText, roleTrack).map((product) => product.name).slice(0, 12);
+  const jobLine = [String(title || "").trim(), String(company || "").trim()].filter(Boolean).join(" at ");
+  const target = jobLine ? `Write this summary for ${jobLine} only.` : "Write this summary for this job only.";
+  const mustName = products.length
+    ? `The hands-on tools sentence must include these products in the JD's exact spellings: ${products.join(", ")}.`
+    : "The hands-on tools sentence must name this job's distinctive tools in the JD's exact spellings.";
   return `
 ==================================================
-PROFILE VOICE (this job only — overrides any shared life-story formula)
+PROFILE SUMMARY (this job only — overrides any shared summary)
 ==================================================
-Voice id: ${voice.id}
-${voice.text}
-Write 6–7 sentences in this voice only. Do not reuse another voice's opening. ${PROFILE_STORY_RULE}
+${target}
+${mustName}
+${PROFILE_STORY_RULE}
 `.trim();
 }
 

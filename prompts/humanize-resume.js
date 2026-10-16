@@ -111,7 +111,7 @@ Do NOT "humanize" away exact skill spellings — skills category items must keep
 Never add clearance, citizenship, visa, or immigration language — including in the headline.
 Never paste the JD job title verbatim into headline.
 Vary the prose, but do not replace a JD tool or product with a synonym. Profile and technicalSummary still carry the job title's distinctive words, and experience bullets still name the must-have tools.
-Humanize may vary rhythm only inside the assigned profile voice. Keep it a life story with no first-person pronouns and no personal name. Do not switch to a default memoir voice, a skills list, or a tour of employers. Do not replace a JD tool name.
+Keep the summary in the seniority, hands-on tools, and connected-systems shape, then a life-like account of that work. No first-person pronouns and no personal name. Do not copy the master resume summary. Do not switch to a memoir or a tour of employers. Do not replace a JD tool name. The tools sentence may name several exact products.
 
 ${US_RESUME_STYLE_RULES}
 

@@ -46,7 +46,7 @@ MASTER RESUME (only allowed career history — match these company names and dat
 ==================================================
 PROFESSIONAL SUMMARY
 ==================================================
-profile is a life story of 6–7 sentences written only in the assigned profile voice for this job. That voice overrides any shared formula. It is not an employer-by-employer chronology. No first-person pronouns (I, me, my, we, our). No personal name. Use the JD's exact product and tool names. Do not invent metrics, employers, or mission statements. No clearance, citizenship, or visa notes.
+profile is a new professional summary written only for this job. Do not copy or paraphrase the summary on the master resume. Sentence 1: seniority and the years already stated on the master resume, then the work this job needs. Do not invent a number. Sentence 2: hands-on tools in the JD's exact spellings. Sentence 3: the environment and the external systems this job connects to, only when the career history supports them. Then one or two sentences that give a life-like account of that same work. Not a memoir and not an employer tour. No first-person pronouns (I, me, my, we, our). No personal name. A summary that would still fit a different JD on the same track is a failed draft. Do not invent metrics, employers, or mission statements. No clearance, citizenship, or visa notes.
 
 headline is a short resume identity using the job title's seniority and role-family words. Do not paste the full JD job title or a requisition id. technicalSummary is 6–10 full sentences that also carry those title words and the top tools.
 
