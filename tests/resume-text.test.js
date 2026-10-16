@@ -527,3 +527,38 @@ test("retired template ids resolve to a kept layout", () => {
   assert.equal(getTemplateById("consulting-classic").id, "times-classic");
   assert.equal(getTemplateById("brief-grid").id, "skills-first");
 });
+
+test("core technical skills stays out of the summary and keeps a wrapped category", () => {
+  const text = `Sandeep Mahankali
+Senior Salesforce Technical Architect
+Round Rock, Texas, United States | msandeep123@outlook.com
+
+SUMMARY
+Senior Salesforce Technical Architect with 12+ years of experience designing CRM solutions.
+
+CORE TECHNICAL SKILLS
+Salesforce Platforms: Health Cloud, Data
+Salesforce CRM, Customer 360, Financial Services Cloud
+Salesforce Architecture: Solution architecture, Person Accounts
+
+PROFESSIONAL EXPERIENCE
+Acme Health
+Senior Salesforce Engineer
+Jan 2022 – Present
+Texas, United States | Remote
+- Designed Health Cloud workflows.
+`;
+  const data = plainTextToResumeData(text);
+  assert.doesNotMatch(data.profile, /core technical skills/i);
+  assert.doesNotMatch(data.profile, /Salesforce Platforms/i);
+  assert.match(data.profile, /12\+ years/i);
+  const platforms = data.skills.find((row) => /Salesforce Platforms/i.test(row.category));
+  assert.ok(platforms);
+  assert.match(platforms.items, /Health Cloud/);
+  assert.match(platforms.items, /Financial Services Cloud/);
+  const architecture = data.skills.find((row) => /Salesforce Architecture/i.test(row.category));
+  assert.ok(architecture);
+  assert.match(architecture.items, /Person Accounts/);
+  assert.equal(data.experience.length, 1);
+  assert.match(data.experience[0].company, /Acme Health/);
+});

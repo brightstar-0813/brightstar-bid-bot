@@ -18,7 +18,7 @@ const SECTION_ALIASES = [
   },
   {
     key: "skills",
-    re: /^(skills|technical\s+skills|core\s+competencies|technologies|tech\s+stack)$/i
+    re: /^(?:(?:core\s+)?(?:technical\s+)?skills|technical\s+expertise|core\s+competencies|technologies|tech\s+stack)$/i
   },
   {
     key: "experience",
