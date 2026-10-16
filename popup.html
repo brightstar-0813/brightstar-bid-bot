@@ -472,12 +472,15 @@
               <span class="engine-chip-label">ChatGPT</span>
             </span>
           </header>
-          <div class="ai-provider-toggle" role="radiogroup" aria-label="AI engine">
+          <div class="ai-provider-toggle engine-toggle" role="radiogroup" aria-label="AI engine">
             <button type="button" class="ai-provider-btn is-active" id="aiProviderChatgpt" data-provider="chatgpt" aria-pressed="true">
               ChatGPT
             </button>
             <button type="button" class="ai-provider-btn" id="aiProviderClaude" data-provider="claude" aria-pressed="false">
               Claude
+            </button>
+            <button type="button" class="ai-provider-btn" id="aiProviderOpenai" data-provider="openai" aria-pressed="false" title="Resume and cover letter via the API key in .env">
+              OpenAI
             </button>
           </div>
           <p class="ai-engine-label">Strong humanize</p>
@@ -492,6 +495,7 @@
               Always
             </button>
           </div>
+          <div id="aiChatTools">
           <label class="checkbox-field toggle-field">
             <span>Delete AI chat after job</span>
             <input
@@ -509,6 +513,7 @@
           >
             Clean leftover AI chats
           </button>
+          </div>
         </section>
 
         <!-- Jobs queue (CSV + shared batch) — when Allow batch process is Yes -->

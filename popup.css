@@ -1413,6 +1413,14 @@ button.primary:hover,
   margin-top: 0;
 }
 
+.section-ai .ai-provider-toggle.engine-toggle {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.section-ai #aiChatTools.is-muted {
+  opacity: 0.45;
+}
+
 .section-ai .ai-provider-btn {
   padding: 4px 8px;
   border-radius: 8px;

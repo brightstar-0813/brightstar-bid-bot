@@ -84,6 +84,12 @@ import {
 } from "./autofill-runner.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { isOpenAiQaAssistEnabled } from "./openai.js";
+import {
+  completeCoverLetter,
+  completeResumeJson,
+  getOpenAiDocsSettings,
+  isOpenAiDocsEnabled
+} from "./openai-docs.js";
 import { cleanCustomQaAnswer, extractFreshCustomQaAnswer, buildCustomQaJobKey } from "./ai-answers.js";
 import {
   resumeJsonToHtml,
@@ -912,6 +918,9 @@ async function getOpenAiTab(provider) {
  */
 async function ensureAiTab(provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
+  if (p === AI_PROVIDERS.OPENAI) {
+    throw new Error("OpenAI uses the API key in .env. Switch the AI engine to ChatGPT or Claude for a chat tab.");
+  }
   const label = aiProviderLabel(p);
   const existing = await getOpenAiTab(p);
   if (existing && typeof existing.id === "number") return existing;
@@ -7840,7 +7849,13 @@ function isManualOneOffJob(jobMeta = {}) {
   return jobMeta?.bidSource === "one-off" || jobMeta?.oneOff === true;
 }
 
-async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { runCoverLetter = true } = {}) {
+async function saveResumeAndCoverLetter(
+  tabId,
+  output,
+  resumeData,
+  jobMeta,
+  { runCoverLetter = true, fetchCoverLetter = null } = {}
+) {
   resumeData = await finalizeResumeData(resumeData);
   await setStatus("Saving jd.txt + resume PDF…");
   const { jobDir: savedDir, nameToken, resumePdfName, saved } = await autoDownloadResumeFiles(
@@ -7864,7 +7879,92 @@ async function saveResumeAndCoverLetter(tabId, output, resumeData, jobMeta, { ru
   const manualBid = isManualOneOffJob(jobMeta);
   const shouldRunCover = Boolean(runCoverLetter) && !manualBid;
   let coverLetterSaved = false;
-  if (shouldRunCover && typeof tabId === "number") {
+  const useOpenAiCover =
+    shouldRunCover && typeof fetchCoverLetter === "function" && typeof tabId !== "number";
+  if (useOpenAiCover) {
+    try {
+      await setStatus("OpenAI: writing cover letter…");
+      const person = await getActivePerson().catch(() => null);
+      const sessionRoleTrack =
+        jobMeta.sessionRoleTrack || (await getSessionRoleTrack().catch(() => "")) || "";
+      const roleTrack = normalizeRoleTrackId(
+        jobMeta.roleTrack || resolveEffectiveRoleTrack(person, sessionRoleTrack)
+      );
+      const coverPrompt = await buildCoverLetterPrompt({
+        jdText: jobMeta.jdText || "",
+        jobTitle: jobMeta.jobTitle || "",
+        companyName: jobMeta.companyName || "",
+        roleTrack,
+        sessionRoleTrack
+      });
+      let coverOutput = "";
+      const pickCover = (reply) => {
+        const fromReply = extractCoverLetterText(reply);
+        if (fromReply && looksLikeCoverLetterBody(fromReply)) return fromReply;
+        if (looksLikeCoverLetterBody(reply)) return String(reply || "").trim();
+        return String(reply || "").trim();
+      };
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const prompt =
+          attempt === 1
+            ? coverPrompt
+            : attempt === 2
+              ? "Stop. Do NOT return JSON or resume content. Write ONLY a plain-text cover letter body for this job: start with Dear Hiring Manager, then 3–4 short paragraphs. No markdown links, no email/URL lines, no signature block."
+              : "IMPORTANT: Ignore the resume JSON above. Reply with ONLY the cover letter plain text starting with Dear Hiring Manager, — nothing else.";
+        try {
+          const reply = await fetchCoverLetter(prompt);
+          coverOutput = pickCover(reply);
+          if (looksLikeCoverLetterBody(coverOutput)) break;
+          await setStatus("Cover letter looked wrong (JSON/stale reply). Retrying…");
+        } catch (attemptErr) {
+          if (attempt === 3) throw attemptErr;
+          await setStatus(
+            `Cover letter attempt ${attempt} failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
+          );
+        }
+      }
+      if (!looksLikeCoverLetterBody(coverOutput)) {
+        throw new Error(
+          "Cover letter response was unusable (got JSON/resume text or empty). Resume PDF was saved — use Retry on this row for the letter."
+        );
+      }
+
+      const token = nameToken || outputNameToken(jobMeta, resumeData);
+      const coverPdfName = `${token}_Cover Letter.pdf`;
+      await setStatus(`Saving ${coverPdfName}…`);
+      const contact = await getAutofillContact();
+      const titleFallback = signatureTitleFallbackForTrack(roleTrack);
+      const cl = await autoDownloadCoverLetterPdf(
+        coverOutput,
+        savedDir,
+        {
+          name: contact.name || resumeData?.name || "Applicant",
+          signatureTitle:
+            contact.signatureTitle || resumeData?.headline || titleFallback,
+          headline: resumeData?.headline || contact.signatureTitle || "",
+          location: contact.location || resumeData?.location || "",
+          email: contact.email || resumeData?.email || "",
+          phone: contact.phone || resumeData?.phone || "",
+          linkedin: contact.linkedin || resumeData?.linkedin || ""
+        },
+        token,
+        jobMeta
+      );
+      if (cl.pdf) {
+        coverLetterSaved = true;
+        status = `${status} + ${cl.coverPdfName || coverPdfName}`;
+      }
+    } catch (coverErr) {
+      status = `${status}; cover letter failed: ${String(coverErr?.message || coverErr)}`;
+      await setLastGeneratedDocs({
+        coverLetter: null,
+        folderName: savedDir,
+        jobDir: savedDir,
+        csvRow: jobMeta.csvRow,
+        jdLink: jobMeta.jdLink || ""
+      }).catch(() => {});
+    }
+  } else if (shouldRunCover && typeof tabId === "number") {
     try {
       // Brief pause so the AI finishes any post-JSON UI before the CL prompt.
       await sleep(COVER_LETTER_GAP_MS);
@@ -8369,6 +8469,341 @@ async function pickTemplateAccent(templateId, jobMeta = {}) {
 }
 
 /**
+ * Same pipeline as runAutoJob, but resume JSON and the cover letter come from
+ * the OpenAI API. Used only when OPENAI_DOCS=1. No ChatGPT/Claude tab.
+ */
+async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
+  const { apiKey, model } = await getOpenAiDocsSettings();
+  if (!apiKey) {
+    throw new Error(
+      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env, then reload the extension."
+    );
+  }
+
+  const jdLink = String(jobMeta.jdLink || "").trim();
+  const shouldProbe = Boolean(jdLink) && !isManualOneOffJob(jobMeta);
+  if (shouldProbe && (batchControl.skipCurrent || batchControl.stop)) {
+    throw new Error("__SKIP__");
+  }
+
+  const inflightProbe = shouldProbe ? takeInflightInactiveProbe(jobMeta) : null;
+  const probePromise = shouldProbe
+    ? inflightProbe || probeJobLinkInactiveAndClose(jdLink)
+    : Promise.resolve(null);
+  if (shouldProbe && !inflightProbe) void probePromise.catch(() => {});
+
+  const rowPrefix = jobMeta.csvRow != null ? `Row ${jobMeta.csvRow}: ` : "";
+  if (shouldProbe) {
+    await setStatus(
+      inflightProbe
+        ? `${rowPrefix}finishing active/inactive check…`
+        : `${rowPrefix}checking if job is active…`
+    );
+  }
+
+  const inactiveProbe = await probePromise;
+  if (shouldProbe) {
+    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+    if (inactiveProbe?.unavailable) {
+      throw new Error(`__INACTIVE_SKIP__:${inactiveProbe.detail || "inactive job"}`);
+    }
+    if (inactiveProbe?.alreadyApplied) {
+      throw new Error(
+        `__ALREADY_APPLIED_SKIP__:${inactiveProbe.detail || "You've already applied to this job"}`
+      );
+    }
+  }
+
+  const person = await getActivePerson();
+  const sessionRoleTrack = await getSessionRoleTrack();
+  const personRoleTrack = resolveRoleTrackForPerson(person);
+  const roleTrack = resolveEffectiveRoleTrack(person, sessionRoleTrack);
+  const trackStatus = formatRoleTrackStatus(roleTrack, {
+    sessionOverride: sessionRoleTrack,
+    personTrack: personRoleTrack
+  });
+  const experienceRules = await activatePersonExperienceRules(person);
+  if (experienceRules?.roles?.length) {
+    await setStatus(
+      `Validating experience employers for ${person.name || person.label}: ${formatRequiredEmployersList(experienceRules)}`
+    );
+  } else {
+    await setStatus(
+      `Warning: no required employers configured for ${person.name || person.label} — incomplete experience may be saved. Add them in the person editor.`
+    );
+  }
+
+  const profileId = jobMeta.profileId || person.id;
+  const humanizeMode = await getStrongHumanizeMode();
+  const strongHumanize = shouldApplyStrongHumanize(humanizeMode, {
+    jdLink: jobMeta.jdLink || "",
+    site: jobMeta.board || jobMeta.source || ""
+  });
+  const prompt = await buildPrompt(profileId, jobMeta.jdText || "", {
+    jobTitle: jobMeta.jobTitle || "",
+    companyName: jobMeta.companyName || "",
+    masterResume: person.masterResume || "",
+    roleTrack,
+    sessionRoleTrack,
+    jdLink: jobMeta.jdLink || "",
+    site: jobMeta.board || "",
+    strongHumanizeMode: humanizeMode,
+    additionalPrompt: jobMeta.additionalPrompt || ""
+  });
+
+  const rowLabel = jobMeta.csvRow != null ? `${jobMeta.csvRow} · ` : "";
+  await setStatus(
+    `Row ${rowLabel}${jobMeta.companyName}: Track ${trackStatus}${
+      strongHumanize ? " · strong humanize" : ""
+    } · OpenAI API resume…`
+  );
+
+  if (batchControl.skipCurrent || batchControl.stop) {
+    throw new Error("__SKIP__");
+  }
+
+  let rawOutput = "";
+  let resumeData =
+    isUsableResumeJson(jobMeta.harvestedResume) || isMinimallySaveableResume(jobMeta.harvestedResume)
+      ? jobMeta.harvestedResume
+      : null;
+  if (resumeData) {
+    rawOutput = JSON.stringify(resumeData);
+    await setStatus(
+      `Row ${rowLabel}${jobMeta.companyName}: resume JSON already available (${resumeData.experience?.length || 0} jobs). Saving files…`
+    );
+  }
+
+  for (
+    let attempt = 1;
+    attempt <= MAX_JSON_ATTEMPTS &&
+    !isUsableResumeJson(resumeData) &&
+    !isMinimallySaveableResume(resumeData);
+    attempt += 1
+  ) {
+    if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+    const isFirst = attempt === 1;
+    const retryPrompt = isFirst ? prompt : buildJsonRetryPrompt(resumeData);
+    await setStatus(
+      isFirst
+        ? `Row ${rowLabel}${jobMeta.companyName}: OpenAI resume JSON…`
+        : `Row ${rowLabel}${jobMeta.companyName}: OpenAI resume retry (${attempt}/${MAX_JSON_ATTEMPTS})…`
+    );
+    rawOutput = await completeResumeJson({ apiKey, model, prompt: retryPrompt });
+    resumeData = extractResumeJson(rawOutput);
+    if (isUsableResumeJson(resumeData) || isMinimallySaveableResume(resumeData)) break;
+    const missingCos = missingExperienceCompanies(resumeData);
+    if (missingCos.length && attempt < MAX_JSON_ATTEMPTS) {
+      await setStatus(
+        `Row ${rowLabel}${jobMeta.companyName}: experience missing ${missingCos.join(", ")} — re-prompting…`
+      );
+    }
+  }
+
+  if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
+    throw new Error(describeUnusableResume(rawOutput, resumeData));
+  }
+
+  {
+    const jd = jobMeta.jdText || "";
+    const required = jdRequiredSkills(jd, roleTrack);
+    if (required.length) {
+      resumeData = enforceJdSkills(resumeData, jd, roleTrack);
+      await setStatus(`JD skills enforced (${trackStatus}): ${required.map((p) => p.name).join(", ")}`);
+      const gaps = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2, roleTrack });
+      if (gaps.length && !batchControl.skipCurrent && !batchControl.stop) {
+        await setStatus(
+          `Row ${rowLabel}${jobMeta.companyName}: ${gaps
+            .map((g) => `${g.company} proves ${g.covered}/${g.need}`)
+            .join(", ")} — one OpenAI re-prompt for JD-skill bullets…`
+        );
+        try {
+          const bulletsRaw = await completeResumeJson({
+            apiKey,
+            model,
+            prompt: buildJdSkillsRetryPrompt(resumeData, jd, { roles: 2, minBullets: 3, roleTrack })
+          });
+          const improved = enforceJdSkills(extractResumeJson(bulletsRaw), jd, roleTrack);
+          if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
+            const before = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2, roleTrack }).length;
+            const after = rolesMissingJdSkills(improved, jd, { roles: 2, minBullets: 2, roleTrack }).length;
+            if (after <= before && totalExperienceBullets(improved) >= totalExperienceBullets(resumeData) * 0.8) {
+              resumeData = improved;
+              await setStatus(
+                after === 0
+                  ? "JD-skill bullets added to both recent roles."
+                  : `JD-skill bullets improved (${before} → ${after} roles short).`
+              );
+            } else {
+              await setStatus("Re-prompt was weaker than the original — keeping the first resume.");
+            }
+          }
+        } catch (err) {
+          await setStatus(`JD-skill re-prompt skipped (${err?.message || "failed"}). Keeping resume.`);
+        }
+      }
+    }
+  }
+
+  const atsJd = jobMeta.jdText || "";
+  const atsTitle = jobMeta.jobTitle || jobMeta.title || "";
+  const atsCompany = jobMeta.companyName || jobMeta.company || "";
+  let atsEvaluation = evaluateAtsScore(resumeData, {
+    jdText: atsJd,
+    jobTitle: atsTitle,
+    roleTrack,
+    companyName: atsCompany
+  });
+  {
+    const boosted = boostResumeForAts(resumeData, {
+      jdText: atsJd,
+      jobTitle: atsTitle,
+      roleTrack,
+      companyName: atsCompany
+    });
+    if (boosted.changed) {
+      resumeData = boosted.data;
+      atsEvaluation = boosted.evaluation;
+      await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
+    }
+  }
+  if (
+    Number(atsEvaluation?.score) < ATS_TARGET_SCORE &&
+    !batchControl.skipCurrent &&
+    !batchControl.stop
+  ) {
+    await setStatus(
+      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — one OpenAI project-bank retry…`
+    );
+    try {
+      const retryRaw = await completeResumeJson({
+        apiKey,
+        model,
+        prompt: buildAtsScoreRetryPrompt(resumeData, atsEvaluation, {
+          jdText: atsJd,
+          jobTitle: atsTitle,
+          roleTrack,
+          companyName: atsCompany
+        })
+      });
+      const improved = extractResumeJson(retryRaw);
+      if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
+        const nextEval = evaluateAtsScore(improved, {
+          jdText: atsJd,
+          jobTitle: atsTitle,
+          roleTrack,
+          companyName: atsCompany
+        });
+        const beforeBullets = totalExperienceBullets(resumeData);
+        if (
+          nextEval.score > atsEvaluation.score &&
+          totalExperienceBullets(improved) >= beforeBullets * 0.8
+        ) {
+          resumeData = improved;
+          atsEvaluation = nextEval;
+          await setStatus(`ATS retry → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
+        } else {
+          await setStatus("ATS retry was not higher — keeping the first resume.");
+        }
+      }
+    } catch (err) {
+      await setStatus(`ATS retry skipped (${err?.message || "failed"}). Keeping resume.`);
+    }
+  }
+  if (jobMeta.csvRow != null) {
+    const atsPatch = {
+      atsScore: atsEvaluation.score,
+      atsGrade: atsEvaluation.grade,
+      atsEvaluation
+    };
+    if (draftOnly) atsPatch.status = "draft";
+    await updateQueueJob(jobMeta.csvRow, atsPatch);
+  }
+
+  const resumeFilePrefix = normalizeResumeFilePrefix(
+    jobMeta.resumeFilePrefix || person.resumeFilePrefix,
+    person.name || person.label || resumeData?.name || ""
+  );
+  const templateIdForJob = await pickTemplateId(jobMeta, person);
+  const enrichedMeta = {
+    ...jobMeta,
+    templateId: templateIdForJob,
+    templateAccent: await pickTemplateAccent(templateIdForJob, jobMeta),
+    resumeFilePrefix,
+    personName: person.name || person.label || "",
+    outputDir: await resolveOutputDir(jobMeta.outputDir || ""),
+    roleTrack,
+    sessionRoleTrack
+  };
+
+  if (draftOnly) {
+    await persistOneOffDraft({
+      resumeData,
+      jobMeta: enrichedMeta,
+      atsEvaluation,
+      templateId: enrichedMeta.templateId,
+      aiTabId: null,
+      aiChatId: "",
+      aiProvider: "openai"
+    });
+    await persistOneOffResult({
+      ok: true,
+      draft: true,
+      jdLink: enrichedMeta.jdLink,
+      csvRow: enrichedMeta.csvRow,
+      atsScore: atsEvaluation.score,
+      atsGrade: atsEvaluation.grade,
+      atsEvaluation
+    });
+    await setStatus(
+      `Draft ready (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Review preview, then Confirm.`
+    );
+    return {
+      draft: true,
+      resumeData,
+      atsEvaluation,
+      enrichedMeta,
+      aiTabId: null,
+      aiChatId: "",
+      aiProvider: "openai",
+      status: `Draft ready · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade})`
+    };
+  }
+
+  await setStatus(
+    `JSON accepted (${resumeData.name || "ok"}) · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade}). Saving jd.txt + PDF…`
+  );
+
+  const result = await saveResumeAndCoverLetter(
+    null,
+    JSON.stringify(resumeData, null, 2),
+    resumeData,
+    enrichedMeta,
+    {
+      runCoverLetter: !isManualOneOffJob(enrichedMeta),
+      fetchCoverLetter: (coverPrompt) => completeCoverLetter({ apiKey, model, prompt: coverPrompt })
+    }
+  );
+
+  try {
+    const found = await chrome.downloads.search({
+      query: [result.savedDir.split("/").pop() || "jd.txt"],
+      limit: 5,
+      orderBy: ["-startTime"]
+    });
+    if (!found?.length) {
+      await setStatus(
+        `${result.status} — WARNING: Chrome Downloads may have blocked files. Check the Downloads shelf / allow downloads.`
+      );
+    }
+  } catch {
+    // ignore
+  }
+
+  return { ...result, atsEvaluation, aiTabId: null, aiChatId: "", aiProvider: "openai", profileId };
+}
+
+/**
  * Fully automatic — ONE new ChatGPT chat per position:
  * resume (with JD) → [optional draft stop] → save files → (batch) cover letter in the same chat.
  * @param {object} jobMeta
@@ -8379,6 +8814,9 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   const preSkipReason = await getPreGenerateSkipReason(jobMeta);
   if (preSkipReason) {
     throw new Error(`__DUPLICATE_SKIP__:${preSkipReason}`);
+  }
+  if (await isOpenAiDocsEnabled()) {
+    return runAutoJobViaOpenAi(jobMeta, { draftOnly });
   }
 
   const jdLink = String(jobMeta.jdLink || "").trim();
@@ -8952,17 +9390,22 @@ async function runBatchLoop(outputDir) {
   startKeepAlive();
 
   try {
-    try {
-      await resetAiHistoryForNewWorkflow("batch");
-    } catch (resetErr) {
-      workflowBlankChatReady = false;
+    const openAiDocs = await isOpenAiDocsEnabled();
+    if (openAiDocs) {
+      await setStatus("OpenAI API docs mode (OPENAI_DOCS=1) — skipping ChatGPT/Claude chat reset.");
+    } else {
+      try {
+        await resetAiHistoryForNewWorkflow("batch");
+      } catch (resetErr) {
+        workflowBlankChatReady = false;
+        await setStatus(
+          `Batch chat reset: ${String(resetErr?.message || resetErr)}. The first job will still require a new chat.`
+        );
+      }
       await setStatus(
-        `Batch chat reset: ${String(resetErr?.message || resetErr)}. The first job will still require a new chat.`
+        `${aiProviderLabel(await getStoredAiProvider())} pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
       );
     }
-    await setStatus(
-      `${aiProviderLabel(await getStoredAiProvider())} pacing: ~${pacingCache.jobGapSeconds}s between jobs (hard-pause after ${pacingCache.hardPauseAfterHits} rate limits).`
-    );
     const dedupe = await dedupeQueueAgainstSheet({ notifySlack: true });
     if (dedupe.skipped > 0) {
       await setStatus(

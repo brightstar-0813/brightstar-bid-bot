@@ -7,7 +7,8 @@ export const DELETE_AI_CHAT_HISTORY_KEY = "delete_ai_chat_history";
 
 export const AI_PROVIDERS = Object.freeze({
   CHATGPT: "chatgpt",
-  CLAUDE: "claude"
+  CLAUDE: "claude",
+  OPENAI: "openai"
 });
 
 export function normalizeAiProvider(value) {
@@ -15,23 +16,29 @@ export function normalizeAiProvider(value) {
     .trim()
     .toLowerCase();
   if (v === "claude" || v === "anthropic") return AI_PROVIDERS.CLAUDE;
+  if (v === "openai" || v === "openai-api") return AI_PROVIDERS.OPENAI;
   return AI_PROVIDERS.CHATGPT;
 }
 
 export function aiProviderLabel(provider) {
-  return normalizeAiProvider(provider) === AI_PROVIDERS.CLAUDE ? "Claude" : "ChatGPT";
+  const normalized = normalizeAiProvider(provider);
+  if (normalized === AI_PROVIDERS.CLAUDE) return "Claude";
+  if (normalized === AI_PROVIDERS.OPENAI) return "OpenAI";
+  return "ChatGPT";
 }
 
 export function aiProviderHomeUrl(provider) {
-  return normalizeAiProvider(provider) === AI_PROVIDERS.CLAUDE
-    ? "https://claude.ai/new"
-    : "https://chatgpt.com/";
+  const normalized = normalizeAiProvider(provider);
+  if (normalized === AI_PROVIDERS.CLAUDE) return "https://claude.ai/new";
+  if (normalized === AI_PROVIDERS.OPENAI) return "";
+  return "https://chatgpt.com/";
 }
 
 export function aiProviderNewChatUrl(provider) {
-  return normalizeAiProvider(provider) === AI_PROVIDERS.CLAUDE
-    ? "https://claude.ai/new"
-    : "https://chatgpt.com/";
+  const normalized = normalizeAiProvider(provider);
+  if (normalized === AI_PROVIDERS.CLAUDE) return "https://claude.ai/new";
+  if (normalized === AI_PROVIDERS.OPENAI) return "";
+  return "https://chatgpt.com/";
 }
 
 export async function isDeleteAiChatHistoryEnabled() {
@@ -55,7 +62,7 @@ export function isClaudeUrl(url) {
 }
 
 export function isAiProviderUrl(url, provider) {
-  return normalizeAiProvider(provider) === AI_PROVIDERS.CLAUDE
-    ? isClaudeUrl(url)
-    : isChatGptUrl(url);
+  const normalized = normalizeAiProvider(provider);
+  if (normalized === AI_PROVIDERS.OPENAI) return false;
+  return normalized === AI_PROVIDERS.CLAUDE ? isClaudeUrl(url) : isChatGptUrl(url);
 }
