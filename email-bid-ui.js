@@ -64,6 +64,7 @@ export function initEmailBidUi(deps) {
   const draftBlock = document.getElementById("emailBidDraftBlock");
   const draftCloseBtn = document.getElementById("emailBidDraftClose");
   const replyFieldsEl = document.getElementById("emailBidReplyFields");
+  const recipientsEl = document.getElementById("emailBidRecipients");
   const replyJobFieldsEl = document.getElementById("emailBidReplyJobFields");
   const replyTemplateEl = document.getElementById("emailBidReplyTemplate");
   const replyNameEl = document.getElementById("emailBidReplyName");
@@ -128,12 +129,14 @@ export function initEmailBidUi(deps) {
 
   function setReplyMode(on) {
     replyMode = Boolean(on);
+    draftBlock?.classList.toggle("is-reply", replyMode);
     if (replyFieldsEl) replyFieldsEl.hidden = !replyMode;
     if (replyJobFieldsEl) replyJobFieldsEl.hidden = !replyMode;
+    if (recipientsEl) recipientsEl.hidden = replyMode;
     if (modalTitleEl) modalTitleEl.textContent = replyMode ? "Reply" : "Email Bid";
     if (modalSubEl) {
       modalSubEl.textContent = replyMode
-        ? "Type the contact, title, and company, pick a template, then send"
+        ? "Fill the draft, then send"
         : "Review recipients, then send";
     }
   }
@@ -691,7 +694,7 @@ export function initEmailBidUi(deps) {
       return;
     }
 
-    const att = await resolveResumeAttachment({ customOnly: replyMode });
+    const att = replyMode ? null : await resolveResumeAttachment({ customOnly: false });
     let downloadedName = "";
     if (att) {
       try {
@@ -700,7 +703,7 @@ export function initEmailBidUi(deps) {
       } catch (err) {
         setStatus(`Resume download failed: ${String(err?.message || err)}`);
       }
-    } else {
+    } else if (!replyMode) {
       setStatus("No resume PDF — pick Resume PDF first.");
     }
 
@@ -759,7 +762,7 @@ export function initEmailBidUi(deps) {
     }
     if (replyMode) {
       syncReplyJobFields();
-      setStatus("Reply · saving files and updating the sheet…");
+      setStatus("Reply · updating the sheet…");
       const committed = await chrome.runtime
         .sendMessage({
           type: "email_bid_reply_commit",

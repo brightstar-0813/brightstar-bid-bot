@@ -560,19 +560,28 @@ h1 {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.email-bid-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+
 .email-bid-modal-section {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   padding: 12px 14px 0;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.email-bid-modal-section + .email-bid-modal-section {
-  flex: 1 1 auto;
-  overflow: auto;
-  padding-bottom: 4px;
+.email-bid-modal.is-reply #emailBidRecipients {
+  display: none;
+}
+
+.email-bid-modal.is-reply #emailBidReplyJobFields {
+  margin-bottom: 2px;
 }
 
 .email-bid-modal-section-head {

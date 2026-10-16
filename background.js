@@ -3319,74 +3319,24 @@ function replySheetNote(sheetResult) {
 }
 
 /**
- * Reply Send: sheet Applied from whatever is filled (title, company, link, time, bid mode),
- * then jd.txt plus any resume/cover already on hand. Does not generate a new resume.
- * A missing link or JD does not block the sheet row. A file-save failure does not undo it.
+ * Reply Send: log the sheet row only. Does not download jd.txt, a resume, or a cover letter.
  */
 async function saveReplyJobFiles(jobMeta = {}) {
   const person = await getActivePerson().catch(() => null);
-  const jobTitle = String(jobMeta.jobTitle || jobMeta.title || "").trim();
-  const companyName = String(jobMeta.companyName || jobMeta.company || "").trim();
   const meta = {
     ...jobMeta,
-    jobTitle,
-    companyName,
+    jobTitle: String(jobMeta.jobTitle || jobMeta.title || "").trim(),
+    companyName: String(jobMeta.companyName || jobMeta.company || "").trim(),
     jdLink: String(jobMeta.jdLink || "").trim(),
     jdText: String(jobMeta.jdText || "").trim(),
     salary: String(jobMeta.salary || "").trim(),
     profileId: jobMeta.profileId || person?.id || "",
-    personName: person?.name || person?.label || "",
-    resumeFilePrefix: normalizeResumeFilePrefix(
-      jobMeta.resumeFilePrefix || person?.resumeFilePrefix,
-      person?.name || person?.label || ""
-    ),
-    bidSource: "email-bid",
-    outputDir: await resolveOutputDir(
-      jobMeta.outputDir || (person ? outputDirFromPerson(person) : "")
-    )
+    bidSource: "email-bid"
   };
   const sheetResult = await recordEmailBidSheetApplied(meta);
-  const sheetNote = replySheetNote(sheetResult);
-  if (!jobTitle && !companyName) {
-    const status = `Reply${sheetNote}`;
-    await setStatus(status);
-    return { ok: true, sheetResult, status, saved: [] };
-  }
-  let jobDir = "";
-  const saved = ["jd.txt"];
-  try {
-    const { jobDir: savedDir } = await saveJdTxtOnly(meta);
-    jobDir = savedDir;
-    const nameToken = outputNameToken(meta, {});
-    const store = await chrome.storage.local.get(["email_bid_custom_resume"]);
-    const custom = store.email_bid_custom_resume || null;
-    const last = await getLastGeneratedDocs().catch(() => null);
-    const customOk = custom?.base64 && (!custom.profileId || custom.profileId === person?.id);
-    const resume = customOk ? custom : last?.resume;
-    if (resume?.base64) {
-      const fileName = `${nameToken}_Resume.pdf`;
-      const b64 = String(resume.base64).replace(/^data:[^;]+;base64,/, "");
-      await downloadBase64File(
-        b64,
-        resume.mimeType || "application/pdf",
-        joinDownloadPath(jobDir, fileName)
-      );
-      saved.push(fileName);
-    }
-    if (last?.coverLetter?.base64) {
-      const fileName = `${nameToken}_Cover Letter.pdf`;
-      const b64 = String(last.coverLetter.base64).replace(/^data:[^;]+;base64,/, "");
-      await downloadBase64File(b64, "application/pdf", joinDownloadPath(jobDir, fileName));
-      saved.push(fileName);
-    }
-  } catch (err) {
-    const status = `Reply · files failed: ${String(err?.message || err).slice(0, 80)}${sheetNote}`;
-    await setStatus(status);
-    return { ok: true, sheetResult, status, saved: jobDir ? saved : [] };
-  }
-  const status = `Saved ${saved.join(", ")} → Downloads / ${jobDir}${sheetNote}`;
+  const status = `Reply${replySheetNote(sheetResult)}`;
   await setStatus(status);
-  return { ok: true, jobDir, saved, sheetResult, status };
+  return { ok: true, sheetResult, status, saved: [] };
 }
 
 /** Write jd.txt only under the person's Downloads job folder. */

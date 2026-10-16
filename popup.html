@@ -622,6 +622,7 @@
               </button>
             </div>
 
+            <div class="email-bid-modal-body">
             <section id="emailBidReplyFields" class="email-bid-modal-section" aria-label="Reply" hidden>
               <label class="field">
                 <span>Template</span>
@@ -641,7 +642,7 @@
               </label>
             </section>
 
-            <section class="email-bid-modal-section" aria-label="Recipients">
+            <section id="emailBidRecipients" class="email-bid-modal-section" aria-label="Recipients">
               <div class="email-bid-modal-section-head">
                 <span class="email-bid-modal-label">To</span>
                 <span class="email-bid-to-hint" id="emailBidToHint"></span>
@@ -650,10 +651,10 @@
             </section>
 
             <section class="email-bid-modal-section" aria-label="Compose">
-              <div id="emailBidReplyJobFields" hidden>
+              <div id="emailBidReplyJobFields" class="grid-2" hidden>
                 <label class="field">
                   <span>Title</span>
-                  <input id="emailBidReplyTitle" type="text" autocomplete="off" placeholder="Senior Software Engineer" />
+                  <input id="emailBidReplyTitle" type="text" autocomplete="off" placeholder="Job title" />
                 </label>
                 <label class="field">
                   <span>Company</span>
@@ -673,6 +674,7 @@
                 <input id="emailBidCustomResume" type="file" accept="application/pdf,.pdf" />
               </label>
             </section>
+            </div>
 
             <div class="email-bid-send-tools" role="group" aria-label="Send actions">
               <button type="button" id="emailBidOpenWeb" class="ghost">
