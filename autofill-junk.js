@@ -68,10 +68,25 @@ export function isSensitiveProfileQuestion(label) {
   return SENSITIVE_PROFILE_QUESTION_RE.test(String(label || "").trim());
 }
 
+/** ChatGPT/Codex page source mistaken for an application answer. */
+export function isPageScriptAnswer(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  if (/oai-epic-native-launch|sessionStorage\s*\.\s*(get|set)Item|localStorage\s*\.\s*(get|set)Item/i.test(t)) {
+    return true;
+  }
+  if (/^\s*(?:\(\)\s*=>|function\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=)/.test(t) && /[{};]/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 /** @param {string} text */
 export function isJunkAutofillAnswer(text, { questionLabel = "" } = {}) {
   const t = String(text || "").trim();
   if (!t) return true;
+  if (isPageScriptAnswer(t)) return true;
+  if (/^continue in this same conversation\b/i.test(t)) return true;
   if (JUNK_ANSWER_RE.test(t)) return true;
   const q = String(questionLabel || "").trim();
   if (q && YES_NO_QUESTION_RE.test(q) && t.length > 500) return true;

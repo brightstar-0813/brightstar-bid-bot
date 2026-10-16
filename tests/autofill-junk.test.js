@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   isJunkAutofillAnswer,
+  isPageScriptAnswer,
   isJunkQuestionLabel,
   isJunkQaRecord,
   isSensitiveProfileQuestion,
@@ -17,6 +18,14 @@ import {
 
 test("isJunkAutofillAnswer rejects polluted answers", () => {
   assert.equal(isJunkAutofillAnswer(""), true);
+  assert.equal(
+    isPageScriptAnswer('() => { const key = "oai-epic-native-launch"; sessionStorage.getItem(key); }'),
+    true
+  );
+  assert.equal(
+    isJunkAutofillAnswer('() => { const key = "oai-epic-native-launch"; sessionStorage.setItem(key, "1"); }'),
+    true
+  );
   assert.equal(isJunkAutofillAnswer("Format Paragraph"), true);
   assert.equal(isJunkAutofillAnswer("Choose file"), true);
   assert.equal(isJunkAutofillAnswer("5208604529", { questionLabel: "Why are you interested?" }), true);

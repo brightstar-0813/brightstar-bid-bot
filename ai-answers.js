@@ -3,7 +3,8 @@
  * Callers must try profile + Q&A bank first; this is last resort.
  */
 
-import { chatCompletion, responsesCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
+import { chatCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
+import { isPageScriptAnswer } from "./autofill-junk.js";
 
 function parseJsonObject(text) {
   const raw = String(text || "").trim();
@@ -151,6 +152,7 @@ export function bankAnswerFitsQuestion(questionLabel, answer) {
   const q = String(questionLabel || "");
   const a = String(answer || "").trim();
   if (!a) return false;
+  if (isPageScriptAnswer(a)) return false;
 
   // Never bank/apply password-like values into unrelated questions.
   if (/\b(password|passcode|otp|ssn|social security)\b/i.test(q)) return false;
@@ -907,6 +909,7 @@ export function cleanCustomQaAnswer(raw) {
   ) {
     t = t.slice(1, -1).trim();
   }
+  if (isPageScriptAnswer(t)) return "";
   return t.slice(0, 4000);
 }
 
@@ -1075,8 +1078,7 @@ export async function generateSingleProfileAnswer({
   applicationBrief = null,
   skills = [],
   recentRoles = [],
-  priorMessages = null,
-  transport = "chat"
+  priorMessages = null
 }) {
   const q = String(question || "").trim();
   if (!q) return { answer: "", usage: null };
@@ -1109,22 +1111,14 @@ export async function generateSingleProfileAnswer({
     ...history.slice(-12),
     { role: "user", content: userContent }
   ];
-  const result =
-    transport === "responses"
-      ? await responsesCompletion({
-          apiKey,
-          model,
-          maxTokens: 700,
-          messages
-        })
-      : await chatCompletion({
-          apiKey,
-          model,
-          jsonMode: false,
-          temperature: certQ ? 0.15 : 0.4,
-          maxTokens: 700,
-          messages
-        });
+  const result = await chatCompletion({
+    apiKey,
+    model,
+    jsonMode: false,
+    temperature: certQ ? 0.15 : 0.4,
+    maxTokens: 700,
+    messages
+  });
 
   let answer = cleanCustomQaAnswer(result.content);
   if (answer && !bankAnswerFitsQuestion(q, answer)) {
@@ -1135,10 +1129,5 @@ export async function generateSingleProfileAnswer({
     { role: "user", content: userContent },
     { role: "assistant", content: answer || String(result.content || "").trim() }
   ].slice(-12);
-  return {
-    answer,
-    usage: result.usage || null,
-    source: transport === "responses" ? "codex" : "openai",
-    messages: nextMessages
-  };
+  return { answer, usage: result.usage || null, source: "openai", messages: nextMessages };
 }

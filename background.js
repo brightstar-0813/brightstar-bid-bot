@@ -164,6 +164,8 @@ import {
   aiProviderLabel,
   aiProviderNewChatUrl,
   isAiProviderUrl,
+  isChatGptUrl,
+  isCodexUrl,
   isDeleteAiChatHistoryEnabled,
   normalizeAiProvider
 } from "./ai-provider.js";
@@ -941,6 +943,297 @@ async function ensureAiTab(provider) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return chrome.tabs.get(tab.id);
+}
+
+const CODEX_ACCOUNT_MODEL = "gpt-5.3-codex";
+
+/** Any logged-in chatgpt.com tab can lend its session. Do not open the Codex app page. */
+async function ensureChatGptSessionTab() {
+  const tabs = await chrome.tabs.query({});
+  const chatTabs = tabs.filter((tab) => isChatGptUrl(tab.url) && typeof tab.id === "number");
+  chatTabs.sort((a, b) => {
+    const aCodex = isCodexUrl(a.url) ? 1 : 0;
+    const bCodex = isCodexUrl(b.url) ? 1 : 0;
+    if (aCodex !== bCodex) return aCodex - bCodex;
+    if (!!b.active !== !!a.active) return (b.active ? 1 : 0) - (a.active ? 1 : 0);
+    return (b.lastAccessed || 0) - (a.lastAccessed || 0);
+  });
+  if (chatTabs[0]) return chatTabs[0];
+
+  await setStatus("No ChatGPT tab open — opening one to use your account…");
+  const tab = await chrome.tabs.create({ url: "https://chatgpt.com/", active: false });
+  if (typeof tab?.id !== "number") {
+    throw new Error("Sign in to ChatGPT in this browser, then try Codex again.");
+  }
+  try {
+    await withTimeout(waitForTabComplete(tab.id, 30000), 32000, "Timed out opening ChatGPT.");
+  } catch {
+    /* session fetch below reports a signed-out tab */
+  }
+  return chrome.tabs.get(tab.id);
+}
+
+/**
+ * Ask Codex on the logged-in ChatGPT account. One backend request, no composer.
+ * @returns {Promise<{ answer: string, conversationId: string, parentMessageId: string }>}
+ */
+async function askCodexWithChatGptSession(prompt, { conversationId = "", parentMessageId = "" } = {}) {
+  const text = String(prompt || "").trim();
+  if (!text) throw new Error("Enter or paste a question first.");
+  const tab = await ensureChatGptSessionTab();
+  if (typeof tab?.id !== "number") {
+    throw new Error("Sign in to ChatGPT in this browser, then try Codex again.");
+  }
+
+  let results;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["chatgpt-sentinel.js"]
+    });
+    results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [text, String(conversationId || ""), String(parentMessageId || ""), CODEX_ACCOUNT_MODEL],
+      func: async (fullPrompt, priorConversationId, priorParentId, model) => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const origin = location.origin.includes("openai.com") ? "https://chat.openai.com" : "https://chatgpt.com";
+        const readCookie = (name) => {
+          const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+          return match ? decodeURIComponent(match[1]) : "";
+        };
+        const fetchWithTimeout = async (url, opts = {}, ms = 90000) => {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), ms);
+          try {
+            return await fetch(url, { ...opts, signal: ctrl.signal });
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+        const decodeAccountId = (token) => {
+          try {
+            const part = String(token || "").split(".")[1] || "";
+            const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+            const auth = json?.["https://api.openai.com/auth"] || {};
+            return String(auth.chatgpt_account_id || auth.account_id || "").trim();
+          } catch {
+            return "";
+          }
+        };
+
+        let token = "";
+        let accountId = "";
+        for (const sessionUrl of [`${origin}/api/auth/session`, "/api/auth/session"]) {
+          try {
+            const session = await fetchWithTimeout(sessionUrl, { credentials: "include" }, 8000).then((r) =>
+              r.json()
+            );
+            token = session?.accessToken || session?.access_token || "";
+            accountId = String(
+              session?.account?.id || session?.account?.account_id || session?.chatgpt_account_id || ""
+            ).trim();
+            if (token) break;
+          } catch {
+            /* try the next session URL */
+          }
+        }
+        if (token && !accountId) accountId = decodeAccountId(token);
+        if (!token) {
+          return { ok: false, error: "Sign in to ChatGPT in this browser, then try Codex again." };
+        }
+
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+          "oai-language": "en-US"
+        };
+        if (accountId) headers["ChatGPT-Account-ID"] = accountId;
+        const deviceId = readCookie("oai-did");
+        if (deviceId) headers["OAI-Device-Id"] = deviceId;
+
+        const authHeaders = {
+          Authorization: headers.Authorization,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "oai-language": "en-US"
+        };
+        if (headers["ChatGPT-Account-ID"]) authHeaders["ChatGPT-Account-ID"] = headers["ChatGPT-Account-ID"];
+        if (headers["OAI-Device-Id"]) authHeaders["OAI-Device-Id"] = headers["OAI-Device-Id"];
+        try {
+          const sentinel = globalThis.__brightstarSentinel;
+          let prepareToken = "";
+          try {
+            const prepRes = await fetchWithTimeout(
+              `${origin}/backend-api/sentinel/chat-requirements/prepare`,
+              { method: "POST", credentials: "include", headers: authHeaders, body: "{}" },
+              20000
+            );
+            if (prepRes.ok) {
+              const prep = await prepRes.json();
+              prepareToken = String(prep?.prepare_token || prep?.token || prep?.p || "").trim();
+            }
+          } catch {
+            /* the requirements call can still run */
+          }
+          const proofSeed = prepareToken || (sentinel?.getRequirementsToken ? sentinel.getRequirementsToken(navigator.userAgent) : "");
+          if (!proofSeed) {
+            return { ok: false, error: "Codex could not start the ChatGPT account check. Reload the extension and try again." };
+          }
+          const reqRes = await fetchWithTimeout(
+            `${origin}/backend-api/sentinel/chat-requirements`,
+            {
+              method: "POST",
+              credentials: "include",
+              headers: authHeaders,
+              body: JSON.stringify({ p: proofSeed })
+            },
+            20000
+          );
+          if (!reqRes.ok) {
+            const raw = await reqRes.text();
+            return {
+              ok: false,
+              error: `Codex error (HTTP ${reqRes.status}): ${raw.slice(0, 220) || "ChatGPT blocked the account check."}`
+            };
+          }
+          const req = await reqRes.json();
+          if (req?.token) headers["OpenAI-Sentinel-Chat-Requirements-Token"] = String(req.token);
+          const pow = req?.proofofwork || {};
+          if (pow.required && pow.seed && pow.difficulty) {
+            if (!sentinel?.solvePow) {
+              return { ok: false, error: "Codex could not solve the ChatGPT account check. Reload the extension and try again." };
+            }
+            const proof = sentinel.solvePow(String(pow.seed), String(pow.difficulty), navigator.userAgent);
+            if (proof) headers["OpenAI-Sentinel-Proof-Token"] = proof;
+          }
+        } catch (err) {
+          return { ok: false, error: `Codex request failed: ${String(err?.message || err)}` };
+        }
+
+        const messageId = crypto.randomUUID();
+        const parent = String(priorParentId || "").trim() || crypto.randomUUID();
+        const body = {
+          action: "next",
+          messages: [
+            {
+              id: messageId,
+              author: { role: "user" },
+              content: { content_type: "text", parts: [fullPrompt] },
+              metadata: {}
+            }
+          ],
+          parent_message_id: parent,
+          model,
+          timezone_offset_min: new Date().getTimezoneOffset(),
+          conversation_mode: { kind: "primary_assistant" },
+          force_use_sse: true,
+          history_and_training_disabled: false
+        };
+        const existingConversation = String(priorConversationId || "").trim();
+        if (existingConversation) body.conversation_id = existingConversation;
+
+        let response;
+        try {
+          response = await fetchWithTimeout(`${origin}/backend-api/conversation`, {
+            method: "POST",
+            credentials: "include",
+            headers,
+            body: JSON.stringify(body)
+          });
+        } catch (err) {
+          return { ok: false, error: `Codex request failed: ${String(err?.message || err)}` };
+        }
+
+        if (!response.ok) {
+          const raw = await response.text();
+          let message = raw.slice(0, 240);
+          try {
+            const parsed = JSON.parse(raw);
+            message = parsed?.detail || parsed?.error?.message || parsed?.message || message;
+          } catch {
+            /* keep the raw slice */
+          }
+          if (response.status === 403 && /unusual activity/i.test(message)) {
+            message += " Open chatgpt.com while signed in, wait a minute, then try again.";
+          }
+          return { ok: false, error: `Codex error (HTTP ${response.status}): ${message}` };
+        }
+
+        const reader = response.body?.getReader?.();
+        if (!reader) return { ok: false, error: "Codex returned no stream." };
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let answer = "";
+        let conversationOut = existingConversation;
+        let parentOut = "";
+        const takeMessage = (json) => {
+          if (!json || typeof json !== "object") return;
+          if (json.conversation_id) conversationOut = String(json.conversation_id);
+          const msg = json.message;
+          const role = msg?.author?.role;
+          if (role === "user" || role === "system") return;
+          if (msg?.id && role === "assistant") parentOut = String(msg.id);
+          const parts = msg?.content?.parts;
+          if (Array.isArray(parts)) {
+            const text = parts
+              .filter((part) => typeof part === "string")
+              .join("\n")
+              .trim();
+            if (text && text.length >= answer.length) answer = text;
+          }
+          if (typeof json.v === "string" && (!json.p || String(json.p).includes("parts"))) {
+            if (json.o === "append") answer += json.v;
+            else if (json.o === "replace" || !answer) answer = json.v;
+          }
+        };
+
+        while (true) {
+          const step = await reader.read();
+          if (step.done) break;
+          buffer += decoder.decode(step.value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const data = trimmed.slice(5).trim();
+            if (!data || data === "[DONE]") continue;
+            try {
+              takeMessage(JSON.parse(data));
+            } catch {
+              /* ignore a partial event */
+            }
+          }
+          if (answer && parentOut && conversationOut) {
+            /* keep reading until the stream ends so the final text wins */
+          }
+        }
+        if (!answer) {
+          await sleep(0);
+          return { ok: false, error: "Codex returned an empty answer. Try again." };
+        }
+        return {
+          ok: true,
+          answer,
+          conversationId: conversationOut,
+          parentMessageId: parentOut || messageId
+        };
+      }
+    });
+  } catch (err) {
+    throw new Error(`Codex request failed: ${String(err?.message || err)}`);
+  }
+
+  const row = results?.[0]?.result;
+  if (!row?.ok) {
+    throw new Error(String(row?.error || "Codex returned an empty answer. Try again."));
+  }
+  return {
+    answer: String(row.answer || "").trim(),
+    conversationId: String(row.conversationId || ""),
+    parentMessageId: String(row.parentMessageId || "")
+  };
 }
 
 /** @deprecated Prefer ensureAiTab — kept for older call sites during transition. */
@@ -11227,6 +11520,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const strongModel = Boolean(message.strongModel);
         const skipBank = Boolean(message.skipBank);
 
+        if (engine === "codex") {
+          const prep = await prepareCustomQaAsk({ question, skipBank, engine: "codex" });
+          if (prep.bankHit) {
+            const via =
+              prep.bankHit.source === "profile"
+                ? `profile facts (${prep.bankHit.personLabel || "profile"})`
+                : `bank (${prep.bankHit.personLabel || "profile"})`;
+            await setStatus(`Custom Q&A: reused ${via}.`);
+            safeSendResponse(sendResponse, prep.bankHit);
+            return;
+          }
+          await setStatus(
+            prep.reuseChat
+              ? "Custom Q&A: continuing Codex on your ChatGPT account…"
+              : "Custom Q&A: asking Codex on your ChatGPT account…"
+          );
+          const asked = await askCodexWithChatGptSession(prep.prompt, {
+            conversationId: prep.codexConversationId,
+            parentMessageId: prep.codexParentMessageId
+          });
+          const fresh = extractFreshCustomQaAnswer(asked.answer, { prompt: prep.prompt });
+          const cleaned = fresh || cleanCustomQaAnswer(asked.answer);
+          const promptFlat = String(prep.prompt || "").replace(/\s+/g, " ").trim();
+          const answerFlat = String(cleaned || "").replace(/\s+/g, " ").trim();
+          const echoed =
+            /^continue in this same conversation/i.test(answerFlat) ||
+            (answerFlat.length >= 40 && promptFlat.startsWith(answerFlat));
+          const answer = echoed ? "" : cleaned;
+          if (!answer) throw new Error("Codex returned an empty answer. Try again.");
+          await markCustomQaAgentSession(prep.jobKey, {
+            seeded: true,
+            engine: "codex",
+            conversationId: asked.conversationId,
+            parentMessageId: asked.parentMessageId
+          }).catch(() => null);
+          await saveCustomQaAnswer({ question, answer, source: "codex" }).catch(() => null);
+          await setStatus(
+            prep.reuseChat
+              ? "Custom Q&A: answer ready (Codex account, same job thread) · saved to bank."
+              : "Custom Q&A: answer ready (Codex account) · saved to bank."
+          );
+          safeSendResponse(sendResponse, {
+            ok: true,
+            answer,
+            source: "codex",
+            profileId: prep.profileId,
+            personLabel: prep.personLabel,
+            jobKey: prep.jobKey || "",
+            reusedChat: Boolean(prep.reuseChat)
+          });
+          return;
+        }
+
         if (engine === "chatgpt" || engine === "agent" || engine === "claude") {
           const prep = await prepareCustomQaAsk({ question, skipBank });
           if (prep.bankHit) {
@@ -11284,28 +11630,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const codex = engine === "codex";
         await setStatus(
-          codex
-            ? "Custom Q&A: generating with Codex…"
-            : strongModel
-              ? "Custom Q&A: generating with stronger OpenAI model…"
-              : "Custom Q&A: generating with OpenAI…"
+          strongModel
+            ? "Custom Q&A: generating with stronger OpenAI model…"
+            : "Custom Q&A: generating with OpenAI…"
         );
-        const result = await answerCustomQaAsk({
-          question,
-          strongModel,
-          skipBank,
-          engine: codex ? "codex" : "openai"
-        });
+        const result = await answerCustomQaAsk({ question, strongModel, skipBank });
         const via =
           result.source === "bank"
             ? `bank (${result.personLabel || "profile"})`
             : result.source === "profile"
               ? `profile facts (${result.personLabel || "profile"})`
-              : result.source === "codex"
-                ? `Codex${result.model ? ` · ${result.model}` : ""}`
-                : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
+              : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
         await setStatus(`Custom Q&A: answer ready (${via}).`);
         safeSendResponse(sendResponse, result);
       } catch (err) {
