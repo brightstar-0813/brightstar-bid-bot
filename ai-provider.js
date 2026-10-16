@@ -11,9 +11,6 @@ export const AI_PROVIDERS = Object.freeze({
   OPENAI: "openai"
 });
 
-/** ChatGPT Codex home. Custom Q&A only — resume harvest stays on the selected engine. */
-export const CODEX_HOME_URL = "https://chatgpt.com/codex";
-
 export function normalizeAiProvider(value) {
   const v = String(value || "")
     .trim()
@@ -58,17 +55,6 @@ export function isChatGptUrl(url) {
     typeof url === "string" &&
     (url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/"))
   );
-}
-
-/** True for the Codex app shell, not a normal ChatGPT /c/ thread. */
-export function isCodexUrl(url) {
-  if (!isChatGptUrl(url)) return false;
-  try {
-    const path = new URL(url).pathname || "";
-    return path === "/codex" || path.startsWith("/codex/");
-  } catch {
-    return false;
-  }
 }
 
 export function isClaudeUrl(url) {

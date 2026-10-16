@@ -36,6 +36,7 @@ import { formatAutofillSummary } from "./autofill-summary.js";
 import { pickCitizenshipOption, normalizeCitizenshipLabel } from "./autofill-citizenship.js";
 import { getEnv } from "./env.js";
 import {
+  DEFAULT_CODEX_MODEL,
   DEFAULT_OPENAI_MODEL,
   QUALITY_OPENAI_MODEL,
   isOpenAiQaAssistEnabled
@@ -2291,6 +2292,14 @@ async function getOpenAiSettings() {
   return { apiKey, model };
 }
 
+/** Codex Custom Q&A uses its own key when set, otherwise the OpenAI key. */
+async function getCodexSettings() {
+  const dedicated = String(await getEnv("CODEX_API_KEY", "")).trim();
+  const apiKey = dedicated || String(await getEnv("OPENAI_API_KEY", "")).trim();
+  const model = (await getEnv("CODEX_MODEL", DEFAULT_CODEX_MODEL)) || DEFAULT_CODEX_MODEL;
+  return { apiKey, model };
+}
+
 async function getAutofillAiContext() {
   const data = await chrome.storage.local.get([
     "last_job_title",
@@ -4097,7 +4106,8 @@ export async function answerQuestionsFromBank(
 export async function answerCustomQaAsk({
   question,
   strongModel = false,
-  skipBank = false
+  skipBank = false,
+  engine = "openai"
 } = {}) {
   const q = String(question || "").trim();
   if (!q) throw new Error("Enter or paste a question first.");
@@ -4131,18 +4141,26 @@ export async function answerCustomQaAsk({
     }
   }
 
-  const { apiKey, model: envModel } = await getOpenAiSettings();
+  const codex = engine === "codex";
+  const { apiKey, model: envModel } = codex ? await getCodexSettings() : await getOpenAiSettings();
   if (!apiKey) {
     throw new Error(
-      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env, or use ChatGPT tab instead."
+      codex
+        ? "Codex API key is missing. Add CODEX_API_KEY or OPENAI_API_KEY to the extension .env, then reload the extension."
+        : "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env, or use ChatGPT tab instead."
     );
   }
-  const model = strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
+  const model = codex ? envModel || DEFAULT_CODEX_MODEL : strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
   const ctx = await getAutofillAiContext();
   const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
   const chatMode = await resolveCustomQaChatReuse(jobKey);
-  const priorMessages =
-    chatMode.reuseChat && Array.isArray(chatMode.session?.openaiMessages)
+  const codexHistory =
+    codex && chatMode.session?.codexJobKey === jobKey && Array.isArray(chatMode.session?.codexMessages)
+      ? chatMode.session.codexMessages
+      : [];
+  const priorMessages = codex
+    ? codexHistory
+    : chatMode.reuseChat && Array.isArray(chatMode.session?.openaiMessages)
       ? chatMode.session.openaiMessages
       : [];
 
@@ -4184,16 +4202,28 @@ export async function answerCustomQaAsk({
     resumeText: ctx.resumeText,
     skills: ctx.skills,
     recentRoles: info.recentRoles || ctx.recentRoles,
-    priorMessages
+    priorMessages,
+    transport: codex ? "responses" : "chat"
   });
   const answer = cleanCustomQaAnswer(result.answer);
-  if (!answer) throw new Error("OpenAI returned an empty answer. Try again or use ChatGPT tab.");
+  if (!answer) {
+    throw new Error(
+      codex
+        ? "Codex returned an empty answer. Try again."
+        : "OpenAI returned an empty answer. Try again or use ChatGPT tab."
+    );
+  }
+  const answerSource = result.source === "profile" ? "profile" : codex ? "codex" : "openai";
   if (Array.isArray(result.messages)) {
-    await saveCustomQaSession({
-      jobKey,
-      openaiMessages: result.messages,
-      agentSeeded: Boolean(chatMode.session?.agentSeeded)
-    }).catch(() => null);
+    await saveCustomQaSession(
+      codex
+        ? { codexJobKey: jobKey, codexMessages: result.messages }
+        : {
+            jobKey,
+            openaiMessages: result.messages,
+            agentSeeded: Boolean(chatMode.session?.agentSeeded)
+          }
+    ).catch(() => null);
   }
   // Persist for this profile so the next Autofill can reuse it from the Q&A bank.
   saveQa({
@@ -4201,12 +4231,12 @@ export async function answerCustomQaAsk({
     question: q,
     answer,
     fieldType: "text",
-    source: result.source === "profile" ? "profile" : "openai"
+    source: answerSource
   }).catch(() => {});
   return {
     ok: true,
     answer,
-    source: result.source === "profile" ? "profile" : "openai",
+    source: answerSource,
     model: result.source === "profile" ? undefined : model,
     usage: result.usage || null,
     profileId,

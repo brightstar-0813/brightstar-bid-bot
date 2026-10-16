@@ -160,13 +160,10 @@ import {
 import {
   AI_PROVIDER_KEY,
   AI_PROVIDERS,
-  CODEX_HOME_URL,
   aiProviderHomeUrl,
   aiProviderLabel,
   aiProviderNewChatUrl,
   isAiProviderUrl,
-  isChatGptUrl,
-  isCodexUrl,
   isDeleteAiChatHistoryEnabled,
   normalizeAiProvider
 } from "./ai-provider.js";
@@ -944,48 +941,6 @@ async function ensureAiTab(provider) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return chrome.tabs.get(tab.id);
-}
-
-const CODEX_TAB_KEY = "custom_qa_codex_tab_id";
-
-/** Open or reuse the ChatGPT Codex tab used by Custom Q&A. Does not touch the resume engine tab. */
-async function ensureCodexTab() {
-  const stored = await chrome.storage.local.get([CODEX_TAB_KEY]);
-  const savedId = stored[CODEX_TAB_KEY];
-  if (typeof savedId === "number") {
-    const saved = await chrome.tabs.get(savedId).catch(() => null);
-    if (saved?.id && isChatGptUrl(saved.url || "")) return saved;
-  }
-
-  const tabs = await chrome.tabs.query({});
-  const codexTabs = tabs.filter((tab) => isCodexUrl(tab.url) && typeof tab.id === "number");
-  codexTabs.sort((a, b) => {
-    if (!!b.active !== !!a.active) return (b.active ? 1 : 0) - (a.active ? 1 : 0);
-    return (b.lastAccessed || 0) - (a.lastAccessed || 0);
-  });
-  let tab = codexTabs[0] || null;
-  if (!tab) {
-    await setStatus("No Codex tab open — opening one…");
-    tab = await chrome.tabs.create({ url: CODEX_HOME_URL, active: true });
-    if (typeof tab?.id !== "number") {
-      throw new Error("Open ChatGPT Codex in a browser tab first.");
-    }
-    try {
-      await withTimeout(waitForTabComplete(tab.id, 30000), 32000, "Timed out opening Codex.");
-    } catch {
-      // Slow load is fine — the composer wait below covers it.
-    }
-    for (let i = 0; i < 40; i += 1) {
-      const state = await readChatReadiness(tab.id, AI_PROVIDERS.CHATGPT);
-      if (state.hasInput) break;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    tab = await chrome.tabs.get(tab.id);
-  }
-  if (typeof tab?.id === "number") {
-    await chrome.storage.local.set({ [CODEX_TAB_KEY]: tab.id }).catch(() => {});
-  }
-  return tab;
 }
 
 /** @deprecated Prefer ensureAiTab — kept for older call sites during transition. */
@@ -11272,13 +11227,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const strongModel = Boolean(message.strongModel);
         const skipBank = Boolean(message.skipBank);
 
-        if (engine === "chatgpt" || engine === "agent" || engine === "claude" || engine === "codex") {
-          const codex = engine === "codex";
-          const prep = await prepareCustomQaAsk({
-            question,
-            skipBank,
-            engine: codex ? "codex" : ""
-          });
+        if (engine === "chatgpt" || engine === "agent" || engine === "claude") {
+          const prep = await prepareCustomQaAsk({ question, skipBank });
           if (prep.bankHit) {
             const via =
               prep.bankHit.source === "profile"
@@ -11288,24 +11238,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             safeSendResponse(sendResponse, prep.bankHit);
             return;
           }
-          const provider = codex ? AI_PROVIDERS.CHATGPT : await getStoredAiProvider();
-          const providerLabel = codex ? "Codex" : aiProviderLabel(provider);
+          const provider = await getStoredAiProvider();
+          const providerLabel = aiProviderLabel(provider);
           const reuseChat = Boolean(prep.reuseChat);
           await setStatus(
             reuseChat
               ? `Custom Q&A: continuing ${providerLabel} chat for this job…`
               : `Custom Q&A: starting ${providerLabel} chat with this job’s JD + profile…`
           );
-          const tab = codex ? await ensureCodexTab() : await ensureAiTab(provider);
+          const tab = await ensureAiTab(provider);
           const raw = await automateChatGpt(tab.id, prep.prompt, {
             // One chat per job apply: reuse while job key matches; seed once with JD+resume.
             newChat: !reuseChat,
             expectResumeJson: false,
             replyKind: "answer",
-            provider: codex ? AI_PROVIDERS.CHATGPT : undefined,
-            providerLabel: codex ? "Codex" : "",
-            freshChatUrl: codex ? CODEX_HOME_URL : "",
-            rememberGlobalChat: !codex,
             statusLabel: reuseChat
               ? `Custom Q&A follow-up via ${providerLabel}…`
               : `Custom Q&A via ${providerLabel} (new job chat)…`
@@ -11314,15 +11260,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!answer) {
             throw new Error(`${providerLabel} returned an empty answer. Try again.`);
           }
-          await markCustomQaAgentSession(prep.jobKey, {
-            seeded: true,
-            engine: codex ? "codex" : ""
-          }).catch(() => null);
-          const answerSource = codex
-            ? "codex"
-            : provider === AI_PROVIDERS.CLAUDE
-              ? "claude"
-              : "chatgpt";
+          await markCustomQaAgentSession(prep.jobKey, { seeded: true }).catch(() => null);
+          const answerSource = provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt";
           await saveCustomQaAnswer({
             question,
             answer,
@@ -11345,18 +11284,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
+        const codex = engine === "codex";
         await setStatus(
-          strongModel
-            ? "Custom Q&A: generating with stronger OpenAI model…"
-            : "Custom Q&A: generating with OpenAI…"
+          codex
+            ? "Custom Q&A: generating with Codex…"
+            : strongModel
+              ? "Custom Q&A: generating with stronger OpenAI model…"
+              : "Custom Q&A: generating with OpenAI…"
         );
-        const result = await answerCustomQaAsk({ question, strongModel, skipBank });
+        const result = await answerCustomQaAsk({
+          question,
+          strongModel,
+          skipBank,
+          engine: codex ? "codex" : "openai"
+        });
         const via =
           result.source === "bank"
             ? `bank (${result.personLabel || "profile"})`
             : result.source === "profile"
               ? `profile facts (${result.personLabel || "profile"})`
-              : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
+              : result.source === "codex"
+                ? `Codex${result.model ? ` · ${result.model}` : ""}`
+                : `OpenAI${result.model ? ` · ${result.model}` : ""}`;
         await setStatus(`Custom Q&A: answer ready (${via}).`);
         safeSendResponse(sendResponse, result);
       } catch (err) {

@@ -3770,7 +3770,7 @@ async function generateCustomQaAsk({ skipBank = false } = {}) {
             : res.source === "claude"
               ? `Claude tab${res.reusedChat ? " · same job chat" : ""}${who}`
               : res.source === "codex"
-                ? `Codex tab${res.reusedChat ? " · same job chat" : ""}${who}`
+                ? `Codex${res.model ? ` · ${res.model}` : ""}${res.reusedThread ? " · same job thread" : ""}${who}`
                 : `ChatGPT tab${res.reusedChat ? " · same job chat" : ""}${who}`;
     setCustomQaMeta(src);
     setStatus(`Custom Q&A ready (${src}).`);

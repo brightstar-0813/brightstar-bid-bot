@@ -3,7 +3,7 @@
  * Callers must try profile + Q&A bank first; this is last resort.
  */
 
-import { chatCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
+import { chatCompletion, responsesCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
 
 function parseJsonObject(text) {
   const raw = String(text || "").trim();
@@ -1075,7 +1075,8 @@ export async function generateSingleProfileAnswer({
   applicationBrief = null,
   skills = [],
   recentRoles = [],
-  priorMessages = null
+  priorMessages = null,
+  transport = "chat"
 }) {
   const q = String(question || "").trim();
   if (!q) return { answer: "", usage: null };
@@ -1108,14 +1109,22 @@ export async function generateSingleProfileAnswer({
     ...history.slice(-12),
     { role: "user", content: userContent }
   ];
-  const result = await chatCompletion({
-    apiKey,
-    model,
-    jsonMode: false,
-    temperature: certQ ? 0.15 : 0.4,
-    maxTokens: 700,
-    messages
-  });
+  const result =
+    transport === "responses"
+      ? await responsesCompletion({
+          apiKey,
+          model,
+          maxTokens: 700,
+          messages
+        })
+      : await chatCompletion({
+          apiKey,
+          model,
+          jsonMode: false,
+          temperature: certQ ? 0.15 : 0.4,
+          maxTokens: 700,
+          messages
+        });
 
   let answer = cleanCustomQaAnswer(result.content);
   if (answer && !bankAnswerFitsQuestion(q, answer)) {
@@ -1126,5 +1135,10 @@ export async function generateSingleProfileAnswer({
     { role: "user", content: userContent },
     { role: "assistant", content: answer || String(result.content || "").trim() }
   ].slice(-12);
-  return { answer, usage: result.usage || null, source: "openai", messages: nextMessages };
+  return {
+    answer,
+    usage: result.usage || null,
+    source: transport === "responses" ? "codex" : "openai",
+    messages: nextMessages
+  };
 }
