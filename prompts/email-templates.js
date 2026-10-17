@@ -1270,6 +1270,20 @@ export function fillReplyTemplate(id, ctx = {}) {
  * @param {string} text
  * @param {{ title?: string, company?: string, previousTitle?: string, previousCompany?: string }} [job]
  */
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Swap a previously inserted title or company without matching inside other words. */
+function replaceInsertedPhrase(text, previous, next) {
+  if (!previous || previous === next) return text;
+  const pattern = new RegExp(
+    `(?<![A-Za-z0-9])${escapeRegExp(previous)}(?![A-Za-z0-9])`,
+    "g"
+  );
+  return text.replace(pattern, next);
+}
+
 export function applyReplyJobTokens(text, job = {}) {
   let out = String(text || "");
   const title = String(job.title || "").trim();
@@ -1278,11 +1292,11 @@ export function applyReplyJobTokens(text, job = {}) {
   const previousCompany = String(job.previousCompany || "").trim();
   if (title) {
     out = out.split("[Role Title]").join(title);
-    if (previousTitle && previousTitle !== title) out = out.split(previousTitle).join(title);
+    out = replaceInsertedPhrase(out, previousTitle, title);
   }
   if (company) {
     out = out.split("[Company]").join(company);
-    if (previousCompany && previousCompany !== company) out = out.split(previousCompany).join(company);
+    out = replaceInsertedPhrase(out, previousCompany, company);
   }
   return out;
 }

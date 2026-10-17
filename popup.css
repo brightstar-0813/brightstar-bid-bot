@@ -718,6 +718,7 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   flex: 0 0 auto;
   margin: 0;
@@ -733,6 +734,10 @@ h1 {
   font-size: 12px;
   font-weight: 650;
   border-radius: 8px;
+}
+
+#emailBidReplyClear {
+  margin-right: auto;
 }
 
 .subblock {

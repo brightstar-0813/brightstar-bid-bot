@@ -53,6 +53,7 @@ export function initEmailBidUi(deps) {
   const jdTextEl = document.getElementById("jdText");
   const prepareBtn = document.getElementById("emailBidPrepare");
   const replyBtn = document.getElementById("emailBidReply");
+  const replyClearBtn = document.getElementById("emailBidReplyClear");
   const emailEl = document.getElementById("emailBidMailboxEmail");
   const passwordEl = document.getElementById("emailBidMailboxPassword");
   const mailboxSaveBtn = document.getElementById("emailBidMailboxSave");
@@ -133,6 +134,7 @@ export function initEmailBidUi(deps) {
     if (replyFieldsEl) replyFieldsEl.hidden = !replyMode;
     if (replyJobFieldsEl) replyJobFieldsEl.hidden = !replyMode;
     if (recipientsEl) recipientsEl.hidden = replyMode;
+    if (replyClearBtn) replyClearBtn.hidden = !replyMode;
     if (modalTitleEl) modalTitleEl.textContent = replyMode ? "Reply" : "Email Bid";
     if (modalSubEl) {
       modalSubEl.textContent = replyMode
@@ -251,6 +253,30 @@ export function initEmailBidUi(deps) {
     if (rememberStyle && filled.styleId) await rememberEmailStyle(filled.styleId);
     replyEdited = false;
     syncReplyRecipient();
+  }
+
+  async function clearReplyDraft() {
+    if (replyNameEl) replyNameEl.value = "";
+    if (replyEmailEl) replyEmailEl.value = "";
+    if (replyRoleEl) replyRoleEl.value = "";
+    if (replyTitleEl) replyTitleEl.value = "";
+    if (replyCompanyEl) replyCompanyEl.value = "";
+    patchedReplyTitle = "";
+    patchedReplyCompany = "";
+    replyEdited = false;
+    const person = await getActivePerson().catch(() => null);
+    const recentIds = await loadRecentEmailStyles();
+    const filled = fillReplyTemplate(replyTemplateEl?.value || "rate", {
+      contact: {},
+      job: {},
+      person,
+      recentIds
+    });
+    if (subjectEl) subjectEl.value = filled.subject;
+    if (bodyEl) bodyEl.value = filled.body;
+    syncReplyRecipient();
+    replyNameEl?.focus?.();
+    setStatus("Cleared reply fields.");
   }
 
   async function openReply() {
@@ -797,6 +823,9 @@ export function initEmailBidUi(deps) {
 
   prepareBtn?.addEventListener("click", () => prepare().catch((e) => setStatus(String(e.message || e))));
   replyBtn?.addEventListener("click", () => openReply().catch((e) => setStatus(String(e.message || e))));
+  replyClearBtn?.addEventListener("click", () =>
+    clearReplyDraft().catch((e) => setStatus(String(e.message || e)))
+  );
   replyTemplateEl?.addEventListener("change", () => {
     if (!replyMode) return;
     applySelectedReplyTemplate({ rememberStyle: true }).catch((e) => setStatus(String(e.message || e)));

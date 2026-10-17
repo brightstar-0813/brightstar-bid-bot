@@ -243,6 +243,10 @@ describe("composeEmailBid", () => {
       previousTitle: "Salesforce Architect"
     });
     assert.equal(revised, "Resume for Salesforce Developer — Sandeep Mahankali");
+    let typing = "Confirming [Rate] for [Role Title] at [Company].";
+    typing = applyReplyJobTokens(typing, { title: "C" });
+    typing = applyReplyJobTokens(typing, { title: "CR", previousTitle: "C" });
+    assert.equal(typing, "Confirming [Rate] for CR at [Company].");
   });
 
   it("does not invent a recruiter name or email when the reply contact is empty", () => {
