@@ -88,6 +88,9 @@ export function initEmailBidUi(deps) {
     if (replyBtn) setIconButton(replyBtn, "reply", "Reply");
     if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect mailbox");
     if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect mailbox");
+    if (replyClearBtn) setIconButton(replyClearBtn, "remove", "Clear reply fields");
+    if (openWebBtn) setIconButton(openWebBtn, "mail", "Open in Outlook / Gmail");
+    if (confirmBtn) setIconButton(confirmBtn, "apply", "Send");
   }
 
   /** @type {null|object} */

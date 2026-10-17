@@ -716,7 +716,7 @@ h1 {
 
 .email-bid-send-tools {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
@@ -727,17 +727,21 @@ h1 {
   background: rgba(0, 0, 0, 0.12);
 }
 
-.email-bid-send-tools .primary,
-.email-bid-send-tools .ghost {
-  min-height: 34px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 650;
+.email-bid-send-tools > .icon-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   border-radius: 8px;
 }
 
-#emailBidReplyClear {
-  margin-right: auto;
+.email-bid-send-tools > .icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .subblock {
