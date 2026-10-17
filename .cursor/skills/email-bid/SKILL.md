@@ -68,7 +68,8 @@ Does **not** auto-run after batch/manual generate.
 - Short, role-specific; 2–3 resume-backed strengths  
 - Do not claim JD buzzwords absent from resume  
 - Prefer personalized copy per primary contact; To list may include several checked recipients  
-- End with a short closing greeting (Warm regards / Thank you / Best regards) — no name/phone/LinkedIn block  
+- End with a short closing greeting (Warm regards / Thank you / Best regards) — no name/phone/LinkedIn block
+- Reply subjects and messages use a hyphen (`-`). Do not use an em dash.  
 - Auto-rotate style variants (`email_style_recent` in storage) so drafts do not look like a ping/bot blast  
 - Status reports who was emailed  
 

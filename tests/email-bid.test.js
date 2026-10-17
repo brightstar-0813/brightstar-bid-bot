@@ -225,6 +225,15 @@ describe("composeEmailBid", () => {
     assert.doesNotMatch(filled.body, /@/);
     assert.doesNotMatch(filled.subject, /@/);
     assert.equal(filled.email, undefined);
+    assert.doesNotMatch(`${filled.subject}\n${filled.body}`, /[—–]/);
+  });
+
+  it("uses a hyphen in every reply template", () => {
+    for (const family of REPLY_TEMPLATES) {
+      for (const variant of family.variants || []) {
+        assert.doesNotMatch(`${variant.subject}\n${variant.body}`, /[—–]/);
+      }
+    }
   });
 
   it("writes title and company into the reply subject and message", () => {
@@ -236,13 +245,13 @@ describe("composeEmailBid", () => {
       "Thank you for contacting me regarding [Role Title] at [Company].",
       { title: "Salesforce Architect", company: "Comtec" }
     );
-    assert.equal(subject, "Resume for Salesforce Architect — Sandeep Mahankali");
+    assert.equal(subject, "Resume for Salesforce Architect - Sandeep Mahankali");
     assert.equal(body, "Thank you for contacting me regarding Salesforce Architect at Comtec.");
     const revised = applyReplyJobTokens(subject, {
       title: "Salesforce Developer",
       previousTitle: "Salesforce Architect"
     });
-    assert.equal(revised, "Resume for Salesforce Developer — Sandeep Mahankali");
+    assert.equal(revised, "Resume for Salesforce Developer - Sandeep Mahankali");
     let typing = "Confirming [Rate] for [Role Title] at [Company].";
     typing = applyReplyJobTokens(typing, { title: "C" });
     typing = applyReplyJobTokens(typing, { title: "CR", previousTitle: "C" });

@@ -731,7 +731,7 @@ export const REPLY_TEMPLATES = [
     variants: withStyleIds(
       [
         {
-          subject: "Re: [Role Title] — rate confirmation",
+          subject: "Re: [Role Title] - rate confirmation",
           body: `Hi [Name],
 
 Confirming the pay rate we discussed for the [Role Title] role at [Company]: [Rate].
@@ -741,7 +741,7 @@ I'm available to start [Start date] and can complete any remaining paperwork.
 Thank you,`
         },
         {
-          subject: "Thanks — confirming rate for [Role Title]",
+          subject: "Thanks - confirming rate for [Role Title]",
           body: `Hello [Name],
 
 Thanks for following up. Confirming rate for [Role Title] at [Company]: [Rate].
@@ -764,7 +764,7 @@ Best regards,`
           subject: "Re: [Role Title]",
           body: `Hi [Name],
 
-Appreciate the note. Yes — confirming [Rate] for the [Role Title] role at [Company].
+Appreciate the note. Yes - confirming [Rate] for the [Role Title] role at [Company].
 
 I can start [Start date] and handle remaining forms promptly.
 
@@ -781,7 +781,7 @@ If yes, I can start [Start date].
 Thanks,`
         },
         {
-          subject: "Re: rate / start — [Role Title]",
+          subject: "Re: rate / start - [Role Title]",
           body: `Hi [Name],
 
 Confirming:
@@ -795,7 +795,7 @@ Ready for paperwork whenever you are.
 Thank you,`
         },
         {
-          subject: "Confirmation of compensation — [Role Title]",
+          subject: "Confirmation of compensation - [Role Title]",
           body: `Dear [Name],
 
 This confirms the compensation discussed for [Role Title] at [Company]: [Rate].
@@ -805,15 +805,15 @@ I remain available to commence on [Start date] and to complete any outstanding d
 Sincerely,`
         },
         {
-          subject: "Yep — [Rate] works",
+          subject: "Yep - [Rate] works",
           body: `Hey [Name],
 
-Yep — [Rate] works for [Role Title] at [Company]. I can start [Start date].
+Yep - [Rate] works for [Role Title] at [Company]. I can start [Start date].
 
 Thanks,`
         },
         {
-          subject: "Re: [Role Title] — paperwork ready",
+          subject: "Re: [Role Title] - paperwork ready",
           body: `Hi [Name],
 
 Confirming [Rate] for [Role Title] at [Company]. Resume already on file if you need it again; I can start [Start date] and finish paperwork ASAP.
@@ -848,7 +848,7 @@ Please tell me the next step.
 Thank you,`
         },
         {
-          subject: "Still interested — [Role Title]",
+          subject: "Still interested - [Role Title]",
           body: `Hello [Name],
 
 Thanks for the nudge. Still very interested in [Role Title] at [Company].
@@ -869,7 +869,7 @@ Best regards,`
           subject: "Following up on [Role Title]",
           body: `Hi [Name],
 
-Following up gently — I remain interested in [Role Title] at [Company] and can move quickly when you are ready.
+Following up gently - I remain interested in [Role Title] at [Company] and can move quickly when you are ready.
 
 Appreciate it,`
         },
@@ -882,7 +882,7 @@ Any update on [Role Title] at [Company]? I'm still interested and flexible on ne
 Thanks,`
         },
         {
-          subject: "Re: status — [Role Title]",
+          subject: "Re: status - [Role Title]",
           body: `Hi [Name],
 
 Status on my side:
@@ -895,7 +895,7 @@ What should I expect next?
 Thank you,`
         },
         {
-          subject: "Continued interest — [Role Title]",
+          subject: "Continued interest - [Role Title]",
           body: `Dear [Name],
 
 I am writing to reaffirm my interest in the [Role Title] position at [Company] and to inquire about the current status of the process.
@@ -903,7 +903,7 @@ I am writing to reaffirm my interest in the [Role Title] position at [Company] a
 Sincerely,`
         },
         {
-          subject: "Still in — [Role Title]",
+          subject: "Still in - [Role Title]",
           body: `Hey [Name],
 
 Still in on [Role Title] at [Company]. Ping me whenever you have an update.
@@ -911,10 +911,10 @@ Still in on [Role Title] at [Company]. Ping me whenever you have an update.
 Thanks,`
         },
         {
-          subject: "Re: [Role Title] — resume on hand if needed",
+          subject: "Re: [Role Title] - resume on hand if needed",
           body: `Hi [Name],
 
-Still interested in [Role Title] at [Company]. I can resend the resume if helpful — just say the word.
+Still interested in [Role Title] at [Company]. I can resend the resume if helpful - just say the word.
 
 Warm regards,`
         },
@@ -936,7 +936,7 @@ Best regards,`
     variants: withStyleIds(
       [
         {
-          subject: "Re: [Role Title] — availability",
+          subject: "Re: [Role Title] - availability",
           body: `Hi [Name],
 
 I'm available to talk about the [Role Title] role at [Company].
@@ -946,7 +946,7 @@ Times that work: [Times].
 Thank you,`
         },
         {
-          subject: "Thanks — here's my availability",
+          subject: "Thanks - here's my availability",
           body: `Hello [Name],
 
 Thanks for reaching out on [Role Title] at [Company]. Here's my availability:
@@ -980,7 +980,7 @@ When works for a quick call on [Role Title] at [Company]? I'm free [Times].
 Thanks,`
         },
         {
-          subject: "Re: interview windows — [Role Title]",
+          subject: "Re: interview windows - [Role Title]",
           body: `Hi [Name],
 
 Interview windows for [Role Title] at [Company]:
@@ -992,7 +992,7 @@ Confirm whichever is easiest on your calendar.
 Thank you,`
         },
         {
-          subject: "Availability for discussion — [Role Title]",
+          subject: "Availability for discussion - [Role Title]",
           body: `Dear [Name],
 
 I am available to discuss the [Role Title] opportunity at [Company] at the following times: [Times].
@@ -1010,7 +1010,7 @@ Free [Times] to talk [Role Title] at [Company]. Text me know what sticks.
 Thanks,`
         },
         {
-          subject: "Re: [Role Title] — calendar + resume ready",
+          subject: "Re: [Role Title] - calendar + resume ready",
           body: `Hi [Name],
 
 Calendar open [Times] for [Role Title] at [Company]. Resume is ready if you need it ahead of the call.
@@ -1035,7 +1035,7 @@ Best regards,`
     variants: withStyleIds(
       [
         {
-          subject: "Re: [Role Title] — resume attached",
+          subject: "Re: [Role Title] - resume attached",
           body: `Hi [Name],
 
 Thank you for reaching out about the [Role Title] role at [Company]. My resume is attached.
@@ -1045,10 +1045,10 @@ Happy to answer any questions.
 Thank you,`
         },
         {
-          subject: "Thanks — resume for [Role Title]",
+          subject: "Thanks - resume for [Role Title]",
           body: `Hello [Name],
 
-Thanks for thinking of me for [Role Title] at [Company]. Resume attached — glad to fill in anything else you need.
+Thanks for thinking of me for [Role Title] at [Company]. Resume attached - glad to fill in anything else you need.
 
 Warm regards,`
         },
@@ -1069,10 +1069,10 @@ Appreciate you reaching out. Resume for [Role Title] at [Company] is attached.
 Appreciate it,`
         },
         {
-          subject: "Got your note — resume enclosed",
+          subject: "Got your note - resume enclosed",
           body: `Hi [Name],
 
-Got your note on [Role Title] at [Company]. Resume enclosed — any screening questions?
+Got your note on [Role Title] at [Company]. Resume enclosed - any screening questions?
 
 Thanks,`
         },
@@ -1089,7 +1089,7 @@ Happy to add anything else.
 Thank you,`
         },
         {
-          subject: "Resume for [Role Title] — [Your Name]",
+          subject: "Resume for [Role Title] - [Your Name]",
           body: `Dear [Name],
 
 Thank you for contacting me regarding [Role Title] at [Company]. Please find my resume attached for your review.
@@ -1097,7 +1097,7 @@ Thank you for contacting me regarding [Role Title] at [Company]. Please find my 
 Sincerely,`
         },
         {
-          subject: "Thanks — resume's on this note",
+          subject: "Thanks - resume's on this note",
           body: `Hey [Name],
 
 Thanks for the ping on [Role Title] at [Company]. Resume's attached.
@@ -1105,7 +1105,7 @@ Thanks for the ping on [Role Title] at [Company]. Resume's attached.
 Thanks,`
         },
         {
-          subject: "Re: [Role Title] — resume + happy to talk",
+          subject: "Re: [Role Title] - resume + happy to talk",
           body: `Hi [Name],
 
 Resume attached for [Role Title] at [Company]. Happy to hop on a short call if useful.
@@ -1140,7 +1140,7 @@ I appreciate the note.
 Best regards,`
         },
         {
-          subject: "Thanks — stepping back from [Role Title]",
+          subject: "Thanks - stepping back from [Role Title]",
           body: `Hello [Name],
 
 Thanks for reaching out on [Role Title] at [Company]. I'm going to step back from this opportunity.
@@ -1159,7 +1159,7 @@ Thank you,`
           subject: "Re: [Role Title] at [Company]",
           body: `Hi [Name],
 
-Appreciate you thinking of me. I'll pass on [Role Title] at [Company] this time — please keep me in mind for a closer fit later if that helps.
+Appreciate you thinking of me. I'll pass on [Role Title] at [Company] this time - please keep me in mind for a closer fit later if that helps.
 
 Appreciate it,`
         },
@@ -1172,7 +1172,7 @@ Can we pause on [Role Title] at [Company]? It's not the right move for me right 
 Thanks,`
         },
         {
-          subject: "Re: decision — [Role Title]",
+          subject: "Re: decision - [Role Title]",
           body: `Hi [Name],
 
 Decision on [Role Title] at [Company]: I will not be moving forward.
@@ -1190,7 +1190,7 @@ Thank you for considering me for [Role Title] at [Company]. I must decline at th
 Sincerely,`
         },
         {
-          subject: "Gonna pass — [Role Title]",
+          subject: "Gonna pass - [Role Title]",
           body: `Hey [Name],
 
 Gonna pass on [Role Title] at [Company]. Thanks for reaching out anyway.
@@ -1198,7 +1198,7 @@ Gonna pass on [Role Title] at [Company]. Thanks for reaching out anyway.
 Thanks,`
         },
         {
-          subject: "Re: [Role Title] — not proceeding",
+          subject: "Re: [Role Title] - not proceeding",
           body: `Hi [Name],
 
 Not proceeding on [Role Title] at [Company]. Grateful you thought of me.
@@ -1209,7 +1209,7 @@ Warm regards,`
           subject: "Closing the loop on [Role Title]",
           body: `Hi [Name],
 
-Closing the loop — I will not pursue [Role Title] at [Company]. Wishing you a strong hire.
+Closing the loop - I will not pursue [Role Title] at [Company]. Wishing you a strong hire.
 
 Best regards,`
         }
@@ -1242,10 +1242,10 @@ export function fillReplyTemplate(id, ctx = {}) {
       ""
   ).trim();
   const known = {
-    "[Name]": String(contact.name || "").trim(),
-    "[Role Title]": String(job.title || job.jobTitle || "").trim(),
-    "[Company]": String(job.company || job.companyName || "").trim(),
-    "[Your Name]": yourName
+    "[Name]": useHyphen(contact.name).trim(),
+    "[Role Title]": useHyphen(job.title || job.jobTitle).trim(),
+    "[Company]": useHyphen(job.company || job.companyName).trim(),
+    "[Your Name]": useHyphen(yourName).trim()
   };
   const fill = (text) => {
     let out = String(text || "");
@@ -1259,8 +1259,8 @@ export function fillReplyTemplate(id, ctx = {}) {
     id: family.id,
     name: family.name,
     styleId: picked.styleId,
-    subject: fill(picked.subject),
-    body: fill(picked.body)
+    subject: useHyphen(fill(picked.subject)),
+    body: useHyphen(fill(picked.body))
   };
 }
 
@@ -1270,6 +1270,11 @@ export function fillReplyTemplate(id, ctx = {}) {
  * @param {string} text
  * @param {{ title?: string, company?: string, previousTitle?: string, previousCompany?: string }} [job]
  */
+/** Reply copy uses a hyphen. Em dashes and en dashes are not used. */
+function useHyphen(text) {
+  return String(text || "").replace(/[—–]/g, "-");
+}
+
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -1285,11 +1290,11 @@ function replaceInsertedPhrase(text, previous, next) {
 }
 
 export function applyReplyJobTokens(text, job = {}) {
-  let out = String(text || "");
-  const title = String(job.title || "").trim();
-  const company = String(job.company || "").trim();
-  const previousTitle = String(job.previousTitle || "").trim();
-  const previousCompany = String(job.previousCompany || "").trim();
+  let out = useHyphen(text);
+  const title = useHyphen(job.title).trim();
+  const company = useHyphen(job.company).trim();
+  const previousTitle = useHyphen(job.previousTitle).trim();
+  const previousCompany = useHyphen(job.previousCompany).trim();
   if (title) {
     out = out.split("[Role Title]").join(title);
     out = replaceInsertedPhrase(out, previousTitle, title);
