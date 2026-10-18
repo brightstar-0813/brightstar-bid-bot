@@ -437,25 +437,27 @@
             </label>
             <label class="field">
               <span>Job description</span>
-              <textarea id="jdText" placeholder="Paste JD or fill from the open tab…" rows="10"></textarea>
+              <textarea id="jdText" placeholder="Paste JD or fill from the open tab…" rows="6"></textarea>
             </label>
 
-            <div class="manual-tools" role="group" aria-label="Job helpers">
-              <button
-                type="button"
-                id="fillFromOpenTab"
-                class="ghost compact icon-button"
-                title="Scrape from open tab"
-                aria-label="Scrape from open tab"
-              ></button>
-              <button
-                type="button"
-                id="clearOneOffFields"
-                class="ghost compact icon-button"
-                title="Clear job fields"
-                aria-label="Clear job fields"
-              ></button>
-              <div id="oneOffIdleActions" class="manual-primary-icons">
+            <div class="manual-actions">
+              <div class="manual-fill" role="group" aria-label="Fill job">
+                <button
+                  type="button"
+                  id="fillFromOpenTab"
+                  class="ghost compact icon-button"
+                  title="Scrape"
+                  aria-label="Scrape"
+                ></button>
+                <button
+                  type="button"
+                  id="clearOneOffFields"
+                  class="ghost compact icon-button"
+                  title="Clear"
+                  aria-label="Clear"
+                ></button>
+              </div>
+              <div id="oneOffIdleActions" class="manual-draft">
                 <button
                   type="button"
                   id="runOneOff"
@@ -464,27 +466,29 @@
                   aria-label="Generate draft"
                 ></button>
               </div>
-              <button
-                type="button"
-                id="emailBidPrepare"
-                class="ghost icon-button"
-                title="Find contacts"
-                aria-label="Find contacts"
-              ></button>
-              <button
-                type="button"
-                id="emailBidReply"
-                class="ghost icon-button"
-                title="Reply"
-                aria-label="Reply"
-              ></button>
-              <button
-                type="button"
-                id="logProfileApply"
-                class="ghost icon-button manual-tools-end"
-                title="Log apply"
-                aria-label="Log apply"
-              ></button>
+              <div class="manual-after" role="group" aria-label="After the bid">
+                <button
+                  type="button"
+                  id="emailBidPrepare"
+                  class="ghost icon-button"
+                  title="Find contacts"
+                  aria-label="Find contacts"
+                ></button>
+                <button
+                  type="button"
+                  id="emailBidReply"
+                  class="ghost icon-button"
+                  title="Reply"
+                  aria-label="Reply"
+                ></button>
+                <button
+                  type="button"
+                  id="logProfileApply"
+                  class="ghost icon-button"
+                  title="Log apply"
+                  aria-label="Log apply"
+                ></button>
+              </div>
             </div>
 
             <div id="oneOffDraftActions" class="one-off-review" hidden>
@@ -545,8 +549,8 @@
                   type="button"
                   id="styleExportClear"
                   class="ghost compact icon-button"
-                  title="Clear paste"
-                  aria-label="Clear paste"
+                  title="Clear"
+                  aria-label="Clear"
                 ></button>
                 <button
                   type="button"
@@ -581,15 +585,15 @@
                   type="button"
                   id="emailBidMailboxSave"
                   class="primary icon-button"
-                  title="Connect mailbox"
-                  aria-label="Connect mailbox"
+                  title="Connect"
+                  aria-label="Connect"
                 ></button>
                 <button
                   type="button"
                   id="emailBidMailboxDisconnect"
                   class="ghost icon-button"
-                  title="Disconnect mailbox"
-                  aria-label="Disconnect mailbox"
+                  title="Disconnect"
+                  aria-label="Disconnect"
                 ></button>
               </div>
             </div>

@@ -84,10 +84,10 @@ export function initEmailBidUi(deps) {
   const openWebBtn = document.getElementById("emailBidOpenWeb");
 
   if (typeof setIconButton === "function") {
-    if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts & draft (Email Bid)");
-    if (replyBtn) setIconButton(replyBtn, "reply", "Reply");
-    if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect mailbox");
-    if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect mailbox");
+    if (prepareBtn) setIconButton(prepareBtn, "search", "Find contacts", { showLabel: true });
+    if (replyBtn) setIconButton(replyBtn, "reply", "Reply", { showLabel: true });
+    if (mailboxSaveBtn) setIconButton(mailboxSaveBtn, "connect", "Connect", { showLabel: true });
+    if (mailboxDisconnectBtn) setIconButton(mailboxDisconnectBtn, "disconnect", "Disconnect", { showLabel: true });
     if (replyClearBtn) setIconButton(replyClearBtn, "remove", "Clear reply fields");
     if (openWebBtn) setIconButton(openWebBtn, "mail", "Open in Outlook / Gmail");
     if (confirmBtn) setIconButton(confirmBtn, "apply", "Send");

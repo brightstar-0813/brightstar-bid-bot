@@ -1774,20 +1774,21 @@ function syncOneOffActionButtons({ busy = document.body.classList.contains("is-b
     setIconButton(
       runOneOffBtn,
       force ? "retry" : "draft",
-      force ? "Force draft" : "Generate draft"
+      force ? "Force draft" : "Generate draft",
+      { showLabel: true }
     );
   }
   if (logProfileApplyBtn) {
     logProfileApplyBtn.disabled = busy;
-    setIconButton(logProfileApplyBtn, "profileApply", "Log apply");
+    setIconButton(logProfileApplyBtn, "profileApply", "Log apply", { showLabel: true });
   }
   if (emailBidPrepareBtn) {
     emailBidPrepareBtn.disabled = busy;
-    setIconButton(emailBidPrepareBtn, "search", "Find contacts");
+    setIconButton(emailBidPrepareBtn, "search", "Find contacts", { showLabel: true });
   }
   if (emailBidReplyBtn) {
     emailBidReplyBtn.disabled = busy;
-    setIconButton(emailBidReplyBtn, "reply", "Reply");
+    setIconButton(emailBidReplyBtn, "reply", "Reply", { showLabel: true });
   }
   if (regenerateOneOffBtn) {
     regenerateOneOffBtn.disabled = busy || !draftReady;
@@ -4535,22 +4536,22 @@ function initThemePicker() {
 }
 
 if (styleExportClearBtn) {
-  setIconButton(styleExportClearBtn, "remove", "Clear paste");
+  setIconButton(styleExportClearBtn, "remove", "Clear", { showLabel: true });
 }
 if (styleExportPdfBtn) {
-  setIconButton(styleExportPdfBtn, "pdf", "Export PDF");
+  setIconButton(styleExportPdfBtn, "pdf", "Export PDF", { showLabel: true });
 }
-if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrap from this page");
-if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear job fields");
+if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrape", { showLabel: true });
+if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear", { showLabel: true });
 if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate draft", { showLabel: true });
 if (logProfileApplyBtn) {
-  setIconButton(logProfileApplyBtn, "profileApply", "Log apply");
+  setIconButton(logProfileApplyBtn, "profileApply", "Log apply", { showLabel: true });
 }
 if (emailBidPrepareBtn) {
-  setIconButton(emailBidPrepareBtn, "search", "Find contacts");
+  setIconButton(emailBidPrepareBtn, "search", "Find contacts", { showLabel: true });
 }
 if (emailBidReplyBtn) {
-  setIconButton(emailBidReplyBtn, "reply", "Reply");
+  setIconButton(emailBidReplyBtn, "reply", "Reply", { showLabel: true });
 }
 if (autofillPageBtn) {
   setIconButton(autofillPageBtn, "autofill", "Autofill");
