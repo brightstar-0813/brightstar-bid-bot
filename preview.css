@@ -190,6 +190,7 @@ body.is-editing #editResume {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .accent-label {
@@ -202,13 +203,15 @@ body.is-editing #editResume {
 
 .accent-swatches {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
 }
 
 button.accent-swatch {
   width: 18px;
   height: 18px;
+  flex: 0 0 18px;
   padding: 0;
   border: 0;
   border-radius: 4px;

@@ -921,9 +921,10 @@ select {
 
 .accent-picker-head {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: baseline;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 8px;
   font-size: 12px;
   color: var(--ink-soft, #9aa3b2);
 }
@@ -933,9 +934,10 @@ select {
 }
 
 .accent-swatches {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 6px;
+  margin-bottom: 12px;
 }
 
 #previewSampleStyle {
@@ -943,11 +945,12 @@ select {
 }
 
 .accent-swatch {
-  width: 22px;
-  height: 22px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 5px;
   cursor: pointer;
   position: relative;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
@@ -960,13 +963,14 @@ select {
 .accent-swatch.is-selected::after {
   content: "";
   position: absolute;
-  left: 6px;
-  top: 6px;
-  width: 8px;
-  height: 4px;
+  left: 28%;
+  top: 32%;
+  width: 42%;
+  height: 22%;
   border-left: 2px solid #fff;
   border-bottom: 2px solid #fff;
   transform: rotate(-45deg);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85));
 }
 
 .template-picker-menu button.is-preview,

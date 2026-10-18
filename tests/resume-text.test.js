@@ -504,8 +504,8 @@ test("accent color tints template rules without replacing body text", () => {
   assert.match(classic, /color: #000/);
 });
 
-test("resume style ships eight enterprise accent colors", () => {
-  assert.equal(TEMPLATE_ACCENTS.length, 8);
+test("resume style ships twelve enterprise accent colors", () => {
+  assert.equal(TEMPLATE_ACCENTS.length, 12);
   const hexes = TEMPLATE_ACCENTS.map((row) => row.hex.toLowerCase());
   assert.deepEqual(hexes, [
     "#1f4e79",
@@ -515,9 +515,13 @@ test("resume style ships eight enterprise accent colors", () => {
     "#1e7a46",
     "#8b2332",
     "#5b2c6f",
-    "#8a5a2b"
+    "#8a5a2b",
+    "#3f6212",
+    "#9f1239",
+    "#312e81",
+    "#27272a"
   ]);
-  assert.equal(new Set(hexes).size, 8);
+  assert.equal(new Set(hexes).size, 12);
 });
 
 test("retired template ids resolve to a kept layout", () => {

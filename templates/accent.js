@@ -2,8 +2,8 @@
 export const TEMPLATE_ACCENT_KEY = "template_accent_by_id";
 
 /**
- * Eight print-safe enterprise accents. Dark enough for headings, and far enough
- * apart that neighboring swatches do not blend.
+ * Twelve print-safe enterprise accents. Dark enough for headings, and far enough
+ * apart that neighboring swatches do not blend. The picker shows them on one row.
  */
 export const TEMPLATE_ACCENTS = [
   { id: "blue", label: "Blue", hex: "#1F4E79" },
@@ -13,7 +13,11 @@ export const TEMPLATE_ACCENTS = [
   { id: "green", label: "Green", hex: "#1E7A46" },
   { id: "burgundy", label: "Burgundy", hex: "#8B2332" },
   { id: "purple", label: "Purple", hex: "#5B2C6F" },
-  { id: "bronze", label: "Bronze", hex: "#8A5A2B" }
+  { id: "bronze", label: "Bronze", hex: "#8A5A2B" },
+  { id: "olive", label: "Olive", hex: "#3F6212" },
+  { id: "crimson", label: "Crimson", hex: "#9F1239" },
+  { id: "indigo", label: "Indigo", hex: "#312E81" },
+  { id: "charcoal", label: "Charcoal", hex: "#27272A" }
 ];
 
 /** Built-in accent when the person has not picked one for that template. */
