@@ -397,6 +397,7 @@ body.ctx-window.editor-page {
   cursor: pointer;
   width: 100%;
   min-height: 36px;
+  white-space: nowrap;
   pointer-events: auto;
   position: relative;
   z-index: 1;

@@ -212,7 +212,7 @@ h1 {
   cursor: not-allowed;
 }
 
-/* Pin Apply / Resume / Bid setup to the top of the editor shell */
+/* Pin Apply / Resume / Setup to the top of the editor shell */
 .profile-editor-panel .profile-tabs {
   flex-shrink: 0;
   position: relative;
