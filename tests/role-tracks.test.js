@@ -19,9 +19,7 @@ import {
   resolveResumePrompt
 } from "../profiles.js";
 import { PROMPT as sfSeniorPrompt } from "../prompts/sf-senior.js";
-import { PROMPT as sfTestPrompt } from "../prompts/sf-test.js";
-import { PROMPT as resumeV3Prompt } from "../prompts/resume-v3.js";
-import { effectiveResumePromptId, normalizeResumePromptId } from "../prompts/resume-catalog.js";
+import { PROMPT as deSeniorPrompt } from "../prompts/de-senior.js";
 import { ATS_RECRUITER_PASS, profileStoryBlock } from "../role-tracks.js";
 
 test("normalizeRoleTrackId defaults invalid values to sf", () => {
@@ -147,48 +145,30 @@ test("resolvePromptTemplateForTrack is the track senior prompt for every track",
   }
 });
 
-test("resolveResumePrompt defaults to the track senior prompt", () => {
-  const person = { id: "dmario-lewis", promptTemplate: "Custom {JD} xyz", roleTrack: "sf" };
-  assert.equal(resolveResumePrompt(person, "sf", "track"), sfSeniorPrompt);
-  assert.equal(resolveResumePrompt(person, "sf", "v1"), sfSeniorPrompt);
-  assert.equal(resolveResumePrompt(person, "de", "track"), getRoleTrack("de").prompt);
-  assert.equal(resolveResumePrompt(person, "fs"), getRoleTrack("fs").prompt);
-  assert.equal(resolveResumePrompt(person, "ai", ""), getRoleTrack("ai").prompt);
+test("resolveResumePrompt uses the track prompt when the custom prompt is empty", () => {
+  const builtin = { id: "dmario-lewis", promptTemplate: "", roleTrack: "sf" };
+  const customPerson = { id: "custom-jane", promptTemplate: "   ", roleTrack: "de" };
+  assert.equal(resolveResumePrompt(builtin, "sf"), sfSeniorPrompt);
+  assert.equal(resolveResumePrompt(builtin, "sf", "v3"), sfSeniorPrompt);
+  assert.equal(resolveResumePrompt(customPerson, "de", "vector"), deSeniorPrompt);
+  assert.equal(resolveResumePrompt(builtin, "fs"), getRoleTrack("fs").prompt);
+  assert.equal(resolveResumePrompt(builtin, "ai", ""), getRoleTrack("ai").prompt);
+  assert.match(sfSeniorPrompt, /\{SF_PROJECT_BANK\}/);
+  assert.match(deSeniorPrompt, /\{DE_PROJECT_BANK\}/);
+  assert.match(deSeniorPrompt, /\{JD\}/);
+  assert.match(deSeniorPrompt, /\{MASTER_RESUME\}/);
 });
 
-test("resolveResumePrompt uses v3 on every track and vector only on SF", () => {
-  const person = { id: "raquel-oliveira-de", promptTemplate: "", roleTrack: "de" };
-  assert.equal(resolveResumePrompt(person, "de", "v3"), resumeV3Prompt);
-  assert.equal(resolveResumePrompt(person, "ai", "v3"), resumeV3Prompt);
-  assert.equal(resolveResumePrompt(person, "sf", "vector"), sfTestPrompt);
-  assert.equal(resolveResumePrompt(person, "sf", "test"), sfTestPrompt);
-  assert.equal(resolveResumePrompt(person, "de", "vector"), getRoleTrack("de").prompt);
-  assert.equal(resolveResumePrompt(person, "fs", "test"), getRoleTrack("fs").prompt);
-  assert.match(sfTestPrompt, /\{JD\}/);
-  assert.match(sfTestPrompt, /\{MASTER_RESUME\}/);
-  assert.match(resumeV3Prompt, /\{JD\}/);
-  assert.match(resumeV3Prompt, /\{MASTER_RESUME\}/);
-  assert.doesNotMatch(resumeV3Prompt, /Becton|Cognizant|Secure Haven|EPAM|Centre Technologies/i);
-});
-
-test("resolveResumePrompt uses a saved custom prompt only when Custom is selected", () => {
+test("resolveResumePrompt uses a saved custom prompt for built-in and custom people", () => {
   const custom = "Custom resume prompt {JD} {NAME} {MASTER_RESUME} with unique xyz123 content";
   const person = { id: "custom-jane", promptTemplate: custom, roleTrack: "de" };
-  assert.equal(resolveResumePrompt(person, "de", "custom"), custom);
-  assert.equal(resolveResumePrompt(person, "de", "track"), getRoleTrack("de").prompt);
+  assert.equal(resolveResumePrompt(person, "de"), custom);
+  assert.equal(resolveResumePrompt(person, "de", "track"), custom);
+  assert.equal(resolveResumePrompt({ id: "dmario-lewis", promptTemplate: custom, roleTrack: "sf" }, "sf"), custom);
   assert.equal(
-    resolveResumePrompt({ id: "custom-jane", promptTemplate: "", roleTrack: "de" }, "de", "custom"),
-    getRoleTrack("de").prompt
+    resolveResumePrompt({ id: "custom-jane", promptTemplate: "", roleTrack: "de" }, "de"),
+    deSeniorPrompt
   );
-});
-
-test("normalizeResumePromptId maps the old menu onto the shared catalog", () => {
-  assert.equal(normalizeResumePromptId("v1"), "track");
-  assert.equal(normalizeResumePromptId(""), "track");
-  assert.equal(normalizeResumePromptId("test"), "vector");
-  assert.equal(normalizeResumePromptId("v3"), "v3");
-  assert.equal(effectiveResumePromptId("vector", "ai"), "track");
-  assert.equal(effectiveResumePromptId("custom", "sf", { customReady: false }), "track");
 });
 
 test("ATS recruiter pass requires exact JD spellings in recent-role bullets", () => {
@@ -280,12 +260,6 @@ test("profile summary block names this job's tools and lands after the ATS pass"
   assert.ok(summaryAt > passAt);
 });
 
-test("resolveResumePrompt ignores Vector on a non-SF track", () => {
-  const person = { id: "raquel-oliveira-de", promptTemplate: "", roleTrack: "de" };
-  assert.equal(resolveResumePrompt(person, "de", "test"), getRoleTrack("de").prompt);
-  assert.equal(resolveResumePrompt(person, "de", "v1"), getRoleTrack("de").prompt);
-});
-
 test("resolveCoverLetterTemplateForTrack switches when session track differs", () => {
   const person = {
     id: "custom-jane",
@@ -315,28 +289,24 @@ test("humanize appendix does not ask for invented metrics", async () => {
   assert.match(text, /Do not invent metrics/);
 });
 
-test("vector headline override is the last headline instruction", async () => {
+test("a stored prompt id does not switch off the track prompt", async () => {
   globalThis.chrome = {
     storage: {
       local: {
-        get: async () => ({}),
+        get: async () => ({ resume_prompt_id: "vector", sf_prompt_version: "v3" }),
         set: async () => {}
       }
     }
   };
   const { buildPrompt } = await import("../profiles.js");
-  const { SF_TEST_HEADLINE_OVERRIDE } = await import("../prompts/sf-test.js");
   const prompt = await buildPrompt("dmario-lewis", "Salesforce Service Cloud role.", {
     resumePromptId: "vector",
     strongHumanizeMode: "off",
     jobTitle: "Salesforce Architect",
     roleTrack: "sf"
   });
-  const passAt = prompt.lastIndexOf("ATS + RECRUITER PASS");
-  const overrideAt = prompt.lastIndexOf("HEADLINE OVERRIDE");
-  assert.ok(passAt > 0);
-  assert.ok(overrideAt > passAt);
-  assert.ok(prompt.trimEnd().endsWith(SF_TEST_HEADLINE_OVERRIDE.trim()));
+  assert.match(prompt, /\{SF_PROJECT_BANK\}|ENTERPRISE SALESFORCE PROJECTS REFERENCE LIBRARY/);
+  assert.doesNotMatch(prompt, /HEADLINE OVERRIDE/);
 });
 
 test("first-pass Salesforce bank ranks catalog products from the JD", async () => {

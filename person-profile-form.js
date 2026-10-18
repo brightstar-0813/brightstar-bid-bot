@@ -260,7 +260,7 @@ export function validatePerson(person) {
     focusKey = focusKey || "label";
   }
   if (person.promptTemplate?.trim() && !person.promptTemplate.includes("{JD}")) {
-    errors.push("Add the {JD} placeholder in your custom resume prompt, or leave it blank to use the Prompt menu.");
+    errors.push("Add the {JD} placeholder in your custom resume prompt, or leave it blank to use the track default.");
     focusKey = focusKey || "promptTemplate";
   }
   if (!person.masterResume?.trim() && person.promptTemplate?.includes("{MASTER_RESUME}")) {

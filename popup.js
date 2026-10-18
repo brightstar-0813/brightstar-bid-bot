@@ -81,16 +81,6 @@ import {
   strongHumanizeModeLabel
 } from "./prompts/humanize-resume.js";
 import {
-  LEGACY_SF_PROMPT_VERSION_KEY,
-  RESUME_PROMPT_ID_KEY,
-  effectiveResumePromptId,
-  normalizeResumePromptId,
-  resumePromptChoices,
-  resumePromptLabel,
-  resumePromptTitle,
-  setResumePromptId
-} from "./prompts/resume-catalog.js";
-import {
   extractProfileFromResumeText,
   parseEmployersFromResume,
   resumeFilePrefixFromName,
@@ -297,9 +287,6 @@ const humanizeOffBtn = document.getElementById("humanizeOff");
 const humanizeAutoBtn = document.getElementById("humanizeAuto");
 const humanizeOnBtn = document.getElementById("humanizeOn");
 let humanizeModeCache = STRONG_HUMANIZE_MODES.AUTO;
-const sfPromptVersionTrigger = document.getElementById("sfPromptVersionTrigger");
-const sfPromptVersionMenu = document.getElementById("sfPromptVersionMenu");
-let resumePromptCache = "track";
 const DEFAULT_CHATGPT_GAP_SEC = 45;
 const DEFAULT_CHATGPT_HARD_PAUSE = 3;
 const keepOpenBtn = document.getElementById("keepOpen");
@@ -439,13 +426,11 @@ async function syncActiveTrackUi({ savedTrack, person } = {}) {
   const personTrack = savedTrack || resolveRoleTrackForPerson(activePerson);
   if (locked) {
     setActiveRoleTrackUi(personTrack, { locked: true });
-    renderResumePromptMenu(personTrack, activePerson);
     return;
   }
   const sessionTrack = await getSessionRoleTrack();
   const activeTrack = sessionTrack || personTrack || readActiveRoleTrack();
   setActiveRoleTrackUi(activeTrack, { locked: false });
-  renderResumePromptMenu(activeTrack, activePerson);
 }
 
 function applyTrackTemplatesToForm(_roleTrack, _person) {
@@ -458,7 +443,6 @@ async function applyActiveRoleTrackChange({ track: nextTrack } = {}) {
   if (isRoleTrackLockedForPerson(person)) {
     await setSessionRoleTrack(savedTrack);
     setActiveRoleTrackUi(savedTrack, { locked: true });
-    renderResumePromptMenu(savedTrack, person);
     setStatus(`Track: ${getRoleTrack(savedTrack).label} (set for profile)`);
     return;
   }
@@ -1009,68 +993,6 @@ async function setHumanizeMode(mode) {
   setStatus(`Strong humanize: ${strongHumanizeModeLabel(next)}.`);
 }
 
-function renderResumePromptMenu(roleTrack, person) {
-  const track = normalizeRoleTrackId(roleTrack || readActiveRoleTrack());
-  const customReady = isUsableCustomResumePrompt(person?.promptTemplate);
-  const visible = new Set(resumePromptChoices(track));
-  const effective = effectiveResumePromptId(resumePromptCache, track, { customReady });
-  if (sfPromptVersionTrigger) {
-    sfPromptVersionTrigger.textContent = resumePromptLabel(effective, track);
-    sfPromptVersionTrigger.title = resumePromptTitle(effective);
-  }
-  for (const btn of sfPromptVersionMenu?.querySelectorAll("[data-resume-prompt]") || []) {
-    const id = btn.dataset.resumePrompt;
-    const item = btn.closest("[data-resume-prompt-item]");
-    if (item) item.hidden = !visible.has(id);
-    const active = id === effective;
-    btn.classList.toggle("is-active", active);
-    btn.setAttribute("aria-selected", active ? "true" : "false");
-    if (id === "track") btn.textContent = resumePromptLabel("track", track);
-    if (id === "custom") {
-      btn.disabled = !customReady;
-      btn.title = customReady
-        ? resumePromptTitle("custom")
-        : "Add a saved prompt first.";
-    }
-  }
-}
-
-function closeSfPromptMenu() {
-  if (!sfPromptVersionMenu || sfPromptVersionMenu.hidden) return;
-  sfPromptVersionMenu.hidden = true;
-  sfPromptVersionTrigger?.setAttribute("aria-expanded", "false");
-}
-
-function openSfPromptMenu() {
-  if (!sfPromptVersionMenu || !sfPromptVersionTrigger) return;
-  if (sfPromptVersionMenu.parentElement !== document.body) {
-    document.body.appendChild(sfPromptVersionMenu);
-  }
-  sfPromptVersionMenu.hidden = false;
-  const rect = sfPromptVersionTrigger.getBoundingClientRect();
-  const menuHeight = sfPromptVersionMenu.offsetHeight;
-  const top =
-    window.innerHeight - rect.bottom < menuHeight + 8 && rect.top > menuHeight + 8
-      ? rect.top - menuHeight - 4
-      : rect.bottom + 4;
-  sfPromptVersionMenu.style.left = `${rect.left}px`;
-  sfPromptVersionMenu.style.width = `${rect.width}px`;
-  sfPromptVersionMenu.style.top = `${top}px`;
-  sfPromptVersionTrigger.setAttribute("aria-expanded", "true");
-}
-
-async function setResumePromptUi(promptId) {
-  const next = normalizeResumePromptId(promptId);
-  resumePromptCache = next;
-  await setResumePromptId(next);
-  const person = profilesCache.find((p) => p.id === profileSelectEl?.value) || null;
-  renderResumePromptMenu(readActiveRoleTrack(), person);
-  const effective = effectiveResumePromptId(next, readActiveRoleTrack(), {
-    customReady: isUsableCustomResumePrompt(person?.promptTemplate)
-  });
-  setStatus(`Prompt: ${resumePromptLabel(effective, readActiveRoleTrack())}.`);
-}
-
 function renderIndeedGrabState(state) {
   const current = state && typeof state === "object" ? state : {};
   const status = String(current.status || "idle");
@@ -1138,8 +1060,6 @@ async function loadSettings() {
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
     STRONG_HUMANIZE_MODE_KEY,
-    RESUME_PROMPT_ID_KEY,
-    LEGACY_SF_PROMPT_VERSION_KEY,
     MANUAL_PANEL_OPEN_KEY,
     PROFILE_EDITOR_PANEL_OPEN_KEY,
     ALLOW_BATCH_KEY,
@@ -1160,9 +1080,6 @@ async function loadSettings() {
   ]);
 
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
-  resumePromptCache = normalizeResumePromptId(
-    data[RESUME_PROMPT_ID_KEY] || data[LEGACY_SF_PROMPT_VERSION_KEY] || "track"
-  );
   await refreshTemplates(data.selected_template_id || DEFAULT_TEMPLATE_ID);
   await loadActivePersonIntoForm();
   await syncActiveTrackUi({ savedTrack: resolveRoleTrackForPerson(await getActivePerson()) });
@@ -3384,20 +3301,11 @@ async function runOneOffDraft({ forceRebuild = false, regenerate = false } = {})
   }
 
   const customReady = isUsableCustomResumePrompt(person?.promptTemplate);
-  const promptId = effectiveResumePromptId(resumePromptCache, readActiveRoleTrack(), { customReady });
-  if (promptId === "custom" && !customReady) {
-    setStatus("Custom prompt needs {JD}, or pick a shared prompt.");
-    return;
-  }
-  if (!person.masterResume?.trim() && promptId !== "custom") {
+  if (!person.masterResume?.trim() && !customReady) {
     setStatus("Upload a master resume for this profile before generating.");
     return;
   }
-  if (
-    promptId === "custom" &&
-    person.promptTemplate.includes("{MASTER_RESUME}") &&
-    !person.masterResume?.trim()
-  ) {
+  if (customReady && person.promptTemplate.includes("{MASTER_RESUME}") && !person.masterResume?.trim()) {
     setStatus("Master resume required.");
     return;
   }
@@ -4398,33 +4306,17 @@ humanizeAutoBtn?.addEventListener("click", () => {
 humanizeOnBtn?.addEventListener("click", () => {
   setHumanizeMode(STRONG_HUMANIZE_MODES.ON).catch((e) => setStatus(String(e.message || e)));
 });
-sfPromptVersionTrigger?.addEventListener("click", (event) => {
-  event.stopPropagation();
-  if (sfPromptVersionMenu?.hidden) openSfPromptMenu();
-  else closeSfPromptMenu();
-});
-sfPromptVersionMenu?.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-resume-prompt]");
-  if (!btn || btn.disabled) return;
-  setResumePromptUi(btn.dataset.resumePrompt)
-    .catch((e) => setStatus(String(e.message || e)))
-    .finally(closeSfPromptMenu);
-});
 document.addEventListener("click", (event) => {
-  const inPrompt = event.target.closest?.(".prompt-version") || event.target.closest?.("#sfPromptVersionMenu");
-  if (!inPrompt) closeSfPromptMenu();
   const inTemplate =
     event.target.closest?.(".template-picker") || event.target.closest?.("#templatePickerMenu");
   if (!inTemplate) closeTemplatePicker();
 });
 window.addEventListener("resize", () => {
-  closeSfPromptMenu();
   closeTemplatePicker();
 });
 document.querySelector(".app-body")?.addEventListener(
   "scroll",
   () => {
-    closeSfPromptMenu();
     closeTemplatePicker();
   },
   { passive: true }
@@ -4754,11 +4646,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[STRONG_HUMANIZE_MODE_KEY] && changes[STRONG_HUMANIZE_MODE_KEY].newValue !== undefined) {
     renderHumanizeMode(changes[STRONG_HUMANIZE_MODE_KEY].newValue);
-  }
-  if (changes[RESUME_PROMPT_ID_KEY] && changes[RESUME_PROMPT_ID_KEY].newValue !== undefined) {
-    resumePromptCache = normalizeResumePromptId(changes[RESUME_PROMPT_ID_KEY].newValue);
-    const person = profilesCache.find((p) => p.id === profileSelectEl?.value) || null;
-    renderResumePromptMenu(readActiveRoleTrack(), person);
   }
   if (changes[SESSION_ROLE_TRACK_KEY]) {
     syncActiveTrackUi().catch(() => {});

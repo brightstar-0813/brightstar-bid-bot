@@ -44,14 +44,6 @@ import {
 } from "./prompts/humanize-resume.js";
 import { SF_ENTERPRISE_PROJECT_BANK } from "./prompts/sf-enterprise-projects.js";
 import { DE_ENTERPRISE_PROJECT_BANK } from "./prompts/de-enterprise-projects.js";
-import { PROMPT as sfTestPrompt, SF_TEST_HEADLINE_OVERRIDE } from "./prompts/sf-test.js";
-import { PROMPT as resumeV3Prompt } from "./prompts/resume-v3.js";
-import {
-  RESUME_PROMPT_IDS,
-  effectiveResumePromptId,
-  getResumePromptId,
-  normalizeResumePromptId
-} from "./prompts/resume-catalog.js";
 import { buildMustProveBlock, selectProjectBankExcerpts } from "./ats-score.js";
 import {
   normalizeResumeFilePrefix,
@@ -1143,7 +1135,7 @@ export async function getCoverLetterProfile() {
   );
 }
 
-/** Saved Bid-setup text is used only when the Prompt menu is Custom. */
+/** Saved Bid-setup text overrides the track default when it includes {JD}. */
 export function isUsableCustomResumePrompt(promptText) {
   const prompt = String(promptText || "").trim();
   return Boolean(prompt) && prompt.includes("{JD}");
@@ -1155,24 +1147,19 @@ export function resolvePromptTemplateForTrack(_person, roleTrack) {
 }
 
 /**
- * Shared catalog prompt for any person and any track.
- * Custom uses person.promptTemplate. Employer checks still read that field, not this result.
+ * Track default for any person. A usable custom prompt overrides it.
+ * The third argument is ignored; older callers passed a Prompt-menu id.
  * @param {object} person
  * @param {string} roleTrack
- * @param {string} [promptId]
  */
-export function resolveResumePrompt(person, roleTrack, promptId = RESUME_PROMPT_IDS.TRACK) {
-  const customReady = isUsableCustomResumePrompt(person?.promptTemplate);
-  const id = effectiveResumePromptId(promptId, roleTrack, { customReady });
-  if (id === RESUME_PROMPT_IDS.CUSTOM) return String(person.promptTemplate);
-  if (id === RESUME_PROMPT_IDS.V3) return resumeV3Prompt;
-  if (id === RESUME_PROMPT_IDS.VECTOR) return sfTestPrompt;
+export function resolveResumePrompt(person, roleTrack, _promptId) {
+  if (isUsableCustomResumePrompt(person?.promptTemplate)) return String(person.promptTemplate);
   return getTrackPromptTemplate(roleTrack);
 }
 
-/** @deprecated Use resolveResumePrompt. Maps the old v1 / test / v3 ids. */
-export function resolveResumePromptForVersion(person, roleTrack, sfPromptVersion = "v1") {
-  return resolveResumePrompt(person, roleTrack, normalizeResumePromptId(sfPromptVersion));
+/** @deprecated Use resolveResumePrompt. */
+export function resolveResumePromptForVersion(person, roleTrack, _sfPromptVersion = "v1") {
+  return resolveResumePrompt(person, roleTrack);
 }
 
 /** Cover letter prompt for the active engineering track. */
@@ -1213,10 +1200,7 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
     extras.roleTrack ||
       resolveEffectiveRoleTrack(person, extras.sessionRoleTrack || "")
   );
-  const resumePromptId = normalizeResumePromptId(
-    extras.resumePromptId != null ? extras.resumePromptId : await getResumePromptId()
-  );
-  const resolvedTemplate = resolveResumePrompt(person, roleTrack, resumePromptId);
+  const resolvedTemplate = resolveResumePrompt(person, roleTrack);
   const promptTemplate = ensureDeProjectBankInTemplate(
     ensureSfProjectBankInTemplate(resolvedTemplate, roleTrack),
     roleTrack
@@ -1296,12 +1280,6 @@ export async function buildPrompt(profileId, jdText, extras = {}) {
   const additional = String(extras.additionalPrompt || "").trim();
   if (additional) {
     prompt = `${prompt}\n\n---\nAdditional instructions for this job only (follow in addition to the rules above):\n${additional}`;
-  }
-  const appliedPromptId = effectiveResumePromptId(resumePromptId, roleTrack, {
-    customReady: isUsableCustomResumePrompt(person?.promptTemplate)
-  });
-  if (appliedPromptId === RESUME_PROMPT_IDS.VECTOR) {
-    prompt = `${prompt}\n\n${SF_TEST_HEADLINE_OVERRIDE}`;
   }
   return trimPromptToBudget(prompt, {
     maxChars: Number(extras.maxPromptChars) > 0 ? Number(extras.maxPromptChars) : MAX_RESUME_PROMPT_CHARS
