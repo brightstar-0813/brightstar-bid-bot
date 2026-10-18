@@ -131,6 +131,7 @@ export const ATS_RECRUITER_PASS = `
 ==================================================
 ATS + RECRUITER PASS (overrides earlier lines that say to avoid JD wording)
 ==================================================
+MOST IMPORTANT RULE: most skills from the JD appear in both the skills section and the experience bullets, in the JD's exact spelling, written as natural work at real employers. A skill listed only in Skills is not a match. Do not paste a keyword list.
 A recruiter skims the summary and the first two jobs. The scorer fails the resume when a JD tool is paraphrased or listed only in Skills.
 
 - ${PROFILE_STORY_RULE}
@@ -138,8 +139,8 @@ A recruiter skims the summary and the first two jobs. The scorer fails the resum
 - Keep every tool, product, platform, method, and repeated responsibility noun in the JD's exact spelling. Do not swap Lightning Web Components for "UI", Snowflake for "warehouse", or RAG for "search".
 - Those exact terms go in real skills categories AND in experience bullets. Skills alone do not count as proof.
 - Each of the two most recent roles names at least 3 JD must-have tools inside real bullets. The 3 most important tools each appear in at least 2 bullets anywhere in experience.
-- Skills: 5–7 real categories. Matching rows carry about 8–15 items, JD terms first, then related tools the master resume already supports. Never a category named JD Keywords, Keywords, or ATS Keywords.
-- Bullets are 20–25 words: action, the system, the exact tool, and a result. Vary the opening verb. Reframe work the master resume already shows. Do not invent employers, titles, dates, degrees, certifications, or metrics.
+- Skills: 5–7 real categories. Most JD skills go in these rows in the JD's exact spelling, including skills the master resume omitted, then related tools. Never a category named JD Keywords, Keywords, or ATS Keywords.
+- Bullets are 20–25 words: action, the system, the exact tool, and a result. Most of those same JD skills appear again inside the bullets as natural hands-on work. Vary the opening verb. Do not invent employers, titles, dates, degrees, certifications, or metrics.
 - Most recent role: at least 9 bullets. The role before it: at least 8. Older roles can be shorter. If an earlier quota is lower, these floors win so the must-have tools fit.
 - Certifications: only entries already on the master resume that match this JD.
 `.trim();

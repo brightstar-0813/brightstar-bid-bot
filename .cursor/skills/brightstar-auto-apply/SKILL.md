@@ -112,7 +112,7 @@ Do not change without an explicit product decision:
 ### Tracks / prompts / scoring
 
 1. New track: `ROLE_TRACK_IDS` + catalogs + defaults in `role-tracks.js` + `prompts/*`.
-2. Each engineering track has one default resume prompt. A profile overrides it only when Bid setup has a custom resume prompt that includes `{JD}`. Built-in profiles store career facts in `masterResume`, not a resume prompt.
+2. Each engineering track has one default resume prompt. A profile overrides it only when Bid setup has a custom resume prompt that includes `{JD}`. Built-in profiles store career facts in `masterResume`, not a resume prompt. The top resume rule is that most JD skills appear in both the skills section and the experience bullets, in the JD's exact spelling, as natural work. On SF and DE, a JD tool missing from the master resume is still written that way at a real employer, using a fitting bank pattern. Bank companies and their published metrics are not copied.
 3. ATS score stays local and track-aware (`ats-score.js`).
 
 ## Verify
