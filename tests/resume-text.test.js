@@ -532,6 +532,34 @@ test("retired template ids resolve to a kept layout", () => {
   assert.equal(getTemplateById("brief-grid").id, "skills-first");
 });
 
+test("Salesforce Certifications heading parses all cert bullets (not into Education)", () => {
+  const text = `# VICTOR BARROS DE HOLANDA
+**Senior Salesforce UI Developer | LWC | Apex | Visualforce**
+
+## EDUCATION
+
+**Federal University of Pernambuco**
+Bachelor of Science in Computer Science
+Apr 2014 – Mar 2018
+
+## SALESFORCE CERTIFICATIONS
+
+- Salesforce Certified Platform Data Architect | Oct 2025
+- Salesforce Certified Agentforce Specialist | May 2025
+- Salesforce Certified Data 360 Consultant | Sep 2024
+- Salesforce Certified Platform Developer | Jul 2023
+- Salesforce Certified Platform Administrator | Apr 2023
+- Salesforce Certified Platform Foundations | Apr 2023
+`;
+  const data = plainTextToResumeData(text);
+  assert.equal(data.education.length, 1);
+  assert.match(data.education[0].school, /Federal University of Pernambuco/i);
+  assert.equal(data.certifications.length, 6);
+  assert.match(data.certifications[0], /Platform Data Architect/i);
+  assert.match(data.certifications[5], /Platform Foundations/i);
+  assert.ok(!data.education.some((e) => /certification/i.test(e.school || "")));
+});
+
 test("core technical skills stays out of the summary and keeps a wrapped category", () => {
   const text = `Sandeep Mahankali
 Senior Salesforce Technical Architect

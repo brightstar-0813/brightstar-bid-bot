@@ -25,7 +25,11 @@ const SECTION_ALIASES = [
     re: /^(experience|work\s+experience|professional\s+experience|employment(\s+history)?|work\s+history|career\s+history)$/i
   },
   { key: "education", re: /^(education|academic|academics)$/i },
-  { key: "certifications", re: /^(certifications?|licenses?|credentials?)$/i },
+  // Exact "Certifications"/"Licenses", or "* Certifications" (e.g. Salesforce Certifications).
+  {
+    key: "certifications",
+    re: /^(?:certifications?|licenses?|credentials?|(?:[\w.&'/+\-]+\s+){1,3}certifications?)$/i
+  },
   { key: "projects", re: /^(projects?|selected\s+projects)$/i }
 ];
 
@@ -514,7 +518,7 @@ function parseCerts(lines) {
   let buf = [];
   const flush = () => {
     const label = buf
-      .map((l) => stripMarkdownDecor(l))
+      .map((l) => stripBullet(l))
       .filter(Boolean)
       .join(" — ")
       .replace(/\s+/g, " ")
