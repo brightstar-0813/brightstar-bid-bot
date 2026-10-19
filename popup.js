@@ -4408,7 +4408,6 @@ function installTemplatePicker() {
   };
 
   const openTemplatePicker = () => {
-    closeSfPromptMenu();
     templatePickerMenu.hidden = false;
     templatePickerTrigger.setAttribute("aria-expanded", "true");
     placeMenu();
