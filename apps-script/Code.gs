@@ -89,11 +89,16 @@ function doPost(e) {
         if (bidMode) {
           sheet.getRange(row, bidModeColumnForRow_(sheet, row)).setValue(bidMode);
         }
+        var appliedHeader = headerRow_(sheet);
+        var appliedJobNoCol =
+          (rowLooksLikeHeader_(appliedHeader) ? jobNoColumnIndex_(appliedHeader) : 0) + 1;
+        var appliedJobNo = String(sheet.getRange(row, appliedJobNoCol).getValue() || "").trim();
         return json_({
           ok: true,
           updated: true,
           appended: false,
           row: row,
+          jobNo: appliedJobNo,
           sheetName: sheet.getName()
         });
       }
@@ -101,10 +106,13 @@ function doPost(e) {
         throw new Error("Cannot mark Applied: job not on sheet and title/company/link missing.");
       }
       sheet.appendRow(buildDataRow_(data, status));
+      var markAppendedRow = sheet.getLastRow();
       return json_({
         ok: true,
         updated: false,
         appended: true,
+        row: markAppendedRow,
+        jobNo: String(data.jobNo || ""),
         sheetName: sheet.getName()
       });
     }
@@ -122,13 +130,34 @@ function doPost(e) {
     }
 
     if (jobLink && linkExists_(sheet, jobLink)) {
-      return json_({ ok: true, duplicate: true, reason: "link", sheetName: sheet.getName() });
+      var dupRow = findRowByLink_(sheet, jobLink);
+      var dupJobNo = "";
+      if (dupRow > 0) {
+        var dupHeader = headerRow_(sheet);
+        var dupJobNoCol = (rowLooksLikeHeader_(dupHeader) ? jobNoColumnIndex_(dupHeader) : 0) + 1;
+        dupJobNo = String(sheet.getRange(dupRow, dupJobNoCol).getValue() || "").trim();
+      }
+      return json_({
+        ok: true,
+        duplicate: true,
+        reason: "link",
+        sheetName: sheet.getName(),
+        row: dupRow > 0 ? dupRow : 0,
+        jobNo: dupJobNo
+      });
     }
 
     ensureSheetLayout_(sheet);
     sheet.appendRow(buildDataRow_(data, data.status || "Ready"));
+    var appendedRow = sheet.getLastRow();
 
-    return json_({ ok: true, duplicate: false, sheetName: sheet.getName() });
+    return json_({
+      ok: true,
+      duplicate: false,
+      sheetName: sheet.getName(),
+      row: appendedRow,
+      jobNo: String(data.jobNo || "")
+    });
   } catch (err) {
     return json_({
       ok: false,

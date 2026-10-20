@@ -2,45 +2,44 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { compareLatestOrder, sortQueueForDisplay } from "../queue-sort.js";
 
-test("within the same status, higher csvRow comes first before sync", () => {
+test("latest jobs sort above older ones by csvRow before sync", () => {
   const sorted = sortQueueForDisplay([
-    { csvRow: 1, status: "pending", title: "a" },
-    { csvRow: 9, status: "pending", title: "b" },
-    { csvRow: 3, status: "pending", title: "c" }
+    { csvRow: 145, status: "done", title: "a" },
+    { csvRow: 293, status: "done", title: "b" },
+    { csvRow: 285, status: "done", title: "c" }
   ]);
   assert.deepEqual(
     sorted.map((j) => j.csvRow),
-    [9, 3, 1]
+    [293, 285, 145]
   );
 });
 
-test("within the same status, higher sheetRow comes first after sync", () => {
+test("higher sheetRow (newer append) sorts first after sync", () => {
   const sorted = sortQueueForDisplay([
-    { csvRow: 1, sheetRow: 86, status: "done", title: "a" },
-    { csvRow: 23, sheetRow: 108, status: "done", title: "b" },
-    { csvRow: 2, sheetRow: 87, status: "done", title: "c" }
+    { csvRow: 285, sheetJobNo: 145, sheetRow: 63, status: "done", title: "a" },
+    { csvRow: 293, sheetJobNo: 200, sheetRow: 120, status: "pending", title: "b" },
+    { csvRow: 10, sheetJobNo: 199, sheetRow: 119, status: "done", title: "c" }
   ]);
   assert.deepEqual(
     sorted.map((j) => j.sheetRow),
-    [108, 87, 86]
+    [120, 119, 63]
   );
 });
 
-test("status groups still put done before pending", () => {
+test("running job stays above other latest rows", () => {
   const sorted = sortQueueForDisplay([
-    { csvRow: 99, status: "pending" },
-    { csvRow: 1, status: "done" },
-    { csvRow: 50, status: "skipped" }
+    { csvRow: 99, sheetRow: 200, status: "done" },
+    { csvRow: 1, sheetRow: 50, status: "running" }
   ]);
-  assert.deepEqual(
-    sorted.map((j) => j.status),
-    ["done", "pending", "skipped"]
-  );
+  assert.equal(sorted[0].status, "running");
 });
 
-test("compareLatestOrder uses csvRow when either side lacks sheetRow", () => {
+test("compareLatestOrder prefers sheetJobNo over csvRow when sheetRow missing", () => {
   assert.ok(
-    compareLatestOrder({ csvRow: 9, sheetRow: 86 }, { csvRow: 20 }) > 0,
-    "higher csvRow wins when peer has no sheetRow"
+    compareLatestOrder(
+      { csvRow: 285, sheetJobNo: 145 },
+      { csvRow: 10, sheetJobNo: 200 }
+    ) > 0,
+    "higher sheetJobNo comes first"
   );
 });

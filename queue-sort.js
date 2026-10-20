@@ -1,11 +1,11 @@
 function statusGroup(job) {
   const s = String(job?.status || "pending").toLowerCase();
-  if (s === "done") return [0];
-  if (s === "running") return [1, 0];
-  if (s === "pending") return [1, 1];
-  if (s === "error" || s === "failed") return [2];
-  if (s === "skipped") return [3];
-  return [1, 2];
+  if (s === "running") return [0];
+  if (s === "done") return [1];
+  if (s === "pending") return [2];
+  if (s === "error" || s === "failed") return [3];
+  if (s === "skipped") return [4];
+  return [2];
 }
 
 function positiveNumber(value) {
@@ -13,33 +13,47 @@ function positiveNumber(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Latest-first tie-break: sheetRow desc when both have it, else csvRow desc. */
+/** Display / sheet No used for latest ordering when sheetRow is missing. */
+function displayNo(job) {
+  return positiveNumber(job?.sheetJobNo ?? job?.jobNo ?? job?.csvRow) || 0;
+}
+
+/**
+ * Latest-first: newer spreadsheet rows first; else higher sheet/display No;
+ * else higher csvRow.
+ */
 export function compareLatestOrder(a, b) {
   const sa = positiveNumber(a?.sheetRow);
   const sb = positiveNumber(b?.sheetRow);
   if (sa != null && sb != null && sa !== sb) return sb - sa;
-  const ca = Number(a?.csvRow || 0);
-  const cb = Number(b?.csvRow || 0);
-  return cb - ca;
+  const na = displayNo(a);
+  const nb = displayNo(b);
+  if (na !== nb) return nb - na;
+  return Number(b?.csvRow || 0) - Number(a?.csvRow || 0);
 }
 
-/** Display order for batch stream: done → pending (running first) → error → skipped, then latest-first. */
+/** @deprecated kept for tests / callers that inspect status keys */
 export function queueStatusSortKey(job) {
-  const latest = positiveNumber(job?.sheetRow);
-  const csvRow = Number(job?.csvRow || 0);
-  // Key used only when sheetRow is missing on peers; compareLatestOrder handles mixed pairs.
-  const latestKey = latest != null ? -latest : -(Number.isFinite(csvRow) ? csvRow : 0);
-  return [...statusGroup(job), latestKey];
+  return [...statusGroup(job), -displayNo(job)];
 }
 
+/**
+ * Search queue order: running first, then latest jobs on top (sheet row / No),
+ * then remaining status as a light tie-break.
+ */
 export function sortQueueForDisplay(jobs) {
   return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
+    const aRun = String(a?.status || "") === "running";
+    const bRun = String(b?.status || "") === "running";
+    if (aRun !== bRun) return aRun ? -1 : 1;
+    const latest = compareLatestOrder(a, b);
+    if (latest !== 0) return latest;
     const ga = statusGroup(a);
     const gb = statusGroup(b);
     for (let i = 0; i < Math.max(ga.length, gb.length); i++) {
       const diff = (ga[i] ?? 0) - (gb[i] ?? 0);
       if (diff !== 0) return diff;
     }
-    return compareLatestOrder(a, b);
+    return 0;
   });
 }

@@ -1,5 +1,5 @@
 import { csvRowFromFolderName, folderFitsJob } from "./job-folder.js";
-import { normalizeJobLink } from "./sheets.js";
+import { normalizeCompanyName, normalizeJobLink } from "./sheets.js";
 
 export const SHEET_SYNC_MISSING_FOLDER =
   "Resume folder not found under the output folder. Copy the job folder into Downloads, then Sync with sheet again.";
@@ -78,8 +78,9 @@ export function parseSheetRowIndex(sheetRow) {
 }
 
 /**
- * Align queue identity with sheet No + spreadsheet row after a link match.
- * Does not touch running jobs. Invalid jobNo leaves csvRow alone; sheetRow still updates.
+ * Align displayed sheet No + spreadsheet row after a sheet match.
+ * Keeps csvRow (internal queue id) so renumbering cannot collide with other CSV rows.
+ * Does not touch running jobs.
  */
 export function sheetIdentityPatch(job, sheetRow) {
   if (!job || !sheetRow) return null;
@@ -87,12 +88,52 @@ export function sheetIdentityPatch(job, sheetRow) {
   const patch = {};
   const sheetNo = parseSheetJobNo(sheetRow);
   if (sheetNo != null) {
-    patch.csvRow = sheetNo;
+    patch.sheetJobNo = sheetNo;
     patch.jobNo = sheetNo;
   }
   const rowIndex = parseSheetRowIndex(sheetRow);
   if (rowIndex != null) patch.sheetRow = rowIndex;
   return Object.keys(patch).length ? patch : null;
+}
+
+function normalizeTitleKey(title) {
+  return String(title || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function companiesLooselyMatch(a, b) {
+  const na = normalizeCompanyName(a);
+  const nb = normalizeCompanyName(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+/** Link first; then unique title + loose company (handles Dice location suffixes). */
+export function findSheetRowForJob(job, sheetRows = [], byLink = null) {
+  const linkMap = byLink || indexSheetRowsByLink(sheetRows);
+  const key = jobLinkKey(job);
+  if (key && linkMap.has(key)) return linkMap.get(key);
+
+  const title = normalizeTitleKey(job?.title || job?.jobTitle || "");
+  if (!title) return null;
+  const company = job?.company || job?.companyName || "";
+  let hit = null;
+  for (const row of sheetRows || []) {
+    if (normalizeTitleKey(row?.title) !== title) continue;
+    if (!companiesLooselyMatch(company, row?.company || "")) continue;
+    if (hit) return null;
+    hit = row;
+  }
+  return hit;
+}
+
+/** Number shown on the Search queue badge (sheet No when known). */
+export function queueDisplayNo(job) {
+  const n = Number(job?.sheetJobNo ?? job?.jobNo ?? job?.csvRow);
+  if (Number.isFinite(n) && n > 0) return n;
+  return job?.csvRow;
 }
 
 /**
@@ -224,11 +265,10 @@ export function reconcileQueueWithSheetRows({
       if (count) counts.unchanged += 1;
       return job;
     }
-    const key = jobLinkKey(job);
-    const sheetRow = key ? byLink.get(key) : null;
+    const sheetRow = findSheetRowForJob(job, sheetRows, byLink);
     const sheetNo = parseSheetJobNo(sheetRow);
-    const jobForMatch = sheetNo != null ? { ...job, csvRow: sheetNo } : job;
-    const folder = matchFolderForJob(jobForMatch, folders);
+    const bySheetNo = sheetNo != null ? matchFolderForJob({ ...job, csvRow: sheetNo }, folders) : null;
+    const folder = bySheetNo || matchFolderForJob(job, folders);
     const result = reconcileQueueJobWithSheet(job, sheetRow, folder);
     const identity = sheetIdentityPatch(job, sheetRow);
     const hasStatusPatch = Boolean(result?.patch);

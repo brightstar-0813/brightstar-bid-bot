@@ -8402,6 +8402,10 @@ async function saveResumeAndCoverLetter(
           salary: jobMeta.salary || "",
           bidSource: jobMeta.bidSource || "one-off"
         });
+        await rememberSheetIdentityForJob(jobMeta.csvRow, {
+          jobNo: sheetResult.jobNo || jobMeta.csvRow,
+          row: sheetResult.row
+        }).catch(() => {});
         const label = sheetResult.status || formatAppliedStatus();
         status = `${status} Sheet: ${label}.`;
       } else {
@@ -8416,6 +8420,7 @@ async function saveResumeAndCoverLetter(
           salary: jobMeta.salary || "",
           bidSource: jobMeta.bidSource || "batch"
         });
+        await rememberSheetIdentityForJob(jobMeta.csvRow, sheetResult).catch(() => {});
         status = sheetResult.duplicate
           ? `${status} (already on Google Sheet — not re-appended)`
           : `${status} and appended to Google Sheet`;
@@ -8476,6 +8481,29 @@ async function updateQueueJob(csvRow, patch) {
   const next = queue.map((j) => (Number(j.csvRow) === Number(csvRow) ? { ...j, ...patch } : j));
   await setQueue(next);
   return next.find((j) => Number(j.csvRow) === Number(csvRow));
+}
+
+/** Persist sheet No / spreadsheet row onto queue + all_us_jobs (display badge + latest sort). */
+async function rememberSheetIdentityForJob(csvRow, sheetResult = {}) {
+  if (csvRow == null || csvRow === "") return null;
+  const sheetNo = Number(String(sheetResult?.jobNo ?? "").trim());
+  const sheetRow = Number(sheetResult?.row);
+  const patch = {};
+  if (Number.isFinite(sheetNo) && sheetNo > 0) {
+    patch.sheetJobNo = sheetNo;
+    patch.jobNo = sheetNo;
+  }
+  if (Number.isFinite(sheetRow) && sheetRow > 0) patch.sheetRow = sheetRow;
+  if (!Object.keys(patch).length) return null;
+
+  const data = await chrome.storage.local.get([QUEUE_KEY, ALL_US_JOBS_KEY]);
+  const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+  const allUs = Array.isArray(data[ALL_US_JOBS_KEY]) ? data[ALL_US_JOBS_KEY] : [];
+  const row = Number(csvRow);
+  const nextQueue = queue.map((j) => (Number(j.csvRow) === row ? { ...j, ...patch } : j));
+  const nextAll = allUs.map((j) => (Number(j.csvRow) === row ? { ...j, ...patch } : j));
+  await chrome.storage.local.set({ [QUEUE_KEY]: nextQueue, [ALL_US_JOBS_KEY]: nextAll });
+  return patch;
 }
 
 async function persistOneOffResult(payload = {}) {

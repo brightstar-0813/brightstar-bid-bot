@@ -260,7 +260,17 @@ export async function appendJobToSpreadsheet({
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);
-  return { spreadsheetId, duplicate: Boolean(parsed?.duplicate), ...payload };
+  const responseJobNo =
+    parsed?.jobNo != null && String(parsed.jobNo).trim() !== ""
+      ? String(parsed.jobNo).trim()
+      : payload.jobNo;
+  return {
+    spreadsheetId,
+    duplicate: Boolean(parsed?.duplicate),
+    ...payload,
+    jobNo: responseJobNo,
+    row: Number(parsed?.row) || 0
+  };
 }
 
 /**
@@ -322,12 +332,18 @@ export async function markJobAppliedOnSpreadsheet({
   };
 
   const parsed = await postSheetWebApp(webAppUrl, payload);
+  const responseJobNo =
+    parsed?.jobNo != null && String(parsed.jobNo).trim() !== ""
+      ? String(parsed.jobNo).trim()
+      : payload.jobNo;
   return {
     spreadsheetId,
     updated: Boolean(parsed?.updated),
     appended: Boolean(parsed?.appended),
     appliedDate,
-    ...payload
+    ...payload,
+    jobNo: responseJobNo,
+    row: Number(parsed?.row) || 0
   };
 }
 

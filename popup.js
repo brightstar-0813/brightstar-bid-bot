@@ -48,7 +48,7 @@ import {
   formatApplicationDate,
   formatApplicationDateTime
 } from "./sheets.js";
-import { SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
+import { queueDisplayNo, SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
 import { sortQueueForDisplay } from "./queue-sort.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { showToast } from "./ui-toast.js";
@@ -2044,7 +2044,7 @@ function renderQueue() {
 
     const rowEl = document.createElement("div");
     rowEl.className = "csv-row";
-    rowEl.textContent = String(job.csvRow);
+    rowEl.textContent = String(queueDisplayNo(job) ?? "");
 
     const meta = document.createElement("div");
     meta.className = "meta";

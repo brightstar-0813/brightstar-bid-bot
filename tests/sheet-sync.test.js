@@ -5,6 +5,7 @@ import {
   csvRowFromListedFolder,
   formatSheetSyncStatus,
   matchFolderForJob,
+  queueDisplayNo,
   reconcileQueueJobWithSheet,
   reconcileQueueWithSheetRows,
   sheetStatusLooksApplied,
@@ -140,28 +141,28 @@ test("formatSheetSyncStatus mentions native host when it is off", () => {
   assert.match(msg, /Native host is off/);
 });
 
-test("sync aligns csvRow and sheetRow from sheet No even when local csvRow differs", () => {
+test("sync sets sheetJobNo for badge without changing csvRow", () => {
   const cloudLink = "https://himalayas.app/companies/cloudmasonry/jobs/salesforce-solution-architect";
   const local = {
-    csvRow: 9,
-    title: "Salesforce Solution Architect",
-    company: "CloudMasonry",
+    csvRow: 285,
+    title: "Senior Salesforce Developer",
+    company: "Dia Software Solutions - Austin",
     jdLink: cloudLink,
     status: "pending",
     applied: false
   };
   const sheet = {
-    row: 86,
-    jobNo: "1",
-    title: local.title,
-    company: local.company,
+    row: 63,
+    jobNo: "145",
+    title: "Senior Salesforce Developer",
+    company: "Dia Software Solutions",
     link: cloudLink,
     status: "Ready",
     bidMode: "Auto bid"
   };
   const folderOne = {
-    csvRow: 1,
-    jobDir: "Lewis-SF/1_10-18_CloudMasonry-Salesforce Solution Architect",
+    csvRow: 145,
+    jobDir: "Lewis-SF/145_10-15_Dia Software Solutions-Senior Salesforce Developer",
     hasResume: true,
     hasCover: true,
     resumeName: "Lewis_Resume.pdf",
@@ -173,15 +174,44 @@ test("sync aligns csvRow and sheetRow from sheet No even when local csvRow diffe
     sheetRows: [sheet],
     folders: [folderOne]
   });
-  assert.equal(queue[0].csvRow, 1);
-  assert.equal(queue[0].jobNo, 1);
-  assert.equal(queue[0].sheetRow, 86);
+  assert.equal(queue[0].csvRow, 285);
+  assert.equal(queue[0].sheetJobNo, 145);
+  assert.equal(queue[0].jobNo, 145);
+  assert.equal(queue[0].sheetRow, 63);
+  assert.equal(queueDisplayNo(queue[0]), 145);
   assert.equal(queue[0].status, "done");
   assert.equal(queue[0].jobDir, folderOne.jobDir);
   assert.equal(counts.ready, 1);
 });
 
-test("unchanged sheet status still updates csvRow and sheetRow from sheet identity", () => {
+test("sync matches sheet by title and loose company when link differs", () => {
+  const local = {
+    csvRow: 285,
+    title: "Senior Salesforce Developer",
+    company: "Dia Software Solutions - Austin",
+    jdLink: "https://www.dice.com/job-detail/aaa",
+    status: "pending",
+    applied: false
+  };
+  const sheet = {
+    row: 63,
+    jobNo: "145",
+    title: "Senior Salesforce Developer",
+    company: "Dia Software Solutions",
+    link: "https://www.dice.com/job-detail/bbb",
+    status: "Ready",
+    bidMode: "Auto bid"
+  };
+  const { queue } = reconcileQueueWithSheetRows({
+    queue: [local],
+    sheetRows: [sheet],
+    folders: []
+  });
+  assert.equal(queueDisplayNo(queue[0]), 145);
+  assert.equal(queue[0].csvRow, 285);
+});
+
+test("unchanged sheet status still updates sheetJobNo and sheetRow", () => {
   const link = "https://example.com/jobs/mystery-status";
   const local = {
     csvRow: 9,
@@ -194,6 +224,8 @@ test("unchanged sheet status still updates csvRow and sheetRow from sheet identi
   const sheet = {
     row: 100,
     jobNo: "3",
+    title: "Mystery Role",
+    company: "Acme",
     link,
     status: "Waiting",
     bidMode: "Auto bid"
@@ -204,13 +236,14 @@ test("unchanged sheet status still updates csvRow and sheetRow from sheet identi
     folders: []
   });
   assert.equal(queue[0].status, "pending");
-  assert.equal(queue[0].csvRow, 3);
+  assert.equal(queue[0].csvRow, 9);
+  assert.equal(queue[0].sheetJobNo, 3);
   assert.equal(queue[0].sheetRow, 100);
   assert.equal(counts.unchanged, 1);
   assert.equal(counts.matched, 0);
 });
 
-test("invalid sheet jobNo leaves csvRow but still sets sheetRow", () => {
+test("invalid sheet jobNo leaves display on csvRow but still sets sheetRow", () => {
   const link = "https://example.com/jobs/no-number";
   const local = {
     csvRow: 9,
@@ -223,6 +256,8 @@ test("invalid sheet jobNo leaves csvRow but still sets sheetRow", () => {
   const sheet = {
     row: 55,
     jobNo: "",
+    title: "No Number",
+    company: "Acme",
     link,
     status: "Waiting",
     bidMode: "Auto bid"
@@ -233,10 +268,11 @@ test("invalid sheet jobNo leaves csvRow but still sets sheetRow", () => {
     folders: []
   });
   assert.equal(queue[0].csvRow, 9);
+  assert.equal(queueDisplayNo(queue[0]), 9);
   assert.equal(queue[0].sheetRow, 55);
 });
 
-test("running jobs keep local csvRow during sync", () => {
+test("running jobs keep local identity during sync", () => {
   const { queue } = reconcileQueueWithSheetRows({
     queue: [{ ...job, status: "running", csvRow: 9 }],
     sheetRows: [{ ...readyRow, row: 86, jobNo: "1" }],
@@ -244,5 +280,6 @@ test("running jobs keep local csvRow during sync", () => {
   });
   assert.equal(queue[0].csvRow, 9);
   assert.equal(queue[0].status, "running");
+  assert.equal(queue[0].sheetJobNo, undefined);
   assert.equal(queue[0].sheetRow, undefined);
 });
