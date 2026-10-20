@@ -65,6 +65,36 @@ function indexSheetRowsByLink(sheetRows = []) {
   return map;
 }
 
+/** Sheet column A / No → positive number, or null. */
+export function parseSheetJobNo(sheetRow) {
+  const n = Number(String(sheetRow?.jobNo ?? "").trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Spreadsheet row index from listRows → positive number, or null. */
+export function parseSheetRowIndex(sheetRow) {
+  const n = Number(sheetRow?.row);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Align queue identity with sheet No + spreadsheet row after a link match.
+ * Does not touch running jobs. Invalid jobNo leaves csvRow alone; sheetRow still updates.
+ */
+export function sheetIdentityPatch(job, sheetRow) {
+  if (!job || !sheetRow) return null;
+  if (String(job.status || "") === "running") return null;
+  const patch = {};
+  const sheetNo = parseSheetJobNo(sheetRow);
+  if (sheetNo != null) {
+    patch.csvRow = sheetNo;
+    patch.jobNo = sheetNo;
+  }
+  const rowIndex = parseSheetRowIndex(sheetRow);
+  if (rowIndex != null) patch.sheetRow = rowIndex;
+  return Object.keys(patch).length ? patch : null;
+}
+
 /**
  * Map one queue job + matching sheet row + optional local folder into a queue patch.
  * Returns null when the row should stay unchanged (no sheet match, or running).
@@ -196,20 +226,32 @@ export function reconcileQueueWithSheetRows({
     }
     const key = jobLinkKey(job);
     const sheetRow = key ? byLink.get(key) : null;
-    const folder = matchFolderForJob(job, folders);
+    const sheetNo = parseSheetJobNo(sheetRow);
+    const jobForMatch = sheetNo != null ? { ...job, csvRow: sheetNo } : job;
+    const folder = matchFolderForJob(jobForMatch, folders);
     const result = reconcileQueueJobWithSheet(job, sheetRow, folder);
-    if (!result || result.kind === "unchanged" || !result.patch) {
+    const identity = sheetIdentityPatch(job, sheetRow);
+    const hasStatusPatch = Boolean(result?.patch);
+    if (!hasStatusPatch && !identity) {
       if (count) counts.unchanged += 1;
       return job;
     }
     if (count) {
-      counts.matched += 1;
-      if (result.kind === "ready") counts.ready += 1;
-      else if (result.kind === "applied") counts.applied += 1;
-      else if (result.kind === "inactive") counts.inactive += 1;
-      else if (result.kind === "missing") counts.missing += 1;
+      if (hasStatusPatch && result.kind !== "unchanged") {
+        counts.matched += 1;
+        if (result.kind === "ready") counts.ready += 1;
+        else if (result.kind === "applied") counts.applied += 1;
+        else if (result.kind === "inactive") counts.inactive += 1;
+        else if (result.kind === "missing") counts.missing += 1;
+      } else {
+        counts.unchanged += 1;
+      }
     }
-    return { ...job, ...result.patch };
+    return {
+      ...job,
+      ...(hasStatusPatch ? result.patch : {}),
+      ...(identity || {})
+    };
   }
 
   return {

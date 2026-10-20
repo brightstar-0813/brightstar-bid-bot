@@ -49,6 +49,7 @@ import {
   formatApplicationDateTime
 } from "./sheets.js";
 import { SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
+import { sortQueueForDisplay } from "./queue-sort.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { showToast } from "./ui-toast.js";
 import { initEmailBidUi } from "./email-bid-ui.js";
@@ -1373,29 +1374,6 @@ function badgeClass(status) {
   if (s === "failed") return "badge badge-failed";
   if (s === "paused") return "badge badge-paused";
   return "badge badge-pending";
-}
-
-/** Display order for batch stream: done → pending (running first) → error → skipped. */
-function queueStatusSortKey(job) {
-  const s = String(job?.status || "pending").toLowerCase();
-  if (s === "done") return [0, Number(job.csvRow || 0)];
-  if (s === "running") return [1, 0, Number(job.csvRow || 0)];
-  if (s === "pending") return [1, 1, Number(job.csvRow || 0)];
-  if (s === "error" || s === "failed") return [2, Number(job.csvRow || 0)];
-  if (s === "skipped") return [3, Number(job.csvRow || 0)];
-  return [1, 2, Number(job.csvRow || 0)];
-}
-
-function sortQueueForDisplay(jobs) {
-  return [...jobs].sort((a, b) => {
-    const ka = queueStatusSortKey(a);
-    const kb = queueStatusSortKey(b);
-    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-      const diff = (ka[i] ?? 0) - (kb[i] ?? 0);
-      if (diff !== 0) return diff;
-    }
-    return 0;
-  });
 }
 
 /** Searchable source tags for a queue row (matches the visible source badge). */
