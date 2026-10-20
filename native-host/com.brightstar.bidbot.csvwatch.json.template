@@ -1,0 +1,9 @@
+{
+  "name": "com.brightstar.bidbot.csvwatch",
+  "description": "Brightstar Bid bot CSV file watcher",
+  "path": "HOST_PATH_PLACEHOLDER",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID_PLACEHOLDER/"
+  ]
+}
