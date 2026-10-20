@@ -3249,13 +3249,6 @@ button.icon-button-labeled .icon-button-label {
   outline-offset: 1px;
 }
 
-.custom-qa-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 0 0 8px;
-}
-
 .custom-qa-icon-row {
   display: flex;
   align-items: center;

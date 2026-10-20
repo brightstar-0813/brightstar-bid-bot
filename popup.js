@@ -4569,6 +4569,8 @@ if (customQaPageBtn) {
   setIconButton(customQaPageBtn, "qa", "Custom Q&A");
 }
 if (customQaScanPageBtn) setIconButton(customQaScanPageBtn, "scan", "Scan page questions");
+if (customQaGenerateBtn) setIconButton(customQaGenerateBtn, "qa", "Generate");
+if (customQaAskAgainBtn) setIconButton(customQaAskAgainBtn, "retry", "Ask again");
 if (customQaClearBtn) setIconButton(customQaClearBtn, "remove", "Clear");
 if (customQaCopyBtn) setIconButton(customQaCopyBtn, "copy", "Copy");
 if (customQaSaveBtn) setIconButton(customQaSaveBtn, "save", "Save to bank");

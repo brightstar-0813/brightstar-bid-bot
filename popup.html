@@ -351,14 +351,25 @@
             </div>
             <textarea id="customQaQuestion" class="custom-qa-textarea" rows="3" placeholder="Paste or type the application question…"></textarea>
             <div id="customQaPicks" class="custom-qa-picks" hidden></div>
-            <div class="custom-qa-actions">
-              <button type="button" id="customQaGenerate" class="primary">Generate</button>
-              <button type="button" id="customQaAskAgain" class="ghost" disabled>Ask again</button>
-            </div>
             <label class="field-label" for="customQaAnswer">Answer</label>
             <textarea id="customQaAnswer" class="custom-qa-textarea" rows="4" placeholder="Generated answer appears here…"></textarea>
             <p class="custom-qa-meta" id="customQaMeta" hidden></p>
             <div class="custom-qa-icon-row" role="toolbar" aria-label="Answer actions">
+              <button
+                type="button"
+                id="customQaGenerate"
+                class="ghost icon-button"
+                title="Generate"
+                aria-label="Generate"
+              ></button>
+              <button
+                type="button"
+                id="customQaAskAgain"
+                class="ghost icon-button"
+                title="Ask again"
+                aria-label="Ask again"
+                disabled
+              ></button>
               <button type="button" id="customQaClear" class="ghost icon-button" title="Clear" disabled>Clear</button>
               <button type="button" id="customQaCopy" class="ghost icon-button" title="Copy" disabled>Copy</button>
               <button type="button" id="customQaSave" class="ghost icon-button" title="Save to bank" disabled>Save to bank</button>
