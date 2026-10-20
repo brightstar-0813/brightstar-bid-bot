@@ -143,6 +143,65 @@ March 2014 ${dash} December 2017
   assert.match(edu.year, /2017/);
 });
 
+test("title-first company pipe with trailing dates keeps slash title and role fields", () => {
+  const dash = "\u2013";
+  const text = `Alex Rivera
+Senior Data Engineer
+alex@example.com
+
+PROFESSIONAL EXPERIENCE
+Senior Data Engineer / Analytics Engineer
+Venatus | London, England, United Kingdom | Remote | September 2024 ${dash} Present
+- Built ETL/ELT pipelines and analytical datasets for product analytics.
+- Wrote Python and SQL with joins, window functions, and incremental transformations.
+North Labs
+Data Engineer
+Minneapolis, Minnesota, United States | Remote | October 2021 ${dash} July 2024
+- Developed cloud data pipelines on AWS.
+`;
+  const data = plainTextToResumeData(text);
+  assert.equal(data.experience.length, 2);
+
+  const venatus = data.experience[0];
+  assert.match(venatus.company, /^Venatus$/i);
+  assert.match(venatus.title, /Senior Data Engineer\s*\/\s*Analytics Engineer/i);
+  assert.match(venatus.dates, /September 2024/);
+  assert.match(venatus.location, /London,\s*England,\s*United Kingdom\s*\|\s*Remote/i);
+  assert.doesNotMatch(venatus.title, /Remote|London|Venatus/i);
+  assert.equal(venatus.bullets.length, 2);
+
+  const north = data.experience[1];
+  assert.match(north.company, /^North Labs$/i);
+  assert.match(north.title, /^Data Engineer$/i);
+  assert.match(north.dates, /October 2021/);
+  assert.match(north.location, /Minneapolis,\s*Minnesota,\s*United States\s*\|\s*Remote/i);
+  assert.doesNotMatch(north.title, /Remote|Minneapolis|Labs/i);
+  assert.equal(north.bullets.length, 1);
+});
+
+test("location pipe with dates alone does not invent a junk role title", () => {
+  const dash = "\u2013";
+  const text = `Alex Rivera
+Data Engineer
+alex@example.com
+
+EXPERIENCE
+Acme Corp
+Senior Data Engineer
+Austin, Texas, United States | Remote | January 2022 ${dash} Present
+- Built pipelines.
+`;
+  const data = plainTextToResumeData(text);
+  assert.equal(data.experience.length, 1);
+  const job = data.experience[0];
+  assert.match(job.company, /^Acme Corp$/i);
+  assert.match(job.title, /^Senior Data Engineer$/i);
+  assert.match(job.dates, /January 2022/);
+  assert.match(job.location, /Austin,\s*Texas,\s*United States\s*\|\s*Remote/i);
+  assert.doesNotMatch(job.title, /Remote|Austin|Texas/i);
+  assert.doesNotMatch(job.company, /Remote|Austin/i);
+});
+
 test("blank-line education paste keeps school, degree, city, and dates together", () => {
   const data = plainTextToResumeData(
     resumeWithEducation(`Bachelor of Science in Computer Science

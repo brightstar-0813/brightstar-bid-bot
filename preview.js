@@ -452,40 +452,66 @@ async function discardEdits() {
   showToast("Edits discarded.", { kind: "warn", placement: "center" });
 }
 
-async function saveEdits() {
-  if (!canEditSource() || !editMode) return;
-  const doc = pageEl.contentDocument;
-  if (!doc || !workingResumeData) {
-    setStatus("Nothing to save.", "warn");
-    return;
+/**
+ * Persist current preview edits to draft/paste storage (used by Save and export flush).
+ * Merges DOM path edits when the iframe is still in edit mode.
+ */
+async function persistWorkingResume({ exitEditMode = false } = {}) {
+  if (!canEditSource() || !workingResumeData) {
+    return { ok: true, flushed: false, source, resumeData: workingResumeData };
   }
-  const edits = collectPathEdits(doc);
-  const next = applyPathEdits(workingResumeData, edits);
-  workingResumeData = next;
+  const doc = pageEl.contentDocument;
+  let next = workingResumeData;
+  if (doc && editMode) {
+    next = applyPathEdits(workingResumeData, collectPathEdits(doc));
+    workingResumeData = next;
+  }
   dirty = false;
+  let atsEvaluation = null;
 
-  try {
-    if (source === "draft") {
-      const res = await chrome.runtime.sendMessage({
-        type: "update_one_off_draft",
-        resumeData: next,
-        templateId
-      });
-      if (!res?.ok) throw new Error(res?.error || "Save failed");
-      const score =
-        res.atsEvaluation?.score != null ? ` · ATS ${res.atsEvaluation.score}/100` : "";
-      setStatus(`Draft saved${score}. Confirm in the bot when ready.`, "ok");
-      showToast(`Draft saved${score}.`, { kind: "ok", placement: "center" });
-    } else if (source === "paste") {
-      await chrome.storage.local.set({ [STYLE_EXPORT_PASTE_KEY]: next });
-      setStatus("Paste saved. Export PDF from Resume style when ready.", "ok");
-      showToast("Paste saved.", { kind: "ok", placement: "center" });
-    }
+  if (source === "draft") {
+    const res = await chrome.runtime.sendMessage({
+      type: "update_one_off_draft",
+      resumeData: next,
+      templateId
+    });
+    if (!res?.ok) throw new Error(res?.error || "Save failed");
+    atsEvaluation = res.atsEvaluation || null;
+  } else if (source === "paste") {
+    await chrome.storage.local.set({ [STYLE_EXPORT_PASTE_KEY]: next });
+  }
+
+  if (exitEditMode && doc) {
     editMode = false;
     skipStorageRefresh = false;
     disableEditableFields(doc);
     updateEditChrome();
     await renderPreview({ keepWorkingCopy: true });
+  } else {
+    updateEditChrome();
+  }
+  return { ok: true, flushed: true, source, resumeData: next, atsEvaluation };
+}
+
+async function saveEdits() {
+  if (!canEditSource() || !editMode) return;
+  if (!pageEl.contentDocument || !workingResumeData) {
+    setStatus("Nothing to save.", "warn");
+    return;
+  }
+
+  try {
+    const result = await persistWorkingResume({ exitEditMode: true });
+    if (source === "draft") {
+      const score = result?.atsEvaluation?.score;
+      const scoreSuffix = score != null ? ` · ATS ${score}/100` : "";
+      setStatus(`Draft saved${scoreSuffix}. Confirm in the bot when ready.`, "ok");
+      showToast(`Draft saved${scoreSuffix}.`, { kind: "ok", placement: "center" });
+    } else if (source === "paste") {
+      setStatus("Paste saved. Export PDF from Resume style when ready.", "ok");
+      showToast("Paste saved.", { kind: "ok", placement: "center" });
+    }
+    return result;
   } catch (err) {
     dirty = true;
     const msg = String(err?.message || err);
@@ -596,7 +622,13 @@ useStyleBtn.addEventListener("click", () =>
   })
 );
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "flush_preview_edits") {
+    persistWorkingResume({ exitEditMode: false })
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
   if (message?.type === "template_preview_show") {
     if (skipStorageRefresh && dirty) return;
     if (message.templateId) {

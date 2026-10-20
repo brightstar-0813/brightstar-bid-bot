@@ -3224,12 +3224,17 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
  * Paste resume text (or JSON) → job folder (jd.txt + resume PDF) + Applied on Google Sheet.
  * Same save/sheet path as Manual Bid Confirm, without AI cover letter.
  */
-async function exportStyledResumePdf(jsonText, { templateId = "", jobMeta = {} } = {}) {
-  const raw = String(jsonText || "").trim();
-  if (!raw) throw new Error("Paste resume text first.");
-
+async function exportStyledResumePdf(jsonText, { templateId = "", jobMeta = {}, resumeData: providedResume } = {}) {
   const person = await getActivePerson().catch(() => null);
-  let resumeData = resolvePastedResume(raw, { person });
+  let resumeData = null;
+  if (providedResume && typeof providedResume === "object") {
+    // Prefer preview-saved / flushed JSON so edits are not clobbered by re-parsing the textarea.
+    resumeData = sanitizeResumeData(providedResume) || providedResume;
+  } else {
+    const raw = String(jsonText || "").trim();
+    if (!raw) throw new Error("Paste resume text first.");
+    resumeData = resolvePastedResume(raw, { person });
+  }
   if (!isStyledExportResume(resumeData)) {
     throw new Error(
       "Could not build a resume from that paste. Include a name and body text (summary, experience, or skills)."
@@ -13204,7 +13209,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const result = await exportStyledResumePdf(message.jsonText || "", {
           templateId: message.templateId || "",
-          jobMeta: message.jobMeta || {}
+          jobMeta: message.jobMeta || {},
+          resumeData: message.resumeData || null
         });
         await chrome.storage.local.set({ generation_running: false });
         await setStatus(result.status);

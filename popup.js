@@ -42,6 +42,7 @@ import {
   accentById
 } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
+import { isResumePreviewable } from "./templates/preview-sample.js";
 import {
   extractSpreadsheetId,
   formatApplicationDate,
@@ -2833,6 +2834,11 @@ async function clearStyleExport() {
   setStatus("Cleared pasted resume text.");
 }
 
+/** When the paste textarea changes, drop saved preview JSON so export won't use a stale edit. */
+styleExportPasteEl?.addEventListener("input", () => {
+  chrome.storage.local.remove(STYLE_EXPORT_PASTE_KEY).catch(() => {});
+});
+
 async function openStyleExportPreview(templateId = "") {
   const resumeData = parseStyleExportPaste();
   const tid =
@@ -2900,6 +2906,16 @@ async function openSampleStylePreview() {
   setStatus("Opened sample resume preview.");
 }
 
+/** Ask an open preview window to persist dirty paste/draft edits before export. */
+async function flushPreviewEditsIfOpen() {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "flush_preview_edits" });
+    return res && typeof res === "object" ? res : null;
+  } catch {
+    return null;
+  }
+}
+
 async function exportStyleExportPdf() {
   const raw = String(styleExportPasteEl?.value || "").trim();
   if (!raw) {
@@ -2949,13 +2965,26 @@ async function exportStyleExportPdf() {
     chrome.storage.local.set({ selected_template_id: templateId }).catch(() => {});
   }
 
+  // Flush dirty preview edits, then prefer saved paste JSON over re-parsing the textarea.
+  const flushed = await flushPreviewEditsIfOpen();
+  const fromFlush =
+    flushed?.ok &&
+    flushed.source === "paste" &&
+    isResumePreviewable(flushed.resumeData)
+      ? flushed.resumeData
+      : null;
+  const storedPaste = (await chrome.storage.local.get(STYLE_EXPORT_PASTE_KEY))[STYLE_EXPORT_PASTE_KEY];
+  const savedResume = fromFlush || (isResumePreviewable(storedPaste) ? storedPaste : null);
+  const fallbackResume = savedResume ? null : parseStyleExportPaste();
+
   const { outputDir, person } = await resolveUiOutputDir();
   await persistJobFields();
   setBusy(true);
   setStatus("Exporting resume + recording on Google Sheet…");
   const res = await chrome.runtime.sendMessage({
     type: "export_styled_resume_pdf",
-    jsonText: raw,
+    jsonText: savedResume ? "" : raw,
+    resumeData: savedResume || fallbackResume || null,
     templateId,
     jobMeta: {
       ...details,
