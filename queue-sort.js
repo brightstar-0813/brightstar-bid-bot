@@ -12,16 +12,14 @@ function displayNo(job) {
 
 /**
  * Display priority (lower first):
- * running → done+applied → done → pending → error/failed → skipped
+ * done (not applied) → done+applied → pending/running → skipped/error
  */
 export function queueStatusSortKey(job) {
   const s = String(job?.status || "pending").toLowerCase();
-  if (s === "running") return 0;
+  if (s === "done" && !job?.applied) return 0;
   if (s === "done" && job?.applied) return 1;
-  if (s === "done") return 2;
-  if (s === "error" || s === "failed") return 4;
-  if (s === "skipped") return 5;
-  return 3; // pending and unknown
+  if (s === "error" || s === "failed" || s === "skipped") return 3;
+  return 2; // pending, running, unknown
 }
 
 /** Epoch ms when the job was posted on the board (not when we generated files). */
@@ -66,9 +64,12 @@ export function compareLatestOrder(a, b, now = Date.now()) {
 }
 
 /**
- * Search queue: Done+Applied, then Done (ready to apply), then pending for
- * batch, then skipped/error. Newest posted jobs first within each status group.
- * Running stays at the very top so live batch work stays visible.
+ * Search queue:
+ * 1. Done (not applied) — ready to apply
+ * 2. Done + Applied
+ * 3. Pending (and running)
+ * 4. Skipped / error
+ * Newest posted jobs first within each group.
  */
 export function sortQueueForDisplay(jobs, now = Date.now()) {
   return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {

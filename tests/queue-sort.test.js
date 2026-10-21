@@ -7,7 +7,7 @@ import {
   sortQueueForDisplay
 } from "../queue-sort.js";
 
-test("status tiers: done+applied, done, pending, then skipped/error", () => {
+test("status tiers: done, done+applied, pending, then skipped/error", () => {
   const sorted = sortQueueForDisplay([
     { csvRow: 10, status: "skipped", title: "skip" },
     { csvRow: 20, status: "pending", title: "pend" },
@@ -17,7 +17,7 @@ test("status tiers: done+applied, done, pending, then skipped/error", () => {
   ]);
   assert.deepEqual(
     sorted.map((j) => j.title),
-    ["applied", "ready", "pend", "err", "skip"]
+    ["ready", "applied", "pend", "err", "skip"]
   );
 });
 
@@ -66,23 +66,30 @@ test("same post date uses firstSeenAt before sheet row", () => {
   );
 });
 
-test("done (not applied) stays above pending even when pending is newer posted", () => {
+test("done (not applied) stays above done+applied and pending", () => {
   const sorted = sortQueueForDisplay([
     { csvRow: 293, status: "pending", datePosted: "2026-10-21", title: "pend" },
+    { csvRow: 50, status: "done", applied: true, datePosted: "2026-10-21", title: "applied" },
     { csvRow: 10, status: "done", datePosted: "2026-10-01", title: "ready" }
   ]);
   assert.deepEqual(
     sorted.map((j) => j.title),
-    ["ready", "pend"]
+    ["ready", "applied", "pend"]
   );
 });
 
-test("running job stays above other status groups", () => {
+test("running sits with pending, below done groups", () => {
   const sorted = sortQueueForDisplay([
     { csvRow: 99, status: "done", applied: true, datePosted: "2026-10-21" },
-    { csvRow: 1, status: "running", datePosted: "2026-10-01" }
+    { csvRow: 1, status: "running", datePosted: "2026-10-01" },
+    { csvRow: 2, status: "done", datePosted: "2026-10-05" }
   ]);
-  assert.equal(sorted[0].status, "running");
+  assert.deepEqual(
+    sorted.map((j) => j.status),
+    ["done", "done", "running"]
+  );
+  assert.equal(sorted[0].applied, undefined);
+  assert.equal(sorted[1].applied, true);
 });
 
 test("without post date, falls back to sheet/csv latest", () => {
@@ -102,11 +109,15 @@ test("jobPostedAt reads datePosted / postedAt", () => {
   assert.equal(jobPostedAt({ postedAt: 1_700_000_000_000 }), 1_700_000_000_000);
 });
 
-test("queueStatusSortKey ranks done+applied ahead of done", () => {
+test("queueStatusSortKey ranks done ahead of done+applied", () => {
+  assert.ok(
+    queueStatusSortKey({ status: "done" }) <
+      queueStatusSortKey({ status: "done", applied: true })
+  );
   assert.ok(
     queueStatusSortKey({ status: "done", applied: true }) <
-      queueStatusSortKey({ status: "done" })
+      queueStatusSortKey({ status: "pending" })
   );
-  assert.ok(queueStatusSortKey({ status: "done" }) < queueStatusSortKey({ status: "pending" }));
   assert.ok(queueStatusSortKey({ status: "pending" }) < queueStatusSortKey({ status: "skipped" }));
+  assert.equal(queueStatusSortKey({ status: "error" }), queueStatusSortKey({ status: "skipped" }));
 });
