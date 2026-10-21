@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compareLatestOrder, queueStatusSortKey, sortQueueForDisplay } from "../queue-sort.js";
+import {
+  compareLatestOrder,
+  jobPostedAt,
+  queueStatusSortKey,
+  sortQueueForDisplay
+} from "../queue-sort.js";
 
 test("status tiers: done+applied, done, pending, then skipped/error", () => {
   const sorted = sortQueueForDisplay([
@@ -16,22 +21,55 @@ test("status tiers: done+applied, done, pending, then skipped/error", () => {
   );
 });
 
-test("done+applied group sorts latest first", () => {
+test("within a status group, newer date_posted ranks above older posts", () => {
   const sorted = sortQueueForDisplay([
-    { csvRow: 145, sheetRow: 63, status: "done", applied: true, title: "old" },
-    { csvRow: 293, sheetRow: 120, status: "done", applied: true, title: "new" },
-    { csvRow: 285, sheetRow: 100, status: "done", applied: true, title: "mid" }
+    { csvRow: 1, sheetRow: 200, status: "done", datePosted: "2026-10-10", title: "old-post" },
+    { csvRow: 2, sheetRow: 50, status: "done", datePosted: "2026-10-21", title: "new-post" },
+    { csvRow: 3, sheetRow: 180, status: "done", datePosted: "2026-10-18", title: "mid-post" }
   ]);
   assert.deepEqual(
     sorted.map((j) => j.title),
-    ["new", "mid", "old"]
+    ["new-post", "mid-post", "old-post"]
   );
 });
 
-test("done (not applied) stays above pending even when pending is newer", () => {
+test("post date beats sheet/generate order when both differ", () => {
+  assert.ok(
+    compareLatestOrder(
+      { csvRow: 1, sheetRow: 999, datePosted: "2026-10-01" },
+      { csvRow: 2, sheetRow: 10, datePosted: "2026-10-21" }
+    ) > 0,
+    "older post with newer sheet row sorts after newer post"
+  );
+});
+
+test("same post date uses firstSeenAt before sheet row", () => {
   const sorted = sortQueueForDisplay([
-    { csvRow: 293, sheetRow: 120, status: "pending", title: "pend" },
-    { csvRow: 10, sheetRow: 50, status: "done", title: "ready" }
+    {
+      csvRow: 1,
+      status: "done",
+      datePosted: "2026-10-20",
+      firstSeenAt: Date.parse("2026-10-20T09:00:00.000Z"),
+      title: "earlier"
+    },
+    {
+      csvRow: 2,
+      status: "done",
+      datePosted: "2026-10-20",
+      firstSeenAt: Date.parse("2026-10-20T21:00:00.000Z"),
+      title: "later"
+    }
+  ]);
+  assert.deepEqual(
+    sorted.map((j) => j.title),
+    ["later", "earlier"]
+  );
+});
+
+test("done (not applied) stays above pending even when pending is newer posted", () => {
+  const sorted = sortQueueForDisplay([
+    { csvRow: 293, status: "pending", datePosted: "2026-10-21", title: "pend" },
+    { csvRow: 10, status: "done", datePosted: "2026-10-01", title: "ready" }
   ]);
   assert.deepEqual(
     sorted.map((j) => j.title),
@@ -41,13 +79,13 @@ test("done (not applied) stays above pending even when pending is newer", () => 
 
 test("running job stays above other status groups", () => {
   const sorted = sortQueueForDisplay([
-    { csvRow: 99, sheetRow: 200, status: "done", applied: true },
-    { csvRow: 1, sheetRow: 50, status: "running" }
+    { csvRow: 99, status: "done", applied: true, datePosted: "2026-10-21" },
+    { csvRow: 1, status: "running", datePosted: "2026-10-01" }
   ]);
   assert.equal(sorted[0].status, "running");
 });
 
-test("latest jobs sort above older ones within the same status", () => {
+test("without post date, falls back to sheet/csv latest", () => {
   const sorted = sortQueueForDisplay([
     { csvRow: 145, status: "done", title: "a" },
     { csvRow: 293, status: "done", title: "b" },
@@ -59,14 +97,9 @@ test("latest jobs sort above older ones within the same status", () => {
   );
 });
 
-test("compareLatestOrder prefers sheetJobNo over csvRow when sheetRow missing", () => {
-  assert.ok(
-    compareLatestOrder(
-      { csvRow: 285, sheetJobNo: 145 },
-      { csvRow: 10, sheetJobNo: 200 }
-    ) > 0,
-    "higher sheetJobNo comes first"
-  );
+test("jobPostedAt reads datePosted / postedAt", () => {
+  assert.equal(jobPostedAt({ datePosted: "2026-10-21" }), Date.parse("2026-10-21"));
+  assert.equal(jobPostedAt({ postedAt: 1_700_000_000_000 }), 1_700_000_000_000);
 });
 
 test("queueStatusSortKey ranks done+applied ahead of done", () => {

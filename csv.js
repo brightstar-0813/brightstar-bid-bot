@@ -654,6 +654,25 @@ export function parseJobsCsv(csvText) {
     const jdText = getField(row, ["description", "job_description", "jd", "Description"]);
     const source = getField(row, ["source", "Source", "id"]);
     const id = getField(row, ["id", "Id"]);
+    const datePosted = getField(row, [
+      "date_posted",
+      "datePosted",
+      "posted_at",
+      "postedAt",
+      "posted_date",
+      "postedDate",
+      "posted",
+      "Date Posted",
+      "Posted"
+    ]);
+    const firstSeenAt = getField(row, [
+      "first_seen_at",
+      "firstSeenAt",
+      "first_seen",
+      "First Seen At"
+    ]);
+    const postedAtMs = Date.parse(datePosted);
+    const firstSeenAtMs = Date.parse(firstSeenAt);
     let salary = formatSalaryRange({
       min: getField(row, ["salary_min", "salaryMin", "min_salary", "Salary Min"]),
       max: getField(row, ["salary_max", "salaryMax", "max_salary", "Salary Max"]),
@@ -701,6 +720,9 @@ export function parseJobsCsv(csvText) {
       location,
       remoteRestrictedTo,
       salary,
+      datePosted,
+      postedAt: Number.isFinite(postedAtMs) ? postedAtMs : null,
+      firstSeenAt: Number.isFinite(firstSeenAtMs) ? firstSeenAtMs : null,
       source:
         source ||
         (linkedIn
