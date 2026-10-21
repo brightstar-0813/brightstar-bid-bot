@@ -50,6 +50,10 @@ import {
 } from "./sheets.js";
 import { queueDisplayNo, SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
 import { ensureQueueDisplayOrder } from "./queue-sort.js";
+import {
+  formatQueueDuration,
+  resolveQueueDurationMs
+} from "./queue-timing.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { showToast } from "./ui-toast.js";
 import { initEmailBidUi } from "./email-bid-ui.js";
@@ -1310,6 +1314,9 @@ function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
       applyAttempts: Number(prev.applyAttempts || j.applyAttempts || 0),
       inactive: Boolean(prev.inactive || j.inactive),
       profileId: prev.profileId || j.profileId || pid || "",
+      startedAt: prev.startedAt || j.startedAt || 0,
+      finishedAt: prev.finishedAt || j.finishedAt || 0,
+      durationMs: prev.durationMs || j.durationMs || 0,
       // Keep frozen list position across filter / status merges.
       displayOrder: prev.displayOrder ?? j.displayOrder,
       error: prev.error
@@ -1741,10 +1748,41 @@ function queueRenderSignature(jobs) {
         j?.jobDir || "",
         j?.error || "",
         j?.inactive ? 1 : 0,
-        j?.atsEvaluation ? 1 : 0
+        j?.atsEvaluation ? 1 : 0,
+        j?.startedAt || 0,
+        j?.durationMs || 0
       ].join(":")
     )
     .join("|");
+}
+
+const QUEUE_TIME_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+
+function buildQueueTimeEl(job, now = Date.now()) {
+  const ms = resolveQueueDurationMs(job, now);
+  const live = String(job?.status || "") === "running" && Number(job?.startedAt || 0) > 0;
+  if (!live && ms <= 0) return null;
+  const el = document.createElement("div");
+  el.className = "queue-time";
+  if (live) el.classList.add("is-live");
+  el.dataset.csvRow = String(job.csvRow);
+  if (live) el.dataset.live = "1";
+  el.dataset.startedAt = String(job.startedAt || 0);
+  el.dataset.durationMs = String(job.durationMs || 0);
+  el.title = live ? "Elapsed for this run" : "Time for this run";
+  el.innerHTML = `${QUEUE_TIME_ICON}<span class="queue-time-label">${formatQueueDuration(ms)}</span>`;
+  return el;
+}
+
+function refreshLiveQueueTimers(now = Date.now()) {
+  if (!queueListEl) return;
+  for (const el of queueListEl.querySelectorAll(".queue-time[data-live='1']")) {
+    const started = Number(el.dataset.startedAt || 0);
+    if (!(started > 0)) continue;
+    const label = el.querySelector(".queue-time-label");
+    if (label) label.textContent = formatQueueDuration(Math.max(0, now - started));
+  }
 }
 
 function escapeHtml(s) {
@@ -2259,6 +2297,8 @@ function renderQueue() {
     controls.className = "queue-controls";
     controls.appendChild(actions);
     controls.appendChild(applyWrap);
+    const timeEl = buildQueueTimeEl(job);
+    if (timeEl) controls.appendChild(timeEl);
 
     item.appendChild(rowEl);
     item.appendChild(meta);
@@ -4769,9 +4809,11 @@ setInterval(async () => {
       renderQueue();
       updateCsvSummaryFromQueue();
     } else {
+      refreshLiveQueueTimers();
       followQueueToCurrentWork();
     }
   } else {
+    refreshLiveQueueTimers();
     followQueueToCurrentWork();
   }
   if (data.csv_source_settings && csvSourceStatusEl) {

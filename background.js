@@ -124,6 +124,7 @@ import {
 } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
+import { applyQueueJobTiming } from "./queue-timing.js";
 import {
   parseJobsCsv,
   filterJobsByChannel,
@@ -653,9 +654,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (age > 90000 && !isRunning) {
       await setStatus("Batch heartbeat lost — auto-resuming from pending jobs…");
       const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
+      const now = Date.now();
       const fixed = queue.map((j) =>
         j.status === "running"
-          ? { ...j, status: "pending", error: "Auto-resumed after worker sleep" }
+          ? applyQueueJobTiming(j, {
+              status: "pending",
+              error: "Auto-resumed after worker sleep"
+            }, now)
           : j
       );
       await chrome.storage.local.set({
@@ -848,10 +853,15 @@ async function recoverInterruptedBatch(statusMessage = "Ready.", { retryFailed =
     const queue = Array.isArray(data[QUEUE_KEY]) ? data[QUEUE_KEY] : [];
     const wasRunning = data[BATCH_STATE_KEY] === "running";
     let changed = false;
+    const now = Date.now();
     const next = queue.map((j) => {
       if (j.status === "running") {
         changed = true;
-        return { ...j, status: "pending", error: "Interrupted — resuming" };
+        return applyQueueJobTiming(
+          j,
+          { status: "pending", error: "Interrupted — resuming" },
+          now
+        );
       }
       if (retryFailed && (j.status === "failed" || j.status === "error")) {
         changed = true;
@@ -8478,7 +8488,10 @@ async function setBatchState(state) {
 
 async function updateQueueJob(csvRow, patch) {
   const queue = await getQueue();
-  const next = queue.map((j) => (Number(j.csvRow) === Number(csvRow) ? { ...j, ...patch } : j));
+  const now = Date.now();
+  const next = queue.map((j) =>
+    Number(j.csvRow) === Number(csvRow) ? applyQueueJobTiming(j, patch, now) : j
+  );
   await setQueue(next);
   return next.find((j) => Number(j.csvRow) === Number(csvRow));
 }
@@ -8600,23 +8613,27 @@ async function ensureOneOffQueueJob(meta = {}) {
   const csvRow = existing?.csvRow != null ? Number(existing.csvRow) : maxRow + 1;
   const title = String(meta.jobTitle || existing?.title || existing?.jobTitle || "").trim();
   const company = String(meta.companyName || existing?.company || existing?.companyName || "").trim();
-  const patch = {
-    csvRow,
-    title,
-    company,
-    jobTitle: title,
-    companyName: company,
-    jdLink: String(meta.jdLink || existing?.jdLink || "").trim(),
-    jdText: String(meta.jdText || existing?.jdText || "").trim(),
-    status: "running",
-    error: "",
-    bidSource: "one-off",
-    source: existing?.source || "one-off",
-    profileId: meta.profileId || person?.id || existing?.profileId || "",
-    applied: Boolean(existing?.applied),
-    attempts: Number(existing?.attempts || 0),
-    jobDir: existing?.jobDir || ""
-  };
+  const patch = applyQueueJobTiming(
+    existing || {},
+    {
+      csvRow,
+      title,
+      company,
+      jobTitle: title,
+      companyName: company,
+      jdLink: String(meta.jdLink || existing?.jdLink || "").trim(),
+      jdText: String(meta.jdText || existing?.jdText || "").trim(),
+      status: "running",
+      error: "",
+      bidSource: "one-off",
+      source: existing?.source || "one-off",
+      profileId: meta.profileId || person?.id || existing?.profileId || "",
+      applied: Boolean(existing?.applied),
+      attempts: Number(existing?.attempts || 0),
+      jobDir: existing?.jobDir || ""
+    },
+    Date.now()
+  );
 
   const nextQueue = existing
     ? queue.map((j) => (Number(j.csvRow) === csvRow ? { ...j, ...patch } : j))

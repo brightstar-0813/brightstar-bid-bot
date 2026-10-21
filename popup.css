@@ -1972,6 +1972,52 @@ input[type="file"]::file-selector-button {
   align-items: stretch;
 }
 
+.queue-time {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--accent, var(--gold)) 75%, #cfe8f5);
+  font-size: 10.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.queue-time svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+
+.queue-time.is-live {
+  color: var(--gold-bright, #f0c674);
+}
+
+.queue-time.is-live svg {
+  animation: queue-time-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes queue-time-pulse {
+  0%,
+  100% {
+    opacity: 0.95;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 .queue-item:last-child {
   border-bottom: 0;
 }
