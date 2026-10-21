@@ -49,7 +49,7 @@ import {
   formatApplicationDateTime
 } from "./sheets.js";
 import { queueDisplayNo, SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
-import { sortQueueForDisplay } from "./queue-sort.js";
+import { ensureQueueDisplayOrder } from "./queue-sort.js";
 import { notifySlackBatchComplete, isSlackWebhookUrl } from "./slack.js";
 import { showToast } from "./ui-toast.js";
 import { initEmailBidUi } from "./email-bid-ui.js";
@@ -1310,9 +1310,35 @@ function mergeStatusFromQueue(jobs, previousQueue, profileId = "") {
       applyAttempts: Number(prev.applyAttempts || j.applyAttempts || 0),
       inactive: Boolean(prev.inactive || j.inactive),
       profileId: prev.profileId || j.profileId || pid || "",
+      // Keep frozen list position across filter / status merges.
+      displayOrder: prev.displayOrder ?? j.displayOrder,
       error: prev.error
     };
   });
+}
+
+/** Stamp displayOrder once and persist so badge changes do not reshuffle the list. */
+function syncQueueDisplayOrder() {
+  const { jobs: ordered, changed } = ensureQueueDisplayOrder(queueCache);
+  if (!changed) return ordered;
+  const orderByRow = new Map(ordered.map((j) => [Number(j.csvRow), Number(j.displayOrder)]));
+  queueCache = queueCache.map((j) => {
+    const o = orderByRow.get(Number(j.csvRow));
+    return o && Number(j.displayOrder) !== o ? { ...j, displayOrder: o } : j;
+  });
+  if (allUsJobsCache.length) {
+    allUsJobsCache = allUsJobsCache.map((j) => {
+      const o = orderByRow.get(Number(j.csvRow));
+      return o && Number(j.displayOrder) !== o ? { ...j, displayOrder: o } : j;
+    });
+  }
+  chrome.storage.local
+    .set({
+      [QUEUE_KEY]: queueCache,
+      [ALL_US_JOBS_KEY]: allUsJobsCache
+    })
+    .catch(() => {});
+  return ordered;
 }
 
 async function applyChannelFilter(nextFilter, { persist = true } = {}) {
@@ -2017,7 +2043,8 @@ function renderQueue() {
   }
 
   const currentRow = resolveCurrentWorkCsvRow();
-  const visibleJobs = filterQueueForDisplay(sortQueueForDisplay(queueCache));
+  const ordered = syncQueueDisplayOrder();
+  const visibleJobs = filterQueueForDisplay(ordered);
   updateQueueSearchMeta(visibleJobs.length, queueCache.length);
 
   if (!visibleJobs.length) {
@@ -4732,7 +4759,8 @@ setInterval(async () => {
         coverName: j.coverName || prev?.coverName || "",
         atsScore: j.atsScore ?? prev?.atsScore ?? null,
         atsGrade: j.atsGrade || prev?.atsGrade || "",
-        atsEvaluation: j.atsEvaluation || prev?.atsEvaluation || null
+        atsEvaluation: j.atsEvaluation || prev?.atsEvaluation || null,
+        displayOrder: j.displayOrder ?? prev?.displayOrder
       };
     });
     const changed = queueRenderSignature(nextQueue) !== queueRenderSignature(queueCache);

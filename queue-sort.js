@@ -10,8 +10,12 @@ function displayNo(job) {
   return positiveNumber(job?.sheetJobNo ?? job?.jobNo ?? job?.csvRow) || 0;
 }
 
+function hasDisplayOrder(job) {
+  return positiveNumber(job?.displayOrder) != null;
+}
+
 /**
- * Display priority (lower first):
+ * Display priority (lower first) — used only for the initial arrange:
  * done (not applied) → done+applied → pending/running → skipped/error
  */
 export function queueStatusSortKey(job) {
@@ -63,19 +67,61 @@ export function compareLatestOrder(a, b, now = Date.now()) {
   return Number(b?.csvRow || 0) - Number(a?.csvRow || 0);
 }
 
-/**
- * Search queue:
- * 1. Done (not applied) — ready to apply
- * 2. Done + Applied
- * 3. Pending (and running)
- * 4. Skipped / error
- * Newest posted jobs first within each group.
- */
-export function sortQueueForDisplay(jobs, now = Date.now()) {
+/** One-time rule sort (status tiers + newest posted). Does not stamp displayOrder. */
+export function sortQueueByRules(jobs, now = Date.now()) {
   return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
     const ga = queueStatusSortKey(a);
     const gb = queueStatusSortKey(b);
     if (ga !== gb) return ga - gb;
     return compareLatestOrder(a, b, now);
   });
+}
+
+/**
+ * Stamp a frozen displayOrder once. Existing orders never change when badges/status
+ * update. New jobs (no displayOrder yet) are rule-sorted and appended after the max.
+ *
+ * @returns {{ jobs: object[], changed: boolean }}
+ */
+export function ensureQueueDisplayOrder(jobs, now = Date.now()) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  if (!list.length) return { jobs: [], changed: false };
+
+  const missing = list.filter((j) => !hasDisplayOrder(j));
+  if (!missing.length) {
+    return {
+      jobs: [...list].sort((a, b) => Number(a.displayOrder) - Number(b.displayOrder)),
+      changed: false
+    };
+  }
+
+  if (missing.length === list.length) {
+    const sorted = sortQueueByRules(list, now).map((j, i) => ({
+      ...j,
+      displayOrder: i + 1
+    }));
+    return { jobs: sorted, changed: true };
+  }
+
+  const maxOrder = Math.max(0, ...list.filter(hasDisplayOrder).map((j) => Number(j.displayOrder)));
+  const newcomers = sortQueueByRules(missing, now).map((j, i) => ({
+    ...j,
+    displayOrder: maxOrder + 1 + i
+  }));
+  const byRow = new Map();
+  for (const j of list) {
+    if (hasDisplayOrder(j)) byRow.set(Number(j.csvRow), { ...j });
+  }
+  for (const j of newcomers) byRow.set(Number(j.csvRow), j);
+  const jobsOut = [...byRow.values()].sort(
+    (a, b) => Number(a.displayOrder) - Number(b.displayOrder)
+  );
+  return { jobs: jobsOut, changed: true };
+}
+
+/**
+ * Stable queue order: freeze after first arrange so badge changes do not reshuffle.
+ */
+export function sortQueueForDisplay(jobs, now = Date.now()) {
+  return ensureQueueDisplayOrder(jobs, now).jobs;
 }

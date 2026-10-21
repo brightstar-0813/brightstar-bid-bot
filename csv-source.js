@@ -156,7 +156,9 @@ export function mergeParsedJobs(previousAllUs, previousQueue, usJobs) {
       atsGrade: prev.atsGrade || "",
       atsEvaluation: prev.atsEvaluation || null,
       hasFiles: Boolean(prev.hasFiles || prev.jobDir),
-      profileId: String(prev.profileId || j.profileId || "").trim()
+      profileId: String(prev.profileId || j.profileId || "").trim(),
+      // Keep frozen queue position across CSV refresh merges.
+      displayOrder: prev.displayOrder ?? j.displayOrder
     };
   });
 
