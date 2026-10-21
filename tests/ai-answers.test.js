@@ -11,6 +11,7 @@ import {
   compactApplicantContext,
   buildCustomQaPayload,
   extractFreshCustomQaAnswer,
+  isCertificationQuestion,
   normalizeSkillList,
   normalizeRecentRoles
 } from "../ai-answers.js";
@@ -44,6 +45,14 @@ test("answerCertificationQuestion returns Yes/No from profile certs", () => {
     answerCertificationQuestion("Do you hold any Salesforce certifications?", []),
     "No"
   );
+});
+
+test("qualifications essays are not treated as cert yes/no", () => {
+  const essay =
+    "Please describe your qualifications for this position, including any relevant skills, training, certifications, and experience. Be specific in explaining how your background relates to the requirements in the job.";
+  assert.equal(isCertificationQuestion(essay), false);
+  assert.equal(answerCertificationQuestion(essay, CERTS), "");
+  assert.equal(bankAnswerFitsQuestion(essay, "Yes"), false);
 });
 
 test("bankAnswerFitsQuestion accepts Yes/No for hold-cert prompts", () => {

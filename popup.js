@@ -336,7 +336,7 @@ const customQaCopyBtn = document.getElementById("customQaCopy");
 const customQaSaveBtn = document.getElementById("customQaSave");
 const customQaClearBtn = document.getElementById("customQaClear");
 let customQaPickCache = [];
-/** Last Custom Q&A source. Ask again is only for bank or profile facts. */
+/** Last Custom Q&A source. Ask again overrides bank / profile facts and calls the AI. */
 let customQaLastSource = "";
 const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");

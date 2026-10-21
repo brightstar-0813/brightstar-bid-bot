@@ -4155,7 +4155,8 @@ export async function answerCustomQaAsk({
   });
 
   // Answer cert yes/no from profile facts before spending an API call.
-  if (isCertificationQuestion(q)) {
+  // Ask again (skipBank) must reach the model — do not re-hit profile facts.
+  if (!skipBank && isCertificationQuestion(q)) {
     const factual = answerCertificationQuestion(q, info.certifications);
     if (factual) {
       saveQa({
@@ -4261,7 +4262,8 @@ export async function prepareCustomQaAsk({ question, skipBank = false, engine = 
       : normalizeRecentRoles(person?.workHistory || [])
   });
 
-  if (isCertificationQuestion(q)) {
+  // Ask again (skipBank) must ask the AI tab — skip profile-fact short-circuit too.
+  if (!skipBank && isCertificationQuestion(q)) {
     const factual = answerCertificationQuestion(q, info.certifications);
     if (factual) {
       saveQa({

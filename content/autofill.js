@@ -4289,9 +4289,16 @@
   ]);
 
   function isCertificationQuestion(label) {
-    return /\b(certif(?:ied|ication|ications)?|credentials you (currently )?hold)\b/i.test(
-      String(label || "")
-    );
+    const q = String(label || "");
+    if (!q) return false;
+    // Essay prompts often list "certifications" among skills/experience — not a cert yes/no.
+    if (
+      /\b(describe|explain|tell us about|summarize|outline|how (?:does|do|has|have) your)\b/i.test(q) &&
+      /\b(qualifications?|background|experience|skills|training)\b/i.test(q)
+    ) {
+      return false;
+    }
+    return /\b(certif(?:ied|ication|ications)?|credentials you (currently )?hold)\b/i.test(q);
   }
 
   function essayNeedsRewrite(el, questionLabel) {

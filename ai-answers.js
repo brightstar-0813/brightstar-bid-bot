@@ -72,9 +72,16 @@ export function certificationsFromText(text) {
 }
 
 export function isCertificationQuestion(label) {
-  return /\b(certif(?:ied|ication|ications)?|credentials you (currently )?hold)\b/i.test(
-    String(label || "")
-  );
+  const q = String(label || "");
+  if (!q) return false;
+  // Essay prompts often list "certifications" among skills/experience — not a cert yes/no.
+  if (
+    /\b(describe|explain|tell us about|summarize|outline|how (?:does|do|has|have) your)\b/i.test(q) &&
+    /\b(qualifications?|background|experience|skills|training)\b/i.test(q)
+  ) {
+    return false;
+  }
+  return /\b(certif(?:ied|ication|ications)?|credentials you (currently )?hold)\b/i.test(q);
 }
 
 function certListHas(certs, pattern) {
@@ -88,11 +95,12 @@ function certListHas(certs, pattern) {
 export function answerCertificationQuestion(label, certifications = []) {
   const certs = parseCertificationList(certifications);
   const q = String(label || "");
-  if (!q) return "";
+  if (!q || !isCertificationQuestion(q)) return "";
 
+  // Require hold/do-you framing — bare "any" matches essay phrases like "any relevant skills".
   const yesNoHold =
     /\b(do you|have you|are you)\b/i.test(q) ||
-    /\b(any|currently hold|current .{0,40}certif|hold any)\b/i.test(q);
+    /\b(currently hold|current .{0,40}certif|hold any|any .{0,40}certif)\b/i.test(q);
 
   // Yes/No: "Do you hold any Salesforce Platform Developer certifications?"
   if (yesNoHold && isCertificationQuestion(q)) {
