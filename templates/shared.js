@@ -481,12 +481,39 @@ export function educationList(education) {
   );
 }
 
+/** Month/year ranges that belong in edu.year, not location. */
+const EDU_PLACE_DATE_RE =
+  /(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}\s*[-–—]\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+)?(?:(?:19|20)\d{2}|present)/i;
+
+/**
+ * Location only — strip pipe-joined date ranges so templates that also render
+ * edu.year do not show "Recife, Brazil | Mar 2013 – Aug 2017" plus a right date.
+ */
+export function stripEducationDatesFromPlace(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  return raw
+    .split(/\s*\|\s*/)
+    .map((b) => b.trim())
+    .filter(Boolean)
+    .filter((b) => !EDU_PLACE_DATE_RE.test(b) && !/^(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present)$/i.test(b))
+    .map((b) =>
+      b
+        .replace(EDU_PLACE_DATE_RE, "")
+        .replace(/\s*[|–—,-]\s*$/g, "")
+        .replace(/^\s*[|–—,-]\s*/g, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .join(", ");
+}
+
 /**
  * Education "details" is location only (city / region / country).
  * Drop honors, coursework, thesis, and other academic narrative the model sometimes invents.
  */
 export function educationLocationLine(edu) {
-  const explicit = String(edu?.location || "").trim();
+  const explicit = stripEducationDatesFromPlace(String(edu?.location || "").trim());
   if (explicit) return explicit;
 
   const raw = String(edu?.details || edu?.gpa || "").trim();
@@ -503,7 +530,7 @@ export function educationLocationLine(edu) {
       !fluffRe.test(firstLine) &&
       !/[.]{2,}|;/.test(firstLine)
     ) {
-      return firstLine;
+      return stripEducationDatesFromPlace(firstLine);
     }
     return "";
   }
@@ -511,7 +538,7 @@ export function educationLocationLine(edu) {
   // Prefer a single short location line over multi-paragraph essays.
   const firstLine = raw.split(/\n/)[0].trim();
   if (firstLine.length > 100) return "";
-  return firstLine;
+  return stripEducationDatesFromPlace(firstLine);
 }
 
 /** Strip invented conferral notes from education year ranges. */

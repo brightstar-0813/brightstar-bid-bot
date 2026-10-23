@@ -236,6 +236,35 @@ Mar 2013 – Aug 2017`)
   assert.match(edu.year, /Mar 2013/);
 });
 
+test("pipe-delimited education splits school, degree, city, and year", () => {
+  const data = plainTextToResumeData(
+    resumeWithEducation(
+      "Federal University of Pernambuco | Bachelor of Science in Computer Science | Recife, Brazil | Mar 2013 - Aug 2017"
+    )
+  );
+  assert.equal(data.education.length, 1);
+  const edu = data.education[0];
+  assert.match(edu.school, /^Federal University of Pernambuco$/i);
+  assert.match(edu.degree, /^Bachelor of Science in Computer Science$/i);
+  assert.equal(edu.details, "Recife, Brazil");
+  assert.match(edu.year, /Mar 2013/);
+  assert.doesNotMatch(edu.details, /2013|2017/);
+});
+
+test("city and dates on one pipe line do not leave the year in details", () => {
+  const data = plainTextToResumeData(
+    resumeWithEducation(`Federal University of Pernambuco
+Bachelor of Science in Computer Science
+Recife, Brazil | Mar 2013 - Aug 2017`)
+  );
+  const edu = data.education[0];
+  assert.equal(edu.details, "Recife, Brazil");
+  assert.match(edu.year, /Mar 2013/);
+  const html = resumeJsonToHtml(data, "orange-banner");
+  assert.equal((html.match(/Mar 2013/gi) || []).length, 1);
+  assert.match(html, /Recife,\s*Brazil/);
+});
+
 test("two schools separated by blank lines stay two entries", () => {
   const data = plainTextToResumeData(
     resumeWithEducation(`Massachusetts Institute of Technology

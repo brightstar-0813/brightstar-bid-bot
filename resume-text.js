@@ -442,7 +442,22 @@ function parseEducation(lines) {
   }
 
   return folded
-    .map((parts) => {
+    .map((rawParts) => {
+      // Expand "School | Degree | City | Dates" pastes into discrete fields so the
+      // whole line is not treated as one degree (and dates are not left in details).
+      const parts = [];
+      for (const part of rawParts) {
+        if (/\s*\|\s*/.test(part)) {
+          parts.push(
+            ...String(part)
+              .split(/\s*\|\s*/)
+              .map((b) => b.trim())
+              .filter(Boolean)
+          );
+        } else {
+          parts.push(part);
+        }
+      }
       const joined = parts.join(" | ");
       const year = (joined.match(EDU_YEAR_RANGE_RE) || joined.match(/\b((?:19|20)\d{2})\b/) || [])[0] || "";
       const degree = parts.find((p) => isDegreeLine(p)) || "";
@@ -473,21 +488,6 @@ function parseEducation(lines) {
       ) {
         school = parts[0];
       }
-      // "School | City, Region, Country" — keep place in details, school name alone.
-      let schoolPlace = "";
-      if (school && /\s*\|\s*/.test(school)) {
-        const bits = school
-          .split(/\s*\|\s*/)
-          .map((b) => b.trim())
-          .filter(Boolean);
-        if (bits.length >= 2) {
-          const place = bits.slice(1).join(" | ");
-          if (isEduCityLine(place) || EDU_LOCATION_RE.test(place) || EDU_PLACE_LINE_RE.test(place)) {
-            school = bits[0];
-            schoolPlace = place;
-          }
-        }
-      }
       const honours =
         parts.find(
           (p) =>
@@ -496,13 +496,14 @@ function parseEducation(lines) {
             p !== year &&
             /\b(honou?rs?|cum laude|distinction|upper division|lower division)\b/i.test(p)
         ) || "";
-      const details =
-        schoolPlace ||
+      let details =
         parts.find(
           (p) => p !== school && p !== degree && p !== year && p !== honours && isEduCityLine(p)
         ) ||
         honours ||
         "";
+      // Location must not retain the date range (templates also render edu.year).
+      details = stripEducationDateFromPlace(details);
       return {
         school: String(school).slice(0, 120),
         degree: String(degree).slice(0, 120),
@@ -511,6 +512,26 @@ function parseEducation(lines) {
       };
     })
     .filter((edu) => edu.school || edu.degree);
+}
+
+/** Drop date-range segments from an education place string (avoids duplicate years on PDF). */
+function stripEducationDateFromPlace(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  return raw
+    .split(/\s*\|\s*/)
+    .map((b) => b.trim())
+    .filter(Boolean)
+    .filter((b) => !isEduDateLine(b))
+    .map((b) =>
+      b
+        .replace(EDU_YEAR_RANGE_RE, "")
+        .replace(/\s*[|–—,-]\s*$/g, "")
+        .replace(/^\s*[|–—,-]\s*/g, "")
+        .trim()
+    )
+    .filter(Boolean)
+    .join(", ");
 }
 
 function parseCerts(lines) {

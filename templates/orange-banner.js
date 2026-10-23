@@ -1,6 +1,7 @@
 import {
   educationLocationLine,
   educationYearLine,
+  stripEducationDatesFromPlace,
   escapeHtml,
   pathAttr,
   renderCerts,
@@ -260,7 +261,11 @@ function renderEducation(education) {
       const year = educationYearLine(edu);
       const location = educationLocationLine(edu);
       let note = String(edu?.details || "").trim();
-      if (note && location && note.toLowerCase() === location.toLowerCase()) note = "";
+      // details is often "City | dates"; location already stripped the date — don't re-print it.
+      const notePlace = stripEducationDatesFromPlace(note);
+      if (note && location && (note.toLowerCase() === location.toLowerCase() || notePlace.toLowerCase() === location.toLowerCase())) {
+        note = "";
+      }
       if (!school && !degree) return "";
       return `<article class="edu">
   <div class="edu-top">
