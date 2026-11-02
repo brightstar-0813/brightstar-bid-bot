@@ -160,16 +160,16 @@ Falls Church, VA, United States | +1 (703) 705-2182 | avash.chapagain0219@outloo
 https://www.linkedin.com/in/avash-chapagain
 
 SUMMARY
-9+ years of overall technology experience, including 9+ years delivering Salesforce solutions across education, nonprofit, healthcare, state and local government consulting, federal IT modernization, higher education admissions, and rental housing industry associations.
+9+ years of overall technology experience, including 9+ years delivering Salesforce solutions across higher-ed Education Cloud and NPSP consulting, federal civil-rights and FDA platforms, Salesforce CPQ and corporate CRM administration, higher education admissions operations, and rental housing association membership data.
 
 SKILLS
-Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Revenue Cloud, Marketing Cloud, Commerce Cloud, Data Cloud, Health Cloud, CRM Analytics, Field Service, Manufacturing Cloud, Consumer Goods Cloud, Education Cloud, Nonprofit Cloud, Salesforce Platform, MuleSoft Integration Cloud.
+Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Revenue Cloud, Marketing Cloud, Commerce Cloud, Data Cloud, Health Cloud, CRM Analytics, Field Service, Manufacturing Cloud, Consumer Goods Cloud, Education Cloud, Nonprofit Cloud / NPSP, EDA, OmniStudio (OmniScripts, FlexCards), Salesforce CPQ, Agentforce, Salesforce Platform, MuleSoft Integration Cloud.
 Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
-Flow and Flow Builder, approval processes, validation rules, workflow automation.
-Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
-MuleSoft and Anypoint, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
-Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance, data architecture.
-Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
+Flow and Flow Builder, approval processes, validation rules, workflow automation, Case Management, guided advising and early-alert automation.
+Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS, Section 508 accessibility patterns in FISMA/FedRAMP-authorized environments.
+MuleSoft and Anypoint, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns, API-led integrations.
+Data modelling, Data Loader, ETL processes, migration, mapping, deduplication, validation, reconciliation, data governance, data architecture, Data Cloud data streams, identity resolution, unified profiles.
+Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance, automated deployment pipelines, federal change-management and security review processes.
 Reports, dashboards, CRM Analytics, UAT, production support, code reviews.
 Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
 Platform administration, configuration, security model, and Salesforce fundamentals.
@@ -177,12 +177,34 @@ Full stack web development fundamentals from professional certificate coursework
 
 EXPERIENCE
 Attain Partners — Senior Salesforce Specialist | McLean, Virginia, United States | Remote | Nov 2021 - Present
+Delivering Education Cloud and NPSP solutions for higher-ed and nonprofit clients at a Salesforce Summit Partner and 2022 Salesforce Education Partner of the Year.
+Led end-to-end Education Cloud implementations for 5 higher-ed institutions using EDA, Flow, OmniStudio (OmniScripts, FlexCards), and scalable data modeling, supporting 30,000+ student records per org.
+Designed and delivered a student success solution with guided advising intake, queues, and early-alert automation for higher-ed advising teams using Case Management, record-triggered Flows, LWC, and OmniStudio guided experiences, driving adoption by 200+ advisors and reducing manual case triage time by 35%.
+Executed large-scale data migrations of 1M+ records across multiple client orgs using Data Loader, ETL processes, and custom deduplication/validation frameworks, achieving 98%+ post-migration data integrity.
+Built a research administration platform for proposal intake, award tracking, and compliance workflows for university research offices using custom objects, Flow, approval processes, and MuleSoft API-led integrations, consolidating 4 legacy systems into a single platform.
+Architected unified student data foundations for AI and analytics initiatives across client engagements using Salesforce Data Cloud (data streams, identity resolution, unified profiles) and Agentforce readiness assessments, positioning orgs for AI-driven engagement and reporting.
+Established CI/CD and release management practices across a managed-services portfolio of 8 concurrent orgs using Salesforce DX, Git-based source control, and automated deployment pipelines, resolving 30+ enhancement requests monthly while reducing deployment errors and technical debt.
+
 Alethix LLC (An IntelliBridge Company) — Salesforce Developer | Washington, District of Columbia, United States | Nov 2020 - Oct 2021
+Built a mission-critical civil rights case management application for USDA's Office of the Assistant Secretary for Civil Rights (OASCR).
+Designed and developed a custom Civil Rights Management System (CRMS) for complaint intake, case processing, and resolution workflows for USDA's Office of the Assistant Secretary for Civil Rights using Apex, Lightning Web Components, and Flow, serving constituents nationwide.
+Delivered end-to-end case lifecycle functionality — dynamic intake forms, case routing, status tracking, and reporting — across 4 federal program areas, replacing manual and legacy processes.
+Developed secure, accessible case management applications in a FISMA/FedRAMP-authorized environment using Apex and LWC built to Section 508 standards, supporting 100+ agency users processing 3,000+ cases annually and cutting average processing touch-time by 30%.
+
 ICF — Senior Salesforce Developer | Fairfax, Virginia, United States | Jan 2020 - Nov 2020
+Built and managed the agency Salesforce platform for the FDA Digital Services Center during the COVID-19 public health emergency using custom applications, automation, and API integrations, supporting 300+ users across multiple offices.
+Shipped 15 releases and enhancements within federal change-management and security review processes using full-lifecycle development practices, sustaining platform reliability during peak operational pressure.
+
 Federal Data Systems — Salesforce Developer/Administrator | Columbia, Maryland, United States | Jun 2019 - Jan 2020
+Owned end-to-end org administration and development for a federal IT provider's corporate Salesforce org using Flow automation, custom Apex, and security administration, supporting 75 users.
+Streamlined quote-to-contract and sales tracking processes across business development teams using Salesforce CPQ (product catalog, price rules, quote generation), automation, and custom objects, reducing manual data entry by 25% and accelerating quote turnaround.
+
 Common App — Technical Analyst (Contract) | Arlington, Virginia, United States | Feb 2019 - Jun 2019
+Provided technical analysis and data operations support for an organization processing college applications for 1,000+ member institutions using requirements gathering and systems documentation, sustaining operations through peak application season.
+
 National Apartment Association — Salesforce Database Administrator | Arlington, Virginia, United States | Sep 2017 - Feb 2019
-Alethix LLC, ICF, Federal Data Systems, Common App, and National Apartment Association have no recorded work mode.
+Administered the Salesforce membership database for a national trade association of 80,000+ member firms using reporting, data quality tooling, and user management, supporting 75 internal users.
+Established enterprise data hygiene and deduplication practices across 100K+ member records using validation and dedup frameworks, laying the foundation later formalized in the Data Architect certification.
 
 EDUCATION
 The George Washington University | Certificate of Professional Studies, Full Stack Web Development | Washington, District of Columbia, United States | 2017 - 2018
