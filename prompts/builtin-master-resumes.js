@@ -495,3 +495,41 @@ University of Illinois Urbana-Champaign | Bachelor of Computer Science | Champai
 
 CERTIFICATIONS
 None.`;
+
+export const SHIRA_LEFF_MASTER = `Shira Leff
+Staff Data Engineer | Global Data & AI Engineer
+Lakewood, New Jersey, United States | +1 (516) 253-4775 | ishiraleff96261@outlook.com
+https://www.linkedin.com/in/shira-shkarofsky
+
+SUMMARY
+9+ years of overall technology experience, including 9+ years delivering data engineering, ETL/ELT, cloud data platforms, and analytics for enterprise software, e-commerce, consulting, and nonprofit teams.
+
+SKILLS
+Python, SQL, Java, Scala; Apache Spark, Apache Airflow, Hive, ETL/ELT, data modeling, data warehousing, data lakes, big data, streaming and batch processing, pipelines; Snowflake, Amazon Redshift, MySQL, relational databases; Microsoft Azure, Azure Databricks, AWS (S3, EC2, EMR, Lambda, Redshift), serverless computing; Domo, Datorama, business intelligence, data analysis; REST APIs, Bitbucket, WordPress, front-end and web development; Docker, CI/CD; consulting, communication, teamwork, leadership.
+
+EXPERIENCE
+HCLSoftware — Staff Data Engineer | New Jersey, United States | Remote | Oct 2023 - Present
+Enterprise software division of HCLTech focused on data and analytics, AI, cybersecurity, and digital experience. Data architecture and engineering on Microsoft Azure, Azure Databricks, Apache Spark, and Python for product and customer data platforms.
+
+Amazon — Data Engineer II | New York City Metropolitan Area, United States | Sep 2020 - Oct 2023
+Global technology and commerce company. Data engineering with Java, Scala, Apache Airflow, and AWS across large-scale retail, logistics, and cloud data workloads.
+
+Search Discovery (now Further) — Senior Associate / Associate, Data Engineer | Atlanta Metropolitan Area, United States | Aug 2017 - Sep 2020
+Data, cloud, analytics, and AI consultancy (rebranded as Further). Associate, Data Engineer (Aug 2017 - Dec 2019), then Senior Associate (Jan 2020 - Sep 2020). SQL, Python, data modeling, ETL, Redshift, BI, Domo, and Datorama for enterprise clients.
+
+Atlanta Kashruth Commission (AKC) — Webmaster (Independent Professional) | Atlanta Metropolitan Area, United States | Jul 2017 - Jul 2019
+Nonprofit kosher certification organization. Web development and site maintenance for certification and community information properties.
+
+EDUCATION
+Middle Georgia State University | Bachelor's in Information Technology, Concentration in Software Development | 2015 - 2017
+
+CERTIFICATIONS
+- Amazon Web Services Data Analytics Specialty
+- SnowPro Core Certification (Snowflake)
+- Amazon Web Services Big Data Specialty
+- Amazon Web Services Cloud Practitioner
+- Datorama Certified Consultant
+- Domo Certified Consultant
+- Data Science Foundations: Fundamentals (Lynda.com)
+- Teaching Certificate — Beth Jacob of Jerusalem Teachers Seminary
+`;

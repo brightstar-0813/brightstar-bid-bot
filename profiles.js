@@ -12,6 +12,7 @@ import {
   RAQUEL_OLIVEIRA_DE_MASTER,
   RAQUEL_OLIVEIRA_SF_MASTER,
   SANDEEP_MAHANKALI_MASTER,
+  SHIRA_LEFF_MASTER,
   VICTOR_HOLANDA_DE_MASTER,
   VICTOR_HOLANDA_SF_MASTER
 } from "./prompts/builtin-master-resumes.js";
@@ -596,6 +597,45 @@ export const BUILTIN_PROFILES = [
       "Unimed Recife",
       "Granular",
       "Wolfram"
+    ]
+  },
+  {
+    id: "shira-leff",
+    label: "Shira Leff",
+    roleTrack: "de",
+    promptTemplate: "",
+    templateId: "ats-modern",
+    resumeFilePrefix: "Leff_Resume",
+    sheetTabName: "Shira-DE",
+    outputDir: "Shira-DE",
+    builtin: true,
+    kind: "resume",
+    name: "Shira Leff",
+    email: "ishiraleff96261@outlook.com",
+    phone: "+1 (516) 253-4775",
+    linkedin: "https://www.linkedin.com/in/shira-shkarofsky",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Lakewood, New Jersey, United States",
+    address: "168 Ridge Ave",
+    zip: "08701",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
+    signatureTitle: "Staff Data Engineer | Global Data & AI Engineer",
+    masterResume: SHIRA_LEFF_MASTER,
+    coverLetterPrompt: coverLetterDePrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "HCLSoftware",
+      "Amazon",
+      "Search Discovery",
+      "Atlanta Kashruth Commission"
     ]
   },
   {
