@@ -360,6 +360,7 @@ export function resolveRoleTrackForPerson(person) {
     id === "sandeep-mahankali" ||
     id === "michael-ibea" ||
     id === "carlos-capulong" ||
+    id === "avash-chapagain" ||
     id === "raquel-oliveira" ||
     id === "jessel-tampus"
   ) {

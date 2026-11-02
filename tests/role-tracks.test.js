@@ -73,6 +73,7 @@ test("isRoleTrackLockedForPerson locks built-ins and saved customs", () => {
 test("resolveRoleTrackForPerson infers sf for built-in Salesforce profiles", () => {
   assert.equal(resolveRoleTrackForPerson({ id: "dmario-lewis" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ id: "sandeep-mahankali" }), "sf");
+  assert.equal(resolveRoleTrackForPerson({ id: "avash-chapagain" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ id: "raquel-oliveira" }), "sf");
   assert.equal(resolveRoleTrackForPerson({ roleTrack: "de" }), "de");
 });
@@ -118,6 +119,7 @@ test("profile menu label puts the track acronym beside the name", () => {
   const byId = (id) => BUILTIN_PROFILES.find((p) => p.id === id);
   assert.equal(profileMenuLabel(byId("dmario-lewis")), "D'Mario Lewis (SF)");
   assert.equal(profileMenuLabel(byId("sandeep-mahankali")), "Sandeep Mahankali (SF)");
+  assert.equal(profileMenuLabel(byId("avash-chapagain")), "Avash Chapagain (SF)");
   assert.equal(profileMenuLabel(byId("raquel-oliveira")), "Raquel Silva (SF)");
   assert.equal(profileMenuLabel(byId("raquel-oliveira-de")), "Raquel Silva De Oliveira (DE)");
   assert.equal(profileMenuLabel(byId("jessel-tampus-de")), "Jessel Tampus (DE)");

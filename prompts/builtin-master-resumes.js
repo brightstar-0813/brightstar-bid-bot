@@ -154,6 +154,47 @@ National University of Singapore (NUS) | Bachelor of Computing in Computer Scien
 CERTIFICATIONS
 None.`;
 
+export const AVASH_CHAPAGAIN_MASTER = `Avash Chapagain
+Senior Salesforce Engineer | Administrator | Certified Data Architect
+Falls Church, VA, United States | +1 (703) 705-2182 | avash.chapagain0219@outlook.com
+https://www.linkedin.com/in/avash-chapagain
+
+SUMMARY
+9+ years of overall technology experience, including 9+ years delivering Salesforce solutions across education, nonprofit, healthcare, state and local government consulting, federal IT modernization, higher education admissions, and rental housing industry associations.
+
+SKILLS
+Salesforce clouds and products: Sales Cloud, Service Cloud, Experience Cloud, Revenue Cloud, Marketing Cloud, Commerce Cloud, Data Cloud, Health Cloud, CRM Analytics, Field Service, Manufacturing Cloud, Consumer Goods Cloud, Education Cloud, Nonprofit Cloud, Salesforce Platform, MuleSoft Integration Cloud.
+Apex, trigger frameworks, Visualforce, Aura and Lightning Web Components, SOQL/SOSL, custom objects and metadata, Batch/Queueable/Scheduled Apex.
+Flow and Flow Builder, approval processes, validation rules, workflow automation.
+Profiles, roles, permission sets, permission set groups, sharing rules, OWD, field-level security, CRUD/FLS.
+MuleSoft and Anypoint, REST/SOAP integrations, Apex callouts, Named Credentials, OAuth, JSON, Platform Events, enterprise integration patterns.
+Data modelling, Data Loader, migration, mapping, deduplication, validation, reconciliation, data governance, data architecture.
+Git-based CI/CD, Salesforce DX, Salesforce CLI, sandbox strategy, Change Sets, release governance.
+Reports, dashboards, CRM Analytics, UAT, production support, code reviews.
+Solution and platform architecture, data model design, stakeholder workshops, requirements analysis, technical documentation, Agile/Scrum.
+Platform administration, configuration, security model, and Salesforce fundamentals.
+Full stack web development fundamentals from professional certificate coursework.
+
+EXPERIENCE
+Attain Partners — Senior Salesforce Specialist | McLean, Virginia, United States | Remote | Nov 2021 - Present
+Alethix LLC (An IntelliBridge Company) — Salesforce Developer | Washington, District of Columbia, United States | Nov 2020 - Oct 2021
+ICF — Senior Salesforce Developer | Fairfax, Virginia, United States | Jan 2020 - Nov 2020
+Federal Data Systems — Salesforce Developer/Administrator | Columbia, Maryland, United States | Jun 2019 - Jan 2020
+Common App — Technical Analyst (Contract) | Arlington, Virginia, United States | Feb 2019 - Jun 2019
+National Apartment Association — Salesforce Database Administrator | Arlington, Virginia, United States | Sep 2017 - Feb 2019
+Alethix LLC, ICF, Federal Data Systems, Common App, and National Apartment Association have no recorded work mode.
+
+EDUCATION
+The George Washington University | Certificate of Professional Studies, Full Stack Web Development | Washington, District of Columbia, United States | 2017 - 2018
+Virginia Commonwealth University | Bachelor of Science (BS), Computer Science | Richmond, Virginia, United States | 2013 - 2017
+
+CERTIFICATIONS
+- Salesforce Certified Data Architect
+- Salesforce Certified AI Specialist
+- Salesforce Certified Platform Developer I
+- Salesforce Certified Administrator
+- Salesforce Certified Nonprofit Cloud Consultant`;
+
 export const RAQUEL_OLIVEIRA_SF_MASTER = `Raquel Silva De Oliveira
 Senior Salesforce Engineer / Salesforce Architect
 Jaboatão dos Guararapes, Pernambuco, Brazil | +55 81 92007-8168 | iraquelsilva95@gmail.com

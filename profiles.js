@@ -1,5 +1,6 @@
 import { PROMPT as coverLetterPrompt } from "./prompts/cover-letter.js";
 import {
+  AVASH_CHAPAGAIN_MASTER,
   CARLOS_CAPULONG_MASTER,
   DMARIO_LEWIS_MASTER,
   DAVID_OLIVEIRA_DE_MASTER,
@@ -240,6 +241,47 @@ export const BUILTIN_PROFILES = [
       "Third Pillar",
       "Pointwest Squad Inc",
       "Deloitte"
+    ]
+  },
+  {
+    id: "avash-chapagain",
+    label: "Avash Chapagain",
+    roleTrack: "sf",
+    promptTemplate: "",
+    templateId: "ats-modern",
+    resumeFilePrefix: "Chapagain_Resume",
+    sheetTabName: "Avash-SF",
+    outputDir: "Avash-SF",
+    builtin: true,
+    kind: "resume",
+    name: "Avash Chapagain",
+    email: "avash.chapagain0219@outlook.com",
+    phone: "+1 (703) 705-2182",
+    linkedin: "https://www.linkedin.com/in/avash-chapagain",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Falls Church, VA, United States",
+    address: "6707 Westcott Road",
+    zip: "22042",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
+    signatureTitle: "Senior Salesforce Engineer | Administrator | Certified Data Architect",
+    masterResume: AVASH_CHAPAGAIN_MASTER,
+    coverLetterPrompt: coverLetterPrompt,
+    autofillExtras: {},
+    requiredExperience: [
+      "Attain Partners",
+      "Alethix LLC",
+      "ICF",
+      "Federal Data Systems",
+      "Common App",
+      "National Apartment Association"
     ]
   },
   {
