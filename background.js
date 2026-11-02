@@ -91,7 +91,12 @@ import {
   getOpenAiDocsSettings,
   isOpenAiDocsEnabled
 } from "./openai-docs.js";
-import { cleanCustomQaAnswer, extractFreshCustomQaAnswer, buildCustomQaJobKey } from "./ai-answers.js";
+import {
+  cleanCustomQaAnswer,
+  extractFreshCustomQaAnswer,
+  buildCustomQaJobKey,
+  enforceMasterCertifications
+} from "./ai-answers.js";
 import {
   resumeJsonToHtml,
   extractResumeJson,
@@ -1828,7 +1833,8 @@ async function recordEmailBidSheetApplied(jobMeta = {}) {
 async function persistActiveResumeJson(resumeData, extra = {}) {
   if (!resumeData || typeof resumeData !== "object") return;
   const person = await getActivePerson().catch(() => null);
-  await setStoredResumeJson(resumeData, person?.id || "");
+  const locked = enforceMasterCertifications(resumeData, person?.masterResume || "");
+  await setStoredResumeJson(locked, person?.id || "");
   const keys = Object.keys(extra || {});
   if (keys.length) await chrome.storage.local.set(extra);
 }
@@ -3552,6 +3558,7 @@ async function finalizeResumeData(resumeData) {
   let data = sanitizeResumeData(resumeData) || resumeData;
   if (!data || typeof data !== "object") return data;
   try {
+    const person = await getActivePerson().catch(() => null);
     const contact = await getAutofillContact();
     // Always prefer saved person contact when present — AI often invents stale phones.
     data = {
@@ -3562,6 +3569,8 @@ async function finalizeResumeData(resumeData) {
       linkedin: contact.linkedin || data.linkedin,
       location: contact.location || data.location
     };
+    // Master certification list is locked — AI often drops or subsets it.
+    data = enforceMasterCertifications(data, person?.masterResume || "");
   } catch {
     // keep sanitized data
   }

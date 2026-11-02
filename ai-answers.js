@@ -47,28 +47,73 @@ export function parseCertificationList(value) {
     .filter((row) => row.length >= 8);
 }
 
+const CERT_CREDENTIAL_RE =
+  /\b(certified|architect|administrator|developer|consultant|builder|designer|associate|professional|specialist)\b/i;
+
+function cleanCertificationLine(line) {
+  return String(line || "")
+    .replace(/^\s*[-•*\d.)]+\s*/, "")
+    .replace(/\s*[|].*$/, "")
+    .replace(/[",]+$/g, "")
+    .trim();
+}
+
+function looksLikeCertificationLine(line) {
+  const row = cleanCertificationLine(line);
+  if (row.length < 8) return false;
+  if (/^(none|no)\b/i.test(row)) return false;
+  return CERT_CREDENTIAL_RE.test(row);
+}
+
 /** Pull credential names out of a master resume or prompt blob. */
 export function certificationsFromText(text) {
   const raw = String(text || "");
   if (!raw) return [];
+
+  // Prefer an explicit CERTIFICATIONS section (master resumes + pasted text).
+  const section = raw.match(
+    /(?:^|\n)\s*(?:SALESFORCE\s+)?CERTIFICATIONS?\s*\r?\n([\s\S]*?)(?=\r?\n\s*(?:EDUCATION|EXPERIENCE|SKILLS|SUMMARY|PROFESSIONAL|TECHNICAL|PROJECTS|LICENSES)\b|\r?\n\s*$|$)/i
+  );
+  if (section) {
+    const fromSection = section[1]
+      .split(/\r?\n/)
+      .map((line) => cleanCertificationLine(line))
+      .filter((row) => looksLikeCertificationLine(row));
+    if (fromSection.length) return fromSection;
+  }
+
   const jsonBlock = raw.match(/"certifications"\s*:\s*\[([\s\S]*?)\]/);
   if (jsonBlock) {
     const fromJson = [...jsonBlock[1].matchAll(/"([^"]+)"/g)]
       .map((m) => m[1].trim())
-      .filter((row) => /\b(certified|architect|administrator|developer|consultant|builder)\b/i.test(row));
+      .filter((row) => CERT_CREDENTIAL_RE.test(row));
     if (fromJson.length) return fromJson;
   }
   const found = [];
   const re =
-    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft)[^\n]{6,140}?(?:Certified|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional)[^\n]{0,60})/gi;
+    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft)[^\n]{1,140}?(?:Certified|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional|Specialist)[^\n]{0,60})/gi;
   let match;
   while ((match = re.exec(raw))) {
-    const row = String(match[1] || "")
-      .replace(/[",]+$/g, "")
-      .trim();
-    if (row) found.push(row);
+    const row = cleanCertificationLine(match[1]);
+    if (row && looksLikeCertificationLine(row)) found.push(row);
   }
   return found;
+}
+
+/**
+ * Master resume certifications are authoritative. When the master lists any,
+ * replace the AI certifications array so JD tailoring cannot drop or invent them.
+ */
+export function enforceMasterCertifications(data, masterSource) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  let masterCerts = [];
+  if (Array.isArray(masterSource)) {
+    masterCerts = parseCertificationList(masterSource);
+  } else if (typeof masterSource === "string" && masterSource.trim()) {
+    masterCerts = certificationsFromText(masterSource);
+  }
+  if (!masterCerts.length) return data;
+  return { ...data, certifications: masterCerts };
 }
 
 export function isCertificationQuestion(label) {

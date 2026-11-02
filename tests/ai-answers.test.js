@@ -7,20 +7,54 @@ import {
   buildCustomQaAgentPrompt,
   buildCustomQaFollowUpPrompt,
   buildCustomQaJobKey,
+  certificationsFromText,
   cleanCustomQaAnswer,
   compactApplicantContext,
   buildCustomQaPayload,
+  enforceMasterCertifications,
   extractFreshCustomQaAnswer,
   isCertificationQuestion,
   normalizeSkillList,
   normalizeRecentRoles
 } from "../ai-answers.js";
+import { AVASH_CHAPAGAIN_MASTER } from "../prompts/builtin-master-resumes.js";
 
 const CERTS = [
   "Salesforce Certified Administrator",
   "Salesforce Certified Application Architect",
   "Salesforce Certified Platform App Builder"
 ];
+
+test("certificationsFromText reads every Avash master credential including AI Specialist", () => {
+  const certs = certificationsFromText(AVASH_CHAPAGAIN_MASTER);
+  assert.equal(certs.length, 5);
+  assert.match(certs[0], /Data Architect/i);
+  assert.match(certs[1], /AI Specialist/i);
+  assert.match(certs[2], /Platform Developer I/i);
+  assert.match(certs[3], /Administrator/i);
+  assert.match(certs[4], /Nonprofit Cloud Consultant/i);
+});
+
+test("enforceMasterCertifications replaces a truncated AI cert list", () => {
+  const out = enforceMasterCertifications(
+    {
+      name: "Avash Chapagain",
+      certifications: ["Salesforce Certified Data Architect", "Salesforce Certified AI Specialist"]
+    },
+    AVASH_CHAPAGAIN_MASTER
+  );
+  assert.equal(out.certifications.length, 5);
+  assert.match(out.certifications[4], /Nonprofit Cloud Consultant/i);
+});
+
+test("enforceMasterCertifications leaves AI certs alone when master has none", () => {
+  const original = ["Made Up Cert"];
+  const out = enforceMasterCertifications(
+    { name: "Nobody", certifications: original },
+    "CERTIFICATIONS\nNone."
+  );
+  assert.deepEqual(out.certifications, original);
+});
 
 test("answerCertificationQuestion returns Yes/No from profile certs", () => {
   assert.equal(
