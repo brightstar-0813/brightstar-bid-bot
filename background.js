@@ -10411,10 +10411,14 @@ async function scrapeActiveJobTab() {
   }
 
   let isDice = false;
+  let isLinkedIn = false;
   try {
-    isDice = /(^|\.)dice\.com$/i.test(new URL(url).hostname);
+    const host = new URL(url).hostname;
+    isDice = /(^|\.)dice\.com$/i.test(host);
+    isLinkedIn = /(^|\.)linkedin\.com$/i.test(host);
   } catch {
     isDice = false;
+    isLinkedIn = false;
   }
 
   const isThinJd = (text) => {
@@ -10437,9 +10441,9 @@ async function scrapeActiveJobTab() {
 
   let result = null;
   let lastErr = "";
-  const attempts = isDice ? 4 : 3;
+  const attempts = isDice || isLinkedIn ? 4 : 3;
   for (let i = 0; i < attempts; i++) {
-    await sleep(i === 0 ? 250 : isDice ? 900 : 600);
+    await sleep(i === 0 ? 250 : isDice || isLinkedIn ? 900 : 600);
     try {
       result = await chrome.tabs.sendMessage(tab.id, { type: "scrape_job_page" });
     } catch (err) {
@@ -10462,8 +10466,8 @@ async function scrapeActiveJobTab() {
   if (!result?.ok || !result.jobData) {
     throw new Error(
       lastErr
-        ? `Could not scrape this tab (${lastErr}). Open a Greenhouse, Workday, Indeed, Dice, Jobright, or similar job page.`
-        : "No job details found on this page. Open a supported job listing, or paste the JD manually."
+        ? `Could not scrape this tab (${lastErr}). Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, Jobright, or similar job page.`
+        : "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, or similar job listing, or paste the JD manually."
     );
   }
   const d = result.jobData || {};
@@ -10479,9 +10483,23 @@ async function scrapeActiveJobTab() {
       /* keep scraped link */
     }
   }
+  if (isLinkedIn) {
+    try {
+      const u = new URL(url);
+      const currentJobId =
+        u.searchParams.get("currentJobId") ||
+        u.pathname.match(/\/jobs\/view\/(\d+)/i)?.[1] ||
+        "";
+      if (/^\d{6,}$/.test(currentJobId)) {
+        jdLink = `https://www.linkedin.com/jobs/view/${currentJobId}`;
+      }
+    } catch {
+      /* keep scraped link */
+    }
+  }
   if (!jdText && !jobTitle) {
     throw new Error(
-      "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, or similar job listing."
+      "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, or similar job listing."
     );
   }
   return {

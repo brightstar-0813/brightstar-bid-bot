@@ -10351,12 +10351,530 @@
     return data && (data.jobTitle || data.jdText) ? data : null;
   }
 
+  /**
+   * LinkedIn jobs scrape (classic /jobs/view + search split-pane + AI Search).
+   * Prefer the right-hand detail pane — never the left results list alone.
+   * Skip AI match / BETA summary cards so they are not treated as the JD body.
+   */
+  function linkedInJunkTitle(title) {
+    const t = String(title || "").trim();
+    if (!t || t.length < 3) return true;
+    if (/\d+\s+jobs?\s+in\b/i.test(t)) return true;
+    return /^(jobs?|search|results?|linkedin|filter|sign\s*in|log\s*in|home|feed|notifications?)\b/i.test(
+      t
+    );
+  }
+
+  function linkedInIdFromUrl(url = location.href) {
+    try {
+      const u = new URL(String(url || location.href), location.origin);
+      const fromQuery =
+        u.searchParams.get("currentJobId") ||
+        u.searchParams.get("jobId") ||
+        u.searchParams.get("trkJobId") ||
+        "";
+      if (/^\d{6,}$/.test(fromQuery)) return fromQuery;
+      const path =
+        u.pathname.match(/\/jobs\/view\/(\d+)/i)?.[1] ||
+        u.pathname.match(/\/jobs\/collections\/[^/]+\/(\d+)/i)?.[1] ||
+        "";
+      if (path) return path;
+      const trailing = String(url || "").match(/[?&]currentJobId=(\d{6,})/i)?.[1];
+      return trailing || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function linkedInIdFromUrn(value) {
+    const m = String(value || "").match(/urn:li:jobPosting:(\d+)/i);
+    return m ? m[1] : "";
+  }
+
+  function linkedInCanonicalLink(jobId) {
+    if (jobId) return `https://www.linkedin.com/jobs/view/${jobId}`;
+    try {
+      if (/\/jobs\/view\//i.test(location.pathname)) {
+        const u = new URL(location.href);
+        u.hash = "";
+        // Keep only the path id — drop search chrome query noise.
+        const id = linkedInIdFromUrl(u.toString());
+        if (id) return `https://www.linkedin.com/jobs/view/${id}`;
+        u.search = "";
+        return u.toString();
+      }
+    } catch {
+      /* ignore */
+    }
+    return canonicalPageUrl();
+  }
+
+  function linkedInIsAiMatchNoise(el) {
+    // null ancestor from closest() means "not inside an AI card" — not noise.
+    if (!el) return false;
+    const cls = String(el.className || "").toLowerCase();
+    const label = `${el.getAttribute?.("aria-label") || ""} ${el.getAttribute?.("data-test-id") || ""}`.toLowerCase();
+    // Keep class checks specific — bare "match"/"premium" false-positives kill real JDs.
+    if (
+      /(jobs-ai|ai-search|job-match|match-card|hiring-assistant|profile-match|ai-match)/i.test(
+        `${cls} ${label}`
+      )
+    ) {
+      return true;
+    }
+    const preview = String(el.innerText || el.textContent || "")
+      .trim()
+      .slice(0, 220)
+      .toLowerCase();
+    return (
+      /show match details/.test(preview) ||
+      /your profile and resume match/.test(preview) ||
+      /how ai search works/.test(preview) ||
+      (/^\s*beta\b/.test(preview) && /match/.test(preview))
+    );
+  }
+
+  function linkedInDetailRoot(doc = document) {
+    const selectors = [
+      ".jobs-search__job-details--container",
+      ".jobs-details",
+      ".scaffold-layout__detail",
+      ".jobs-search__job-details",
+      '[class*="jobs-search__job-details"]',
+      '[class*="job-details-jobs-unified-top-card"]',
+      ".jobs-details__main-content",
+      "#job-details",
+      '[data-job-id]',
+      "main",
+      '[role="main"]'
+    ];
+    const candidates = [];
+    for (const sel of selectors) {
+      try {
+        candidates.push(...doc.querySelectorAll(sel));
+      } catch {
+        /* invalid selector */
+      }
+    }
+    const scored = [];
+    for (const el of candidates) {
+      if (!el || scored.includes(el)) continue;
+      const hasJd = Boolean(
+        el.querySelector?.(
+          [
+            "#job-details",
+            ".jobs-description",
+            ".jobs-description__content",
+            ".jobs-box__html-content",
+            ".show-more-less-html__markup",
+            ".jobs-description-content__text",
+            ".description__text",
+            '[class*="jobs-description"]'
+          ].join(", ")
+        )
+      );
+      const hasTitle = Boolean(
+        el.querySelector?.(
+          [
+            ".job-details-jobs-unified-top-card__job-title",
+            ".jobs-unified-top-card__job-title",
+            ".top-card-layout__title",
+            "h1",
+            "h2"
+          ].join(", ")
+        )
+      );
+      if (!hasJd && !hasTitle) continue;
+      scored.push(el);
+      if (hasJd && hasTitle) return el;
+    }
+    for (const el of scored) {
+      if (
+        el.querySelector?.(
+          "#job-details, .jobs-description, .show-more-less-html__markup, .jobs-box__html-content"
+        )
+      ) {
+        return el;
+      }
+    }
+    return scored[0] || doc.body || doc;
+  }
+
+  function linkedInExpandDescription(root) {
+    if (!root?.querySelectorAll) return false;
+    const buttons = Array.from(
+      root.querySelectorAll(
+        [
+          ".jobs-description__footer button",
+          ".jobs-description button",
+          "#job-details ~ button",
+          "button.show-more-less-html__button--more",
+          "button[aria-expanded='false']",
+          "button[aria-label*='more']",
+          "button[aria-label*='More']",
+          "button[aria-label*='See more']",
+          "button[aria-label*='Show more']"
+        ].join(", ")
+      )
+    );
+    for (const btn of buttons) {
+      const label = `${elementText(btn)} ${btn.getAttribute("aria-label") || ""}`.toLowerCase();
+      if (
+        !/(see more|show more|see full|expand|more about)/i.test(label) &&
+        btn.getAttribute("aria-expanded") !== "false"
+      ) {
+        continue;
+      }
+      if (/see less|show less|collapse/i.test(label)) continue;
+      try {
+        btn.click();
+        return true;
+      } catch {
+        /* ignore */
+      }
+    }
+    return false;
+  }
+
+  function linkedInIdFromDom(doc = document) {
+    const fromUrl = linkedInIdFromUrl(doc.defaultView?.location?.href || location.href);
+    if (fromUrl) return fromUrl;
+
+    const root = linkedInDetailRoot(doc);
+    const attrSelectors = [
+      "[data-job-id]",
+      "[data-occludable-job-id]",
+      "[data-entity-urn*='jobPosting']",
+      "[data-urn*='jobPosting']"
+    ];
+    for (const sel of attrSelectors) {
+      for (const el of root.querySelectorAll(sel)) {
+        const id =
+          el.getAttribute("data-job-id") ||
+          el.getAttribute("data-occludable-job-id") ||
+          linkedInIdFromUrn(el.getAttribute("data-entity-urn")) ||
+          linkedInIdFromUrn(el.getAttribute("data-urn")) ||
+          "";
+        if (/^\d{6,}$/.test(id)) return id;
+      }
+    }
+
+    const selectedCard =
+      doc.querySelector(
+        '.jobs-search-results-list [aria-current="page"], .jobs-search-results-list .job-card-list--selected, .jobs-search-results__list-item--active, .scaffold-layout__list [aria-current="true"], li.jobs-search-results__list-item--active'
+      ) || null;
+    if (selectedCard) {
+      const id =
+        selectedCard.getAttribute("data-job-id") ||
+        selectedCard.getAttribute("data-occludable-job-id") ||
+        linkedInIdFromUrn(selectedCard.getAttribute("data-entity-urn")) ||
+        linkedInIdFromUrn(
+          selectedCard.querySelector?.("[data-entity-urn]")?.getAttribute("data-entity-urn")
+        ) ||
+        linkedInIdFromUrl(
+          selectedCard.querySelector?.('a[href*="/jobs/view/"]')?.getAttribute("href") || ""
+        );
+      if (/^\d{6,}$/.test(id)) return id;
+    }
+
+    const href =
+      root.querySelector('a[href*="/jobs/view/"]')?.getAttribute("href") ||
+      doc.querySelector('link[rel="canonical"]')?.getAttribute("href") ||
+      "";
+    return linkedInIdFromUrl(href);
+  }
+
+  function linkedInCompanyFromDom(root) {
+    const selectors = [
+      ".job-details-jobs-unified-top-card__company-name a",
+      ".job-details-jobs-unified-top-card__company-name",
+      ".jobs-unified-top-card__company-name a",
+      ".jobs-unified-top-card__company-name",
+      ".topcard__org-name-link",
+      ".top-card-layout__card a[href*='/company/']",
+      ".job-details-jobs-unified-top-card__primary-description-container a[href*='/company/']",
+      "a.topcard__org-name-link",
+      'a[data-tracking-control-name*="topcard-org-name"]',
+      'a[href*="/company/"]'
+    ];
+    for (const sel of selectors) {
+      for (const el of root.querySelectorAll(sel)) {
+        const t = elementText(el);
+        if (!t || t.length > 120) continue;
+        if (/^(view|see|follow|about|jobs?|people|home)\b/i.test(t)) continue;
+        if (/linkedin\.com\/company\//i.test(t)) continue;
+        return t;
+      }
+    }
+    return "";
+  }
+
+  function linkedInTitleFromDom(root) {
+    const selectors = [
+      ".job-details-jobs-unified-top-card__job-title a",
+      ".job-details-jobs-unified-top-card__job-title h1",
+      ".job-details-jobs-unified-top-card__job-title",
+      ".jobs-unified-top-card__job-title a",
+      ".jobs-unified-top-card__job-title h1",
+      ".jobs-unified-top-card__job-title",
+      ".top-card-layout__title",
+      ".topcard__title",
+      "h1.t-24",
+      "h1.job-title",
+      "h1"
+    ];
+    for (const sel of selectors) {
+      const el = root.querySelector(sel);
+      const t = elementText(el);
+      if (t && !linkedInJunkTitle(t)) return t;
+    }
+    // Some AI layouts put the active title only on the selected list card.
+    const ownerDoc = root.ownerDocument || document;
+    const selected =
+      ownerDoc.querySelector(
+        '.jobs-search-results-list [aria-current="page"] a strong, .jobs-search-results-list .job-card-list--selected a strong, .jobs-search-results__list-item--active a strong, .scaffold-layout__list [aria-current="true"] strong'
+      ) || null;
+    const selectedTitle = elementText(selected);
+    if (selectedTitle && !linkedInJunkTitle(selectedTitle)) return selectedTitle;
+    return "";
+  }
+
+  function linkedInLocationFromDom(root) {
+    const selectors = [
+      ".job-details-jobs-unified-top-card__bullet",
+      ".job-details-jobs-unified-top-card__tertiary-description-container",
+      ".jobs-unified-top-card__bullet",
+      ".topcard__flavor--bullet",
+      ".job-details-jobs-unified-top-card__primary-description-container",
+      '[class*="top-card"] [class*="bullet"]'
+    ];
+    for (const sel of selectors) {
+      for (const el of root.querySelectorAll(sel)) {
+        const t = elementText(el);
+        if (!t || t.length > 120) continue;
+        if (/^(remote|hybrid|on-?site)\b/i.test(t)) return t;
+        if (/,/.test(t) || /\b(remote|hybrid|united|states|brazil|canada|uk|india)\b/i.test(t)) {
+          return t;
+        }
+      }
+    }
+    return "";
+  }
+
+  function linkedInDescriptionFromDom(root) {
+    const selectors = [
+      "#job-details",
+      ".jobs-description__content",
+      ".jobs-box__html-content",
+      ".jobs-description-content__text--stretch",
+      ".jobs-description-content__text",
+      ".show-more-less-html__markup",
+      ".description__text",
+      ".jobs-description",
+      '[class*="jobs-description__content"]',
+      '[class*="jobs-box__html-content"]'
+    ];
+    let best = "";
+    for (const sel of selectors) {
+      let nodes;
+      try {
+        nodes = root.querySelectorAll(sel);
+      } catch {
+        continue;
+      }
+      for (const el of nodes) {
+        if (linkedInIsAiMatchNoise(el)) continue;
+        // Skip nodes nested inside AI match / BETA cards (null closest = not nested).
+        const noiseRoot = el.closest?.(
+          '[class*="jobs-ai"], [class*="ai-match"], [class*="job-match"], [class*="match-card"], [class*="hiring-assistant"], [class*="profile-match"]'
+        );
+        if (noiseRoot && linkedInIsAiMatchNoise(noiseRoot)) continue;
+        const t = textFromDescEl(el);
+        if (t.length > best.length) best = t;
+      }
+    }
+    // Strip a leading AI match blurb if a broad selector accidentally included it.
+    if (/show match details/i.test(best) || /your profile and resume match/i.test(best)) {
+      const cut = best.search(/\babout the job\b/i);
+      if (cut > 0) best = best.slice(cut).replace(/^about the job\s*/i, "").trim();
+    }
+    return best;
+  }
+
+  function scrapeLinkedInDom(doc = document) {
+    const root = linkedInDetailRoot(doc);
+    linkedInExpandDescription(root);
+    const jobTitle = linkedInTitleFromDom(root);
+    const companyName = linkedInCompanyFromDom(root);
+    const jobLocation = linkedInLocationFromDom(root);
+    const jdText = linkedInDescriptionFromDom(root);
+    const pageText = `${jobLocation} ${elementText(root)}`;
+    return {
+      jobTitle,
+      companyName,
+      jobLocation,
+      jdText,
+      workArrangement: /\bremote\b/i.test(pageText)
+        ? "Remote"
+        : /\bhybrid\b/i.test(pageText)
+          ? "Hybrid"
+          : /\bon-?site\b/i.test(pageText)
+            ? "On-site"
+            : "",
+      employmentType: "",
+      datePosted: elementText(root.querySelector("time")) || ""
+    };
+  }
+
+  function assembleLinkedInScrape(ld, { jobId = "", dom = null } = {}) {
+    ld = ld || {};
+    dom = dom || {};
+    const ldOrg = ld.hiringOrganization;
+    const ldCompany =
+      (ldOrg && (ldOrg.name || ldOrg.legalName)) ||
+      (typeof ldOrg === "string" ? ldOrg : "") ||
+      "";
+    const salary = salaryBoundsFromLd(ld);
+    const remoteFromLd =
+      String(ld.jobLocationType || "").toUpperCase() === "TELECOMMUTE" ? "Remote" : "";
+
+    const domTitle = String(dom.jobTitle || "").trim();
+    const ldTitle = String(ld.title || ld.name || "").trim();
+    const jobTitle = !linkedInJunkTitle(domTitle)
+      ? domTitle
+      : !linkedInJunkTitle(ldTitle)
+        ? ldTitle
+        : "";
+
+    let jdText = String(dom.jdText || "").trim();
+    if ((!jdText || isThinJobDescription(jdText)) && ld.description) {
+      jdText = pickLongestText(jdText, htmlToPlainText(ld.description));
+    }
+
+    const companyName = String(dom.companyName || "").trim() || String(ldCompany).trim();
+    const id =
+      jobId ||
+      String(ld.identifier?.value || "") ||
+      linkedInIdFromUrl(String(ld.url || "")) ||
+      "";
+
+    if (!jobTitle && !jdText) return null;
+
+    return {
+      jobId: id,
+      jobTitle,
+      companyName,
+      jdLink: linkedInCanonicalLink(id),
+      jdText,
+      applyLink: String(ld.url || "").trim() || linkedInCanonicalLink(id),
+      workArrangement: String(dom.workArrangement || "").trim() || remoteFromLd,
+      employmentType: normalizeEmploymentType(dom.employmentType || ld.employmentType),
+      salaryMin: salary.min,
+      salaryMax: salary.max,
+      datePosted:
+        String(dom.datePosted || "").trim() || String(ld.datePosted || "").trim(),
+      jobLocation: String(dom.jobLocation || "").trim() || locationFromLd(ld)
+    };
+  }
+
+  function scrapeLinkedInOnce(doc = document) {
+    const jobId = linkedInIdFromDom(doc);
+    const dom = scrapeLinkedInDom(doc);
+    const ld = findJobPostingLdJson(doc);
+    return assembleLinkedInScrape(ld, { jobId, dom });
+  }
+
+  async function fetchLinkedInGuestJobDocument(jobId) {
+    if (!jobId) return null;
+    const urls = [
+      `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
+      `https://www.linkedin.com/jobs/view/${jobId}`
+    ];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          credentials: "include",
+          headers: { Accept: "text/html" },
+          cache: "no-store"
+        });
+        if (!res.ok) continue;
+        const html = await res.text();
+        if (!html || html.length < 200) continue;
+        return new DOMParser().parseFromString(html, "text/html");
+      } catch {
+        /* try next */
+      }
+    }
+    return null;
+  }
+
+  function mergeLinkedInScrapes(base, next) {
+    if (!base) return next;
+    if (!next) return base;
+    const pickLonger = (a, b) => (String(b || "").length > String(a || "").length ? b : a);
+    const pickTitle = () => {
+      const n = String(next.jobTitle || "").trim();
+      const b = String(base.jobTitle || "").trim();
+      if (n && !linkedInJunkTitle(n)) return n;
+      if (b && !linkedInJunkTitle(b)) return b;
+      return n || b || "";
+    };
+    return {
+      ...base,
+      ...next,
+      companyName: next.companyName || base.companyName || "",
+      jobTitle: pickTitle(),
+      jdText: pickLonger(base.jdText, next.jdText) || "",
+      workArrangement: next.workArrangement || base.workArrangement || "",
+      employmentType: next.employmentType || base.employmentType || "",
+      salaryMin: next.salaryMin || base.salaryMin || "",
+      salaryMax: next.salaryMax || base.salaryMax || "",
+      datePosted: next.datePosted || base.datePosted || "",
+      jobLocation: next.jobLocation || base.jobLocation || "",
+      jobId: next.jobId || base.jobId || "",
+      jdLink: next.jdLink || base.jdLink || ""
+    };
+  }
+
+  function linkedInScrapeComplete(data) {
+    if (!data) return false;
+    const title = String(data.jobTitle || "").trim();
+    const jd = String(data.jdText || "").trim();
+    return Boolean(title && !linkedInJunkTitle(title) && !isThinJobDescription(jd));
+  }
+
+  async function scrapeLinkedIn() {
+    let data = scrapeLinkedInOnce(document);
+    if (linkedInScrapeComplete(data) && data.companyName) return data;
+
+    // Search / AI Search side panel often hydrates late — try guest/detail HTML next.
+    const jobId = data?.jobId || linkedInIdFromDom(document);
+    if (jobId) {
+      const detailDoc = await fetchLinkedInGuestJobDocument(jobId);
+      if (detailDoc) {
+        data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(detailDoc));
+        if (linkedInScrapeComplete(data) && data.companyName) return data;
+      }
+    }
+
+    for (const waitMs of [400, 800, 1200, 2000]) {
+      await new Promise((r) => setTimeout(r, waitMs));
+      linkedInExpandDescription(linkedInDetailRoot(document));
+      data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(document));
+      if (linkedInScrapeComplete(data) && data.companyName) return data;
+      if (linkedInScrapeComplete(data)) return data;
+    }
+
+    return data && (data.jobTitle || data.jdText) ? data : null;
+  }
+
   // Registry of site-specific scrapers. Extend this as new sites are supported.
   const JOB_SCRAPERS = [
     { id: "jobright", host: /(^|\.)jobright\.ai$/i, scrape: scrapeJobright },
     { id: "dice", host: /(^|\.)dice\.com$/i, scrape: scrapeDice },
     { id: "indeed", host: /(^|\.)indeed\.com$/i, scrape: scrapeIndeed },
-    { id: "ziprecruiter", host: /(^|\.)ziprecruiter\.com$/i, scrape: scrapeZipRecruiter }
+    { id: "ziprecruiter", host: /(^|\.)ziprecruiter\.com$/i, scrape: scrapeZipRecruiter },
+    { id: "linkedin", host: /(^|\.)linkedin\.com$/i, scrape: scrapeLinkedIn }
   ];
 
   async function scrapeJobPage() {
