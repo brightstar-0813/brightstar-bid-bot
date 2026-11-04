@@ -6,8 +6,17 @@
 (() => {
   // Keyed by build, not a plain boolean: a tab that already ran an older copy of
   // this script would otherwise block the updated one from installing.
-  const SCRIPT_BUILD = "2026-10-06.qa-chrome1";
-  if (window.__brightstarAutofillBuild === SCRIPT_BUILD) return;
+  // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
+  // Bid keeps working after extension reload without requiring a LinkedIn refresh.
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd1";
+  const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
+  if (
+    window.__brightstarAutofillBuild === SCRIPT_BUILD &&
+    alreadyMsgBound &&
+    typeof window.__brightstarScrapeJobPage === "function"
+  ) {
+    return;
+  }
   window.__brightstarAutofillBuild = SCRIPT_BUILD;
   window.__brightstarAutofillInstalled = true;
 
@@ -10414,9 +10423,10 @@
     if (!el) return false;
     const cls = String(el.className || "").toLowerCase();
     const label = `${el.getAttribute?.("aria-label") || ""} ${el.getAttribute?.("data-test-id") || ""}`.toLowerCase();
-    // Keep class checks specific — bare "match"/"premium" false-positives kill real JDs.
+    // Keep class checks specific. Do NOT match bare "ai-search" — that string appears
+    // on real JD chrome for LinkedIn AI Search (/jobs/search-results/).
     if (
-      /(jobs-ai|ai-search|job-match|match-card|hiring-assistant|profile-match|ai-match)/i.test(
+      /(jobs-ai-match|jobs-ai-ask|ai-match-card|job-match-card|hiring-assistant|profile-match|jobs-premium-match)/i.test(
         `${cls} ${label}`
       )
     ) {
@@ -10434,6 +10444,52 @@
     );
   }
 
+  const LINKEDIN_JD_SELECTORS = [
+    "#job-details",
+    ".jobs-description__content",
+    ".jobs-box__html-content",
+    ".jobs-description-content__text--stretch",
+    ".jobs-description-content__text",
+    ".jobs-description__text",
+    ".jobs-description__container",
+    ".show-more-less-html__markup",
+    ".description__text",
+    ".jobs-description",
+    '[data-testid="job-description"]',
+    '[data-testid="job-description-text"]',
+    '[class*="jobs-description__content"]',
+    '[class*="jobs-box__html-content"]'
+  ];
+
+  function linkedInNodeHasJd(el) {
+    if (!el?.querySelector) return false;
+    try {
+      return Boolean(el.querySelector(LINKEDIN_JD_SELECTORS.join(", ")));
+    } catch {
+      return false;
+    }
+  }
+
+  function linkedInNodeHasTitle(el) {
+    if (!el?.querySelector) return false;
+    try {
+      return Boolean(
+        el.querySelector(
+          [
+            ".job-details-jobs-unified-top-card__job-title",
+            ".jobs-unified-top-card__job-title",
+            ".top-card-layout__title",
+            ".topcard__title",
+            "h1",
+            "h2"
+          ].join(", ")
+        )
+      );
+    } catch {
+      return false;
+    }
+  }
+
   function linkedInDetailRoot(doc = document) {
     const selectors = [
       ".jobs-search__job-details--container",
@@ -10441,9 +10497,13 @@
       ".scaffold-layout__detail",
       ".jobs-search__job-details",
       '[class*="jobs-search__job-details"]',
-      '[class*="job-details-jobs-unified-top-card"]',
+      ".jobs-search-results-list__list-detail",
+      '[class*="job-details-page"]',
       ".jobs-details__main-content",
       "#job-details",
+      // Top-card selectors are last on purpose — title-only nodes must not win
+      // over a parent that also wraps About the job.
+      '[class*="job-details-jobs-unified-top-card"]',
       '[data-job-id]',
       "main",
       '[role="main"]'
@@ -10459,44 +10519,25 @@
     const scored = [];
     for (const el of candidates) {
       if (!el || scored.includes(el)) continue;
-      const hasJd = Boolean(
-        el.querySelector?.(
-          [
-            "#job-details",
-            ".jobs-description",
-            ".jobs-description__content",
-            ".jobs-box__html-content",
-            ".show-more-less-html__markup",
-            ".jobs-description-content__text",
-            ".description__text",
-            '[class*="jobs-description"]'
-          ].join(", ")
-        )
-      );
-      const hasTitle = Boolean(
-        el.querySelector?.(
-          [
-            ".job-details-jobs-unified-top-card__job-title",
-            ".jobs-unified-top-card__job-title",
-            ".top-card-layout__title",
-            "h1",
-            "h2"
-          ].join(", ")
-        )
-      );
+      const hasJd = linkedInNodeHasJd(el);
+      const hasTitle = linkedInNodeHasTitle(el);
       if (!hasJd && !hasTitle) continue;
       scored.push(el);
       if (hasJd && hasTitle) return el;
     }
     for (const el of scored) {
-      if (
-        el.querySelector?.(
-          "#job-details, .jobs-description, .show-more-less-html__markup, .jobs-box__html-content"
-        )
-      ) {
-        return el;
+      if (linkedInNodeHasJd(el)) return el;
+    }
+    // AI Search / search-results often mounts the unified top card as a sibling of
+    // the description. Walk up from a title-only hit until About the job is inside.
+    for (const el of scored) {
+      let node = el?.parentElement || null;
+      for (let depth = 0; node && depth < 10; depth += 1) {
+        if (linkedInNodeHasJd(node)) return node;
+        node = node.parentElement;
       }
     }
+    if (linkedInNodeHasJd(doc)) return doc.body || doc;
     return scored[0] || doc.body || doc;
   }
 
@@ -10661,21 +10702,40 @@
     return "";
   }
 
-  function linkedInDescriptionFromDom(root) {
-    const selectors = [
-      "#job-details",
-      ".jobs-description__content",
-      ".jobs-box__html-content",
-      ".jobs-description-content__text--stretch",
-      ".jobs-description-content__text",
-      ".show-more-less-html__markup",
-      ".description__text",
-      ".jobs-description",
-      '[class*="jobs-description__content"]',
-      '[class*="jobs-box__html-content"]'
-    ];
+  function linkedInDescriptionFromAboutHeading(root) {
+    if (!root?.querySelectorAll) return "";
+    const headings = root.querySelectorAll(
+      "h1, h2, h3, h4, .jobs-box__title, .t-16, .t-20, [class*='jobs-description'] h2"
+    );
+    for (const h of headings) {
+      const label = elementText(h);
+      if (!/^about the job$/i.test(label)) continue;
+      const block =
+        h.closest?.(
+          "section, article, .jobs-description, .jobs-box, .jobs-description__container, [class*='jobs-description']"
+        ) || h.parentElement;
+      let text = textFromDescEl(block);
+      if (text) {
+        text = text.replace(/^about the job\s*/i, "").trim();
+        if (text.length > 160 && !linkedInIsAiMatchNoise(block)) return text;
+      }
+      const parts = [];
+      let sib = h.nextElementSibling;
+      for (let i = 0; sib && i < 12; i += 1) {
+        const piece = textFromDescEl(sib);
+        if (piece) parts.push(piece);
+        sib = sib.nextElementSibling;
+      }
+      const joined = parts.join("\n\n").trim();
+      if (joined.length > 160) return joined;
+    }
+    return "";
+  }
+
+  function linkedInDescriptionFromScope(root) {
+    if (!root?.querySelectorAll) return "";
     let best = "";
-    for (const sel of selectors) {
+    for (const sel of LINKEDIN_JD_SELECTORS) {
       let nodes;
       try {
         nodes = root.querySelectorAll(sel);
@@ -10686,17 +10746,34 @@
         if (linkedInIsAiMatchNoise(el)) continue;
         // Skip nodes nested inside AI match / BETA cards (null closest = not nested).
         const noiseRoot = el.closest?.(
-          '[class*="jobs-ai"], [class*="ai-match"], [class*="job-match"], [class*="match-card"], [class*="hiring-assistant"], [class*="profile-match"]'
+          '[class*="jobs-ai-match"], [class*="ai-match-card"], [class*="job-match-card"], [class*="hiring-assistant"], [class*="profile-match"]'
         );
         if (noiseRoot && linkedInIsAiMatchNoise(noiseRoot)) continue;
         const t = textFromDescEl(el);
         if (t.length > best.length) best = t;
       }
     }
+    if (!best || isThinJobDescription(best)) {
+      const fromHeading = linkedInDescriptionFromAboutHeading(root);
+      if (fromHeading.length > best.length) best = fromHeading;
+    }
     // Strip a leading AI match blurb if a broad selector accidentally included it.
     if (/show match details/i.test(best) || /your profile and resume match/i.test(best)) {
       const cut = best.search(/\babout the job\b/i);
       if (cut > 0) best = best.slice(cut).replace(/^about the job\s*/i, "").trim();
+    }
+    return best;
+  }
+
+  function linkedInDescriptionFromDom(root) {
+    let best = linkedInDescriptionFromScope(root);
+    if (!isThinJobDescription(best)) return best;
+    // Title-only roots (unified top card) are common on /jobs/search-results/ —
+    // fall back to the full document so About the job is still captured.
+    const ownerDoc = root?.ownerDocument || (root?.nodeType === 9 ? root : document);
+    if (ownerDoc && root !== ownerDoc && root !== ownerDoc.body) {
+      const fromDoc = linkedInDescriptionFromScope(ownerDoc);
+      if (fromDoc.length > best.length) best = fromDoc;
     }
     return best;
   }
@@ -10790,19 +10867,26 @@
       `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
       `https://www.linkedin.com/jobs/view/${jobId}`
     ];
+    // Logged-in cookies sometimes break the guest endpoint — try include then omit.
+    const credentialModes = ["include", "omit"];
     for (const url of urls) {
-      try {
-        const res = await fetch(url, {
-          credentials: "include",
-          headers: { Accept: "text/html" },
-          cache: "no-store"
-        });
-        if (!res.ok) continue;
-        const html = await res.text();
-        if (!html || html.length < 200) continue;
-        return new DOMParser().parseFromString(html, "text/html");
-      } catch {
-        /* try next */
+      for (const credentials of credentialModes) {
+        try {
+          const res = await fetch(url, {
+            credentials,
+            headers: { Accept: "text/html" },
+            cache: "no-store"
+          });
+          if (!res.ok) continue;
+          const html = await res.text();
+          if (!html || html.length < 200) continue;
+          if (!/(show-more-less-html__markup|description__text|jobs-description|about the job)/i.test(html)) {
+            continue;
+          }
+          return new DOMParser().parseFromString(html, "text/html");
+        } catch {
+          /* try next */
+        }
       }
     }
     return null;
@@ -10912,13 +10996,25 @@
     };
   }
 
+  // Always publish the latest scrape entry so background executeScript / message
+  // handlers call this build even when an older listener is still registered.
+  window.__brightstarScrapeJobPage = scrapeJobPage;
+
+  // Upgrading an already-injected tab: rebind scrape only — do not stack listeners.
+  if (alreadyMsgBound) return;
+  window.__brightstarAutofillMsgBound = true;
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "autofill_ping") {
       sendResponse({ ok: true, build: SCRIPT_BUILD });
       return false;
     }
     if (message?.type === "scrape_job_page") {
-      scrapeJobPage()
+      const run =
+        typeof window.__brightstarScrapeJobPage === "function"
+          ? window.__brightstarScrapeJobPage
+          : scrapeJobPage;
+      run()
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
       return true;

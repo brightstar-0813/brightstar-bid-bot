@@ -187,6 +187,15 @@ export function buildSheetRowTsv({
   return cells.join("\t");
 }
 
+function isTransientSheetFetchError(err) {
+  const msg = String(err?.message || err || "");
+  return /failed to fetch|networkerror|network request failed|load failed/i.test(msg);
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function postSheetWebApp(webAppUrl, payload) {
   const endpoint = String(webAppUrl || "").trim();
   if (!endpoint || !/^https:\/\/script\.google\.com\//i.test(endpoint)) {
@@ -195,31 +204,49 @@ async function postSheetWebApp(webAppUrl, payload) {
     );
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    redirect: "follow",
-    headers: {
-      "Content-Type": "text/plain;charset=utf-8"
-    },
-    body: JSON.stringify(payload)
-  });
+  const body = JSON.stringify(payload);
+  const maxAttempts = 3;
+  let lastFetchErr = null;
 
-  const text = await response.text();
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    parsed = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        redirect: "follow",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8"
+        },
+        body
+      });
+    } catch (fetchErr) {
+      lastFetchErr = fetchErr;
+      if (!isTransientSheetFetchError(fetchErr) || attempt === maxAttempts) {
+        throw fetchErr;
+      }
+      await sleepMs(400 * attempt);
+      continue;
+    }
+
+    const text = await response.text();
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+
+    if (!response.ok) {
+      throw new Error(parsed?.error || `Sheet request failed (HTTP ${response.status}).`);
+    }
+    if (parsed && parsed.ok === false) {
+      throw new Error(parsed.error || "Sheet request failed.");
+    }
+
+    return parsed || { ok: true };
   }
 
-  if (!response.ok) {
-    throw new Error(parsed?.error || `Sheet request failed (HTTP ${response.status}).`);
-  }
-  if (parsed && parsed.ok === false) {
-    throw new Error(parsed.error || "Sheet request failed.");
-  }
-
-  return parsed || { ok: true };
+  throw lastFetchErr || new Error("Sheet request failed.");
 }
 
 /**

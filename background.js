@@ -8160,6 +8160,46 @@ async function saveResumeAndCoverLetter(
   { runCoverLetter = true, fetchCoverLetter = null } = {}
 ) {
   resumeData = await finalizeResumeData(resumeData);
+  const manualBid = isManualOneOffJob(jobMeta);
+
+  // Resolve sheet config early. Manual Bid marks Applied before debugger PDF work so
+  // Octobrowser/SW networking is still healthy (Log apply already succeeds this way).
+  let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
+  let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
+  let sheetTabName = String(jobMeta.sheetTabName || jobMeta.sheetName || "").trim();
+  if (!spreadsheetUrl || !sheetsWebAppUrl || !sheetTabName) {
+    const sheetCfg = await getSheetConfig();
+    if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheetUrl || "").trim();
+    if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.webAppUrl || "").trim();
+    if (!sheetTabName) sheetTabName = String(sheetCfg.sheetTabName || "").trim();
+  }
+
+  let manualSheetStatus = "";
+  if (manualBid && spreadsheetUrl && sheetsWebAppUrl) {
+    await setStatus("Recording Applied on Google Sheet...");
+    try {
+      const sheetResult = await markJobAppliedOnSpreadsheet({
+        spreadsheetUrl,
+        webAppUrl: sheetsWebAppUrl,
+        sheetName: sheetTabName,
+        jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
+        jobTitle: jobMeta.jobTitle,
+        companyName: jobMeta.companyName,
+        jdLink: jobMeta.jdLink,
+        salary: jobMeta.salary || "",
+        bidSource: jobMeta.bidSource || "one-off"
+      });
+      await rememberSheetIdentityForJob(jobMeta.csvRow, {
+        jobNo: sheetResult.jobNo || jobMeta.csvRow,
+        row: sheetResult.row
+      }).catch(() => {});
+      const label = sheetResult.status || formatAppliedStatus();
+      manualSheetStatus = ` Sheet: ${label}.`;
+    } catch (sheetErr) {
+      manualSheetStatus = `, but sheet update failed: ${String(sheetErr?.message || sheetErr)}`;
+    }
+  }
+
   await setStatus("Saving jd.txt + resume PDF…");
   const { jobDir: savedDir, nameToken, resumePdfName, saved } = await autoDownloadResumeFiles(
     output,
@@ -8178,8 +8218,6 @@ async function saveResumeAndCoverLetter(
   } else if (saved?.pdfError) {
     status += ` — ${saved.pdfError}`;
   }
-
-  const manualBid = isManualOneOffJob(jobMeta);
   const shouldRunCover = Boolean(runCoverLetter) && !manualBid;
   let coverLetterSaved = false;
   const useOpenAiCover =
@@ -8396,56 +8434,29 @@ async function saveResumeAndCoverLetter(
     status = `${status}. Cover letter skipped: open a ChatGPT or Claude tab.`;
   }
 
-  let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
-  let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
-  let sheetTabName = String(jobMeta.sheetTabName || jobMeta.sheetName || "").trim();
-  if (!spreadsheetUrl || !sheetsWebAppUrl || !sheetTabName) {
-    const sheetCfg = await getSheetConfig();
-    if (!spreadsheetUrl) spreadsheetUrl = String(sheetCfg.spreadsheetUrl || "").trim();
-    if (!sheetsWebAppUrl) sheetsWebAppUrl = String(sheetCfg.webAppUrl || "").trim();
-    if (!sheetTabName) sheetTabName = String(sheetCfg.sheetTabName || "").trim();
-  }
-  if (spreadsheetUrl && sheetsWebAppUrl) {
-    const sheetManualBid = isManualOneOffJob(jobMeta);
-    await setStatus(sheetManualBid ? "Recording Applied on Google Sheet..." : "Appending row to Google Sheet...");
+  if (manualBid) {
+    status = `${status}${manualSheetStatus}`;
+  } else if (spreadsheetUrl && sheetsWebAppUrl) {
+    // Batch: Ready append stays after PDF so a Ready row means files exist.
+    await setStatus("Appending row to Google Sheet...");
     try {
-      if (sheetManualBid) {
-        const sheetResult = await markJobAppliedOnSpreadsheet({
-          spreadsheetUrl,
-          webAppUrl: sheetsWebAppUrl,
-          sheetName: sheetTabName,
-          jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
-          jobTitle: jobMeta.jobTitle,
-          companyName: jobMeta.companyName,
-          jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || "",
-          bidSource: jobMeta.bidSource || "one-off"
-        });
-        await rememberSheetIdentityForJob(jobMeta.csvRow, {
-          jobNo: sheetResult.jobNo || jobMeta.csvRow,
-          row: sheetResult.row
-        }).catch(() => {});
-        const label = sheetResult.status || formatAppliedStatus();
-        status = `${status} Sheet: ${label}.`;
-      } else {
-        const sheetResult = await appendJobToSpreadsheet({
-          spreadsheetUrl,
-          webAppUrl: sheetsWebAppUrl,
-          sheetName: sheetTabName,
-          jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
-          jobTitle: jobMeta.jobTitle,
-          companyName: jobMeta.companyName,
-          jdLink: jobMeta.jdLink,
-          salary: jobMeta.salary || "",
-          bidSource: jobMeta.bidSource || "batch"
-        });
-        await rememberSheetIdentityForJob(jobMeta.csvRow, sheetResult).catch(() => {});
-        status = sheetResult.duplicate
-          ? `${status} (already on Google Sheet — not re-appended)`
-          : `${status} and appended to Google Sheet`;
-      }
+      const sheetResult = await appendJobToSpreadsheet({
+        spreadsheetUrl,
+        webAppUrl: sheetsWebAppUrl,
+        sheetName: sheetTabName,
+        jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
+        jobTitle: jobMeta.jobTitle,
+        companyName: jobMeta.companyName,
+        jdLink: jobMeta.jdLink,
+        salary: jobMeta.salary || "",
+        bidSource: jobMeta.bidSource || "batch"
+      });
+      await rememberSheetIdentityForJob(jobMeta.csvRow, sheetResult).catch(() => {});
+      status = sheetResult.duplicate
+        ? `${status} (already on Google Sheet — not re-appended)`
+        : `${status} and appended to Google Sheet`;
     } catch (sheetErr) {
-      status = `${status}, but sheet append failed: ${String(sheetErr?.message || sheetErr)}`;
+      status = `${status}, but sheet update failed: ${String(sheetErr?.message || sheetErr)}`;
     }
   }
 
@@ -10373,17 +10384,46 @@ async function findActiveIndeedTab() {
   return focused;
 }
 
-async function scrapeIndeedJobFromTab(tabId) {
+/** Inject autofill scrape helpers and invoke the latest window.__brightstarScrapeJobPage. */
+async function invokeTabJobScrape(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
       files: ["content/autofill.js"]
     });
   } catch {
-    // Already injected.
+    // Already injected or host not injectable.
   }
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      world: "ISOLATED",
+      func: async () => {
+        const run = globalThis.__brightstarScrapeJobPage;
+        if (typeof run !== "function") {
+          return {
+            ok: false,
+            error: "Job scraper not installed on this page. Refresh the tab and try Scrape again."
+          };
+        }
+        return await run();
+      }
+    });
+    if (result) return result;
+  } catch (err) {
+    // Fall through to sendMessage for older injected builds.
+    try {
+      return await chrome.tabs.sendMessage(tabId, { type: "scrape_job_page" });
+    } catch {
+      throw err;
+    }
+  }
+  return chrome.tabs.sendMessage(tabId, { type: "scrape_job_page" });
+}
+
+async function scrapeIndeedJobFromTab(tabId) {
   await sleep(200);
-  const result = await chrome.tabs.sendMessage(tabId, { type: "scrape_job_page" });
+  const result = await invokeTabJobScrape(tabId);
   if (!result?.ok || !result.jobData) {
     throw new Error(result?.error || "Could not read the selected Indeed job.");
   }
@@ -10400,14 +10440,6 @@ async function scrapeActiveJobTab() {
   const url = String(tab.url || "");
   if (!/^https?:\/\//i.test(url)) {
     throw new Error("Open a job posting tab (http/https), then try again.");
-  }
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: false },
-      files: ["content/autofill.js"]
-    });
-  } catch {
-    // Already injected or host not injectable.
   }
 
   let isDice = false;
@@ -10445,7 +10477,7 @@ async function scrapeActiveJobTab() {
   for (let i = 0; i < attempts; i++) {
     await sleep(i === 0 ? 250 : isDice || isLinkedIn ? 900 : 600);
     try {
-      result = await chrome.tabs.sendMessage(tab.id, { type: "scrape_job_page" });
+      result = await invokeTabJobScrape(tab.id);
     } catch (err) {
       lastErr = String(err?.message || err);
       result = null;
