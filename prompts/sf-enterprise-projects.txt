@@ -1,0 +1,920 @@
+1. Healthcare
+Patient 360 + EHR Integration Platform
+
+Verified public inspiration: Damco worked on EHR modernization for a hospital, including legacy EHR data migration to Cerner, CRM integration, analytics, eight developers, three QA engineers, two data-conversion specialists, and a project manager.
+
+Enterprise blueprint:
+
+Business problem:
+Patient information is fragmented between EHR, CRM, scheduling, contact-center, and analytics systems.
+
+Salesforce stack:
+Health Cloud, Service Cloud, OmniStudio, Experience Cloud, MuleSoft, CRM Analytics.
+
+Core model:
+Person Account, CarePlan, CareTeam, ClinicalEncounter, Case, ContactPointAddress, Provider, custom Referral and Appointment objects.
+
+Integration architecture:
+Epic/Cerner → FHIR R4 → MuleSoft → Salesforce Health Cloud.
+
+Use:
+REST/FHIR APIs, Named Credentials, OAuth/JWT, Platform Events, Change Data Capture.
+
+Automation:
+Flows for intake and routing.
+Apex for complex synchronization.
+OmniScripts for guided patient registration.
+Integration Procedures for FHIR orchestration.
+
+Security:
+OWD private, permission-set groups, field-level protection for PHI, audit history, encryption strategy.
+
+Scale scenario:
+Millions of patient records, high-volume clinical updates, asynchronous reconciliation jobs.
+
+Interview challenge:
+Prevent duplicate patients when EHR and Salesforce have different identifiers.
+
+Solution:
+MRN + external system ID matching, probabilistic duplicate detection, matching rules, integration idempotency keys and reconciliation queues.
+
+2. Healthcare
+Epic Patient Search and Registration
+
+This one has direct Salesforce technical evidence.
+
+Salesforce's archived accelerator combines Health Cloud, OmniStudio, Person Accounts, Epic FHIR R4, JWT authentication and optional MuleSoft integration.
+
+Architecture:
+
+User searches by:
+MRN, FHIR ID, DOB, name, phone, demographics.
+
+Flow:
+
+Health Cloud
+→ OmniScript
+→ Integration Procedure
+→ JWT / Named Credential
+→ MuleSoft or direct API
+→ Epic FHIR Patient endpoint
+
+If patient exists:
+Map Epic response to Person Account.
+
+If patient does not exist:
+Create patient through FHIR Patient.Create and associate the resulting identifier with Salesforce.
+
+Technical components:
+OmniScript, FlexCard, DataRaptors, Integration Procedures, Apex JWT helper, Person Accounts.
+
+This is excellent for Senior Developer, Health Cloud Consultant and Solution Architect interviews.
+
+3. Healthcare SaaS
+Health Cloud Patient and Provider Management
+
+Verified: Plumlogix provided Health Cloud configuration, healthcare data-model setup, patient/provider management, custom development, automation, integrations, user administration, security and reporting.
+
+Enterprise blueprint:
+
+Modules:
+Patient intake.
+Provider directory.
+Referral management.
+Care coordination.
+Patient communications.
+Case management.
+
+Technical stack:
+Health Cloud, Flow, Apex, LWC, Experience Cloud, REST APIs.
+
+Integration targets:
+EHR.
+Provider directory.
+Identity provider.
+SMS.
+Document management.
+
+Strong interview topic:
+Designing the healthcare data model without turning every clinical entity into a custom object.
+
+4. Pharmaceutical
+Field Sales and Offline CRM Ecosystem
+
+Verified: Customertimes built a new CRM ecosystem and offline application for a pharmaceutical company.
+
+Enterprise blueprint:
+
+Users:
+Medical representatives, territory managers, sales operations.
+
+Functions:
+HCP/HCO management.
+Territory alignment.
+Visit planning.
+Sample distribution.
+Medical product catalog.
+Call reporting.
+Offline access.
+
+Salesforce:
+Sales Cloud, Life Sciences-style data model, mobile application, Apex, LWC.
+
+Integration:
+ERP product catalog.
+MDM.
+Data warehouse.
+Identity platform.
+Marketing systems.
+
+Hard problem:
+Mobile users operate in locations with poor connectivity.
+
+Architecture:
+Local cache → offline transaction queue → synchronization API → Salesforce validation → conflict resolution.
+
+5. Banking
+Financial Services Cloud Relationship Banking
+
+Verified: Veri Cloud built and configured Financial Services Cloud functionality and provided platform-level architectural consulting for a financial institution.
+
+Enterprise blueprint:
+
+Salesforce:
+Financial Services Cloud, Experience Cloud, Data Cloud, MuleSoft.
+
+Business processes:
+Customer onboarding.
+KYC.
+Financial accounts.
+Relationship groups.
+Banker referrals.
+Opportunities.
+Service requests.
+
+Data model:
+Person Account.
+FinancialAccount.
+FinancialAccountRole.
+AccountAccountRelation.
+FinancialHolding.
+FinancialGoal.
+
+Integrations:
+Core banking.
+KYC/AML provider.
+Credit bureau.
+Document management.
+Data warehouse.
+
+Architecture principle:
+Salesforce stores relationship and interaction data while core banking remains system of record for balances and transactions.
+
+6. Wealth Management
+Agentic Advisor Workspace
+
+This has direct Salesforce repository evidence.
+
+Salesforce's Agentic Advisor implementation combines FSC, Data Cloud, Flows, GenAI Prompt Templates, meeting playbooks and relationship graphs.
+
+Architecture:
+
+Core entities:
+Household.
+Client.
+Financial Account.
+Financial Holding.
+Financial Goal.
+Financial Plan.
+Security.
+Life Event.
+Referral.
+
+Data flow:
+Operational FSC data → Data Cloud streams → mappings → unified advisor context.
+
+AI:
+Annual review preparation.
+Client summaries.
+Client-pulse analysis.
+Meeting assistance.
+
+UX:
+Advisor Lightning pages.
+Relationship graphs.
+Meeting Playbooks.
+
+This is one of the strongest modern Salesforce Architect project stories.
+
+7. Lending / Alternative Finance
+Loan Funds Collection Management
+
+Verified: Avenga designed a Salesforce-based loan funds collection-management solution using the client's existing Jira environment. The delivery team included solution architecture, Scrum, development, QA and UX roles.
+
+Enterprise blueprint:
+
+Objects:
+Loan.
+Borrower.
+Payment Schedule.
+Collection Case.
+Promise to Pay.
+Payment.
+Communication.
+
+Automation:
+Missed payment → collection case → risk classification → queue assignment → communication journey.
+
+Integrations:
+Loan platform.
+Payment gateway.
+Jira.
+Accounting.
+Data warehouse.
+
+Apex:
+Complex collection calculations and bulk processing.
+
+Flow:
+Case assignment, reminders, approvals, escalation.
+
+8. Financial Services
+Customer Self-Service Lending Portal
+
+Verified: Erudite Works built custom Salesforce functionality and a customer portal for Pimlico Capital.
+
+Enterprise blueprint:
+
+Experience Cloud portal:
+Application status.
+Document upload.
+Funding requests.
+Payment history.
+Support cases.
+Profile maintenance.
+
+Security:
+External-user sharing sets.
+Account relationships.
+Permission sets.
+Restriction rules.
+Secure file access.
+
+Backend integrations:
+Loan management system.
+Document service.
+Payment provider.
+Credit data.
+
+Architecture question:
+How do you expose financial records to external users without accidentally leaking another customer's data?
+
+Answer:
+Explicit external ownership model, private sharing, account-based access, sharing sets/recalculation testing and negative security tests.
+
+9. Insurance
+Enterprise Sales CRM Consolidation
+
+Verified: Gravie engaged Redpath to consolidate and upgrade CRM platforms as product offerings grew. Redpath created a Salesforce sales application and worked iteratively with the business.
+
+Enterprise blueprint:
+
+Processes:
+Broker management.
+Employer sales.
+Plan selection.
+Renewals.
+Quotes.
+Pipeline.
+Enrollment handoff.
+
+Salesforce:
+Sales Cloud, Service Cloud, Experience Cloud.
+
+Integrations:
+Policy administration.
+Enrollment.
+Billing.
+Marketing automation.
+Document generation.
+
+Key architecture issue:
+Different product families require different selling processes without producing hundreds of record types.
+
+Solution:
+Shared canonical Opportunity model with product-driven orchestration and modular screen flows.
+
+10. Insurance
+Digital Broker and Policy Experience
+
+Your existing AZ Insurance research gives a real Salesforce reference using Experience Cloud, LWR, LWC and Salesforce CMS.
+
+Enterprise version:
+
+Broker portal.
+Policyholder portal.
+Quote intake.
+Claims initiation.
+Document center.
+Knowledge.
+Policy servicing.
+
+Salesforce:
+Experience Cloud LWR, LWC, Service Cloud, Salesforce CMS.
+
+Integration:
+Policy administration.
+Claims platform.
+Billing.
+Identity.
+Document storage.
+
+11. Telecommunications
+Enterprise CPQ and Partner Sales Transformation
+
+Verified: Modelit worked with a telecom company for about three years implementing Salesforce improvements including Forecasting, CPQ and Partner Portal.
+
+Enterprise blueprint:
+
+Architecture:
+Sales Cloud + CPQ + Experience Cloud.
+
+Processes:
+B2B opportunities.
+Complex product bundles.
+Contract pricing.
+Discount approvals.
+Partner quoting.
+Forecasting.
+
+Integrations:
+Product catalog.
+Billing.
+Provisioning.
+ERP.
+Partner systems.
+
+Complex scenario:
+Internet + voice + managed service bundle where compatibility depends on geography and existing infrastructure.
+
+Solution:
+Product rules, configuration attributes, price rules and external serviceability API.
+
+12. Telecommunications
+Omnichannel Enterprise CPQ
+
+Verified: CloudSense developed a Salesforce CPQ solution for VodafoneZiggo. The engagement involved more than 20 people and professional services of roughly €1.5 million.
+
+Enterprise architecture blueprint:
+
+Channels:
+Call center.
+Retail.
+Partner.
+Digital.
+Field sales.
+
+Shared services:
+Product catalog.
+Eligibility.
+Pricing.
+Promotions.
+Quote calculation.
+Order capture.
+
+Key principle:
+All channels call the same commercial rules rather than implementing pricing independently.
+
+This is a strong Technical Architect project because of scale, omnichannel consistency and downstream provisioning complexity.
+
+13. Manufacturing
+Salesforce + ERP Service Transformation
+
+Verified inspiration: The Manifest contains manufacturing-oriented Salesforce projects, and Techila specifically reports a Salesforce consolidation for an international manufacturer following a merger.
+
+Enterprise blueprint:
+
+Salesforce:
+Sales Cloud, Service Cloud, Field Service, Experience Cloud.
+
+ERP:
+SAP or Dynamics.
+
+Processes:
+Installed products.
+Warranty.
+Work orders.
+Spare parts.
+Service contracts.
+Dealer management.
+Asset lifecycle.
+
+Integration:
+SAP customer/product/material master → Salesforce.
+Salesforce service order → SAP.
+Parts availability → Salesforce.
+Invoice status → Salesforce.
+
+Architecture:
+MuleSoft APIs + Platform Events + scheduled reconciliation.
+
+14. Manufacturing
+Post-Merger Global Salesforce Consolidation
+
+Verified: Techila reports Salesforce consolidation for an international manufacturing company after a merger.
+
+Enterprise blueprint:
+
+Problem:
+Two organizations have separate Salesforce orgs, customer IDs, territories, products and security models.
+
+Workstreams:
+Org assessment.
+Canonical data model.
+Duplicate resolution.
+Account hierarchy.
+Sales-process harmonization.
+Permission redesign.
+Integration consolidation.
+Migration.
+Cutover.
+
+Technical challenges:
+Duplicate Accounts.
+Conflicting external IDs.
+Different Opportunity stages.
+Overlapping integrations.
+Different currencies.
+Different role hierarchies.
+
+Senior Architect story:
+Choose between org consolidation, org-to-org coexistence, or multi-org architecture.
+
+15. Logistics
+Field Service and Geospatial Operations
+
+Verified: Damco implemented Salesforce Field Service, ArcGIS integration and data migration for a logistics business seeking a 360-degree view of operations. The team included Salesforce developers and data-migration specialists.
+
+Enterprise blueprint:
+
+Salesforce:
+Service Cloud, Field Service.
+
+Objects:
+Asset.
+Work Order.
+Service Appointment.
+Service Territory.
+Service Resource.
+Shipment.
+Facility.
+
+ArcGIS:
+Route visualization.
+Geofencing.
+Field-worker location.
+Site mapping.
+
+Mobile:
+Technician work orders.
+Photos.
+Signatures.
+Parts usage.
+Offline operations.
+
+16. Fuel and Fluid Logistics
+Preventive Maintenance Field Service
+
+Verified: Customertimes implemented Salesforce Field Service for a fuel/fluid logistics company, including automated work-order scheduling and dispatch, mobile paperless work processing, parts management and KPIs.
+
+Enterprise blueprint:
+
+Trigger:
+Asset reaches engine-hour or calendar threshold.
+
+Automation:
+Maintenance plan → work order → service appointment → scheduling optimization → technician mobile app.
+
+Integrations:
+IoT/telematics.
+ERP parts inventory.
+Fleet platform.
+Billing.
+
+High-level scale scenario:
+Tens of thousands of assets and thousands of maintenance jobs per month.
+
+17. Retail
+Omnichannel Retail Operations Platform
+
+Verified: Veri Cloud delivered inventory management, e-commerce integration and POS functionality for SE Retail.
+
+Enterprise blueprint:
+
+Salesforce:
+Sales Cloud, Service Cloud, Commerce integration, Data Cloud.
+
+Systems:
+POS.
+E-commerce.
+Warehouse.
+ERP.
+Payment gateway.
+
+Customer 360:
+Store purchases.
+Online transactions.
+Service interactions.
+Loyalty profile.
+
+Real-time pattern:
+POS event → integration layer → Data Cloud/CRM → customer profile update.
+
+18. E-commerce
+AI-Assisted Nationwide Commerce Expansion
+
+Verified: Erudite Works used Salesforce technologies including Sales Cloud and Einstein AI for an e-commerce client and supported an Endless Aisle strategy.
+
+Enterprise blueprint:
+
+Functions:
+Customer segmentation.
+Product recommendations.
+Sales-assisted commerce.
+Store inventory discovery.
+Cross-sell.
+Lead/customer scoring.
+
+Endless Aisle:
+If local stock is unavailable, sales staff find inventory across distribution centers and complete an order for delivery.
+
+Integration:
+ERP inventory.
+Commerce platform.
+Payment gateway.
+Salesforce CRM.
+
+19. Nonprofit
+Inventory, Orders and AI Case Automation
+
+Verified: Peeklogic customized Salesforce for The Aleph Institute with inventory/order management, carrier integration, new objects, workflows, Lightning components, third-party integrations, and AI/OCR for automatic case creation and categorization.
+
+Enterprise blueprint:
+
+Salesforce:
+Nonprofit Cloud/NPSP-style CRM, Service Cloud, LWC.
+
+AI document flow:
+Email/document → OCR → classification → Case creation → routing → human review.
+
+Order flow:
+Program request → inventory check → order → carrier API → tracking.
+
+Excellent interview topic:
+Human-in-the-loop AI, confidence thresholds and exception handling.
+
+20. Nonprofit
+Salesforce NPSP Constituent Migration
+
+Verified: Astrea implemented Salesforce NPSP for a nonprofit, including data import, household naming conventions, deduplication and VOIP integration.
+
+Enterprise blueprint:
+
+Data sources:
+Legacy donor CRM.
+Excel.
+Email lists.
+Event systems.
+
+Migration:
+Extract → profile → normalize → deduplicate → transform → load → reconcile.
+
+Objects:
+Accounts/Households.
+Contacts.
+Opportunities/Donations.
+Campaigns.
+Recurring donations.
+
+Integration:
+Telephony.
+Marketing.
+Donation processing.
+
+21. Social Services
+Digital Clinical Records and Program Management
+
+Verified: Force by Design transformed paper-based processes for a nonprofit into Salesforce. Work included clinical recordkeeping and moving an AmeriCorps program online, with Visualforce, Apex and substantial customization.
+
+Modernized blueprint:
+
+Salesforce:
+Service Cloud or Nonprofit Cloud, Experience Cloud, Flow, LWC.
+
+Processes:
+Client intake.
+Case plans.
+Counseling sessions.
+Program enrollment.
+Volunteer management.
+Outcome reporting.
+
+Legacy modernization:
+Visualforce → LWC.
+Workflow Rules → Flow.
+Old profiles → permission-set groups.
+
+22. Real Estate
+Enterprise CRM Greenfield Implementation
+
+Verified: Seneca Group hired Modelit for its first CRM. Scope included solution architecture, workflow, UX design, product configuration, setup and administration.
+
+Enterprise blueprint:
+
+Objects:
+Property.
+Building.
+Unit.
+Client.
+Broker.
+Opportunity.
+Lease.
+Project.
+
+Processes:
+Property pipeline.
+Tenant opportunities.
+Broker referrals.
+Proposal generation.
+Lease milestones.
+
+Integration:
+Property management system.
+Accounting.
+Document management.
+Mapping.
+
+23. Government
+Citizen Case Management Platform
+
+Enterprise blueprint based on the Salesforce public-sector patterns represented across the public implementation corpus. The exact technical design below is reconstructed, not a claim from a specific Manifest client.
+
+Salesforce:
+Public Sector Solutions, Service Cloud, Experience Cloud.
+
+Processes:
+Citizen application.
+Eligibility.
+Document collection.
+Case review.
+Approvals.
+Appeals.
+Notifications.
+
+Architecture:
+Experience Cloud → OmniScript → Salesforce case model → external eligibility API → document storage.
+
+Security:
+Public users.
+Case workers.
+Supervisors.
+Agency partners.
+
+Use:
+Restriction Rules, sharing rules, permission-set groups and encryption.
+
+24. Government
+Licensing and Permitting System
+
+Enterprise blueprint:
+
+Users:
+Citizens.
+Businesses.
+Review officers.
+Inspectors.
+Supervisors.
+
+Functions:
+License application.
+Fee collection.
+Document upload.
+Inspection.
+Violation.
+Renewal.
+Appeal.
+
+Salesforce:
+Public Sector Solutions, Experience Cloud, OmniStudio, Field Service.
+
+Integrations:
+Payment gateway.
+GIS.
+Identity verification.
+Document management.
+
+Interview challenge:
+Long-running government processes.
+
+Solution:
+State-machine style application lifecycle with auditable transitions rather than one enormous Flow.
+
+25. Education
+Student Admissions and Enrollment CRM
+
+Enterprise blueprint:
+
+Salesforce:
+Education Cloud, Experience Cloud, Marketing Cloud.
+
+Lifecycle:
+Prospect → inquiry → application → admission → enrollment → student.
+
+Integrations:
+Student Information System.
+Learning management system.
+Payment provider.
+Identity provider.
+
+Automation:
+Application completeness.
+Document reminders.
+Counselor routing.
+Admissions decisions.
+
+Data Cloud:
+Unify marketing, web and admissions activity.
+
+26. Higher Education
+Student Success and Advising Platform
+
+Architecture:
+
+Data:
+Student.
+Academic program.
+Course.
+Advisor.
+Appointment.
+Success plan.
+Risk indicator.
+
+Salesforce:
+Education Cloud, Service Cloud, Experience Cloud.
+
+AI:
+At-risk student summarization.
+Advisor preparation.
+Suggested outreach.
+
+Integration:
+SIS.
+LMS.
+Attendance.
+Financial aid.
+
+Event pattern:
+LMS event → middleware → Salesforce → risk score → advisor task.
+
+27. SaaS / Technology
+Enterprise Lead-to-Cash Transformation
+
+Enterprise blueprint:
+
+Salesforce:
+Sales Cloud, Revenue Cloud/CPQ, Service Cloud.
+
+Processes:
+Lead.
+Opportunity.
+Quote.
+Contract.
+Subscription.
+Order.
+Renewal.
+
+Integrations:
+ERP.
+Billing.
+Product usage platform.
+Data warehouse.
+E-signature.
+
+Technical:
+Apex pricing extensions only where declarative rules are insufficient.
+Platform Events for order handoff.
+Scheduled reconciliation for billing.
+
+Architect question:
+Salesforce or ERP as order system of record?
+
+Answer depends on fulfillment and accounting ownership.
+
+28. SaaS
+Marketing-to-Sales Customer Lifecycle
+
+Verified inspiration: Redpath implemented Salesforce and Pardot, addressing data management, sales process, segmentation and marketing automation.
+
+Architecture:
+
+Marketing Account Engagement → Lead/Contact → Sales Cloud → Opportunity → customer lifecycle.
+
+Components:
+Scoring.
+Grading.
+Campaign attribution.
+Lead routing.
+Nurture.
+Sales alerts.
+
+Data challenge:
+Duplicate leads and contacts.
+
+Solution:
+Identity strategy before automation.
+
+29. Enterprise Platform Engineering
+Modern Salesforce DevOps Program
+
+Your manifest research gives direct evidence from LWC Recipes and Apex Recipes for modern CLI, GitHub Actions, testing, Code Analyzer, scratch-org workflows and packaging.
+
+Enterprise blueprint:
+
+Git strategy:
+Feature → pull request → integration → release.
+
+Pipeline:
+Lint.
+Jest.
+Apex tests.
+Code Analyzer.
+Package validation.
+Temporary org deployment.
+Regression tests.
+Production deployment.
+
+Tools:
+Salesforce CLI.
+GitHub Actions.
+Unlocked packages.
+Scratch orgs.
+Code Analyzer.
+
+Controls:
+Minimum test coverage.
+Static-analysis severity threshold.
+Peer approval.
+Deployment validation.
+Rollback procedure.
+
+30. Enterprise Data Platform
+Salesforce Customer 360 + Data Cloud
+
+Architecture:
+
+Sources:
+CRM.
+ERP.
+Website.
+Mobile app.
+POS.
+Marketing.
+Service.
+Data warehouse.
+
+Pipeline:
+Data Streams
+→ Data Lake Objects
+→ Data Model Objects
+→ Identity Resolution
+→ Unified Individual
+→ Calculated Insights
+→ Segmentation
+→ Activation.
+
+Use cases:
+Next best action.
+Churn detection.
+Personalization.
+Agent context.
+Audience activation.
+
+Salesforce:
+Data Cloud, Sales Cloud, Service Cloud, Marketing Cloud, Agentforce.
+
+This architecture pairs particularly well with the FSC Agentic Advisor reference, whose manifests include extensive Data Cloud streams and mappings.
+
+The 10 strongest projects to master first
+
+For senior Salesforce interviews, I would prioritize these ten:
+
+Healthcare Patient 360 + Epic/Cerner FHIR
+Banking FSC + Core Banking
+Wealth Management FSC + Data Cloud + Agentforce
+Telecom Enterprise CPQ + Provisioning
+Manufacturing Salesforce + SAP + Field Service
+Insurance Customer/Broker Portal
+Logistics Field Service + GIS/IoT
+Retail Customer 360 + POS + Commerce
+SaaS Lead-to-Cash + Revenue Cloud
+Enterprise Data Cloud + Agentforce
