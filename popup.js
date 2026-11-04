@@ -1092,7 +1092,13 @@ async function loadSettings() {
 
   jobTitleEl.value = data.last_job_title || "";
   companyNameEl.value = data.last_company_name || "";
-  jdLinkEl.value = data.last_jd_link || "";
+  // A bare LinkedIn search-results URL is never a job link — drop it so it cannot look "stuck".
+  const restoredJdLink = String(data.last_jd_link || "");
+  jdLinkEl.value = /linkedin\.com\/jobs\/(search-results|search|collections)\/?(\?|$)/i.test(
+    restoredJdLink
+  ) && !/currentJobId=\d{6,}/i.test(restoredJdLink)
+    ? ""
+    : restoredJdLink;
   jdTextEl.value = data.last_jd_text || "";
   if (oneOffExtraPromptEl) {
     oneOffExtraPromptEl.value = data.last_one_off_extra_prompt || "";
@@ -3277,6 +3283,19 @@ async function clearOneOffJobFields() {
 async function fillFromOpenTab() {
   setStatus("Scraping active tab…");
   try {
+    // Show the clean LinkedIn link right away (id is in the tab URL) so a failed or
+    // slow scrape can never leave the bare /jobs/search-results link in the field.
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const earlyId = String(activeTab?.url || "").match(
+        /linkedin\.com\/jobs\/.*[?&#]currentJobId=(\d{6,})/i
+      )?.[1];
+      if (earlyId && jdLinkEl) {
+        jdLinkEl.value = `https://www.linkedin.com/jobs/view/${earlyId}`;
+      }
+    } catch {
+      /* tabs permission / no active tab — scrape below reports the real error */
+    }
     const res = await chrome.runtime.sendMessage({ type: "scrape_active_job_tab" });
     if (!res?.ok) {
       setStatus(res?.error || "Could not scrape this tab.");
@@ -3305,7 +3324,7 @@ async function fillFromOpenTab() {
     if (jdLen) {
       jdNote = ` · ${jdLen >= 1000 ? `${(jdLen / 1000).toFixed(1)}k` : jdLen} chars`;
     } else if (!jobId) {
-      jdNote = " · JD empty · no jobId — open job or use classic /jobs/search";
+      jdNote = " · JD empty · no jobId";
     } else if (res.guestAttempted && !res.guestOk) {
       jdNote = " · JD empty · API/guest failed";
     } else {
@@ -3313,7 +3332,12 @@ async function fillFromOpenTab() {
     }
     const linkNote = cleanLink ? " · clean link" : jobId ? "" : " · no clean link";
     const companyNote = String(res.companyName || "").trim() ? "" : " · no company";
-    setStatus(`Filled from tab${site}${jdNote}${linkNote}${companyNote}.`);
+    // Build tags + stage trace make a stale extension or a blocked API visible.
+    const ver = chrome.runtime.getManifest?.().version || "?";
+    const builds = [res.bgBuild, res.contentBuild].filter(Boolean).join("/") || "old-build";
+    const trace = jdLen ? "" : String(res.debug || "").trim();
+    const debugNote = site && /linkedin/i.test(site) ? ` [v${ver} ${builds}${trace ? ` · ${trace}` : ""}]` : "";
+    setStatus(`Filled from tab${site}${jdNote}${linkNote}${companyNote}.${debugNote}`);
     syncOneOffActionButtons();
   } catch (err) {
     setStatus(`Scrape failed: ${String(err?.message || err)}`);

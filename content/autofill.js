@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd5";
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd6";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -11565,7 +11565,7 @@
         if (!data || (!title && !jd)) continue;
         // Reject obvious search-chrome titles (e.g. "213 jobs in United States…").
         if (title && /\d+\s+jobs?\s+in\b/i.test(title)) continue;
-        return { ok: true, site: scraper.id, jobData: data };
+        return { ok: true, site: scraper.id, jobData: data, build: SCRIPT_BUILD };
       } catch {
         /* fall through to the generic scraper */
       }
@@ -11575,7 +11575,7 @@
     try {
       const data = await scrapeGenericJobPage();
       if (data && (data.jobTitle || data.jdText)) {
-        return { ok: true, site: "generic", jobData: data };
+        return { ok: true, site: "generic", jobData: data, build: SCRIPT_BUILD };
       }
     } catch {
       /* ignore and report not-found below */

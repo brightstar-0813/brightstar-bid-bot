@@ -10749,7 +10749,7 @@ async function parseLinkedInGuestHtmlInTab(tabId, html) {
  * Fetch JD via Voyager inside the LinkedIn tab (cookies + CSRF), then guest HTML.
  * AI Search DOM is intentionally not trusted for description text.
  */
-async function fetchLinkedInVoyagerJobInTab(tabId, jobId) {
+async function fetchLinkedInVoyagerJobInTab(tabId, jobId, trace = null) {
   if (!tabId || !/^\d{6,}$/.test(String(jobId || ""))) return null;
   try {
     const [{ result } = {}] = await chrome.scripting.executeScript({
@@ -10784,7 +10784,11 @@ async function fetchLinkedInVoyagerJobInTab(tabId, jobId) {
             node?.companyName || node?.primaryDescription?.text || node?.company?.name || ""
           ).trim();
         };
+        const trace = [];
+        if (!csrf) trace.push("no csrf");
+        let urlIdx = 0;
         for (const url of urls) {
+          urlIdx += 1;
           for (const accept of [
             "application/vnd.linkedin.normalized+json+2.1",
             "application/json"
@@ -10800,7 +10804,10 @@ async function fetchLinkedInVoyagerJobInTab(tabId, jobId) {
                 headers,
                 cache: "no-store"
               });
-              if (!res.ok) continue;
+              if (!res.ok) {
+                trace.push(`v${urlIdx}:${res.status}`);
+                continue;
+              }
               const data = await res.json();
               let jdText = pickDesc(data) || pickDesc(data.data);
               let jobTitle = pickTitle(data) || pickTitle(data.data);
@@ -10820,20 +10827,24 @@ async function fetchLinkedInVoyagerJobInTab(tabId, jobId) {
                 .replace(/\n{3,}/g, "\n\n")
                 .trim();
               if (jdText.length >= 160) {
-                return { jdText, jobTitle, companyName };
+                return { jdText, jobTitle, companyName, trace };
               }
-            } catch {
-              /* try next */
+              trace.push(`v${urlIdx}:200 no-desc`);
+            } catch (err) {
+              trace.push(`v${urlIdx}:err`);
             }
           }
         }
-        return null;
+        return { jdText: "", trace };
       },
       args: [String(jobId)]
     });
+    if (Array.isArray(trace)) {
+      trace.push(...(Array.isArray(result?.trace) ? result.trace.slice(0, 8) : []));
+    }
     if (result && String(result.jdText || "").trim().length >= 160) return result;
-  } catch {
-    /* fall through */
+  } catch (err) {
+    if (Array.isArray(trace)) trace.push(`voyager-exec:${String(err?.message || err).slice(0, 60)}`);
   }
   return null;
 }
@@ -10842,7 +10853,7 @@ async function fetchLinkedInVoyagerJobInTab(tabId, jobId) {
  * Job-id-first enrich: Voyager (in-tab) then guest HTML.
  * Service workers have no DOMParser — guest HTML is parsed in the tab.
  */
-async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
+async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
   const out = { ...(job || {}) };
   const jobId =
     linkedInJobIdFromString(out.jobId) ||
@@ -10859,23 +10870,32 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
     out.jdLink = "";
   }
 
-  const jd = String(out.jdText || "").trim();
+  let jd = String(out.jdText || "").trim();
   if (!jobId) {
+    trace.push("no jobId");
     return { job: out, guestAttempted, guestOk };
   }
+  // AI match / BETA card text is long enough to look like a JD — never accept it.
+  if (jd && /show match details|your profile and resume match|is this information helpful/i.test(jd)) {
+    trace.push("dom jd was match card");
+    jd = "";
+    out.jdText = "";
+  }
   if (!isThinLinkedInJd(jd)) {
+    trace.push(`dom jd ${jd.length}`);
     return { job: out, guestAttempted, guestOk: true };
   }
 
   guestAttempted = true;
 
-  const voyager = await fetchLinkedInVoyagerJobInTab(tabId, jobId);
+  const voyager = await fetchLinkedInVoyagerJobInTab(tabId, jobId, trace);
   if (voyager && String(voyager.jdText || "").trim().length >= 160) {
     out.jdText = String(voyager.jdText).trim();
     if (!out.jobTitle && voyager.jobTitle) out.jobTitle = String(voyager.jobTitle).trim();
     if (!out.companyName && voyager.companyName) {
       out.companyName = String(voyager.companyName).trim();
     }
+    trace.push("voyager ok");
     guestOk = true;
     return { job: out, guestAttempted, guestOk };
   }
@@ -10884,22 +10904,40 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
     `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
     `https://www.linkedin.com/jobs/view/${jobId}`
   ];
+  let urlIdx = 0;
   for (const url of urls) {
+    urlIdx += 1;
     for (const credentials of ["omit", "include"]) {
+      const tag = `g${urlIdx}${credentials === "omit" ? "o" : "i"}`;
       try {
-        const res = await fetch(url, {
+        let res = await fetch(url, {
           credentials,
           headers: { Accept: "text/html" },
           cache: "no-store"
         });
-        if (!res.ok) continue;
+        if (res.status === 429 || res.status === 999) {
+          await sleep(800);
+          res = await fetch(url, {
+            credentials,
+            headers: { Accept: "text/html" },
+            cache: "no-store"
+          });
+        }
+        if (!res.ok) {
+          trace.push(`${tag}:${res.status}`);
+          continue;
+        }
         const html = await res.text();
-        if (!html || html.length < 200) continue;
+        if (!html || html.length < 200) {
+          trace.push(`${tag}:empty`);
+          continue;
+        }
         if (
           !/(show-more-less-html__markup|description__text|jobs-description|about the job|sobre a vaga)/i.test(
             html
           )
         ) {
+          trace.push(`${tag}:no-markup(${html.length})`);
           continue;
         }
         const parsed = await parseLinkedInGuestHtmlInTab(tabId, html);
@@ -10909,11 +10947,13 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
           if (!out.companyName && parsed.companyName) {
             out.companyName = String(parsed.companyName).trim();
           }
+          trace.push(`${tag} ok`);
           guestOk = true;
           return { job: out, guestAttempted, guestOk };
         }
-      } catch {
-        /* try next */
+        trace.push(`${tag}:parse-thin`);
+      } catch (err) {
+        trace.push(`${tag}:err ${String(err?.message || err).slice(0, 40)}`);
       }
     }
   }
@@ -10928,6 +10968,8 @@ async function scrapeIndeedJobFromTab(tabId) {
   }
   return result.jobData;
 }
+
+const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd6";
 
 /** Scrape title/company/link/JD from the user's active tab (any supported ATS / schema.org). */
 async function scrapeActiveJobTab() {
@@ -10956,11 +10998,14 @@ async function scrapeActiveJobTab() {
   let liveJobId = "";
   let guestAttempted = false;
   let guestOk = false;
+  const trace = [];
   if (isLinkedIn) {
     const live = await readLiveLinkedInJobContext(tab.id);
     if (live.href) liveTabUrl = live.href;
     liveJobId = live.jobId || linkedInJobIdFromString(liveTabUrl) || linkedInJobIdFromString(url);
+    trace.push(liveJobId ? `id ${liveJobId}` : "id none");
   }
+  let contentBuild = "";
 
   const isThinJd = isThinLinkedInJd;
 
@@ -10974,8 +11019,10 @@ async function scrapeActiveJobTab() {
     } catch (err) {
       lastErr = String(err?.message || err);
       result = null;
+      if (isLinkedIn) trace.push(`dom err ${lastErr.slice(0, 50)}`);
       continue;
     }
+    if (result?.build) contentBuild = String(result.build);
     if (!result?.ok || !result.jobData) {
       lastErr = result?.error || "No job details found";
       continue;
@@ -11008,7 +11055,7 @@ async function scrapeActiveJobTab() {
   }
 
   if (isLinkedIn) {
-    const enriched = await enrichLinkedInJobFromGuest(tab.id, d, liveTabUrl);
+    const enriched = await enrichLinkedInJobFromGuest(tab.id, d, liveTabUrl, trace);
     d = enriched.job;
     guestAttempted = enriched.guestAttempted;
     guestOk = enriched.guestOk;
@@ -11043,7 +11090,7 @@ async function scrapeActiveJobTab() {
   } else if (!jdLink) {
     jdLink = url;
   }
-  if (!jdText && !jobTitle) {
+  if (!jdText && !jobTitle && !(isLinkedIn && jobId)) {
     throw new Error(
       "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, or similar job listing."
     );
@@ -11056,7 +11103,10 @@ async function scrapeActiveJobTab() {
     jobId,
     guestAttempted: isLinkedIn ? guestAttempted : false,
     guestOk: isLinkedIn ? guestOk : false,
-    site: result.site || (isLinkedIn ? "linkedin" : "")
+    site: result.site || (isLinkedIn ? "linkedin" : ""),
+    bgBuild: LINKEDIN_SCRAPE_BG_BUILD,
+    contentBuild,
+    debug: isLinkedIn ? trace.join(" | ") : ""
   };
 }
 
