@@ -10445,6 +10445,24 @@ function isLinkedInSearchChromeLink(url) {
   }
 }
 
+function isThinLinkedInJd(text) {
+  const t = String(text || "").trim();
+  if (!t) return true;
+  if (t.length < 160) return true;
+  const lines = t
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length <= 5) {
+    return lines.every((line) =>
+      /^(role|title|location|employment(\s*type)?|job\s*type|type|company|posted|salary|compensation|workplace|work\s*arrangement|remote|hybrid|on-?site)\b/i.test(
+        line
+      )
+    );
+  }
+  return false;
+}
+
 function linkedInPlainTextFromGuestHtml(html) {
   const raw = String(html || "");
   if (!raw) return { jdText: "", jobTitle: "", companyName: "" };
@@ -10498,14 +10516,122 @@ function linkedInPlainTextFromGuestHtml(html) {
   return { jdText: text, jobTitle: title, companyName: company };
 }
 
-/** SW guest fetch — parse without DOMParser (not available in service workers). */
-async function enrichLinkedInJobFromGuest(job, tabUrl = "") {
+async function readLiveLinkedInJobContext(tabId) {
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      func: () => {
+        const href = String(location.href || "");
+        let jobId = "";
+        try {
+          jobId =
+            new URLSearchParams(location.search).get("currentJobId") ||
+            new URLSearchParams(location.search).get("jobId") ||
+            (location.pathname.match(/\/jobs\/view\/(\d{6,})/i) || [])[1] ||
+            "";
+        } catch {
+          jobId = (href.match(/[?&#]currentJobId=(\d{6,})/i) || [])[1] || "";
+        }
+        if (!/^\d{6,}$/.test(jobId)) {
+          jobId = (href.match(/[?&#]currentJobId=(\d{6,})/i) || [])[1] || "";
+        }
+        return { href, jobId: /^\d{6,}$/.test(jobId) ? jobId : "" };
+      }
+    });
+    return {
+      href: String(result?.href || "").trim(),
+      jobId: linkedInJobIdFromString(result?.jobId || "")
+    };
+  } catch {
+    return { href: "", jobId: "" };
+  }
+}
+
+/** Prefer an active LinkedIn jobs tab; fall back to any jobs tab in the focused window. */
+async function resolveJobScrapeTab() {
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  let tab = activeTabs[0] || null;
+  const isLinkedInJobsUrl = (u) => {
+    try {
+      const parsed = new URL(String(u || ""));
+      return /(^|\.)linkedin\.com$/i.test(parsed.hostname) && /\/jobs\b/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  };
+  if (tab?.id && isLinkedInJobsUrl(tab.url)) return tab;
+
+  const focused = await chrome.tabs.query({ lastFocusedWindow: true });
+  const linkedInJobs = focused.filter((t) => t?.id && isLinkedInJobsUrl(t.url));
+  const withJobId = linkedInJobs.find((t) => linkedInJobIdFromString(t.url));
+  if (withJobId) return withJobId;
+  if (linkedInJobs[0]) return linkedInJobs[0];
+
+  if (tab?.id) return tab;
+  throw new Error("No active tab.");
+}
+
+async function parseLinkedInGuestHtmlInTab(tabId, html) {
+  const raw = String(html || "");
+  if (!raw || raw.length < 200) return null;
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      func: (pageHtml) => {
+        const doc = new DOMParser().parseFromString(String(pageHtml || ""), "text/html");
+        const el =
+          doc.querySelector(".show-more-less-html__markup") ||
+          doc.querySelector(".description__text") ||
+          doc.querySelector("#job-details") ||
+          doc.querySelector(".jobs-description") ||
+          doc.querySelector(".jobs-box__html-content");
+        let jdText = String(el?.innerText || el?.textContent || "").trim();
+        if (jdText.length < 160) {
+          const body = String(doc.body?.innerText || "").trim();
+          const cut = body.search(/\babout the job\b/i);
+          if (cut >= 0) {
+            jdText = body
+              .slice(cut)
+              .replace(/^about the job\s*/i, "")
+              .split(
+                /\n(?=\s*(Seniority level|Employment type|Job function|Industries|About the company)\b)/i
+              )[0]
+              .trim();
+          }
+        }
+        jdText = jdText.replace(/^about the job\s*/i, "").trim();
+        const jobTitle = String(doc.querySelector("h1")?.innerText || "").trim();
+        const companyName = String(
+          doc.querySelector(".topcard__org-name-link, a.topcard__org-name-link, a[href*='/company/']")
+            ?.innerText || ""
+        ).trim();
+        return { jdText, jobTitle, companyName };
+      },
+      args: [raw]
+    });
+    if (result && String(result.jdText || "").trim().length >= 160) return result;
+  } catch {
+    /* fall through to regex */
+  }
+  const parsed = linkedInPlainTextFromGuestHtml(raw);
+  if (String(parsed.jdText || "").trim().length >= 160) return parsed;
+  return null;
+}
+
+/**
+ * Job-id-first guest enrich. SW fetches HTML; tab parses with DOMParser
+ * (service workers have no DOMParser). Regex parse is fallback only.
+ */
+async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
   const out = { ...(job || {}) };
   const jobId =
     linkedInJobIdFromString(out.jobId) ||
     linkedInJobIdFromString(out.jdLink) ||
     linkedInJobIdFromString(out.applyLink) ||
     linkedInJobIdFromString(tabUrl);
+  let guestAttempted = false;
+  let guestOk = false;
+
   if (jobId) {
     out.jobId = jobId;
     out.jdLink = linkedInCleanJobLink(jobId);
@@ -10514,8 +10640,14 @@ async function enrichLinkedInJobFromGuest(job, tabUrl = "") {
   }
 
   const jd = String(out.jdText || "").trim();
-  if (!jobId || (jd && jd.length >= 160)) return out;
+  if (!jobId) {
+    return { job: out, guestAttempted, guestOk };
+  }
+  if (!isThinLinkedInJd(jd)) {
+    return { job: out, guestAttempted, guestOk: true };
+  }
 
+  guestAttempted = true;
   const urls = [
     `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
     `https://www.linkedin.com/jobs/view/${jobId}`
@@ -10534,19 +10666,22 @@ async function enrichLinkedInJobFromGuest(job, tabUrl = "") {
         if (!/(show-more-less-html__markup|description__text|jobs-description|about the job)/i.test(html)) {
           continue;
         }
-        const parsed = linkedInPlainTextFromGuestHtml(html);
-        if (String(parsed.jdText || "").trim().length >= 160) {
-          out.jdText = parsed.jdText.trim();
-          if (!out.jobTitle && parsed.jobTitle) out.jobTitle = parsed.jobTitle;
-          if (!out.companyName && parsed.companyName) out.companyName = parsed.companyName;
-          return out;
+        const parsed = await parseLinkedInGuestHtmlInTab(tabId, html);
+        if (parsed && String(parsed.jdText || "").trim().length >= 160) {
+          out.jdText = String(parsed.jdText).trim();
+          if (!out.jobTitle && parsed.jobTitle) out.jobTitle = String(parsed.jobTitle).trim();
+          if (!out.companyName && parsed.companyName) {
+            out.companyName = String(parsed.companyName).trim();
+          }
+          guestOk = true;
+          return { job: out, guestAttempted, guestOk };
         }
       } catch {
         /* try next */
       }
     }
   }
-  return out;
+  return { job: out, guestAttempted, guestOk };
 }
 
 async function scrapeIndeedJobFromTab(tabId) {
@@ -10560,8 +10695,7 @@ async function scrapeIndeedJobFromTab(tabId) {
 
 /** Scrape title/company/link/JD from the user's active tab (any supported ATS / schema.org). */
 async function scrapeActiveJobTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs[0];
+  const tab = await resolveJobScrapeTab();
   if (!tab?.id) {
     throw new Error("No active tab.");
   }
@@ -10581,23 +10715,18 @@ async function scrapeActiveJobTab() {
     isLinkedIn = false;
   }
 
-  const isThinJd = (text) => {
-    const t = String(text || "").trim();
-    if (!t) return true;
-    if (t.length < 160) return true;
-    const lines = t
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (lines.length <= 5) {
-      return lines.every((line) =>
-        /^(role|title|location|employment(\s*type)?|job\s*type|type|company|posted|salary|compensation|workplace|work\s*arrangement|remote|hybrid|on-?site)\b/i.test(
-          line
-        )
-      );
-    }
-    return false;
-  };
+  // LinkedIn: resolve live currentJobId first so guest JD can run even if DOM scrape is thin.
+  let liveTabUrl = url;
+  let liveJobId = "";
+  let guestAttempted = false;
+  let guestOk = false;
+  if (isLinkedIn) {
+    const live = await readLiveLinkedInJobContext(tab.id);
+    if (live.href) liveTabUrl = live.href;
+    liveJobId = live.jobId || linkedInJobIdFromString(liveTabUrl) || linkedInJobIdFromString(url);
+  }
+
+  const isThinJd = isThinLinkedInJd;
 
   let result = null;
   let lastErr = "";
@@ -10619,45 +10748,41 @@ async function scrapeActiveJobTab() {
     const title = String(probe.jobTitle || probe.title || "").trim();
     const text = String(probe.jdText || "").trim();
     // SPA boards hydrate late — retry while JD is still a stub / header-only.
+    // LinkedIn with a known jobId can stop early: guest enrich fills the JD next.
+    if (isLinkedIn && liveJobId && title) break;
     if (title && isThinJd(text) && i < attempts - 1) continue;
     if (title || text) break;
   }
 
   if (!result?.ok || !result.jobData) {
-    throw new Error(
-      lastErr
-        ? `Could not scrape this tab (${lastErr}). Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, Jobright, or similar job page.`
-        : "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, or similar job listing, or paste the JD manually."
-    );
-  }
-  let d = result.jobData || {};
-
-  // Side panel / SPA: chrome.tabs url can lag behind location.href — read live href + id.
-  let liveTabUrl = url;
-  if (isLinkedIn) {
-    try {
-      const [{ result: live } = {}] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id, allFrames: false },
-        func: () => ({
-          href: String(location.href || ""),
-          jobId:
-            new URLSearchParams(location.search).get("currentJobId") ||
-            (location.pathname.match(/\/jobs\/view\/(\d{6,})/i) || [])[1] ||
-            ""
-        })
-      });
-      if (live?.href) liveTabUrl = live.href;
-      if (live?.jobId && !d.jobId) d = { ...d, jobId: live.jobId };
-    } catch {
-      /* keep tab.url */
+    // LinkedIn with a resolved id can still succeed via guest-only enrich.
+    if (!(isLinkedIn && liveJobId)) {
+      throw new Error(
+        lastErr
+          ? `Could not scrape this tab (${lastErr}). Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, Jobright, or similar job page.`
+          : "No job details found on this page. Open a Greenhouse, Workday, Indeed, Dice, LinkedIn, or similar job listing, or paste the JD manually."
+      );
     }
-    d = await enrichLinkedInJobFromGuest(d, liveTabUrl);
+    result = { ok: true, site: "linkedin", jobData: {} };
+  }
+  let d = { ...(result.jobData || {}) };
+  if (isLinkedIn && liveJobId) {
+    d.jobId = liveJobId;
+    d.jdLink = linkedInCleanJobLink(liveJobId);
+  }
+
+  if (isLinkedIn) {
+    const enriched = await enrichLinkedInJobFromGuest(tab.id, d, liveTabUrl);
+    d = enriched.job;
+    guestAttempted = enriched.guestAttempted;
+    guestOk = enriched.guestOk;
   }
 
   const jobTitle = String(d.jobTitle || d.title || "").trim();
   const companyName = String(d.companyName || d.company || "").trim();
   const jdText = String(d.jdText || "").trim();
   let jdLink = String(d.jdLink || d.applyLink || "").trim();
+  let jobId = "";
   if (isDice) {
     try {
       const selected = new URL(url).searchParams.get("selectedJobId");
@@ -10667,8 +10792,9 @@ async function scrapeActiveJobTab() {
     }
   }
   if (isLinkedIn) {
-    const jobId =
+    jobId =
       linkedInJobIdFromString(d.jobId) ||
+      linkedInJobIdFromString(liveJobId) ||
       linkedInJobIdFromString(jdLink) ||
       linkedInJobIdFromString(liveTabUrl) ||
       linkedInJobIdFromString(url);
@@ -10691,7 +10817,10 @@ async function scrapeActiveJobTab() {
     companyName,
     jdText,
     jdLink,
-    site: result.site || ""
+    jobId,
+    guestAttempted: isLinkedIn ? guestAttempted : false,
+    guestOk: isLinkedIn ? guestOk : false,
+    site: result.site || (isLinkedIn ? "linkedin" : "")
   };
 }
 

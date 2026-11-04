@@ -3290,17 +3290,30 @@ async function fillFromOpenTab() {
       companyNameEl.value = res.companyName;
       companyNameEl.dispatchEvent(new Event("input", { bubbles: true }));
     }
-    if (res.jdLink) jdLinkEl.value = res.jdLink;
-    if (res.jdText) jdTextEl.value = res.jdText;
+    // Always write link/JD so a failed scrape clears stale search-results URLs.
+    if (jdLinkEl) jdLinkEl.value = String(res.jdLink || "").trim();
+    if (jdTextEl) jdTextEl.value = String(res.jdText || "").trim();
     await persistJobFields();
     setManualPanelOpen(true);
     const site = res.site ? ` (${res.site})` : "";
     const jdLen = String(res.jdText || "").trim().length;
-    const jdNote = jdLen
-      ? ` · ${jdLen >= 1000 ? `${(jdLen / 1000).toFixed(1)}k` : jdLen} chars`
-      : " · JD empty";
+    const cleanLink = /^https:\/\/www\.linkedin\.com\/jobs\/view\/\d{6,}\/?$/i.test(
+      String(res.jdLink || "").trim()
+    );
+    const jobId = String(res.jobId || "").trim();
+    let jdNote = "";
+    if (jdLen) {
+      jdNote = ` · ${jdLen >= 1000 ? `${(jdLen / 1000).toFixed(1)}k` : jdLen} chars`;
+    } else if (!jobId) {
+      jdNote = " · JD empty · no jobId";
+    } else if (res.guestAttempted && !res.guestOk) {
+      jdNote = " · JD empty · guest failed";
+    } else {
+      jdNote = " · JD empty";
+    }
+    const linkNote = cleanLink ? " · clean link" : jobId ? "" : " · no clean link";
     const companyNote = String(res.companyName || "").trim() ? "" : " · no company";
-    setStatus(`Filled from tab${site}${jdNote}${companyNote}.`);
+    setStatus(`Filled from tab${site}${jdNote}${linkNote}${companyNote}.`);
     syncOneOffActionButtons();
   } catch (err) {
     setStatus(`Scrape failed: ${String(err?.message || err)}`);

@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd2";
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd3";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -10852,6 +10852,40 @@
     return "";
   }
 
+  /** Class-agnostic backup for semantic search hashed DOM. */
+  function linkedInDescriptionFromAboutTreeWalker(root) {
+    const scope = root?.nodeType === 9 ? root.body || root : root;
+    if (!scope?.ownerDocument && scope?.nodeType !== 1 && scope?.nodeType !== 9) return "";
+    const doc = scope.ownerDocument || (scope.nodeType === 9 ? scope : document);
+    if (!doc?.createTreeWalker) return "";
+    const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT);
+    let node = walker.currentNode;
+    while (node) {
+      if (node.nodeType === 1) {
+        const label = elementText(node);
+        if (label && label.length <= 40 && /^about the job$/i.test(label)) {
+          const block =
+            node.closest?.(
+              "section, article, .jobs-description, .jobs-box, [class*='description']"
+            ) || node.parentElement;
+          const fromBlock = linkedInDescriptionFromPlainText(textFromDescEl(block));
+          if (fromBlock.length > 160) return fromBlock;
+          const parts = [];
+          let sib = node.nextElementSibling;
+          for (let i = 0; sib && i < 20; i += 1) {
+            const piece = textFromDescEl(sib);
+            if (piece) parts.push(piece);
+            sib = sib.nextElementSibling;
+          }
+          const joined = linkedInDescriptionFromPlainText(parts.join("\n\n"));
+          if (joined.length > 160) return joined;
+        }
+      }
+      node = walker.nextNode();
+    }
+    return "";
+  }
+
   function linkedInDescriptionFromScope(root) {
     if (!root?.querySelectorAll && root?.nodeType !== 9) return "";
     let best = "";
@@ -10876,6 +10910,10 @@
     if (!best || isThinJobDescription(best)) {
       const fromHeading = linkedInDescriptionFromAboutHeading(root);
       if (fromHeading.length > best.length) best = fromHeading;
+    }
+    if (!best || isThinJobDescription(best)) {
+      const fromWalker = linkedInDescriptionFromAboutTreeWalker(root);
+      if (fromWalker.length > best.length) best = fromWalker;
     }
     if (!best || isThinJobDescription(best)) {
       // Hashed-class semantic search: slice visible detail text at About the job.
