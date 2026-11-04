@@ -10520,22 +10520,149 @@ async function readLiveLinkedInJobContext(tabId) {
   try {
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      func: () => {
-        const href = String(location.href || "");
-        let jobId = "";
-        try {
-          jobId =
-            new URLSearchParams(location.search).get("currentJobId") ||
-            new URLSearchParams(location.search).get("jobId") ||
-            (location.pathname.match(/\/jobs\/view\/(\d{6,})/i) || [])[1] ||
-            "";
-        } catch {
-          jobId = (href.match(/[?&#]currentJobId=(\d{6,})/i) || [])[1] || "";
+      func: async () => {
+        const fromHref = (raw) => {
+          const s = String(raw || "");
+          return (
+            s.match(/[?&#]currentJobId=(\d{6,})/i)?.[1] ||
+            s.match(/[?&#]jobId=(\d{6,})/i)?.[1] ||
+            s.match(/\/jobs\/view\/(\d{6,})/i)?.[1] ||
+            s.match(/urn:li:(?:fsd_)?jobPosting:(\d{6,})/i)?.[1] ||
+            (/^\d{6,}$/.test(s.trim()) ? s.trim() : "") ||
+            ""
+          );
+        };
+        const fromAttrs = (el) => {
+          if (!el?.getAttribute) return "";
+          const vals = [
+            el.getAttribute("data-job-id"),
+            el.getAttribute("data-occludable-job-id"),
+            el.getAttribute("data-job-posting-id"),
+            el.getAttribute("data-entity-urn"),
+            el.getAttribute("data-urn"),
+            el.getAttribute("componentkey"),
+            el.getAttribute("data-test-job-id")
+          ];
+          for (const v of vals) {
+            const id = fromHref(v || "");
+            if (id) return id;
+          }
+          const attrs = el.getAttributeNames?.() || [];
+          for (const name of attrs) {
+            const id = fromHref(el.getAttribute(name) || "");
+            if (id) return id;
+          }
+          return "";
+        };
+        const selectedCard = () =>
+          document.querySelector(
+            [
+              '.jobs-search-results-list [aria-current="page"]',
+              ".jobs-search-results__list-item--active",
+              '.scaffold-layout__list [aria-current="true"]',
+              '[aria-current="page"][data-occludable-job-id]',
+              'div[role="button"][aria-pressed="true"]',
+              'div[role="button"][aria-current="true"]',
+              'div[role="button"][componentkey*="jobPosting"]',
+              'div[role="button"][componentkey*="JobPosting"]'
+            ].join(", ")
+          );
+
+        const resolveId = () => {
+          let jobId = "";
+          const href = String(location.href || "");
+          try {
+            jobId =
+              new URLSearchParams(location.search).get("currentJobId") ||
+              new URLSearchParams(location.search).get("jobId") ||
+              (location.pathname.match(/\/jobs\/view\/(\d{6,})/i) || [])[1] ||
+              "";
+          } catch {
+            jobId = fromHref(href);
+          }
+          if (!/^\d{6,}$/.test(jobId)) jobId = fromHref(href);
+
+          if (!/^\d{6,}$/.test(jobId)) {
+            const selected = selectedCard();
+            jobId =
+              fromAttrs(selected) ||
+              fromAttrs(
+                selected?.querySelector?.(
+                  "[data-occludable-job-id],[data-entity-urn],[componentkey],[data-job-id]"
+                )
+              );
+          }
+
+          if (!/^\d{6,}$/.test(jobId)) {
+            for (const a of document.querySelectorAll(
+              'a[href*="/jobs/view/"], a[href*="currentJobId="]'
+            )) {
+              jobId = fromHref(a.getAttribute("href") || "");
+              if (/^\d{6,}$/.test(jobId)) break;
+            }
+          }
+
+          if (!/^\d{6,}$/.test(jobId)) {
+            try {
+              let best = "";
+              let bestTs = -1;
+              for (const entry of performance.getEntriesByType("resource")) {
+                const name = String(entry?.name || "");
+                const id =
+                  name.match(/jobPostings?\/(\d{6,})/i)?.[1] ||
+                  name.match(/fsd_jobPosting%3A(\d{6,})/i)?.[1] ||
+                  name.match(/[?&]currentJobId=(\d{6,})/i)?.[1] ||
+                  "";
+                if (!id) continue;
+                const ts = Number(entry.responseEnd || entry.startTime || 0);
+                if (ts >= bestTs) {
+                  bestTs = ts;
+                  best = id;
+                }
+              }
+              jobId = best;
+            } catch {
+              /* ignore */
+            }
+          }
+
+          if (!/^\d{6,}$/.test(jobId)) {
+            jobId =
+              String(document.body?.innerHTML || "")
+                .slice(0, 400000)
+                .match(/urn:li:(?:fsd_)?jobPosting:(\d{6,})/i)?.[1] || "";
+          }
+          return /^\d{6,}$/.test(jobId) ? jobId : "";
+        };
+
+        let jobId = resolveId();
+        // AI Search: re-activate the selected card so currentJobId lands in the URL.
+        if (
+          !jobId &&
+          /\/jobs\/(search-results|search|collections)\b/i.test(location.pathname)
+        ) {
+          const selected = selectedCard();
+          if (selected) {
+            try {
+              selected.click();
+            } catch {
+              try {
+                selected.dispatchEvent(
+                  new MouseEvent("click", { bubbles: true, cancelable: true })
+                );
+              } catch {
+                /* ignore */
+              }
+            }
+            await new Promise((r) => setTimeout(r, 700));
+            jobId = resolveId();
+          }
         }
-        if (!/^\d{6,}$/.test(jobId)) {
-          jobId = (href.match(/[?&#]currentJobId=(\d{6,})/i) || [])[1] || "";
-        }
-        return { href, jobId: /^\d{6,}$/.test(jobId) ? jobId : "" };
+
+        return {
+          href: String(location.href || "").trim(),
+          jobId: jobId || ""
+        };
       }
     });
     return {
@@ -10619,8 +10746,101 @@ async function parseLinkedInGuestHtmlInTab(tabId, html) {
 }
 
 /**
- * Job-id-first guest enrich. SW fetches HTML; tab parses with DOMParser
- * (service workers have no DOMParser). Regex parse is fallback only.
+ * Fetch JD via Voyager inside the LinkedIn tab (cookies + CSRF), then guest HTML.
+ * AI Search DOM is intentionally not trusted for description text.
+ */
+async function fetchLinkedInVoyagerJobInTab(tabId, jobId) {
+  if (!tabId || !/^\d{6,}$/.test(String(jobId || ""))) return null;
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      func: async (id) => {
+        const csrf =
+          document.cookie.match(/(?:^|;\s*)JSESSIONID="?([^";]+)"?/)?.[1] ||
+          document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ||
+          "";
+        const urls = [
+          `https://www.linkedin.com/voyager/api/jobs/jobPostings/${id}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebLightJobPosting-23`,
+          `https://www.linkedin.com/voyager/api/voyagerJobsDashJobPostings/urn%3Ali%3Afsd_jobPosting%3A${id}`,
+          `https://www.linkedin.com/voyager/api/jobs/jobPostings/${id}`
+        ];
+        const pickDesc = (node) => {
+          if (!node || typeof node !== "object") return "";
+          const d = node.description;
+          if (typeof d === "string") return d.trim();
+          if (d && typeof d.text === "string") return d.text.trim();
+          return "";
+        };
+        const pickTitle = (node) =>
+          String(node?.title?.text || node?.title || node?.name || "").trim();
+        const pickCompany = (node) => {
+          const details = node?.companyDetails || {};
+          for (const v of Object.values(details)) {
+            const name =
+              v?.companyResolutionResult?.name || v?.company?.name || v?.name || "";
+            if (name) return String(name).trim();
+          }
+          return String(
+            node?.companyName || node?.primaryDescription?.text || node?.company?.name || ""
+          ).trim();
+        };
+        for (const url of urls) {
+          for (const accept of [
+            "application/vnd.linkedin.normalized+json+2.1",
+            "application/json"
+          ]) {
+            try {
+              const headers = {
+                Accept: accept,
+                "x-restli-protocol-version": "2.0.0"
+              };
+              if (csrf) headers["csrf-token"] = csrf;
+              const res = await fetch(url, {
+                credentials: "include",
+                headers,
+                cache: "no-store"
+              });
+              if (!res.ok) continue;
+              const data = await res.json();
+              let jdText = pickDesc(data) || pickDesc(data.data);
+              let jobTitle = pickTitle(data) || pickTitle(data.data);
+              let companyName = pickCompany(data) || pickCompany(data.data);
+              const included = Array.isArray(data.included)
+                ? data.included
+                : Array.isArray(data.data?.included)
+                  ? data.data.included
+                  : [];
+              for (const node of included) {
+                if (!jdText) jdText = pickDesc(node);
+                if (!jobTitle) jobTitle = pickTitle(node);
+                if (!companyName) companyName = pickCompany(node);
+              }
+              jdText = String(jdText || "")
+                .replace(/\r\n/g, "\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+              if (jdText.length >= 160) {
+                return { jdText, jobTitle, companyName };
+              }
+            } catch {
+              /* try next */
+            }
+          }
+        }
+        return null;
+      },
+      args: [String(jobId)]
+    });
+    if (result && String(result.jdText || "").trim().length >= 160) return result;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+/**
+ * Job-id-first enrich: Voyager (in-tab) then guest HTML.
+ * Service workers have no DOMParser — guest HTML is parsed in the tab.
  */
 async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
   const out = { ...(job || {}) };
@@ -10648,6 +10868,18 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
   }
 
   guestAttempted = true;
+
+  const voyager = await fetchLinkedInVoyagerJobInTab(tabId, jobId);
+  if (voyager && String(voyager.jdText || "").trim().length >= 160) {
+    out.jdText = String(voyager.jdText).trim();
+    if (!out.jobTitle && voyager.jobTitle) out.jobTitle = String(voyager.jobTitle).trim();
+    if (!out.companyName && voyager.companyName) {
+      out.companyName = String(voyager.companyName).trim();
+    }
+    guestOk = true;
+    return { job: out, guestAttempted, guestOk };
+  }
+
   const urls = [
     `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
     `https://www.linkedin.com/jobs/view/${jobId}`
@@ -10663,7 +10895,11 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "") {
         if (!res.ok) continue;
         const html = await res.text();
         if (!html || html.length < 200) continue;
-        if (!/(show-more-less-html__markup|description__text|jobs-description|about the job)/i.test(html)) {
+        if (
+          !/(show-more-less-html__markup|description__text|jobs-description|about the job|sobre a vaga)/i.test(
+            html
+          )
+        ) {
           continue;
         }
         const parsed = await parseLinkedInGuestHtmlInTab(tabId, html);

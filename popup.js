@@ -3305,9 +3305,9 @@ async function fillFromOpenTab() {
     if (jdLen) {
       jdNote = ` · ${jdLen >= 1000 ? `${(jdLen / 1000).toFixed(1)}k` : jdLen} chars`;
     } else if (!jobId) {
-      jdNote = " · JD empty · no jobId";
+      jdNote = " · JD empty · no jobId — open job or use classic /jobs/search";
     } else if (res.guestAttempted && !res.guestOk) {
-      jdNote = " · JD empty · guest failed";
+      jdNote = " · JD empty · API/guest failed";
     } else {
       jdNote = " · JD empty";
     }

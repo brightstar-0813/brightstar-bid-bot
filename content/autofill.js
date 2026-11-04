@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd3";
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd5";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -10364,7 +10364,17 @@
    * LinkedIn jobs scrape (classic /jobs/view + search split-pane + AI Search).
    * Prefer the right-hand detail pane — never the left results list alone.
    * Skip AI match / BETA summary cards so they are not treated as the JD body.
+   *
+   * AI Search (/jobs/search-results/) often uses hashed class names, lazy-loads
+   * the description until the detail pane scrolls, and may omit the English
+   * "About the job" heading (or localize it). Guest HTML also has no heading —
+   * only `.show-more-less-html__markup` / `.description__text`.
    */
+  const LINKEDIN_ABOUT_JOB_RE =
+    /\b(about the job|about this job|job description|job details|sobre a vaga|descri[cç][aã]o(?:\s+da)?\s+vaga|acerca del empleo|descripci[oó]n del (?:empleo|puesto)|stellenbeschreibung|à propos du poste)\b/i;
+  const LINKEDIN_ABOUT_JOB_HEADING_RE =
+    /^(about the job|about this job|job description|job details|sobre a vaga|descri[cç][aã]o(?:\s+da)?\s+vaga|acerca del empleo|descripci[oó]n del (?:empleo|puesto)|stellenbeschreibung|à propos du poste)$/i;
+
   function linkedInJunkTitle(title) {
     const t = String(title || "").trim();
     if (!t || t.length < 3) return true;
@@ -10402,8 +10412,29 @@
   }
 
   function linkedInIdFromUrn(value) {
-    const m = String(value || "").match(/urn:li:jobPosting:(\d+)/i);
+    const m = String(value || "").match(/urn:li:(?:fsd_)?jobPosting:(\d+)/i);
     return m ? m[1] : "";
+  }
+
+  function linkedInIsAiSearchPath(url = location.href) {
+    try {
+      return /\/jobs\/search-results\b/i.test(new URL(String(url || ""), location.origin).pathname);
+    } catch {
+      return /\/jobs\/search-results\b/i.test(String(url || ""));
+    }
+  }
+
+  function linkedInCsrfToken() {
+    const fromCookie =
+      document.cookie.match(/(?:^|;\s*)JSESSIONID="?([^";]+)"?/)?.[1] ||
+      document.cookie.match(/(?:^|;\s*)csrf-token="?([^";]+)"?/)?.[1] ||
+      "";
+    if (fromCookie) return fromCookie;
+    return (
+      document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ||
+      document.querySelector('input[name="csrfToken"]')?.value ||
+      ""
+    );
   }
 
   function linkedInIsSearchChromeUrl(url) {
@@ -10486,8 +10517,13 @@
       /* ignore */
     }
     // Semantic / AI search often uses hashed class names with no #job-details.
-    const sample = String(el.innerText || el.textContent || "").slice(0, 5000);
-    return /\babout the job\b/i.test(sample) && sample.length > 220;
+    const sample = String(el.innerText || el.textContent || "").slice(0, 8000);
+    if (LINKEDIN_ABOUT_JOB_RE.test(sample) && sample.length > 220) return true;
+    // No localized heading: treat a long detail body (minus AI match chrome) as JD-bearing.
+    if (sample.length < 500) return false;
+    if (linkedInIsAiMatchNoise(el) && sample.length < 900) return false;
+    const stripped = linkedInDescriptionFromPlainText(sample);
+    return stripped.length > 280 && !isThinJobDescription(stripped);
   }
 
   function linkedInNodeHasTitle(el) {
@@ -10561,6 +10597,47 @@
     return scored[0] || doc.body || doc;
   }
 
+  /** AI Search lazy-loads the JD until the detail pane is scrolled. */
+  function linkedInRevealDetailPane(root) {
+    const scopes = [];
+    const push = (el) => {
+      if (el && !scopes.includes(el)) scopes.push(el);
+    };
+    push(root);
+    push(root?.closest?.(".scaffold-layout__detail, .jobs-search__job-details, .jobs-details, [class*='job-details']"));
+    try {
+      document
+        .querySelectorAll(
+          ".scaffold-layout__detail, .jobs-search__job-details--container, .jobs-search__job-details, .jobs-details__main-content"
+        )
+        .forEach(push);
+    } catch {
+      /* ignore */
+    }
+    for (const scope of scopes) {
+      if (!scope) continue;
+      try {
+        if (typeof scope.scrollTop === "number" && scope.scrollHeight > scope.clientHeight + 40) {
+          const prev = scope.scrollTop;
+          scope.scrollTop = Math.min(scope.scrollHeight, prev + Math.max(480, scope.clientHeight));
+          scope.scrollTop = Math.min(scope.scrollHeight, scope.scrollTop + 480);
+        }
+        scope.querySelectorAll?.("*").forEach((el) => {
+          if (!(el instanceof HTMLElement)) return;
+          if (el.scrollHeight > el.clientHeight + 80 && el.clientHeight > 120) {
+            try {
+              el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + 600);
+            } catch {
+              /* ignore */
+            }
+          }
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   function linkedInExpandDescription(root) {
     if (!root?.querySelectorAll) return false;
     const buttons = Array.from(
@@ -10575,6 +10652,8 @@
           "button[aria-label*='More']",
           "button[aria-label*='See more']",
           "button[aria-label*='Show more']",
+          "button[aria-label*='Ver mais']",
+          "button[aria-label*='Mostrar mais']",
           "button",
           "[role='button']"
         ].join(", ")
@@ -10582,17 +10661,17 @@
     );
     for (const btn of buttons) {
       const label = `${elementText(btn)} ${btn.getAttribute("aria-label") || ""}`.toLowerCase();
-      if (/see less|show less|collapse/i.test(label)) continue;
+      if (/see less|show less|collapse|ver menos|mostrar menos/i.test(label)) continue;
       const isMore =
-        /(see more|show more|see full|expand|more about|^more$)/i.test(label) ||
+        /(see more|show more|see full|expand|more about|ver mais|mostrar mais|^more$)/i.test(label) ||
         btn.getAttribute("aria-expanded") === "false";
       if (!isMore) continue;
       // Avoid clicking unrelated "More" menus (share / overflow) in the top card.
-      if (/^more$/i.test(elementText(btn)) && !/description|about|job/i.test(label)) {
+      if (/^more$/i.test(elementText(btn)) && !/description|about|job|vaga/i.test(label)) {
         const inDesc = btn.closest?.(
           ".jobs-description, #job-details, .jobs-box, [class*='jobs-description'], [class*='description']"
         );
-        if (!inDesc && !/\babout the job\b/i.test(String(root?.innerText || "").slice(0, 2000))) {
+        if (!inDesc && !LINKEDIN_ABOUT_JOB_RE.test(String(root?.innerText || "").slice(0, 2000))) {
           continue;
         }
       }
@@ -10615,6 +10694,7 @@
       el.getAttribute("data-urn") ||
       el.getAttribute("data-job-posting-id") ||
       el.getAttribute("componentkey") ||
+      el.getAttribute("data-test-job-id") ||
       "";
     const fromDirect =
       (/^\d{6,}$/.test(direct) ? direct : "") ||
@@ -10626,7 +10706,8 @@
       const val = el.getAttribute(name) || "";
       const hit =
         linkedInIdFromUrn(val) ||
-        val.match(/(?:jobPosting|jobId|currentJobId)[=:]?(\d{6,})/i)?.[1] ||
+        val.match(/(?:fsd_)?jobPosting[=:]?(\d{6,})/i)?.[1] ||
+        val.match(/(?:jobId|currentJobId)[=:]?(\d{6,})/i)?.[1] ||
         "";
       if (/^\d{6,}$/.test(hit)) return hit;
     }
@@ -10646,6 +10727,8 @@
       'div[role="listitem"][aria-current="true"]',
       'div[role="button"][aria-pressed="true"]',
       'div[role="button"][aria-current="true"]',
+      'div[role="button"][componentkey*="jobPosting"]',
+      'div[role="button"][componentkey*="JobPosting"]',
       ".jobs-search-results-list__list-item--active",
       ".scaffold-layout__list-item--active"
     ];
@@ -10657,16 +10740,52 @@
     // pick the card whose visible title matches the detail pane title.
     const detailTitle = linkedInTitleFromDom(linkedInDetailRoot(doc));
     if (!detailTitle) return null;
+    const needle = detailTitle.toLowerCase().slice(0, 28);
     const cards = doc.querySelectorAll(
-      'li[data-occludable-job-id], div[data-occludable-job-id], div[role="button"][componentkey], div[role="listitem"]'
+      [
+        "li[data-occludable-job-id]",
+        "div[data-occludable-job-id]",
+        "div[role='button'][componentkey]",
+        "div[role='listitem']",
+        ".scaffold-layout__list div[role='button']",
+        ".scaffold-layout__list li",
+        "[class*='job-card']",
+        "[class*='JobCard']"
+      ].join(", ")
     );
     for (const card of cards) {
-      const cardText = elementText(card).slice(0, 180);
-      if (cardText && cardText.toLowerCase().includes(detailTitle.toLowerCase().slice(0, 28))) {
+      const cardText = elementText(card).slice(0, 220);
+      if (cardText && cardText.toLowerCase().includes(needle)) {
         return card;
       }
     }
     return null;
+  }
+
+  function linkedInIdFromPerformance(doc = document) {
+    const win = doc.defaultView || (doc === document ? window : null);
+    if (!win?.performance?.getEntriesByType) return "";
+    let best = "";
+    let bestTs = -1;
+    try {
+      for (const entry of win.performance.getEntriesByType("resource")) {
+        const name = String(entry?.name || "");
+        const id =
+          name.match(/jobPostings?\/(\d{6,})/i)?.[1] ||
+          name.match(/[?&]currentJobId=(\d{6,})/i)?.[1] ||
+          name.match(/urn:li:jobPosting:(\d{6,})/i)?.[1] ||
+          "";
+        if (!id) continue;
+        const ts = Number(entry.responseEnd || entry.startTime || 0);
+        if (ts >= bestTs) {
+          bestTs = ts;
+          best = id;
+        }
+      }
+    } catch {
+      return "";
+    }
+    return best;
   }
 
   function linkedInIdFromDom(doc = document) {
@@ -10678,6 +10797,15 @@
     const fromUrl = linkedInIdFromUrl(liveHref) || linkedInIdFromUrl(location.href);
     if (fromUrl) return fromUrl;
 
+    try {
+      const stateId =
+        linkedInIdFromUrl(String(history.state?.asPath || history.state?.url || "")) ||
+        linkedInIdFromStringish(history.state);
+      if (stateId) return stateId;
+    } catch {
+      /* ignore */
+    }
+
     const root = linkedInDetailRoot(doc);
     const attrSelectors = [
       "[data-job-id]",
@@ -10685,7 +10813,8 @@
       "[data-job-posting-id]",
       "[data-entity-urn*='jobPosting']",
       "[data-urn*='jobPosting']",
-      "[componentkey*='jobPosting']"
+      "[componentkey*='jobPosting']",
+      "[componentkey*='JobPosting']"
     ];
     for (const sel of attrSelectors) {
       for (const el of root.querySelectorAll(sel)) {
@@ -10698,9 +10827,15 @@
     if (selectedCard) {
       const id =
         linkedInIdFromAttributes(selectedCard) ||
-        linkedInIdFromAttributes(selectedCard.querySelector?.("[data-entity-urn],[data-occludable-job-id],[data-job-id]")) ||
+        linkedInIdFromAttributes(
+          selectedCard.querySelector?.(
+            "[data-entity-urn],[data-occludable-job-id],[data-job-id],[componentkey]"
+          )
+        ) ||
         linkedInIdFromUrl(
-          selectedCard.querySelector?.('a[href*="/jobs/view/"]')?.getAttribute("href") || ""
+          selectedCard.querySelector?.('a[href*="/jobs/view/"], a[href*="currentJobId="]')?.getAttribute(
+            "href"
+          ) || ""
         );
       if (/^\d{6,}$/.test(id)) return id;
     }
@@ -10710,10 +10845,13 @@
       const id = linkedInIdFromUrl(a.getAttribute("href") || "");
       if (/^\d{6,}$/.test(id)) return id;
     }
-    for (const a of doc.querySelectorAll('a[href*="/jobs/view/"]')) {
+    for (const a of doc.querySelectorAll('a[href*="/jobs/view/"], a[href*="currentJobId="]')) {
       const id = linkedInIdFromUrl(a.getAttribute("href") || "");
       if (/^\d{6,}$/.test(id)) return id;
     }
+
+    const fromPerf = linkedInIdFromPerformance(doc);
+    if (fromPerf) return fromPerf;
 
     // Last resort: urn:li:jobPosting in page HTML near the open detail.
     const urnHit = String(root.innerHTML || doc.body?.innerHTML || "")
@@ -10723,6 +10861,25 @@
 
     const href = doc.querySelector('link[rel="canonical"]')?.getAttribute("href") || "";
     return linkedInIdFromUrl(href);
+  }
+
+  function linkedInIdFromStringish(value) {
+    if (value == null) return "";
+    if (typeof value === "string" || typeof value === "number") {
+      return linkedInIdFromUrl(String(value)) || linkedInIdFromUrn(String(value));
+    }
+    if (typeof value !== "object") return "";
+    try {
+      const raw = JSON.stringify(value);
+      return (
+        raw.match(/urn:li:jobPosting:(\d{6,})/i)?.[1] ||
+        raw.match(/"currentJobId"\s*:\s*"?(\d{6,})"?/i)?.[1] ||
+        raw.match(/"jobPosting(?:Id)?"\s*:\s*"?(\d{6,})"?/i)?.[1] ||
+        ""
+      );
+    } catch {
+      return "";
+    }
   }
 
   function linkedInCompanyFromDom(root) {
@@ -10808,18 +10965,41 @@
       .replace(/\n{3,}/g, "\n\n")
       .trim();
     if (!body) return "";
-    const about = body.search(/\babout the job\b/i);
+    const about = body.search(LINKEDIN_ABOUT_JOB_RE);
     if (about >= 0) {
-      body = body.slice(about).replace(/^about the job\s*/i, "").trim();
+      body = body
+        .slice(about)
+        .replace(LINKEDIN_ABOUT_JOB_RE, "")
+        .replace(/^\s*[:\-–]?\s*/, "")
+        .trim();
     }
     body = body
       .split(
-        /\n(?=\s*(Seniority level|Employment type|Job function|Industries|About the company|Similar jobs|Show more jobs|People also viewed|Report this job)\b)/i
+        /\n(?=\s*(Seniority level|Employment type|Job function|Industries|About the company|Similar jobs|Show more jobs|People also viewed|Report this job|N[ií]vel de experi[eê]ncia|Tipo de emprego|Setores|Sobre a empresa|Vagas semelhantes)\b)/i
       )[0]
       .trim();
-    if (/show match details/i.test(body) || /your profile and resume match/i.test(body)) {
-      const cut = body.search(/\babout the job\b/i);
-      if (cut >= 0) body = body.slice(cut).replace(/^about the job\s*/i, "").trim();
+    if (
+      /show match details/i.test(body) ||
+      /your profile and resume match/i.test(body) ||
+      (/^\s*beta\b/i.test(body) && /helpful/i.test(body))
+    ) {
+      const cut = body.search(LINKEDIN_ABOUT_JOB_RE);
+      if (cut >= 0) {
+        body = body
+          .slice(cut)
+          .replace(LINKEDIN_ABOUT_JOB_RE, "")
+          .replace(/^\s*[:\-–]?\s*/, "")
+          .trim();
+      } else {
+        // AI Search: match card sits above the JD with no "About the job" label.
+        body = body
+          .replace(
+            /^[\s\S]*?(?:show match details|is this information helpful\?)\s*/i,
+            ""
+          )
+          .replace(/^beta\b[\s\S]{0,80}?\n+/i, "")
+          .trim();
+      }
     }
     return body;
   }
@@ -10831,8 +11011,8 @@
     );
     for (const h of headings) {
       const label = elementText(h);
-      if (!label || label.length > 40) continue;
-      if (!/^about the job$/i.test(label)) continue;
+      if (!label || label.length > 48) continue;
+      if (!LINKEDIN_ABOUT_JOB_HEADING_RE.test(label)) continue;
       const block =
         h.closest?.(
           "section, article, .jobs-description, .jobs-box, .jobs-description__container, [class*='jobs-description'], [class*='description']"
@@ -10863,7 +11043,7 @@
     while (node) {
       if (node.nodeType === 1) {
         const label = elementText(node);
-        if (label && label.length <= 40 && /^about the job$/i.test(label)) {
+        if (label && label.length <= 48 && LINKEDIN_ABOUT_JOB_HEADING_RE.test(label)) {
           const block =
             node.closest?.(
               "section, article, .jobs-description, .jobs-box, [class*='description']"
@@ -10884,6 +11064,53 @@
       node = walker.nextNode();
     }
     return "";
+  }
+
+  /**
+   * AI Search hashed DOM: drop match/BETA chrome, keep the longest remaining
+   * text block in the detail pane (no classic #job-details / About heading).
+   */
+  function linkedInDescriptionFromDetailMinusNoise(root) {
+    const scope = root?.nodeType === 9 ? root.body || root : root;
+    if (!scope?.querySelectorAll) return "";
+    const clone = scope.cloneNode(true);
+    try {
+      clone
+        .querySelectorAll(
+          [
+            '[class*="jobs-ai-match"]',
+            '[class*="ai-match-card"]',
+            '[class*="job-match-card"]',
+            '[class*="hiring-assistant"]',
+            '[class*="profile-match"]',
+            '[class*="jobs-premium-match"]',
+            "aside"
+          ].join(", ")
+        )
+        .forEach((el) => el.remove());
+    } catch {
+      /* ignore selector failures — text-preview strip below still runs */
+    }
+    for (const el of Array.from(clone.querySelectorAll("*"))) {
+      if (linkedInIsAiMatchNoise(el)) {
+        try {
+          el.remove();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    let best = "";
+    const candidates = clone.querySelectorAll("section, article, div, p");
+    for (const el of candidates) {
+      const t = textFromDescEl(el);
+      if (t.length < 280) continue;
+      if (linkedInJunkTitle(t.split("\n")[0] || "")) continue;
+      if (/show match details|your profile and resume match/i.test(t) && t.length < 900) continue;
+      if (t.length > best.length) best = t;
+    }
+    if (!best) best = textFromDescEl(clone);
+    return linkedInDescriptionFromPlainText(best) || best;
   }
 
   function linkedInDescriptionFromScope(root) {
@@ -10916,6 +11143,10 @@
       if (fromWalker.length > best.length) best = fromWalker;
     }
     if (!best || isThinJobDescription(best)) {
+      const fromMinusNoise = linkedInDescriptionFromDetailMinusNoise(root);
+      if (fromMinusNoise.length > best.length) best = fromMinusNoise;
+    }
+    if (!best || isThinJobDescription(best)) {
       // Hashed-class semantic search: slice visible detail text at About the job.
       const fromPlain = linkedInDescriptionFromPlainText(textFromDescEl(root));
       if (fromPlain.length > best.length) best = fromPlain;
@@ -10938,6 +11169,7 @@
 
   function scrapeLinkedInDom(doc = document) {
     const root = linkedInDetailRoot(doc);
+    linkedInRevealDetailPane(root);
     linkedInExpandDescription(root);
     const jobTitle = linkedInTitleFromDom(root);
     const companyName = linkedInCompanyFromDom(root);
@@ -11023,6 +11255,158 @@
     return assembleLinkedInScrape(ld, { jobId, dom });
   }
 
+  /**
+   * AI Search often never puts currentJobId in the bar until the card is
+   * (re)activated. Re-click the selected result, then re-read id sources.
+   */
+  async function linkedInEnsureJobId(doc = document) {
+    let id = linkedInIdFromDom(doc);
+    if (id) return id;
+
+    const onSearch =
+      linkedInIsAiSearchPath(location.href) ||
+      /\/jobs\/(search|collections)\b/i.test(location.pathname);
+    if (!onSearch) return "";
+
+    const card = linkedInSelectedResultCard(doc);
+    if (card) {
+      try {
+        card.click();
+      } catch {
+        try {
+          card.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        } catch {
+          /* ignore */
+        }
+      }
+      await new Promise((r) => setTimeout(r, 700));
+      id = linkedInIdFromDom(document);
+      if (id) return id;
+    }
+
+    // Detail chrome sometimes exposes share / view links only after interaction.
+    const root = linkedInDetailRoot(document);
+    for (const a of root.querySelectorAll('a[href*="/jobs/view/"], a[href*="currentJobId="]')) {
+      id = linkedInIdFromUrl(a.getAttribute("href") || "");
+      if (id) return id;
+    }
+    return linkedInIdFromDom(document);
+  }
+
+  function linkedInPlainFromVoyagerPayload(data) {
+    if (!data || typeof data !== "object") return null;
+    const pickDesc = (node) => {
+      if (!node || typeof node !== "object") return "";
+      const d = node.description;
+      if (typeof d === "string") return d.trim();
+      if (d && typeof d.text === "string") return d.text.trim();
+      if (d && typeof d.text?.text === "string") return d.text.text.trim();
+      return "";
+    };
+    const pickTitle = (node) =>
+      String(node?.title?.text || node?.title || node?.name || "").trim();
+    const pickCompany = (node) => {
+      const details = node?.companyDetails || {};
+      for (const v of Object.values(details)) {
+        const name =
+          v?.companyResolutionResult?.name ||
+          v?.company?.name ||
+          v?.name ||
+          "";
+        if (name) return String(name).trim();
+      }
+      return String(
+        node?.companyName ||
+          node?.primaryDescription?.text ||
+          node?.company?.name ||
+          ""
+      ).trim();
+    };
+
+    let jdText = pickDesc(data) || pickDesc(data.data);
+    let jobTitle = pickTitle(data) || pickTitle(data.data);
+    let companyName = pickCompany(data) || pickCompany(data.data);
+
+    const included = Array.isArray(data.included)
+      ? data.included
+      : Array.isArray(data.data?.included)
+        ? data.data.included
+        : [];
+    for (const node of included) {
+      const type = String(node?.$type || node?.type || "").toLowerCase();
+      if (!jdText && /jobposting|job.?description/i.test(type)) {
+        jdText = pickDesc(node) || jdText;
+      }
+      if (!jdText) jdText = pickDesc(node) || jdText;
+      if (!jobTitle && /jobposting/i.test(type)) jobTitle = pickTitle(node) || jobTitle;
+      if (!companyName) companyName = pickCompany(node) || companyName;
+    }
+
+    jdText = linkedInDescriptionFromPlainText(jdText) || jdText;
+    if (!jdText || jdText.length < 160) return null;
+    return {
+      jobTitle: jobTitle && !linkedInJunkTitle(jobTitle) ? jobTitle : "",
+      companyName: companyName || "",
+      jdText,
+      jobLocation: String(data.formattedLocation || data.data?.formattedLocation || "").trim()
+    };
+  }
+
+  /**
+   * Logged-in Voyager JSON — reliable JD source when AI Search DOM is hashed/empty.
+   */
+  async function fetchLinkedInVoyagerJob(jobId) {
+    if (!jobId) return null;
+    const csrf = linkedInCsrfToken();
+    const urls = [
+      `https://www.linkedin.com/voyager/api/jobs/jobPostings/${jobId}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebLightJobPosting-23`,
+      `https://www.linkedin.com/voyager/api/voyagerJobsDashJobPostings/urn%3Ali%3Afsd_jobPosting%3A${jobId}`,
+      `https://www.linkedin.com/voyager/api/jobs/jobPostings/${jobId}`
+    ];
+    const acceptHeaders = [
+      "application/vnd.linkedin.normalized+json+2.1",
+      "application/json"
+    ];
+    for (const url of urls) {
+      for (const accept of acceptHeaders) {
+        try {
+          const headers = {
+            Accept: accept,
+            "x-restli-protocol-version": "2.0.0"
+          };
+          if (csrf) headers["csrf-token"] = csrf;
+          const res = await fetch(url, {
+            credentials: "include",
+            headers,
+            cache: "no-store"
+          });
+          if (!res.ok) continue;
+          const json = await res.json();
+          const parsed = linkedInPlainFromVoyagerPayload(json);
+          if (parsed?.jdText) {
+            return {
+              jobId,
+              jobTitle: parsed.jobTitle,
+              companyName: parsed.companyName,
+              jdText: parsed.jdText,
+              jdLink: linkedInCanonicalLink(jobId),
+              applyLink: linkedInCanonicalLink(jobId),
+              jobLocation: parsed.jobLocation,
+              workArrangement: "",
+              employmentType: "",
+              salaryMin: "",
+              salaryMax: "",
+              datePosted: ""
+            };
+          }
+        } catch {
+          /* try next */
+        }
+      }
+    }
+    return null;
+  }
+
   async function fetchLinkedInGuestJobDocument(jobId) {
     if (!jobId) return null;
     const urls = [
@@ -11030,7 +11414,7 @@
       `https://www.linkedin.com/jobs/view/${jobId}`
     ];
     // Logged-in cookies sometimes break the guest endpoint — try include then omit.
-    const credentialModes = ["include", "omit"];
+    const credentialModes = ["omit", "include"];
     for (const url of urls) {
       for (const credentials of credentialModes) {
         try {
@@ -11042,7 +11426,11 @@
           if (!res.ok) continue;
           const html = await res.text();
           if (!html || html.length < 200) continue;
-          if (!/(show-more-less-html__markup|description__text|jobs-description|about the job)/i.test(html)) {
+          if (
+            !/(show-more-less-html__markup|description__text|jobs-description|about the job|sobre a vaga)/i.test(
+              html
+            )
+          ) {
             continue;
           }
           return new DOMParser().parseFromString(html, "text/html");
@@ -11095,24 +11483,60 @@
     return Boolean(title && !linkedInJunkTitle(title) && !isThinJobDescription(jd));
   }
 
-  async function scrapeLinkedIn() {
-    let data = scrapeLinkedInOnce(document);
-    if (linkedInScrapeComplete(data) && data.companyName) return data;
+  async function linkedInEnrichFromApis(data, jobId) {
+    let out = data;
+    const id = String(jobId || out?.jobId || "").trim();
+    if (!/^\d{6,}$/.test(id)) return out;
 
-    // Search / AI Search side panel often hydrates late — try guest/detail HTML next.
-    const jobId = data?.jobId || linkedInIdFromDom(document);
-    if (jobId) {
-      const detailDoc = await fetchLinkedInGuestJobDocument(jobId);
-      if (detailDoc) {
-        data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(detailDoc));
-        if (linkedInScrapeComplete(data) && data.companyName) return data;
-      }
+    // Voyager first (full JD JSON while logged in) — AI Search DOM is a last resort.
+    const voyager = await fetchLinkedInVoyagerJob(id);
+    if (voyager) {
+      out = mergeLinkedInScrapes(out, voyager);
+      if (linkedInScrapeComplete(out)) return out;
     }
 
-    for (const waitMs of [400, 800, 1200, 2000]) {
+    const detailDoc = await fetchLinkedInGuestJobDocument(id);
+    if (detailDoc) {
+      out = mergeLinkedInScrapes(out, scrapeLinkedInOnce(detailDoc));
+    }
+    return out;
+  }
+
+  async function scrapeLinkedIn() {
+    const aiSearch = linkedInIsAiSearchPath(location.href);
+    linkedInRevealDetailPane(linkedInDetailRoot(document));
+
+    // Title/company from the open pane; JD on AI Search is fetched via APIs.
+    let data = scrapeLinkedInOnce(document);
+    let jobId = data?.jobId || (await linkedInEnsureJobId(document));
+    if (jobId && data) {
+      data.jobId = jobId;
+      data.jdLink = linkedInCanonicalLink(jobId) || data.jdLink || "";
+    }
+
+    // API-first whenever JD is thin — especially /jobs/search-results/.
+    if (jobId && (aiSearch || !linkedInScrapeComplete(data))) {
+      data = await linkedInEnrichFromApis(data, jobId);
+      if (linkedInScrapeComplete(data) && data.companyName) return data;
+      if (linkedInScrapeComplete(data)) return data;
+    }
+
+    if (linkedInScrapeComplete(data) && data.companyName) return data;
+
+    for (const waitMs of aiSearch ? [500, 1000, 1600] : [400, 800, 1200, 2000, 2800]) {
       await new Promise((r) => setTimeout(r, waitMs));
-      linkedInExpandDescription(linkedInDetailRoot(document));
+      if (!jobId) jobId = await linkedInEnsureJobId(document);
+      const root = linkedInDetailRoot(document);
+      linkedInRevealDetailPane(root);
+      linkedInExpandDescription(root);
       data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(document));
+      if (jobId) {
+        data.jobId = jobId;
+        data.jdLink = linkedInCanonicalLink(jobId) || data.jdLink || "";
+        if (aiSearch || isThinJobDescription(data.jdText)) {
+          data = await linkedInEnrichFromApis(data, jobId);
+        }
+      }
       if (linkedInScrapeComplete(data) && data.companyName) return data;
       if (linkedInScrapeComplete(data)) return data;
     }
