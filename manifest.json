@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "BrightStar Bid Bot",
   "description": "CSV batch resume & cover letters via ChatGPT or Claude — BrightStar Bid Bot.",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "permissions": [
     "storage",
     "unlimitedStorage",

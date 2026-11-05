@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd7";
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd8";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -8748,6 +8748,28 @@
     return false;
   }
 
+  function isTruncatedJobDescription(text) {
+    const t = String(text || "").trim();
+    if (!t) return false;
+    if (/\b(show more|see more|see full description|ver mais|mostrar mais)\b/i.test(t)) return true;
+    if (/\bshow less\b/i.test(t) && t.length < 1200) return true;
+    if (t.length < 900 && /\u2026|\.\.\.\s*$/.test(t)) return true;
+    return false;
+  }
+
+  function cleanJobDescriptionChrome(text) {
+    return String(text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(
+        /\b(show more|show less|see more|see less|see full description|ver mais|mostrar mais|ver menos|mostrar menos)\b/gi,
+        ""
+      )
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+  }
+
   function pickLongestText(...values) {
     let best = "";
     for (const v of values) {
@@ -10640,6 +10662,26 @@
 
   function linkedInExpandDescription(root) {
     if (!root?.querySelectorAll) return false;
+    // Unclamp CSS-collapsed markup even when the Show more control is a no-op.
+    try {
+      root
+        .querySelectorAll(
+          ".show-more-less-html__markup--clamp-after-5, [class*='markup--clamp'], [class*='line-clamp']"
+        )
+        .forEach((el) => {
+          el.classList.remove("show-more-less-html__markup--clamp-after-5");
+          if (el.style) {
+            el.style.maxHeight = "none";
+            el.style.webkitLineClamp = "unset";
+            el.style.overflow = "visible";
+          }
+        });
+      root.querySelectorAll("section.show-more-less-html").forEach((sec) => {
+        sec.removeAttribute("data-max-lines");
+      });
+    } catch {
+      /* ignore */
+    }
     const buttons = Array.from(
       root.querySelectorAll(
         [
@@ -10647,6 +10689,7 @@
           ".jobs-description button",
           "#job-details ~ button",
           "button.show-more-less-html__button--more",
+          "button.show-more-less-html__button",
           "button[aria-expanded='false']",
           "button[aria-label*='more']",
           "button[aria-label*='More']",
@@ -10659,17 +10702,19 @@
         ].join(", ")
       )
     );
+    let clicked = false;
     for (const btn of buttons) {
       const label = `${elementText(btn)} ${btn.getAttribute("aria-label") || ""}`.toLowerCase();
       if (/see less|show less|collapse|ver menos|mostrar menos/i.test(label)) continue;
       const isMore =
         /(see more|show more|see full|expand|more about|ver mais|mostrar mais|^more$)/i.test(label) ||
-        btn.getAttribute("aria-expanded") === "false";
+        (btn.getAttribute("aria-expanded") === "false" &&
+          /show-more-less|description|job-details/i.test(String(btn.className || "")));
       if (!isMore) continue;
       // Avoid clicking unrelated "More" menus (share / overflow) in the top card.
       if (/^more$/i.test(elementText(btn)) && !/description|about|job|vaga/i.test(label)) {
         const inDesc = btn.closest?.(
-          ".jobs-description, #job-details, .jobs-box, [class*='jobs-description'], [class*='description']"
+          ".jobs-description, #job-details, .jobs-box, .show-more-less-html, [class*='jobs-description'], [class*='description']"
         );
         if (!inDesc && !LINKEDIN_ABOUT_JOB_RE.test(String(root?.innerText || "").slice(0, 2000))) {
           continue;
@@ -10677,12 +10722,20 @@
       }
       try {
         btn.click();
-        return true;
+        clicked = true;
       } catch {
-        /* ignore */
+        /* try next */
       }
     }
-    return false;
+    return clicked;
+  }
+
+  async function linkedInExpandDescriptionFully(root) {
+    for (let i = 0; i < 3; i += 1) {
+      const clicked = linkedInExpandDescription(root);
+      if (!clicked) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
   }
 
   function linkedInIdFromAttributes(el) {
@@ -11001,7 +11054,7 @@
           .trim();
       }
     }
-    return body;
+    return cleanJobDescriptionChrome(body);
   }
 
   function linkedInDescriptionFromAboutHeading(root) {
@@ -11474,8 +11527,13 @@
   function linkedInScrapeComplete(data) {
     if (!data) return false;
     const title = String(data.jobTitle || "").trim();
-    const jd = String(data.jdText || "").trim();
-    return Boolean(title && !linkedInJunkTitle(title) && !isThinJobDescription(jd));
+    const jd = cleanJobDescriptionChrome(data.jdText || "");
+    return Boolean(
+      title &&
+        !linkedInJunkTitle(title) &&
+        !isThinJobDescription(jd) &&
+        !isTruncatedJobDescription(jd)
+    );
   }
 
   async function linkedInEnrichFromApis(data, jobId) {
@@ -11486,22 +11544,29 @@
     // Guest HTML first (no CSRF, proven JD source). Voyager is a short backup.
     const detailDoc = await fetchLinkedInGuestJobDocument(id);
     if (detailDoc) {
+      linkedInExpandDescription(detailDoc.body || detailDoc);
       out = mergeLinkedInScrapes(out, scrapeLinkedInOnce(detailDoc));
+      if (out?.jdText) out.jdText = cleanJobDescriptionChrome(out.jdText);
       if (linkedInScrapeComplete(out)) return out;
     }
 
     const voyager = await fetchLinkedInVoyagerJob(id);
     if (voyager) {
+      if (voyager.jdText) voyager.jdText = cleanJobDescriptionChrome(voyager.jdText);
       out = mergeLinkedInScrapes(out, voyager);
     }
+    if (out?.jdText) out.jdText = cleanJobDescriptionChrome(out.jdText);
     return out;
   }
 
   async function scrapeLinkedIn() {
     const aiSearch = linkedInIsAiSearchPath(location.href);
-    // Never burn the scrape budget revealing/expanding when we already have a job id —
-    // guest HTML is the JD source for AI Search.
+    const root = linkedInDetailRoot(document);
+    linkedInRevealDetailPane(root);
+    await linkedInExpandDescriptionFully(root);
+
     let data = scrapeLinkedInOnce(document);
+    if (data?.jdText) data.jdText = cleanJobDescriptionChrome(data.jdText);
     let jobId =
       data?.jobId ||
       linkedInIdFromUrl(location.href) ||
@@ -11525,6 +11590,7 @@
       data.jdLink = linkedInCanonicalLink(jobId) || data.jdLink || "";
     }
 
+    // Always prefer guest/Voyager when DOM JD is thin OR still has Show more chrome.
     if (jobId && (aiSearch || !linkedInScrapeComplete(data))) {
       data = await linkedInEnrichFromApis(data, jobId);
       if (linkedInScrapeComplete(data)) return data;
@@ -11536,9 +11602,11 @@
     if (!jobId) {
       for (const waitMs of [400, 900]) {
         await new Promise((r) => setTimeout(r, waitMs));
-        linkedInRevealDetailPane(linkedInDetailRoot(document));
-        linkedInExpandDescription(linkedInDetailRoot(document));
+        const nextRoot = linkedInDetailRoot(document);
+        linkedInRevealDetailPane(nextRoot);
+        await linkedInExpandDescriptionFully(nextRoot);
         data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(document));
+        if (data?.jdText) data.jdText = cleanJobDescriptionChrome(data.jdText);
         jobId = data?.jobId || linkedInIdFromDom(document);
         if (jobId) {
           data.jobId = jobId;
@@ -11549,6 +11617,7 @@
       }
     }
 
+    if (data?.jdText) data.jdText = cleanJobDescriptionChrome(data.jdText);
     return data && (data.jobTitle || data.jdText) ? data : null;
   }
 

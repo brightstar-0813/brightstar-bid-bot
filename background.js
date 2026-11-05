@@ -10463,6 +10463,27 @@ function isThinLinkedInJd(text) {
   return false;
 }
 
+/** Collapsed LinkedIn JD chrome — long enough to look complete, but still truncated. */
+function isTruncatedLinkedInJd(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  if (/\b(show more|see more|see full description|ver mais|mostrar mais)\b/i.test(t)) return true;
+  if (/\bshow less\b/i.test(t) && t.length < 1200) return true;
+  // Ellipsis / clamp stubs at the end of a short description body.
+  if (t.length < 900 && /\u2026|\.\.\.\s*$/.test(t)) return true;
+  return false;
+}
+
+function linkedInCleanJdText(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\b(show more|show less|see more|see less|see full description|ver mais|mostrar mais|ver menos|mostrar menos)\b/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function linkedInPlainTextFromGuestHtml(html) {
   const raw = String(html || "");
   if (!raw) return { jdText: "", jobTitle: "", companyName: "" };
@@ -10512,7 +10533,11 @@ function linkedInPlainTextFromGuestHtml(html) {
         .trim();
     }
   }
-  text = text.replace(/^about the job\s*/i, "").trim();
+  text = text
+    .replace(/^about the job\s*/i, "")
+    .replace(/\b(show more|show less|see more|see less|see full description)\b/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return { jdText: text, jobTitle: title, companyName: company };
 }
 
@@ -10706,15 +10731,18 @@ async function parseLinkedInGuestHtmlInTab(tabId, html) {
       target: { tabId, allFrames: false },
       func: (pageHtml) => {
         const doc = new DOMParser().parseFromString(String(pageHtml || ""), "text/html");
+        // Prefer the markup node itself — parent sections also contain Show more / Show less buttons.
         const el =
           doc.querySelector(".show-more-less-html__markup") ||
+          doc.querySelector(".description__text--rich") ||
           doc.querySelector(".description__text") ||
           doc.querySelector("#job-details") ||
           doc.querySelector(".jobs-description") ||
           doc.querySelector(".jobs-box__html-content");
-        let jdText = String(el?.innerText || el?.textContent || "").trim();
+        // textContent survives CSS line-clamp better than innerText on guest shells.
+        let jdText = String(el?.textContent || el?.innerText || "").trim();
         if (jdText.length < 160) {
-          const body = String(doc.body?.innerText || "").trim();
+          const body = String(doc.body?.textContent || doc.body?.innerText || "").trim();
           const cut = body.search(/\babout the job\b/i);
           if (cut >= 0) {
             jdText = body
@@ -10726,7 +10754,11 @@ async function parseLinkedInGuestHtmlInTab(tabId, html) {
               .trim();
           }
         }
-        jdText = jdText.replace(/^about the job\s*/i, "").trim();
+        jdText = jdText
+          .replace(/\b(show more|show less|see more|see less|see full description)\b/gi, "")
+          .replace(/^about the job\s*/i, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
         const jobTitle = String(doc.querySelector("h1")?.innerText || "").trim();
         const companyName = String(
           doc.querySelector(".topcard__org-name-link, a.topcard__org-name-link, a[href*='/company/']")
@@ -10872,7 +10904,8 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
     out.jdLink = "";
   }
 
-  let jd = String(out.jdText || "").trim();
+  let jd = linkedInCleanJdText(out.jdText || "");
+  out.jdText = jd;
   if (!jobId) {
     trace.push("no jobId");
     return { job: out, guestAttempted, guestOk };
@@ -10883,7 +10916,13 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
     jd = "";
     out.jdText = "";
   }
-  if (!isThinLinkedInJd(jd)) {
+  // Collapsed "Show more" stubs look long enough but are incomplete — still fetch guest.
+  if (isTruncatedLinkedInJd(jd)) {
+    trace.push("dom jd truncated");
+    jd = "";
+    out.jdText = "";
+  }
+  if (!isThinLinkedInJd(jd) && !isTruncatedLinkedInJd(jd)) {
     trace.push(`dom jd ${jd.length}`);
     return { job: out, guestAttempted, guestOk: true };
   }
@@ -10932,17 +10971,21 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
           continue;
         }
         const parsed = await parseLinkedInGuestHtmlInTab(tabId, html);
-        if (parsed && String(parsed.jdText || "").trim().length >= 160) {
-          out.jdText = String(parsed.jdText).trim();
+        const guestJd = linkedInCleanJdText(parsed?.jdText || "");
+        if (guestJd.length >= 160 && !isTruncatedLinkedInJd(guestJd)) {
+          out.jdText = guestJd;
           if (!out.jobTitle && parsed.jobTitle) out.jobTitle = String(parsed.jobTitle).trim();
           if (!out.companyName && parsed.companyName) {
             out.companyName = String(parsed.companyName).trim();
           }
-          trace.push(`${tag} ok`);
+          trace.push(`${tag} ok ${guestJd.length}`);
           guestOk = true;
           return { job: out, guestAttempted, guestOk };
         }
-        trace.push(`${tag}:parse-thin`);
+        if (guestJd.length > String(out.jdText || "").length) {
+          out.jdText = guestJd;
+        }
+        trace.push(`${tag}:parse-thin(${guestJd.length})`);
       } catch (err) {
         const msg = String(err?.name || err?.message || err);
         trace.push(`${tag}:${/abort/i.test(msg) ? "timeout" : `err ${msg.slice(0, 30)}`}`);
@@ -10951,17 +10994,19 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
   }
 
   const voyager = await fetchLinkedInVoyagerJobInTab(tabId, jobId, trace);
-  if (voyager && String(voyager.jdText || "").trim().length >= 160) {
-    out.jdText = String(voyager.jdText).trim();
+  const voyagerJd = linkedInCleanJdText(voyager?.jdText || "");
+  if (voyagerJd.length >= 160 && !isTruncatedLinkedInJd(voyagerJd)) {
+    out.jdText = voyagerJd;
     if (!out.jobTitle && voyager.jobTitle) out.jobTitle = String(voyager.jobTitle).trim();
     if (!out.companyName && voyager.companyName) {
       out.companyName = String(voyager.companyName).trim();
     }
-    trace.push("voyager ok");
+    trace.push(`voyager ok ${voyagerJd.length}`);
     guestOk = true;
     return { job: out, guestAttempted, guestOk };
   }
 
+  out.jdText = linkedInCleanJdText(out.jdText || "");
   return { job: out, guestAttempted, guestOk };
 }
 
@@ -10974,7 +11019,7 @@ async function scrapeIndeedJobFromTab(tabId) {
   return result.jobData;
 }
 
-const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd7";
+const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd8";
 
 function linkedInFetchWithTimeout(url, opts = {}, ms = 8000) {
   const ctrl = new AbortController();
@@ -11087,7 +11132,9 @@ async function scrapeActiveJobTab() {
 
   const jobTitle = String(d.jobTitle || d.title || "").trim();
   const companyName = String(d.companyName || d.company || "").trim();
-  const jdText = String(d.jdText || "").trim();
+  const jdText = isLinkedIn
+    ? linkedInCleanJdText(d.jdText || "")
+    : String(d.jdText || "").trim();
   let jdLink = String(d.jdLink || d.applyLink || "").trim();
   let jobId = "";
   if (isDice) {
