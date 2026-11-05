@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd6";
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd7";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -11255,9 +11255,16 @@
     return assembleLinkedInScrape(ld, { jobId, dom });
   }
 
+  function linkedInFetchTimed(url, opts = {}, ms = 8000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  }
+
   /**
    * AI Search often never puts currentJobId in the bar until the card is
-   * (re)activated. Re-click the selected result, then re-read id sources.
+   * (re)activated. Only re-click when the id is truly missing — never when
+   * currentJobId is already in the URL (re-click can hang the SPA).
    */
   async function linkedInEnsureJobId(doc = document) {
     let id = linkedInIdFromDom(doc);
@@ -11268,24 +11275,9 @@
       /\/jobs\/(search|collections)\b/i.test(location.pathname);
     if (!onSearch) return "";
 
-    const card = linkedInSelectedResultCard(doc);
-    if (card) {
-      try {
-        card.click();
-      } catch {
-        try {
-          card.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        } catch {
-          /* ignore */
-        }
-      }
-      await new Promise((r) => setTimeout(r, 700));
-      id = linkedInIdFromDom(document);
-      if (id) return id;
-    }
-
-    // Detail chrome sometimes exposes share / view links only after interaction.
-    const root = linkedInDetailRoot(document);
+    // Prefer share/view hrefs over clicking — click can remount the detail pane
+    // and leave the content-script scrape hanging.
+    const root = linkedInDetailRoot(doc);
     for (const a of root.querySelectorAll('a[href*="/jobs/view/"], a[href*="currentJobId="]')) {
       id = linkedInIdFromUrl(a.getAttribute("href") || "");
       if (id) return id;
@@ -11352,56 +11344,60 @@
     };
   }
 
+  async function linkedInTimedFetch(url, opts = {}, ms = 8000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { ...opts, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /**
    * Logged-in Voyager JSON — reliable JD source when AI Search DOM is hashed/empty.
    */
   async function fetchLinkedInVoyagerJob(jobId) {
     if (!jobId) return null;
     const csrf = linkedInCsrfToken();
+    // One decoration URL is enough — more variants just burn the scrape budget.
     const urls = [
       `https://www.linkedin.com/voyager/api/jobs/jobPostings/${jobId}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebLightJobPosting-23`,
-      `https://www.linkedin.com/voyager/api/voyagerJobsDashJobPostings/urn%3Ali%3Afsd_jobPosting%3A${jobId}`,
       `https://www.linkedin.com/voyager/api/jobs/jobPostings/${jobId}`
     ];
-    const acceptHeaders = [
-      "application/vnd.linkedin.normalized+json+2.1",
-      "application/json"
-    ];
     for (const url of urls) {
-      for (const accept of acceptHeaders) {
-        try {
-          const headers = {
-            Accept: accept,
-            "x-restli-protocol-version": "2.0.0"
+      try {
+        const headers = {
+          Accept: "application/vnd.linkedin.normalized+json+2.1",
+          "x-restli-protocol-version": "2.0.0"
+        };
+        if (csrf) headers["csrf-token"] = csrf;
+        const res = await linkedInTimedFetch(
+          url,
+          { credentials: "include", headers, cache: "no-store" },
+          7000
+        );
+        if (!res.ok) continue;
+        const json = await res.json();
+        const parsed = linkedInPlainFromVoyagerPayload(json);
+        if (parsed?.jdText) {
+          return {
+            jobId,
+            jobTitle: parsed.jobTitle,
+            companyName: parsed.companyName,
+            jdText: parsed.jdText,
+            jdLink: linkedInCanonicalLink(jobId),
+            applyLink: linkedInCanonicalLink(jobId),
+            jobLocation: parsed.jobLocation,
+            workArrangement: "",
+            employmentType: "",
+            salaryMin: "",
+            salaryMax: "",
+            datePosted: ""
           };
-          if (csrf) headers["csrf-token"] = csrf;
-          const res = await fetch(url, {
-            credentials: "include",
-            headers,
-            cache: "no-store"
-          });
-          if (!res.ok) continue;
-          const json = await res.json();
-          const parsed = linkedInPlainFromVoyagerPayload(json);
-          if (parsed?.jdText) {
-            return {
-              jobId,
-              jobTitle: parsed.jobTitle,
-              companyName: parsed.companyName,
-              jdText: parsed.jdText,
-              jdLink: linkedInCanonicalLink(jobId),
-              applyLink: linkedInCanonicalLink(jobId),
-              jobLocation: parsed.jobLocation,
-              workArrangement: "",
-              employmentType: "",
-              salaryMin: "",
-              salaryMax: "",
-              datePosted: ""
-            };
-          }
-        } catch {
-          /* try next */
         }
+      } catch {
+        /* try next */
       }
     }
     return null;
@@ -11413,16 +11409,15 @@
       `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
       `https://www.linkedin.com/jobs/view/${jobId}`
     ];
-    // Logged-in cookies sometimes break the guest endpoint — try include then omit.
-    const credentialModes = ["omit", "include"];
+    // Prefer omit first — logged-in cookies sometimes break the guest HTML.
     for (const url of urls) {
-      for (const credentials of credentialModes) {
+      for (const credentials of ["omit", "include"]) {
         try {
-          const res = await fetch(url, {
-            credentials,
-            headers: { Accept: "text/html" },
-            cache: "no-store"
-          });
+          const res = await linkedInTimedFetch(
+            url,
+            { credentials, headers: { Accept: "text/html" }, cache: "no-store" },
+            8000
+          );
           if (!res.ok) continue;
           const html = await res.text();
           if (!html || html.length < 200) continue;
@@ -11488,57 +11483,70 @@
     const id = String(jobId || out?.jobId || "").trim();
     if (!/^\d{6,}$/.test(id)) return out;
 
-    // Voyager first (full JD JSON while logged in) — AI Search DOM is a last resort.
-    const voyager = await fetchLinkedInVoyagerJob(id);
-    if (voyager) {
-      out = mergeLinkedInScrapes(out, voyager);
-      if (linkedInScrapeComplete(out)) return out;
-    }
-
+    // Guest HTML first (no CSRF, proven JD source). Voyager is a short backup.
     const detailDoc = await fetchLinkedInGuestJobDocument(id);
     if (detailDoc) {
       out = mergeLinkedInScrapes(out, scrapeLinkedInOnce(detailDoc));
+      if (linkedInScrapeComplete(out)) return out;
+    }
+
+    const voyager = await fetchLinkedInVoyagerJob(id);
+    if (voyager) {
+      out = mergeLinkedInScrapes(out, voyager);
     }
     return out;
   }
 
   async function scrapeLinkedIn() {
     const aiSearch = linkedInIsAiSearchPath(location.href);
-    linkedInRevealDetailPane(linkedInDetailRoot(document));
-
-    // Title/company from the open pane; JD on AI Search is fetched via APIs.
+    // Never burn the scrape budget revealing/expanding when we already have a job id —
+    // guest HTML is the JD source for AI Search.
     let data = scrapeLinkedInOnce(document);
-    let jobId = data?.jobId || (await linkedInEnsureJobId(document));
-    if (jobId && data) {
+    let jobId =
+      data?.jobId ||
+      linkedInIdFromUrl(location.href) ||
+      linkedInIdFromDom(document);
+    // Only re-click a card when the id is still unknown (re-click can hang/reload the SPA).
+    if (!jobId) jobId = await linkedInEnsureJobId(document);
+    if (jobId) {
+      data = data || {
+        jobTitle: "",
+        companyName: "",
+        jdText: "",
+        jdLink: "",
+        workArrangement: "",
+        employmentType: "",
+        salaryMin: "",
+        salaryMax: "",
+        datePosted: "",
+        jobLocation: ""
+      };
       data.jobId = jobId;
       data.jdLink = linkedInCanonicalLink(jobId) || data.jdLink || "";
     }
 
-    // API-first whenever JD is thin — especially /jobs/search-results/.
     if (jobId && (aiSearch || !linkedInScrapeComplete(data))) {
       data = await linkedInEnrichFromApis(data, jobId);
-      if (linkedInScrapeComplete(data) && data.companyName) return data;
       if (linkedInScrapeComplete(data)) return data;
     }
 
     if (linkedInScrapeComplete(data) && data.companyName) return data;
 
-    for (const waitMs of aiSearch ? [500, 1000, 1600] : [400, 800, 1200, 2000, 2800]) {
-      await new Promise((r) => setTimeout(r, waitMs));
-      if (!jobId) jobId = await linkedInEnsureJobId(document);
-      const root = linkedInDetailRoot(document);
-      linkedInRevealDetailPane(root);
-      linkedInExpandDescription(root);
-      data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(document));
-      if (jobId) {
-        data.jobId = jobId;
-        data.jdLink = linkedInCanonicalLink(jobId) || data.jdLink || "";
-        if (aiSearch || isThinJobDescription(data.jdText)) {
+    // Short DOM-only retry when there is still no job id (classic /jobs/view hydrate).
+    if (!jobId) {
+      for (const waitMs of [400, 900]) {
+        await new Promise((r) => setTimeout(r, waitMs));
+        linkedInRevealDetailPane(linkedInDetailRoot(document));
+        linkedInExpandDescription(linkedInDetailRoot(document));
+        data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(document));
+        jobId = data?.jobId || linkedInIdFromDom(document);
+        if (jobId) {
+          data.jobId = jobId;
+          data.jdLink = linkedInCanonicalLink(jobId) || data.jdLink || "";
           data = await linkedInEnrichFromApis(data, jobId);
         }
+        if (linkedInScrapeComplete(data)) return data;
       }
-      if (linkedInScrapeComplete(data) && data.companyName) return data;
-      if (linkedInScrapeComplete(data)) return data;
     }
 
     return data && (data.jobTitle || data.jdText) ? data : null;

@@ -10761,7 +10761,6 @@ async function fetchLinkedInVoyagerJobInTab(tabId, jobId, trace = null) {
           "";
         const urls = [
           `https://www.linkedin.com/voyager/api/jobs/jobPostings/${id}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebLightJobPosting-23`,
-          `https://www.linkedin.com/voyager/api/voyagerJobsDashJobPostings/urn%3Ali%3Afsd_jobPosting%3A${id}`,
           `https://www.linkedin.com/voyager/api/jobs/jobPostings/${id}`
         ];
         const pickDesc = (node) => {
@@ -10789,50 +10788,53 @@ async function fetchLinkedInVoyagerJobInTab(tabId, jobId, trace = null) {
         let urlIdx = 0;
         for (const url of urls) {
           urlIdx += 1;
-          for (const accept of [
-            "application/vnd.linkedin.normalized+json+2.1",
-            "application/json"
-          ]) {
+          try {
+            const headers = {
+              Accept: "application/vnd.linkedin.normalized+json+2.1",
+              "x-restli-protocol-version": "2.0.0"
+            };
+            if (csrf) headers["csrf-token"] = csrf;
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 7000);
+            let res;
             try {
-              const headers = {
-                Accept: accept,
-                "x-restli-protocol-version": "2.0.0"
-              };
-              if (csrf) headers["csrf-token"] = csrf;
-              const res = await fetch(url, {
+              res = await fetch(url, {
                 credentials: "include",
                 headers,
-                cache: "no-store"
+                cache: "no-store",
+                signal: ctrl.signal
               });
-              if (!res.ok) {
-                trace.push(`v${urlIdx}:${res.status}`);
-                continue;
-              }
-              const data = await res.json();
-              let jdText = pickDesc(data) || pickDesc(data.data);
-              let jobTitle = pickTitle(data) || pickTitle(data.data);
-              let companyName = pickCompany(data) || pickCompany(data.data);
-              const included = Array.isArray(data.included)
-                ? data.included
-                : Array.isArray(data.data?.included)
-                  ? data.data.included
-                  : [];
-              for (const node of included) {
-                if (!jdText) jdText = pickDesc(node);
-                if (!jobTitle) jobTitle = pickTitle(node);
-                if (!companyName) companyName = pickCompany(node);
-              }
-              jdText = String(jdText || "")
-                .replace(/\r\n/g, "\n")
-                .replace(/\n{3,}/g, "\n\n")
-                .trim();
-              if (jdText.length >= 160) {
-                return { jdText, jobTitle, companyName, trace };
-              }
-              trace.push(`v${urlIdx}:200 no-desc`);
-            } catch (err) {
-              trace.push(`v${urlIdx}:err`);
+            } finally {
+              clearTimeout(timer);
             }
+            if (!res.ok) {
+              trace.push(`v${urlIdx}:${res.status}`);
+              continue;
+            }
+            const data = await res.json();
+            let jdText = pickDesc(data) || pickDesc(data.data);
+            let jobTitle = pickTitle(data) || pickTitle(data.data);
+            let companyName = pickCompany(data) || pickCompany(data.data);
+            const included = Array.isArray(data.included)
+              ? data.included
+              : Array.isArray(data.data?.included)
+                ? data.data.included
+                : [];
+            for (const node of included) {
+              if (!jdText) jdText = pickDesc(node);
+              if (!jobTitle) jobTitle = pickTitle(node);
+              if (!companyName) companyName = pickCompany(node);
+            }
+            jdText = String(jdText || "")
+              .replace(/\r\n/g, "\n")
+              .replace(/\n{3,}/g, "\n\n")
+              .trim();
+            if (jdText.length >= 160) {
+              return { jdText, jobTitle, companyName, trace };
+            }
+            trace.push(`v${urlIdx}:200 no-desc`);
+          } catch {
+            trace.push(`v${urlIdx}:err`);
           }
         }
         return { jdText: "", trace };
@@ -10888,18 +10890,7 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
 
   guestAttempted = true;
 
-  const voyager = await fetchLinkedInVoyagerJobInTab(tabId, jobId, trace);
-  if (voyager && String(voyager.jdText || "").trim().length >= 160) {
-    out.jdText = String(voyager.jdText).trim();
-    if (!out.jobTitle && voyager.jobTitle) out.jobTitle = String(voyager.jobTitle).trim();
-    if (!out.companyName && voyager.companyName) {
-      out.companyName = String(voyager.companyName).trim();
-    }
-    trace.push("voyager ok");
-    guestOk = true;
-    return { job: out, guestAttempted, guestOk };
-  }
-
+  // Guest HTML first (timeout-bounded). Voyager is a short backup.
   const urls = [
     `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`,
     `https://www.linkedin.com/jobs/view/${jobId}`
@@ -10910,18 +10901,18 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
     for (const credentials of ["omit", "include"]) {
       const tag = `g${urlIdx}${credentials === "omit" ? "o" : "i"}`;
       try {
-        let res = await fetch(url, {
-          credentials,
-          headers: { Accept: "text/html" },
-          cache: "no-store"
-        });
+        let res = await linkedInFetchWithTimeout(
+          url,
+          { credentials, headers: { Accept: "text/html" }, cache: "no-store" },
+          8000
+        );
         if (res.status === 429 || res.status === 999) {
-          await sleep(800);
-          res = await fetch(url, {
-            credentials,
-            headers: { Accept: "text/html" },
-            cache: "no-store"
-          });
+          await sleep(500);
+          res = await linkedInFetchWithTimeout(
+            url,
+            { credentials, headers: { Accept: "text/html" }, cache: "no-store" },
+            8000
+          );
         }
         if (!res.ok) {
           trace.push(`${tag}:${res.status}`);
@@ -10953,10 +10944,24 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
         }
         trace.push(`${tag}:parse-thin`);
       } catch (err) {
-        trace.push(`${tag}:err ${String(err?.message || err).slice(0, 40)}`);
+        const msg = String(err?.name || err?.message || err);
+        trace.push(`${tag}:${/abort/i.test(msg) ? "timeout" : `err ${msg.slice(0, 30)}`}`);
       }
     }
   }
+
+  const voyager = await fetchLinkedInVoyagerJobInTab(tabId, jobId, trace);
+  if (voyager && String(voyager.jdText || "").trim().length >= 160) {
+    out.jdText = String(voyager.jdText).trim();
+    if (!out.jobTitle && voyager.jobTitle) out.jobTitle = String(voyager.jobTitle).trim();
+    if (!out.companyName && voyager.companyName) {
+      out.companyName = String(voyager.companyName).trim();
+    }
+    trace.push("voyager ok");
+    guestOk = true;
+    return { job: out, guestAttempted, guestOk };
+  }
+
   return { job: out, guestAttempted, guestOk };
 }
 
@@ -10969,7 +10974,13 @@ async function scrapeIndeedJobFromTab(tabId) {
   return result.jobData;
 }
 
-const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd6";
+const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd7";
+
+function linkedInFetchWithTimeout(url, opts = {}, ms = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
 
 /** Scrape title/company/link/JD from the user's active tab (any supported ATS / schema.org). */
 async function scrapeActiveJobTab() {
@@ -11011,11 +11022,23 @@ async function scrapeActiveJobTab() {
 
   let result = null;
   let lastErr = "";
-  const attempts = isDice || isLinkedIn ? 4 : 3;
+  // LinkedIn + known jobId: one timed DOM pass for title/company, then guest/Voyager.
+  // Extra retries here were hanging Scrape on AI Search (status stuck on "Scraping…").
+  const attempts = isLinkedIn && liveJobId ? 1 : isDice || isLinkedIn ? 3 : 3;
   for (let i = 0; i < attempts; i++) {
-    await sleep(i === 0 ? 250 : isDice || isLinkedIn ? 900 : 600);
+    await sleep(i === 0 ? 150 : isDice || isLinkedIn ? 700 : 600);
     try {
-      result = await invokeTabJobScrape(tab.id);
+      const scrapePromise = invokeTabJobScrape(tab.id);
+      result =
+        isLinkedIn
+          ? await Promise.race([
+              scrapePromise,
+              sleep(14000).then(() => ({
+                ok: false,
+                error: "content scrape timed out (14s)"
+              }))
+            ])
+          : await scrapePromise;
     } catch (err) {
       lastErr = String(err?.message || err);
       result = null;
@@ -11025,6 +11048,7 @@ async function scrapeActiveJobTab() {
     if (result?.build) contentBuild = String(result.build);
     if (!result?.ok || !result.jobData) {
       lastErr = result?.error || "No job details found";
+      if (isLinkedIn) trace.push(`dom ${lastErr.slice(0, 40)}`);
       continue;
     }
     const probe = result.jobData || {};

@@ -3286,17 +3286,35 @@ async function fillFromOpenTab() {
     // Show the clean LinkedIn link right away (id is in the tab URL) so a failed or
     // slow scrape can never leave the bare /jobs/search-results link in the field.
     try {
-      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      const earlyId = String(activeTab?.url || "").match(
-        /linkedin\.com\/jobs\/.*[?&#]currentJobId=(\d{6,})/i
-      )?.[1];
+      const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
+      const withId = tabs.find((t) => /[?&#]currentJobId=\d{6,}/i.test(String(t?.url || "")));
+      const active = tabs.find((t) => t.active) || tabs[0];
+      const earlyUrl = String(withId?.url || active?.url || "");
+      const earlyId =
+        earlyUrl.match(/[?&#]currentJobId=(\d{6,})/i)?.[1] ||
+        earlyUrl.match(/\/jobs\/view\/(\d{6,})/i)?.[1] ||
+        "";
       if (earlyId && jdLinkEl) {
         jdLinkEl.value = `https://www.linkedin.com/jobs/view/${earlyId}`;
       }
     } catch {
       /* tabs permission / no active tab — scrape below reports the real error */
     }
-    const res = await chrome.runtime.sendMessage({ type: "scrape_active_job_tab" });
+    // Never leave the UI stuck on "Scraping…" — background must answer or we time out.
+    const res = await Promise.race([
+      chrome.runtime.sendMessage({ type: "scrape_active_job_tab" }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Scrape timed out (22s). Reload the extension, close+reopen the side panel, then try again."
+              )
+            ),
+          22000
+        )
+      )
+    ]);
     if (!res?.ok) {
       setStatus(res?.error || "Could not scrape this tab.");
       return;
