@@ -10468,6 +10468,8 @@ function isTruncatedLinkedInJd(text) {
   const t = String(text || "").trim();
   if (!t) return false;
   if (/\b(show more|see more|see full description|ver mais|mostrar mais)\b/i.test(t)) return true;
+  // AI Search inline expander: "Functional overview... more" / "… more"
+  if (/(?:\u2026|\.{2,3})\s*more\b/i.test(t)) return true;
   if (/\bshow less\b/i.test(t) && t.length < 1200) return true;
   // Ellipsis / clamp stubs at the end of a short description body.
   if (t.length < 900 && /\u2026|\.\.\.\s*$/.test(t)) return true;
@@ -10478,6 +10480,7 @@ function linkedInCleanJdText(text) {
   return String(text || "")
     .replace(/\r\n/g, "\n")
     .replace(/\b(show more|show less|see more|see less|see full description|ver mais|mostrar mais|ver menos|mostrar menos)\b/gi, "")
+    .replace(/(?:\u2026|\.{2,3})\s*more\b/gi, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
@@ -10904,8 +10907,14 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
     out.jdLink = "";
   }
 
-  let jd = linkedInCleanJdText(out.jdText || "");
+  // Detect truncation on RAW text first — cleaning strips "… more" markers.
+  const rawJd = String(out.jdText || "").trim();
+  const wasTruncated = isTruncatedLinkedInJd(rawJd);
+  let jd = linkedInCleanJdText(rawJd);
   out.jdText = jd;
+  // Keep a fallback copy: if guest/Voyager fail we still return cleaned DOM text
+  // instead of an empty JD field (the prior clear-on-truncate path looked "broken").
+  let fallbackJd = jd;
   if (!jobId) {
     trace.push("no jobId");
     return { job: out, guestAttempted, guestOk };
@@ -10915,14 +10924,16 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
     trace.push("dom jd was match card");
     jd = "";
     out.jdText = "";
+    fallbackJd = "";
   }
-  // Collapsed "Show more" stubs look long enough but are incomplete — still fetch guest.
-  if (isTruncatedLinkedInJd(jd)) {
+  // Collapsed "… more" / Show more stubs are incomplete — still fetch guest.
+  if (wasTruncated || isTruncatedLinkedInJd(jd)) {
     trace.push("dom jd truncated");
+    fallbackJd = jd || linkedInCleanJdText(rawJd);
     jd = "";
     out.jdText = "";
   }
-  if (!isThinLinkedInJd(jd) && !isTruncatedLinkedInJd(jd)) {
+  if (!isThinLinkedInJd(jd) && !wasTruncated && !isTruncatedLinkedInJd(jd)) {
     trace.push(`dom jd ${jd.length}`);
     return { job: out, guestAttempted, guestOk: true };
   }
@@ -11006,7 +11017,16 @@ async function enrichLinkedInJobFromGuest(tabId, job, tabUrl = "", trace = []) {
     return { job: out, guestAttempted, guestOk };
   }
 
-  out.jdText = linkedInCleanJdText(out.jdText || "");
+  // Prefer any longer guest/voyager attempt residue; else restore cleaned DOM fallback.
+  const finalJd = linkedInCleanJdText(out.jdText || "");
+  if (!isThinLinkedInJd(finalJd) && !isTruncatedLinkedInJd(finalJd)) {
+    out.jdText = finalJd;
+  } else if (fallbackJd && fallbackJd.length >= 40) {
+    out.jdText = fallbackJd;
+    trace.push(`fallback dom ${fallbackJd.length}`);
+  } else {
+    out.jdText = finalJd;
+  }
   return { job: out, guestAttempted, guestOk };
 }
 
@@ -11019,7 +11039,7 @@ async function scrapeIndeedJobFromTab(tabId) {
   return result.jobData;
 }
 
-const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd8";
+const LINKEDIN_SCRAPE_BG_BUILD = "bg-2026-11-05.jd10";
 
 function linkedInFetchWithTimeout(url, opts = {}, ms = 8000) {
   const ctrl = new AbortController();

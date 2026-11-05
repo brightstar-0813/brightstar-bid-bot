@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd8";
+  const SCRIPT_BUILD = "2026-11-05.linkedin-jd10";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -8752,6 +8752,8 @@
     const t = String(text || "").trim();
     if (!t) return false;
     if (/\b(show more|see more|see full description|ver mais|mostrar mais)\b/i.test(t)) return true;
+    // AI Search inline expander: "Functional overview... more" / "… more"
+    if (/(?:\u2026|\.{2,3})\s*more\b/i.test(t)) return true;
     if (/\bshow less\b/i.test(t) && t.length < 1200) return true;
     if (t.length < 900 && /\u2026|\.\.\.\s*$/.test(t)) return true;
     return false;
@@ -8764,6 +8766,7 @@
         /\b(show more|show less|see more|see less|see full description|ver mais|mostrar mais|ver menos|mostrar menos)\b/gi,
         ""
       )
+      .replace(/(?:\u2026|\.{2,3})\s*more\b/gi, "")
       .replace(/[ \t]+\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .replace(/[ \t]{2,}/g, " ")
@@ -10527,8 +10530,11 @@
     ".jobs-description",
     '[data-testid="job-description"]',
     '[data-testid="job-description-text"]',
+    '[data-testid="expandable-text-box"]',
+    '[data-test-expandable-text-box]',
     '[class*="jobs-description__content"]',
-    '[class*="jobs-box__html-content"]'
+    '[class*="jobs-box__html-content"]',
+    '[class*="expandable-text"]'
   ];
 
   function linkedInNodeHasJd(el) {
@@ -10666,15 +10672,18 @@
     try {
       root
         .querySelectorAll(
-          ".show-more-less-html__markup--clamp-after-5, [class*='markup--clamp'], [class*='line-clamp']"
+          ".show-more-less-html__markup--clamp-after-5, [class*='markup--clamp'], [class*='line-clamp'], [data-testid='expandable-text-box']"
         )
         .forEach((el) => {
           el.classList.remove("show-more-less-html__markup--clamp-after-5");
           if (el.style) {
             el.style.maxHeight = "none";
             el.style.webkitLineClamp = "unset";
+            el.style.display = "block";
             el.style.overflow = "visible";
+            el.style.webkitBoxOrient = "unset";
           }
+          if (el.hasAttribute?.("aria-expanded")) el.setAttribute("aria-expanded", "true");
         });
       root.querySelectorAll("section.show-more-less-html").forEach((sec) => {
         sec.removeAttribute("data-max-lines");
@@ -10682,6 +10691,105 @@
     } catch {
       /* ignore */
     }
+
+    let clicked = false;
+    const clickEl = (el) => {
+      if (!el) return;
+      try {
+        el.click();
+        clicked = true;
+      } catch {
+        try {
+          el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+          clicked = true;
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    // AI Search: expandable-text-box with inline "… more" / "... more"
+    for (const box of root.querySelectorAll(
+      '[data-testid="expandable-text-box"], [data-test-expandable-text-box], [class*="expandable-text"], [class*="ExpandableText"]'
+    )) {
+      const t = elementText(box);
+      if (/(?:\u2026|\.{2,3})\s*more\b|\bmore\b\s*$/i.test(t) || box.getAttribute("aria-expanded") === "false") {
+        clickEl(box);
+        clickEl(box.parentElement);
+        for (const near of box.querySelectorAll?.(
+          'button, [role="button"], a, span[tabindex], [aria-expanded="false"], span, div'
+        ) || []) {
+          const nearLabel = elementText(near);
+          if (
+            nearLabel &&
+            nearLabel.length <= 28 &&
+            /^(?:\u2026|\.{0,3})\s*more$|^more$|^see more$|^show more$/i.test(nearLabel)
+          ) {
+            clickEl(near);
+          }
+        }
+        const collapsed = box.parentElement?.querySelector?.(
+          'button, [role="button"], a, span[tabindex], [aria-expanded="false"]'
+        );
+        clickEl(collapsed);
+      }
+    }
+
+    // Text-node walk: LinkedIn often puts only "more" / "… more" in a leaf span.
+    try {
+      const doc = root.ownerDocument || document;
+      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let textNode = walker.nextNode();
+      while (textNode) {
+        const raw = String(textNode.textContent || "").replace(/\u00a0/g, " ").trim();
+        if (raw && raw.length <= 28 && /^(?:\u2026|\.{0,3})\s*more$|^more$|^see more$|^show more$/i.test(raw)) {
+          const el = textNode.parentElement;
+          const nearAbout =
+            el?.closest?.(
+              "section, article, .jobs-description, #job-details, [class*='description'], [class*='about'], [data-testid='expandable-text-box'], [class*='expandable']"
+            ) || LINKEDIN_ABOUT_JOB_RE.test(String(root?.innerText || "").slice(0, 2500));
+          if (nearAbout) {
+            clickEl(el);
+            clickEl(el?.closest?.('button, a, [role="button"], [tabindex]'));
+          }
+        }
+        textNode = walker.nextNode();
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Bare "more" / "… more" controls next to About the job.
+    for (const el of root.querySelectorAll("button, a, span, div, [role='button']")) {
+      const label = elementText(el);
+      if (!label || label.length > 28) continue;
+      if (
+        !/^(?:\u2026|\.{0,3})\s*more$/i.test(label) &&
+        !/^see more$/i.test(label) &&
+        !/^show more$/i.test(label) &&
+        !/^more$/i.test(label)
+      ) {
+        continue;
+      }
+      const nearAbout =
+        el.closest?.(
+          "section, article, .jobs-description, #job-details, [class*='description'], [class*='about'], [data-testid='expandable-text-box'], [class*='expandable']"
+        ) || LINKEDIN_ABOUT_JOB_RE.test(String(root?.innerText || "").slice(0, 2500));
+      if (!nearAbout) continue;
+      clickEl(el);
+    }
+
+    // Any collapsed expander in the detail pane.
+    for (const el of root.querySelectorAll('[aria-expanded="false"]')) {
+      const label = `${elementText(el)} ${el.getAttribute("aria-label") || ""}`;
+      if (/more|expand|description|about/i.test(label) || label.trim().length < 40) {
+        const nearAbout = el.closest?.(
+          "section, article, .jobs-description, #job-details, [class*='description'], [class*='about'], [data-testid='expandable-text-box']"
+        );
+        if (nearAbout || /more|expand/i.test(label)) clickEl(el);
+      }
+    }
+
     const buttons = Array.from(
       root.querySelectorAll(
         [
@@ -10702,39 +10810,41 @@
         ].join(", ")
       )
     );
-    let clicked = false;
     for (const btn of buttons) {
       const label = `${elementText(btn)} ${btn.getAttribute("aria-label") || ""}`.toLowerCase();
       if (/see less|show less|collapse|ver menos|mostrar menos/i.test(label)) continue;
       const isMore =
-        /(see more|show more|see full|expand|more about|ver mais|mostrar mais|^more$)/i.test(label) ||
+        /(see more|show more|see full|expand|more about|ver mais|mostrar mais|^\s*more\s*$|^\.{0,3}\s*more\s*$)/i.test(
+          label
+        ) ||
         (btn.getAttribute("aria-expanded") === "false" &&
-          /show-more-less|description|job-details/i.test(String(btn.className || "")));
+          /show-more-less|description|job-details|expandable/i.test(String(btn.className || "")));
       if (!isMore) continue;
       // Avoid clicking unrelated "More" menus (share / overflow) in the top card.
-      if (/^more$/i.test(elementText(btn)) && !/description|about|job|vaga/i.test(label)) {
+      if (/^more$/i.test(elementText(btn)) && !/description|about|job|vaga|expandable/i.test(label)) {
         const inDesc = btn.closest?.(
-          ".jobs-description, #job-details, .jobs-box, .show-more-less-html, [class*='jobs-description'], [class*='description']"
+          ".jobs-description, #job-details, .jobs-box, .show-more-less-html, [data-testid='expandable-text-box'], [class*='jobs-description'], [class*='description']"
         );
         if (!inDesc && !LINKEDIN_ABOUT_JOB_RE.test(String(root?.innerText || "").slice(0, 2000))) {
           continue;
         }
       }
-      try {
-        btn.click();
-        clicked = true;
-      } catch {
-        /* try next */
-      }
+      clickEl(btn);
     }
     return clicked;
   }
 
   async function linkedInExpandDescriptionFully(root) {
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       const clicked = linkedInExpandDescription(root);
-      if (!clicked) break;
-      await new Promise((r) => setTimeout(r, 250));
+      // Always pause once so SPA can hydrate after the first expand pass.
+      await new Promise((r) => setTimeout(r, clicked ? 450 : i === 0 ? 200 : 0));
+      if (!clicked && i > 0) break;
+      // Stop early once the collapsed stub is gone.
+      const sample = String(root?.innerText || "").slice(0, 4000);
+      if (sample && !isTruncatedJobDescription(sample) && !/(?:\u2026|\.{2,3})\s*more\b/i.test(sample)) {
+        break;
+      }
     }
   }
 
@@ -11054,7 +11164,14 @@
           .trim();
       }
     }
-    return cleanJobDescriptionChrome(body);
+    // Remember collapse chrome before clean strips "… more" / Show more.
+    const wasTruncated = isTruncatedJobDescription(body);
+    body = cleanJobDescriptionChrome(body);
+    // Re-attach a sentinel so downstream thin/truncated checks still force guest enrich.
+    if (wasTruncated && body && !isTruncatedJobDescription(body)) {
+      body = `${body}\n… more`;
+    }
+    return body;
   }
 
   function linkedInDescriptionFromAboutHeading(root) {
@@ -11071,7 +11188,8 @@
           "section, article, .jobs-description, .jobs-box, .jobs-description__container, [class*='jobs-description'], [class*='description']"
         ) || h.parentElement;
       let text = linkedInDescriptionFromPlainText(textFromDescEl(block));
-      if (text.length > 160 && !linkedInIsAiMatchNoise(block)) return text;
+      // Accept short / truncated stubs ("Functional overview… more") so enrich can run.
+      if (text.length > 40 && !linkedInIsAiMatchNoise(block)) return text;
       const parts = [];
       let sib = h.nextElementSibling;
       for (let i = 0; sib && i < 16; i += 1) {
@@ -11080,7 +11198,7 @@
         sib = sib.nextElementSibling;
       }
       const joined = linkedInDescriptionFromPlainText(parts.join("\n\n"));
-      if (joined.length > 160) return joined;
+      if (joined.length > 40) return joined;
     }
     return "";
   }
@@ -11102,7 +11220,7 @@
               "section, article, .jobs-description, .jobs-box, [class*='description']"
             ) || node.parentElement;
           const fromBlock = linkedInDescriptionFromPlainText(textFromDescEl(block));
-          if (fromBlock.length > 160) return fromBlock;
+          if (fromBlock.length > 40) return fromBlock;
           const parts = [];
           let sib = node.nextElementSibling;
           for (let i = 0; sib && i < 20; i += 1) {
@@ -11111,7 +11229,7 @@
             sib = sib.nextElementSibling;
           }
           const joined = linkedInDescriptionFromPlainText(parts.join("\n\n"));
-          if (joined.length > 160) return joined;
+          if (joined.length > 40) return joined;
         }
       }
       node = walker.nextNode();
@@ -11566,6 +11684,12 @@
     await linkedInExpandDescriptionFully(root);
 
     let data = scrapeLinkedInOnce(document);
+    // Second expand pass after scrape selectors touch expandable-text-box nodes.
+    if (isTruncatedJobDescription(data?.jdText) || aiSearch) {
+      await linkedInExpandDescriptionFully(linkedInDetailRoot(document));
+      data = mergeLinkedInScrapes(data, scrapeLinkedInOnce(document));
+    }
+    const stillTruncated = isTruncatedJobDescription(data?.jdText);
     if (data?.jdText) data.jdText = cleanJobDescriptionChrome(data.jdText);
     let jobId =
       data?.jobId ||
@@ -11591,7 +11715,8 @@
     }
 
     // Always prefer guest/Voyager when DOM JD is thin OR still has Show more chrome.
-    if (jobId && (aiSearch || !linkedInScrapeComplete(data))) {
+    // AI Search collapsed "… more" almost always needs guest even after expand attempts.
+    if (jobId && (aiSearch || stillTruncated || !linkedInScrapeComplete(data))) {
       data = await linkedInEnrichFromApis(data, jobId);
       if (linkedInScrapeComplete(data)) return data;
     }
