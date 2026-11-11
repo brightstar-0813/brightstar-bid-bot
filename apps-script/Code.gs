@@ -8,20 +8,23 @@
  *    - Execute as: Me
  *    - Who has access: Anyone
  * 5. Copy the Web App URL into the extension / WorkSphere "Web App URL" field
- *    (redeploy after updates so listRows / listLinks / markApplied / sheetName are live)
+ *    (redeploy after updates so listRows / listLinks / listCaptureJobs / markApplied / sheetName are live)
  *
  * POST body (text/plain JSON):
- *   action: "append" (default) | "listRows" | "listLinks" | "markApplied"
+ *   action: "append" (default) | "listRows" | "listLinks" | "listCaptureJobs" | "markApplied"
  *   spreadsheetId, optional sheetName (tab per profile; created if missing)
+ *   listCaptureJobs also accepts sheetGid (from the sheet URL ?gid= / #gid=)
  *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status, bidMode
  *
- * Sheet columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status | H Bid mode
+ * Bid-tracking columns: A No | B Date | C Title | D Company | E Link | F Salary | G Status | H Bid mode
+ * Capture / jobs-source tabs (read-only via listCaptureJobs): Role | Company | Link | JD | Salary
  * Resume build → Status "Ready". Apply click → Status "Applied M/D/YYYY h:mm AM/PM" on that row.
  * Bid mode: "Auto bid" (batch) | "Manual bid" (one-off) | "Email bid".
  * Dedup: same job link (normalized) is treated as duplicate within that tab.
  *
  * WorkSphere "Sync from sheet" calls listRows. Older scripts without listRows treated
  * that request as append and wrote blank Ready rows — do not fall through unknown actions.
+ * Never run listRows / ensureSheetLayout_ on capture tabs — that deletes the JD column.
  */
 function doPost(e) {
   try {
@@ -31,8 +34,21 @@ function doPost(e) {
     }
 
     const ss = SpreadsheetApp.openById(String(data.spreadsheetId));
-    const sheet = resolveSheet_(ss, data.sheetName);
     const action = String(data.action || "append").toLowerCase().replace(/_/g, "");
+
+    if (action === "listcapturejobs") {
+      const sheet = resolveExistingSheet_(ss, data.sheetGid, data.sheetName);
+      const rows = collectCaptureJobRows_(sheet);
+      return json_({
+        ok: true,
+        sheetName: sheet.getName(),
+        sheetGid: sheet.getSheetId(),
+        rows: rows,
+        count: rows.length
+      });
+    }
+
+    const sheet = resolveSheet_(ss, data.sheetName);
 
     if (action === "listlinks") {
       ensureSheetLayout_(sheet);
@@ -121,7 +137,7 @@ function doPost(e) {
       throw new Error(
         'Unknown action "' +
           String(data.action || "") +
-          '". Supported: append, listRows, listLinks, markApplied.'
+          '". Supported: append, listRows, listLinks, listCaptureJobs, markApplied.'
       );
     }
 
@@ -197,6 +213,31 @@ function resolveSheet_(ss, sheetName) {
     ["No", "Date", "Title", "Company", "Link", "Salary", "Status", "Bid mode"]
   ]);
   return created;
+}
+
+/**
+ * Read-only tab resolve for capture / jobs-source sheets.
+ * Prefer sheetGid (from the Google Sheets URL); else sheetName. Never creates a tab.
+ */
+function resolveExistingSheet_(ss, sheetGid, sheetName) {
+  var gidRaw = String(sheetGid == null ? "" : sheetGid).trim();
+  if (gidRaw !== "" && /^\d+$/.test(gidRaw)) {
+    var byId = ss.getSheetById(Number(gidRaw));
+    if (byId) return byId;
+    throw new Error('No sheet tab with gid "' + gidRaw + '".');
+  }
+  var name = String(sheetName || "")
+    .trim()
+    .replace(/[:\\\/\?\*\[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (name.length > 100) name = name.slice(0, 100).trim();
+  if (!name) {
+    throw new Error("listCaptureJobs requires sheetGid (from the sheet URL) or sheetName.");
+  }
+  var existing = ss.getSheetByName(name);
+  if (existing) return existing;
+  throw new Error('Sheet tab "' + name + '" was not found.');
 }
 
 /** One data row A–H: No | Date | Title | Company | Link | Salary | Status | Bid mode */
@@ -278,7 +319,9 @@ function rowLooksLikeHeader_(row) {
     .join(" ");
   if (!joined) return false;
   if (/https?:\/\//i.test(joined)) return false;
-  return /\b(link|title|company|compay|status|date|salary|bid\s*mode|bid\s*source)\b/.test(joined);
+  return /\b(link|title|role|company|compay|status|date|salary|jd|job\s*description|bid\s*mode|bid\s*source)\b/.test(
+    joined
+  );
 }
 
 function cellLooksLikeUrl_(value) {
@@ -368,6 +411,21 @@ function salaryColumnIndex_(headerRow) {
     if (idx >= 0) return idx;
   }
   return 5; // column F
+}
+
+/** JD / description column for capture tabs (Role | Company | Link | JD | Salary). */
+function jdTextColumnIndex_(headerRow) {
+  var idx = findNamedColumnIndex_(headerRow, [
+    "jd",
+    "job description",
+    "description",
+    "job desc",
+    "job_description",
+    "jd text",
+    "jdtext"
+  ]);
+  if (idx >= 0) return idx;
+  return 3; // column D on Role|Company|Link|JD|Salary
 }
 
 function dateColumnIndex_(headerRow) {
@@ -550,6 +608,52 @@ function companyColumnIndex_(headerRow) {
     if (idx >= 0) return idx;
   }
   return 3; // column D
+}
+
+/**
+ * Capture / jobs-source rows for batch ingest. Read-only — does not mutate layout.
+ * Expects headers like Role | Company | Link | JD | Salary (flexible aliases).
+ */
+function collectCaptureJobRows_(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return [];
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var header = hasHeader ? values[0] : [];
+  var titleCol = hasHeader ? titleColumnIndex_(header) : 0;
+  var companyCol = hasHeader ? companyColumnIndex_(header) : 1;
+  var linkCol = hasHeader ? linkColumnIndex_(header) : 2;
+  var jdCol = hasHeader ? jdTextColumnIndex_(header) : 3;
+  var salaryCol = hasHeader ? salaryColumnIndex_(header) : 4;
+  var out = [];
+  for (var r = start; r < values.length; r++) {
+    var row = values[r] || [];
+    var title = String(row[titleCol] || "").trim();
+    var company = String(row[companyCol] || "").trim();
+    var link = String(row[linkCol] || "").trim();
+    var jdText = String(row[jdCol] || "").trim();
+    var salary = String(row[salaryCol] || "").trim();
+    if (!link) {
+      for (var c = 0; c < row.length; c++) {
+        var cell = String(row[c] || "").trim();
+        if (cellLooksLikeUrl_(cell)) {
+          link = cell;
+          break;
+        }
+      }
+    }
+    if (!rowHasJobIdentity_(title, company, link) && !jdText) continue;
+    if (!title && !company && !link && !jdText) continue;
+    out.push({
+      row: r + 1,
+      title: title,
+      company: company,
+      link: link,
+      jdText: jdText,
+      salary: salary
+    });
+  }
+  return out;
 }
 
 /** Full job rows for WorkSphere Sync from sheet (skips blank Ready placeholders). */

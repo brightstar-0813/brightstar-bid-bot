@@ -19,7 +19,7 @@ background.js  (service worker, type: module)
 
 ## Typical job pipeline
 
-1. CSV / Indeed grab → US filter → host-based source (Dice / Indeed / LI / Etc)
+1. CSV / capture Google Sheet (`listCaptureJobs`) / Indeed grab → host-based source (Dice / Indeed / LI / Etc). Capture-tab rules: sibling skill `sheet-batch-source`.
 2. Queue review → user **Start**
 3. Ensure AI tab → fresh chat → resume prompt + JD → poll JSON → PDFs + `jd.txt`
 4. Same chat → cover letter → sheet append (Ready) → optional Slack on failures only

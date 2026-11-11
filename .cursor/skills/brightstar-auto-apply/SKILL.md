@@ -1,16 +1,17 @@
 ---
 name: brightstar-auto-apply
 description: >-
-  Guides safe changes to Brightstar Bid bot (Chrome MV3): CSV/Indeed batch,
+  Guides safe changes to Brightstar Bid bot (Chrome MV3): CSV/Sheet/Indeed batch,
   ChatGPT/Claude resume harvest, ATS autofill, Email Bid hiring outreach,
   hosted auto-submit policy. Use when the user wants to edit this repo, or
   mentions adapters, autofill, batch/queue, Greenhouse/Workday/Dice/Indeed
   apply, Email Bid, role tracks, prompts, profiles, Google Sheet, Slack,
-  manifest matches, or submit-safety.
+  manifest matches, or submit-safety. For capture-tab Load from sheet /
+  listCaptureJobs, also follow the sheet-batch-source skill.
 compatibility: Cursor (Agent Skills / skills.sh layout)
 metadata:
   author: brightstar
-  version: "1.1"
+  version: "1.2"
   ecosystem: https://www.skills.sh/
 ---
 
@@ -21,13 +22,14 @@ Procedural knowledge for this repo. Goal: **predictable change process** — sam
 Progressive disclosure (per [Agent Skills](https://www.skills.sh/) / agentskills spec):
 
 1. This file — activate and follow first
-2. Deeper detail only when needed: [references/architecture.md](references/architecture.md)
-3. Agent install/reload/popup smoke via Chrome DevTools MCP: [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
+2. Sheet capture-tab ingest (CSV \| Google Sheet, `listCaptureJobs`): [sheet-batch-source/SKILL.md](../sheet-batch-source/SKILL.md)
+3. Deeper detail only when needed: [references/architecture.md](references/architecture.md)
+4. Agent install/reload/popup smoke via Chrome DevTools MCP: [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
 
 ## Product in one screen
 
 1. Build resume + cover letter PDFs via open **ChatGPT or Claude** tab
-2. Queue US jobs from CSV / Indeed grab
+2. Queue US jobs from **CSV**, **Google Sheet capture tab** (Load from sheet), or Indeed grab
 3. Autofill forms; **auto-submit only on allowed hosted paths**
 4. Optional **Email Bid**: discover hiring contacts (Recruiter/HR/CTO/Lead) → review To → SMTP send
 
@@ -39,6 +41,7 @@ Prefer short control labels and live status text over long instructional hints i
 | Concern | Primary files |
 |---------|----------------|
 | Batch, downloads, sheet/Slack, keep-alive | `background.js` |
+| Sheet batch ingest (capture tab → queue) | `sheet-jobs.js`, `sheets.js` (`fetchCaptureSheetJobs`), `apps-script/Code.gs` (`listCaptureJobs`); see [sheet-batch-source](../sheet-batch-source/SKILL.md) |
 | Apply orchestration, docs, multi-frame | `autofill-runner.js` |
 | DOM fill / Apply / Submit clicks | `content/autofill.js` |
 | In-page apply panel | `content/autofill-panel.js` |
@@ -70,7 +73,7 @@ Do not change without an explicit product decision:
 4. **Workday daily path is extension-only** (real employer tab + Autofill panel). Workday panel defaults **Allow auto submit** off (`workdayAllowSubmit`). Sensitive/consequential fields use `content/workday-engine.js` policy (ask user / Q&A — never invent).
 5. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.
 6. Sheet dedupe = **job link** (normalized) only. The same company with a different URL is a new job. **Generate** skips if that link is already on the sheet (Ready or Applied) or already kept earlier in this CSV. Rebuild still overrides the generate skip. **Apply** only skips when the sheet status is Applied for that same link — a Ready row from the just-finished build must not block submit. Sheet **Bid mode** (column H): batch → `Auto bid`, manual one-off → `Manual bid`, Email Bid → `Email bid`, site-profile / 1-click log → `Profile apply`.
-7. CSV upload/refresh **never auto-starts** generation — user clicks **Start** after review.
+7. CSV upload/refresh and **Load from sheet** **never auto-start** generation — user clicks **Start** after review. Capture-tab reads use **`listCaptureJobs` only** (never `listRows`/`append` on capture tabs — that deletes JD). Ready/Applied still write to the **person bid tab** only.
 8. Bad row: retry once → `failed` → continue batch.
 9. Never commit `.env` / secrets.
 10. After code changes, remind: **Reload** unpacked extension on `chrome://extensions`.
@@ -138,15 +141,17 @@ npm test
 - Folder: `Downloads/Applications-{Prefix}/[N] - [Company] - [Title]/`
 - Files: `jd.txt`, `{Name}_Resume.pdf`, `{Name}_Cover Letter.pdf` only
 - Sheet: build → **Ready**; confirmed submit / manual Apply / successful one-off → **Applied M/D/YYYY**; Profile apply log → **Applied** + Bid mode **Profile apply**
+- Capture jobs-source tabs (e.g. `US-SF-Jobs`) are **read-only** for Brightstar; see [sheet-batch-source](../sheet-batch-source/SKILL.md)
 - Sheet/Slack failure must not fail file generation
 - Profile apply path: `jd.txt` only (no resume PDF)
 
 ## When shipping
 
-State: layer touched, submit-safety impact (yes/no), reload/test steps.
+State: layer touched, submit-safety impact (yes/no), reload/test steps. If Apps Script changed: redeploy Web App (new version).
 
 ## References
 
 - Runtime, pipeline, pitfalls: [references/architecture.md](references/architecture.md)
+- Sheet capture ingest: [sheet-batch-source/SKILL.md](../sheet-batch-source/SKILL.md)
 - Agent extension install/debug (Chrome DevTools MCP): [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
 - Ecosystem: discover/install skills via [skills.sh](https://www.skills.sh/) (`npx skills add <owner/repo>`)

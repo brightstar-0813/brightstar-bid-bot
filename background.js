@@ -5,12 +5,14 @@ import {
   formatApplicationDateTime,
   fetchExistingJobLinks,
   fetchExistingSheetDedupKeys,
+  fetchCaptureSheetJobs,
   fetchSheetRows,
   buildKnownLinkSet,
   normalizeJobLink,
   resolveSheetTabNameForPerson,
   emailBidSheetFields
 } from "./sheets.js";
+import { captureRowsToJobs } from "./sheet-jobs.js";
 import {
   formatSheetSyncStatus,
   reconcileQueueWithSheetRows
@@ -11591,6 +11593,113 @@ async function handleNativeCsvMessage(msg) {
 }
 
 /**
+ * Load jobs from a capture Google Sheet tab (Role/Company/Link/JD/Salary).
+ * Replaces all_us_jobs like a fresh CSV upload; never auto-starts batch.
+ * Bid-tracking dedupe still uses the active person's tab via getSheetConfig().
+ */
+async function ingestSheetJobs({
+  spreadsheetUrl = "",
+  webAppUrl = "",
+  sheetName = "",
+  sheetGid = ""
+} = {}) {
+  let sourceUrl = String(spreadsheetUrl || "").trim();
+  let endpoint = String(webAppUrl || "").trim();
+  if (!sourceUrl || !endpoint) {
+    const stored = await chrome.storage.local.get([
+      "jobs_sheet_source_url",
+      "sheets_web_app_url",
+      "spreadsheet_url"
+    ]);
+    if (!sourceUrl) sourceUrl = String(stored.jobs_sheet_source_url || "").trim();
+    if (!endpoint) endpoint = String(stored.sheets_web_app_url || "").trim();
+  }
+  if (!sourceUrl) {
+    throw new Error("Paste a Jobs sheet URL (Google Sheets edit link, with gid for the tab).");
+  }
+  if (!endpoint) {
+    throw new Error("Paste the Apps Script Web App URL in the Google Sheet section.");
+  }
+
+  const fetched = await fetchCaptureSheetJobs({
+    spreadsheetUrl: sourceUrl,
+    webAppUrl: endpoint,
+    sheetName,
+    sheetGid
+  });
+  const mapped = captureRowsToJobs(fetched.rows, { sheetName: fetched.sheetName });
+  const removedData = await chrome.storage.local.get([
+    REMOVED_JOB_IDENTITIES_KEY,
+    JOB_CHANNEL_FILTER_KEY
+  ]);
+  const removedIdentities = new Set(
+    Array.isArray(removedData[REMOVED_JOB_IDENTITIES_KEY])
+      ? removedData[REMOVED_JOB_IDENTITIES_KEY].map(String)
+      : []
+  );
+  const person = await getActivePerson().catch(() => null);
+  const tagProfile = (job) => {
+    if (!person?.id) return job;
+    return { ...job, profileId: job.profileId || person.id };
+  };
+  const allUsJobs = mapped.usJobs
+    .filter((job) => !removedIdentities.has(jobIdentity(job)))
+    .map((job) => tagProfile({ ...job, status: "pending" }));
+  const channel = normalizeChannelFilter(
+    removedData[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER
+  );
+  const filtered = filterJobsByChannel(allUsJobs, channel);
+
+  await chrome.storage.local.set({
+    [ALL_US_JOBS_KEY]: allUsJobs,
+    [QUEUE_KEY]: filtered,
+    [JOB_CHANNEL_FILTER_KEY]: channel,
+    batch_state: "idle",
+    csv_file_name: mapped.sheetLabel,
+    csv_total_rows: mapped.totalRows,
+    csv_dropped_non_us: mapped.droppedEmpty,
+    jobs_sheet_source_url: sourceUrl,
+    jobs_sheet_source_tab: fetched.sheetName || "",
+    job_batch_source: "sheet"
+  });
+
+  let dedupe = { checked: false, skipped: 0 };
+  try {
+    dedupe = await dedupeQueueAgainstSheet({ notifySlack: true });
+  } catch (err) {
+    dedupe = { checked: false, skipped: 0, error: String(err?.message || err) };
+  }
+
+  try {
+    await hydrateQueueFromDisk();
+  } catch {
+    /* native host optional */
+  }
+
+  const queue = await getQueue();
+  const pending = queue.filter(
+    (j) => j.status === "pending" || j.status === "error" || j.status === "failed"
+  ).length;
+
+  const status =
+    `Sheet (${fetched.sheetName || "tab"}): ${mapped.totalRows} rows → ${allUsJobs.length} jobs · ${pending} pending · sheet skipped ${dedupe.skipped || 0}. Review jobs, then click Start.`;
+  await setStatus(status);
+  await setBatchState("idle");
+
+  return {
+    ok: true,
+    fileName: mapped.sheetLabel,
+    sheetName: fetched.sheetName || "",
+    totalRows: mapped.totalRows,
+    loaded: allUsJobs.length,
+    pending,
+    droppedEmpty: mapped.droppedEmpty,
+    dedupe,
+    queue
+  };
+}
+
+/**
  * Parse CSV text, merge with existing queue by job identity, sheet-dedupe, optionally auto-start.
  */
 async function ingestCsvText({
@@ -11888,6 +11997,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           source: message.source || "manual",
           autoStart: message.autoStart === true,
           force: Boolean(message.force)
+        });
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === "ingest_sheet_jobs") {
+    (async () => {
+      try {
+        const result = await ingestSheetJobs({
+          spreadsheetUrl: message.spreadsheetUrl || message.url || "",
+          webAppUrl: message.webAppUrl || "",
+          sheetName: message.sheetName || "",
+          sheetGid: message.sheetGid || ""
         });
         safeSendResponse(sendResponse, result);
       } catch (err) {

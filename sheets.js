@@ -12,6 +12,26 @@ export function extractSpreadsheetId(urlOrId) {
 }
 
 /**
+ * Tab gid from a Google Sheets edit URL (?gid= / #gid=).
+ * @param {string} url
+ * @returns {string} digits only, or ""
+ */
+export function extractSpreadsheetGid(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  const hash = raw.match(/[#&?]gid=(\d+)/i);
+  if (hash) return hash[1];
+  try {
+    const u = new URL(raw);
+    const q = u.searchParams.get("gid");
+    if (q != null && /^\d+$/.test(String(q))) return String(q);
+  } catch {
+    /* not a URL */
+  }
+  return "";
+}
+
+/**
  * Google Sheets tab names cannot include \ / ? * [ ] and max out at 100 chars.
  */
 export function sanitizeSheetTabName(name) {
@@ -431,6 +451,72 @@ export async function fetchExistingJobLinks({ spreadsheetUrl, webAppUrl, sheetNa
 
 const LIST_ROWS_REDEPLOY_HINT =
   "Apps Script is missing listRows. Open apps-script/Code.gs, Save, then Deploy → Manage deployments → Edit → Version: New.";
+
+const LIST_CAPTURE_JOBS_REDEPLOY_HINT =
+  "Apps Script is missing listCaptureJobs. Open apps-script/Code.gs, Save, then Deploy → Manage deployments → Edit → Version: New.";
+
+/**
+ * Capture / jobs-source tab rows (Role, Company, Link, JD, Salary).
+ * Read-only — does not run bid-tracking layout mutation. Requires listCaptureJobs.
+ * @param {{ spreadsheetUrl: string, webAppUrl: string, sheetName?: string, sheetGid?: string|number }} opts
+ */
+export async function fetchCaptureSheetJobs({
+  spreadsheetUrl,
+  webAppUrl,
+  sheetName = "",
+  sheetGid = ""
+} = {}) {
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrl);
+  if (!spreadsheetId) {
+    throw new Error("Invalid Google Spreadsheet link.");
+  }
+
+  const gid =
+    sheetGid !== "" && sheetGid != null
+      ? String(sheetGid).trim()
+      : extractSpreadsheetGid(spreadsheetUrl);
+  const tabName = sanitizeSheetTabName(sheetName);
+
+  if (!gid && !tabName) {
+    throw new Error(
+      "Jobs sheet URL needs a tab gid (?gid=… in the link) or an explicit sheet tab name."
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = await postSheetWebApp(webAppUrl, {
+      action: "listCaptureJobs",
+      spreadsheetId,
+      sheetGid: gid || undefined,
+      sheetName: tabName || undefined
+    });
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (/unknown action/i.test(msg) && /listcapturejobs/i.test(msg)) {
+      throw new Error(LIST_CAPTURE_JOBS_REDEPLOY_HINT);
+    }
+    throw err;
+  }
+
+  if (!Array.isArray(parsed?.rows)) {
+    throw new Error(LIST_CAPTURE_JOBS_REDEPLOY_HINT);
+  }
+
+  return {
+    rows: parsed.rows.map((row) => ({
+      row: Number(row?.row) || 0,
+      title: String(row?.title || "").trim(),
+      company: String(row?.company || "").trim(),
+      link: String(row?.link || "").trim(),
+      jdText: String(row?.jdText || "").trim(),
+      salary: String(row?.salary || "").trim()
+    })),
+    sheetName: String(parsed?.sheetName || tabName || "").trim(),
+    sheetGid: String(parsed?.sheetGid ?? gid ?? "").trim(),
+    count: Number(parsed?.count) || (parsed.rows || []).length
+  };
+}
 
 /**
  * Full sheet rows (No, Date, Title, Company, Link, Salary, Status, Bid mode).

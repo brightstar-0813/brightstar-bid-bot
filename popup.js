@@ -218,6 +218,93 @@ const csvSourceStatusEl = document.getElementById("csvSourceStatus");
 const csvExtensionIdHintEl = document.getElementById("csvExtensionIdHint");
 const csvSourceSaveBtn = document.getElementById("csvSourceSave");
 const csvClearPinBtn = document.getElementById("csvClearPin");
+const batchSourceCsvBtn = document.getElementById("batchSourceCsv");
+const batchSourceSheetBtn = document.getElementById("batchSourceSheet");
+const csvBatchSourcePanel = document.getElementById("csvBatchSourcePanel");
+const sheetBatchSourcePanel = document.getElementById("sheetBatchSourcePanel");
+const jobsSheetSourceUrlEl = document.getElementById("jobsSheetSourceUrl");
+const loadSheetJobsBtn = document.getElementById("loadSheetJobsBtn");
+const saveJobsSheetUrlBtn = document.getElementById("saveJobsSheetUrlBtn");
+const jobsSheetSourceStatusEl = document.getElementById("jobsSheetSourceStatus");
+
+const JOB_BATCH_SOURCE_KEY = "job_batch_source";
+const JOBS_SHEET_SOURCE_URL_KEY = "jobs_sheet_source_url";
+let jobBatchSource = "csv";
+
+function normalizeJobBatchSource(value) {
+  return String(value || "").trim().toLowerCase() === "sheet" ? "sheet" : "csv";
+}
+
+function applyJobBatchSourceUi(source, { persist = false } = {}) {
+  jobBatchSource = normalizeJobBatchSource(source);
+  const isSheet = jobBatchSource === "sheet";
+  batchSourceCsvBtn?.classList.toggle("active", !isSheet);
+  batchSourceSheetBtn?.classList.toggle("active", isSheet);
+  if (csvBatchSourcePanel) csvBatchSourcePanel.hidden = isSheet;
+  if (sheetBatchSourcePanel) sheetBatchSourcePanel.hidden = !isSheet;
+  if (persist) {
+    chrome.storage.local.set({ [JOB_BATCH_SOURCE_KEY]: jobBatchSource }).catch(() => {});
+  }
+}
+
+async function saveJobsSheetSourceUrl() {
+  const url = String(jobsSheetSourceUrlEl?.value || "").trim();
+  await chrome.storage.local.set({
+    [JOBS_SHEET_SOURCE_URL_KEY]: url,
+    [JOB_BATCH_SOURCE_KEY]: "sheet"
+  });
+  if (jobsSheetSourceStatusEl) {
+    jobsSheetSourceStatusEl.textContent = url
+      ? "Jobs sheet URL saved. Click Load from sheet when ready."
+      : "Jobs sheet URL cleared.";
+  }
+  setStatus(url ? "Jobs sheet URL saved." : "Jobs sheet URL cleared.");
+}
+
+async function loadJobsFromSheet() {
+  const url = String(jobsSheetSourceUrlEl?.value || "").trim();
+  if (!url) {
+    setStatus("Paste a Jobs sheet URL first (include gid= for the capture tab).");
+    return;
+  }
+  const webAppUrl = String(sheetsWebAppUrlEl?.value || "").trim();
+  if (!webAppUrl) {
+    setStatus("Paste the Apps Script Web App URL in the Google Sheet section first.");
+    return;
+  }
+  applyJobBatchSourceUi("sheet", { persist: true });
+  await chrome.storage.local.set({ [JOBS_SHEET_SOURCE_URL_KEY]: url });
+  if (jobsSheetSourceStatusEl) jobsSheetSourceStatusEl.textContent = "Loading jobs from sheet…";
+  setStatus("Loading jobs from sheet…");
+  const res = await chrome.runtime.sendMessage({
+    type: "ingest_sheet_jobs",
+    spreadsheetUrl: url,
+    webAppUrl
+  });
+  if (!res?.ok) {
+    const err = String(res?.error || "Sheet load failed");
+    if (jobsSheetSourceStatusEl) jobsSheetSourceStatusEl.textContent = err;
+    setStatus(err);
+    return;
+  }
+  await reloadQueueFromStorage();
+  if (csvFileNameEl) csvFileNameEl.textContent = res.fileName || "Sheet";
+  const skipped = res.dedupe?.skipped || 0;
+  const note =
+    skipped > 0
+      ? ` Skipped ${skipped} already on the person sheet.`
+      : res.dedupe?.error
+        ? ` (Sheet check failed: ${res.dedupe.error})`
+        : "";
+  const status =
+    `Loaded ${res.totalRows || 0} → ${res.loaded || 0} from ${res.sheetName || "sheet"}` +
+    (res.droppedEmpty ? ` · dropped ${res.droppedEmpty} empty` : "") +
+    ` · ${res.pending || 0} pending.${note}`;
+  if (jobsSheetSourceStatusEl) {
+    jobsSheetSourceStatusEl.textContent = `${res.sheetName || "Sheet"} · ${res.loaded || 0} jobs. Review filter, then Start.`;
+  }
+  setStatus(status);
+}
 const queueListEl = document.getElementById("queueList");
 const queueSearchEl = document.getElementById("queueSearch");
 const queueSearchMetaEl = document.getElementById("queueSearchMeta");
@@ -1062,6 +1149,9 @@ async function loadSettings() {
     "output_dir",
     "spreadsheet_url",
     "sheets_web_app_url",
+    JOB_BATCH_SOURCE_KEY,
+    JOBS_SHEET_SOURCE_URL_KEY,
+    "jobs_sheet_source_tab",
     "slack_webhook_url",
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
@@ -1114,6 +1204,13 @@ async function loadSettings() {
   }
   if (!String(sheetsWebAppUrlEl.value || "").trim() && data.sheets_web_app_url) {
     sheetsWebAppUrlEl.value = data.sheets_web_app_url;
+  }
+  if (jobsSheetSourceUrlEl) {
+    jobsSheetSourceUrlEl.value = String(data[JOBS_SHEET_SOURCE_URL_KEY] || "").trim();
+  }
+  applyJobBatchSourceUi(data[JOB_BATCH_SOURCE_KEY] || "csv", { persist: false });
+  if (jobsSheetSourceStatusEl && data.jobs_sheet_source_tab) {
+    jobsSheetSourceStatusEl.textContent = `Last tab: ${data.jobs_sheet_source_tab}. Ready/Applied still write to the active person’s tab.`;
   }
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
   const pacing = data[CHATGPT_PACING_KEY] || {};
@@ -1214,7 +1311,7 @@ function updateCsvSummaryFromQueue() {
   if (!csvSummaryEl) return;
   if (!allUsJobsCache.length && !queueCache.length) {
     csvSummaryEl.classList.add("is-idle");
-    csvSummaryEl.innerHTML = `<span class="summary-idle">No CSV loaded</span>`;
+    csvSummaryEl.innerHTML = `<span class="summary-idle">No jobs loaded</span>`;
     return;
   }
   const liTotal = allUsJobsCache.filter((j) => isLinkedInJob(j)).length;
@@ -4128,6 +4225,7 @@ csvFileBtn?.addEventListener("click", () => csvFileEl?.click());
 csvFileEl.addEventListener("change", () => {
   const file = csvFileEl.files?.[0];
   if (csvFileNameEl) csvFileNameEl.textContent = file?.name || "No file chosen";
+  applyJobBatchSourceUi("csv", { persist: true });
   onCsvSelected(file).catch((e) => setStatus(String(e.message || e)));
 });
 
@@ -4145,6 +4243,21 @@ csvSourceSaveBtn?.addEventListener("click", () => {
 });
 csvClearPinBtn?.addEventListener("click", () => {
   clearPinnedCsv().catch((e) => setStatus(String(e.message || e)));
+});
+batchSourceCsvBtn?.addEventListener("click", () => {
+  applyJobBatchSourceUi("csv", { persist: true });
+});
+batchSourceSheetBtn?.addEventListener("click", () => {
+  applyJobBatchSourceUi("sheet", { persist: true });
+});
+loadSheetJobsBtn?.addEventListener("click", () => {
+  loadJobsFromSheet().catch((e) => setStatus(String(e.message || e)));
+});
+saveJobsSheetUrlBtn?.addEventListener("click", () => {
+  saveJobsSheetSourceUrl().catch((e) => setStatus(String(e.message || e)));
+});
+jobsSheetSourceUrlEl?.addEventListener("change", () => {
+  saveJobsSheetSourceUrl().catch(() => {});
 });
 
 filterDiceBtn?.addEventListener("click", () => {

@@ -208,7 +208,18 @@ After each job’s files finish (batch or one-off), the extension can append a r
 
 **Bid mode column** (next to Status): **Auto bid** for CSV/batch (and Indeed grab), **Manual bid** for Manual one-off, **Email bid** for Email Bid outreach.
 
-**Duplicate prevention:** dedup uses **job link only** (not company name). When you upload a CSV (and again when a batch starts), the bot reads existing **Link** values from the sheet and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
+**Duplicate prevention:** dedup uses **job link only** (not company name). When you upload a CSV or **Load from sheet** (and again when a batch starts), the bot reads existing **Link** values from the **person bid tab** and skips any job whose JD URL already appears there (tracking params / trailing slashes are normalized). Skipped duplicates are marked in the queue and Slack is alerted. Append also refuses to re-add the same link.
+
+### Batch from a capture sheet (optional)
+
+Jobs queue can load from **CSV** or a **Google Sheet** capture tab (e.g. `US-SF-Jobs` with columns Role | Company | Link | JD | Salary):
+
+1. Toggle **Load from → Google Sheet**
+2. Paste the full edit URL of that tab (include `gid=` so the correct tab is selected)
+3. Click **Load from sheet** — review the queue, then **Start** (never auto-starts)
+4. Ready/Applied still write to the **active person’s** tab (`Lewis-SF`, etc.), not back onto the capture tab
+
+Uses the same Apps Script **Web App URL**. After updating `apps-script/Code.gs`, redeploy so **`listCaptureJobs`** is live. Do not use Sync/`listRows` on capture tabs — that path mutates bid-tracking layout and can delete the JD column.
 
 Chrome cannot write from the spreadsheet share link alone:
 
@@ -217,7 +228,7 @@ Chrome cannot write from the spreadsheet share link alone:
 3. Deploy → New deployment → Web app → Execute as: **Me**, Who has access: **Anyone**
 4. Paste the spreadsheet link and Web App URL into the extension’s **Google Sheet** section
 5. Reload the extension if you just changed code; values persist in `storage.local`
-6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listRows` / `listLinks` / `markApplied` are live. WorkSphere **Sync from sheet** needs `listRows` — without it, older scripts treated sync as append and wrote blank **Ready** rows.
+6. After updating the Apps Script, create a **new deployment** (or “Manage deployments → Edit → Version: New”) so `listRows` / `listLinks` / `listCaptureJobs` / `markApplied` are live. WorkSphere **Sync from sheet** needs `listRows` — without it, older scripts treated sync as append and wrote blank **Ready** rows.
 
 If sheet append fails, file generation still succeeds — the status line will note the sheet error.
 

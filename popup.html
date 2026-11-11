@@ -104,72 +104,107 @@
               <p class="section-title">Jobs queue</p>
             </div>
           </header>
-          <div class="field file-field resume-file-field">
-            <span>Upload jobs CSV (optional)</span>
-            <div class="resume-file-row">
-              <button
-                type="button"
-                id="csvFileBtn"
-                class="ghost compact icon-button"
-                title="Upload jobs CSV"
-                aria-label="Upload jobs CSV"
-              ></button>
-              <span id="csvFileName" class="resume-file-name">No file chosen</span>
-              <input id="csvFile" type="file" accept=".csv,text/csv" tabindex="-1" />
+          <div class="channel-toggle" role="group" aria-label="Batch job source">
+            <span class="channel-label">Load from</span>
+            <div class="channel-grid">
+              <button type="button" class="channel-btn active" id="batchSourceCsv" data-batch-source="csv">
+                CSV
+              </button>
+              <button type="button" class="channel-btn" id="batchSourceSheet" data-batch-source="sheet">
+                Google Sheet
+              </button>
             </div>
           </div>
-          <div class="row row-2">
-            <button type="button" id="csvRefresh" class="ghost" title="Re-read CSV">
-              Refresh CSV
+          <div id="csvBatchSourcePanel">
+            <div class="field file-field resume-file-field">
+              <span>Upload jobs CSV (optional)</span>
+              <div class="resume-file-row">
+                <button
+                  type="button"
+                  id="csvFileBtn"
+                  class="ghost compact icon-button"
+                  title="Upload jobs CSV"
+                  aria-label="Upload jobs CSV"
+                ></button>
+                <span id="csvFileName" class="resume-file-name">No file chosen</span>
+                <input id="csvFile" type="file" accept=".csv,text/csv" tabindex="-1" />
+              </div>
+            </div>
+            <div class="row row-2">
+              <button type="button" id="csvRefresh" class="ghost" title="Re-read CSV">
+                Refresh CSV
+              </button>
+              <button type="button" id="csvPinFile" class="ghost" title="Pin a local CSV">
+                Pin local CSV…
+              </button>
+            </div>
+            <button type="button" class="panel-toggle" id="toggleCsvSourcePanel" aria-expanded="false">
+              Auto-source settings
             </button>
-            <button type="button" id="csvPinFile" class="ghost" title="Pin a local CSV">
-              Pin local CSV…
-            </button>
-          </div>
-          <button type="button" class="panel-toggle" id="toggleCsvSourcePanel" aria-expanded="false">
-            Auto-source settings
-          </button>
-          <div class="panel-body" id="csvSourcePanelBody" hidden>
-            <div class="grid-2">
+            <div class="panel-body" id="csvSourcePanelBody" hidden>
+              <div class="grid-2">
+                <label class="field">
+                  <span>Poll every (minutes)</span>
+                  <input id="csvPollMinutes" type="number" min="5" max="720" step="5" value="30" />
+                </label>
+                <label class="field checkbox-field">
+                  <span>Enable URL poll</span>
+                  <input id="csvUrlEnabled" type="checkbox" />
+                </label>
+              </div>
               <label class="field">
-                <span>Poll every (minutes)</span>
-                <input id="csvPollMinutes" type="number" min="5" max="720" step="5" value="30" />
+                <span>CSV URL (http/https — cron publishes here)</span>
+                <input id="csvUrl" type="url" placeholder="https://example.com/jobs_latest.csv" autocomplete="off" />
               </label>
-              <label class="field checkbox-field">
-                <span>Enable URL poll</span>
-                <input id="csvUrlEnabled" type="checkbox" />
+              <div class="grid-2">
+                <label class="field checkbox-field">
+                  <span>Poll pinned local file</span>
+                  <input id="csvPinEnabled" type="checkbox" />
+                </label>
+                <label class="field checkbox-field">
+                  <span>Native OS watcher</span>
+                  <input id="csvNativeEnabled" type="checkbox" />
+                </label>
+              </div>
+              <label class="field">
+                <span>Native watch path (optional)</span>
+                <input
+                  id="csvNativePath"
+                  type="text"
+                  placeholder="D:\Jobs\jobs_latest.csv"
+                  autocomplete="off"
+                />
               </label>
+              <p class="hint" id="csvPinHint">No local CSV pinned.</p>
+              <p class="hint" id="csvSourceStatus">Auto-source idle.</p>
+              <p class="hint" id="csvExtensionIdHint"></p>
+              <div class="row row-2">
+                <button type="button" id="csvSourceSave" class="primary">Save source settings</button>
+                <button type="button" id="csvClearPin" class="ghost danger">Clear pin</button>
+              </div>
             </div>
+          </div>
+          <div id="sheetBatchSourcePanel" hidden>
             <label class="field">
-              <span>CSV URL (http/https — cron publishes here)</span>
-              <input id="csvUrl" type="url" placeholder="https://example.com/jobs_latest.csv" autocomplete="off" />
-            </label>
-            <div class="grid-2">
-              <label class="field checkbox-field">
-                <span>Poll pinned local file</span>
-                <input id="csvPinEnabled" type="checkbox" />
-              </label>
-              <label class="field checkbox-field">
-                <span>Native OS watcher</span>
-                <input id="csvNativeEnabled" type="checkbox" />
-              </label>
-            </div>
-            <label class="field">
-              <span>Native watch path (optional)</span>
+              <span>Jobs sheet URL (capture tab — include gid= for the tab)</span>
               <input
-                id="csvNativePath"
-                type="text"
-                placeholder="D:\Jobs\jobs_latest.csv"
+                id="jobsSheetSourceUrl"
+                type="url"
+                placeholder="https://docs.google.com/spreadsheets/d/…/edit?gid=…"
                 autocomplete="off"
               />
             </label>
-            <p class="hint" id="csvPinHint">No local CSV pinned.</p>
-            <p class="hint" id="csvSourceStatus">Auto-source idle.</p>
-            <p class="hint" id="csvExtensionIdHint"></p>
             <div class="row row-2">
-              <button type="button" id="csvSourceSave" class="primary">Save source settings</button>
-              <button type="button" id="csvClearPin" class="ghost danger">Clear pin</button>
+              <button type="button" id="loadSheetJobsBtn" class="primary" title="Load jobs from the sheet URL">
+                Load from sheet
+              </button>
+              <button type="button" id="saveJobsSheetUrlBtn" class="ghost" title="Save jobs sheet URL">
+                Save URL
+              </button>
             </div>
+            <p class="hint" id="jobsSheetSourceStatus">
+              Uses the Web App URL from Google Sheet setup. Ready/Applied still write to the active person’s tab.
+            </p>
           </div>
           <div class="channel-toggle" role="group" aria-label="Job source filter">
             <span class="channel-label">Source filter</span>
