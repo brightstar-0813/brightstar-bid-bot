@@ -1174,7 +1174,8 @@ async function loadSettings() {
     "allowSubmitOnAssist",
     AUTOFILL_ENABLED_KEY,
     OPENAI_QA_ASSIST_KEY,
-    DELETE_AI_CHAT_HISTORY_KEY
+    DELETE_AI_CHAT_HISTORY_KEY,
+    CUSTOM_QA_ENGINE_KEY
   ]);
 
   await refreshProfiles(data.active_person_id || data.selected_profile_id || DEFAULT_PROFILE_ID);
@@ -1215,6 +1216,7 @@ async function loadSettings() {
     jobsSheetSourceStatusEl.textContent = `Last tab: ${data.jobs_sheet_source_tab}. Ready/Applied still write to the active person’s tab.`;
   }
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
+  applyCustomQaEngineUi(data[CUSTOM_QA_ENGINE_KEY] || "");
   const pacing = data[CHATGPT_PACING_KEY] || {};
   if (chatgptJobGapSecEl) {
     chatgptJobGapSecEl.value = String(
@@ -3865,10 +3867,30 @@ async function scanCustomQaQuestions() {
   }
 }
 
+const CUSTOM_QA_ENGINE_KEY = "custom_qa_engine";
+
 function selectedCustomQaEngine() {
   const value = document.querySelector('input[name="customQaEngine"]:checked')?.value;
   if (value === "chatgpt" || value === "codex") return value;
   return "openai";
+}
+
+function applyCustomQaEngineUi(engine, { persist = false } = {}) {
+  const normalized =
+    engine === "chatgpt" || engine === "codex" || engine === "openai" ? engine : "";
+  if (normalized) {
+    const radio = document.querySelector(`input[name="customQaEngine"][value="${normalized}"]`);
+    if (radio) radio.checked = true;
+  }
+  if (persist && normalized) {
+    chrome.storage.local.set({ [CUSTOM_QA_ENGINE_KEY]: normalized }).catch(() => {});
+  }
+}
+
+async function persistSelectedCustomQaEngine() {
+  const engine = selectedCustomQaEngine();
+  await chrome.storage.local.set({ [CUSTOM_QA_ENGINE_KEY]: engine }).catch(() => {});
+  return engine;
 }
 
 function customQaEngineBusyLabel(engine, { again = false } = {}) {
@@ -3951,7 +3973,7 @@ async function generateCustomQaAsk({ skipBank = false } = {}) {
     }
     return;
   }
-  const engine = selectedCustomQaEngine();
+  const engine = await persistSelectedCustomQaEngine();
   if (customQaGenerateBtn) customQaGenerateBtn.dataset.busy = "1";
   customQaLastSource = "";
   syncCustomQaAskControls();
@@ -4437,7 +4459,10 @@ customQaSaveBtn?.addEventListener("click", () => {
   saveCustomQaAskToBank().catch((e) => setStatus(String(e.message || e)));
 });
 document.querySelectorAll('input[name="customQaEngine"]').forEach((el) => {
-  el.addEventListener("change", syncCustomQaAskControls);
+  el.addEventListener("change", () => {
+    persistSelectedCustomQaEngine().catch(() => {});
+    syncCustomQaAskControls();
+  });
 });
 customQaAnswerEl?.addEventListener("input", syncCustomQaAskControls);
 resetBtn.addEventListener("click", resetWorkflow);

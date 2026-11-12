@@ -83,7 +83,10 @@ import {
   answerCustomQaAsk,
   prepareCustomQaAsk,
   markCustomQaAgentSession,
-  saveCustomQaAnswer
+  saveCustomQaAnswer,
+  setCustomQaEngineAsker,
+  getStoredCustomQaEngine,
+  normalizeCustomQaEngine
 } from "./autofill-runner.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { isOpenAiQaAssistEnabled } from "./openai.js";
@@ -1253,6 +1256,110 @@ async function askCodexWithChatGptSession(prompt, { conversationId = "", parentM
     parentMessageId: String(row.parentMessageId || "")
   };
 }
+
+function formatEngineQaQuestion(question, { choice = false } = {}) {
+  const label = String(question?.label || "").trim();
+  if (!label) return "";
+  const options = Array.isArray(question?.options)
+    ? question.options.map((o) => String(o || "").trim()).filter(Boolean)
+    : [];
+  if (choice && options.length) {
+    return (
+      `${label}\n\nChoose exactly one of these options. Reply with the option text only:\n` +
+      options.map((o) => `- ${o}`).join("\n")
+    );
+  }
+  return label;
+}
+
+async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuestion = "" } = {}) {
+  const text = String(questionText || "").trim();
+  if (!text) return { answer: "", source: "" };
+  const bankLabel = String(bankQuestion || text).trim() || text;
+  let engine = normalizeCustomQaEngine(preferredEngine) || (await getStoredCustomQaEngine());
+  if (engine === "openai") engine = "codex";
+
+  const tryCodex = async () => {
+    const prep = await prepareCustomQaAsk({ question: text, skipBank: true, engine: "codex" });
+    const asked = await askCodexWithChatGptSession(prep.prompt, {
+      conversationId: prep.codexConversationId,
+      parentMessageId: prep.codexParentMessageId
+    });
+    const fresh = extractFreshCustomQaAnswer(asked.answer, { prompt: prep.prompt });
+    const cleaned = fresh || cleanCustomQaAnswer(asked.answer);
+    if (!cleaned) throw new Error("Codex returned an empty answer.");
+    await markCustomQaAgentSession(prep.jobKey, {
+      seeded: true,
+      engine: "codex",
+      conversationId: asked.conversationId,
+      parentMessageId: asked.parentMessageId
+    }).catch(() => null);
+    await saveCustomQaAnswer({ question: bankLabel, answer: cleaned, source: "codex" }).catch(() => null);
+    return { answer: cleaned, source: "codex" };
+  };
+
+  const tryAiTab = async () => {
+    const prep = await prepareCustomQaAsk({ question: text, skipBank: true, engine: "chatgpt" });
+    const provider = await getStoredAiProvider();
+    const providerLabel = aiProviderLabel(provider);
+    const reuseChat = Boolean(prep.reuseChat);
+    const tab = await ensureAiTab(provider);
+    const raw = await automateChatGpt(tab.id, prep.prompt, {
+      newChat: !reuseChat,
+      expectResumeJson: false,
+      replyKind: "answer",
+      statusLabel: reuseChat
+        ? `Apply Q&A follow-up via ${providerLabel}…`
+        : `Apply Q&A via ${providerLabel}…`
+    });
+    const answer = extractFreshCustomQaAnswer(raw, { prompt: prep.prompt }) || cleanCustomQaAnswer(raw);
+    if (!answer) throw new Error(`${providerLabel} returned an empty answer.`);
+    await markCustomQaAgentSession(prep.jobKey, { seeded: true }).catch(() => null);
+    const answerSource = provider === AI_PROVIDERS.CLAUDE ? "claude" : "chatgpt";
+    await saveCustomQaAnswer({ question: bankLabel, answer, source: answerSource }).catch(() => null);
+    return { answer, source: answerSource };
+  };
+
+  if (engine === "chatgpt") {
+    return tryAiTab();
+  }
+  try {
+    return await tryCodex();
+  } catch (err) {
+    await setStatus(
+      `Apply Q&A: Codex failed (${String(err?.message || err)}). Falling back to AI tab…`
+    ).catch(() => {});
+    return tryAiTab();
+  }
+}
+
+/** Batch Dice recovery: answer leftover screening questions via Codex or AI tab. */
+setCustomQaEngineAsker(async (questions = [], { choice = false, engine = "" } = {}) => {
+  const list = Array.isArray(questions) ? questions.slice(0, 8) : [];
+  const preferred = normalizeCustomQaEngine(engine) || (await getStoredCustomQaEngine());
+  const out = [];
+  for (const q of list) {
+    const promptText = formatEngineQaQuestion(q, { choice });
+    if (!promptText || !q?.id) continue;
+    try {
+      const { answer, source } = await askCustomQaEngineOnce(promptText, preferred, {
+        bankQuestion: String(q.label || "").trim()
+      });
+      if (!answer) continue;
+      out.push({
+        id: q.id,
+        answer,
+        source: source || preferred,
+        options: Array.isArray(q.options) ? q.options : []
+      });
+    } catch (err) {
+      await setStatus(
+        `Apply Q&A skipped for “${String(q.label || "").slice(0, 60)}”: ${String(err?.message || err)}`
+      ).catch(() => {});
+    }
+  }
+  return out;
+});
 
 /** @deprecated Prefer ensureAiTab — kept for older call sites during transition. */
 async function ensureChatGptTab() {
@@ -2429,9 +2536,38 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
     ...applyResult,
     status: status || "needs_review",
     detail: reviewMsg,
+    csvRow: jobMeta.csvRow,
+    company: jobMeta.companyName || jobMeta.company || "",
+    jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+    pauseKind: applyResult?.pauseKind || "",
+    unansweredLabels: Array.isArray(applyResult?.unansweredLabels)
+      ? applyResult.unansweredLabels
+      : [],
     needsPause: !exhausted && status !== "unavailable" && status !== "skipped"
   };
   return applyResult;
+}
+
+function isUnanswerableRequiredPause(applyResult = {}) {
+  if (applyResult?.pauseKind === "unanswerable_required") return true;
+  if (Array.isArray(applyResult?.unansweredLabels) && applyResult.unansweredLabels.length > 0) {
+    return true;
+  }
+  const detail = String(applyResult?.detail || "");
+  if (/CAPTCHA|sign-?in|password|login/i.test(detail)) return false;
+  return /required answer|required field|Required answer is missing|A required answer/i.test(detail);
+}
+
+function formatUnanswerableSlackMessage(applyResult = {}) {
+  const detail = String(applyResult?.detail || "Required field unanswered").trim();
+  const labels = Array.isArray(applyResult?.unansweredLabels)
+    ? applyResult.unansweredLabels.map((l) => String(l || "").trim()).filter(Boolean)
+    : [];
+  const parts = [detail];
+  if (labels.length) {
+    parts.push(`Unanswered: ${labels.slice(0, 6).join(" · ")}`);
+  }
+  return parts.join(" — ").slice(0, 500);
 }
 
 async function pauseAfterFailedHostedApply(applyResult, jobLabel = "") {
@@ -2441,6 +2577,15 @@ async function pauseAfterFailedHostedApply(applyResult, jobLabel = "") {
     `${jobLabel ? `Row ${jobLabel}: ` : ""}${detail}. Batch paused — fix the form (login/CAPTCHA/Next), then click Start to retry apply.`
   );
   await chrome.storage.local.set({ generation_running: false });
+  if (isUnanswerableRequiredPause(applyResult)) {
+    await trySlackAlert({
+      title: "Dice apply paused — required field unanswered ⛔",
+      message: formatUnanswerableSlackMessage(applyResult),
+      csvRow: applyResult?.csvRow ?? jobLabel,
+      company: applyResult?.company || applyResult?.companyName || "",
+      jobTitle: applyResult?.jobTitle || applyResult?.title || ""
+    }).catch(() => {});
+  }
 }
 
 function hostedApplyAttemptCount(j) {

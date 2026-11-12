@@ -4331,7 +4331,8 @@
 
   function collectUnmatchedQuestions(applicantInfo = {}) {
     const questions = [];
-    const nodes = [...document.querySelectorAll("input, textarea")].filter((el) => {
+    // Dice/DHI (and similar) put screening inputs inside shadow roots — must walk deep.
+    const nodes = queryAllDeep("input, textarea").filter((el) => {
       const type = (el.type || "text").toLowerCase();
       if (el.tagName === "TEXTAREA") return true;
       if (el.tagName === "INPUT" && ["text", "search", ""].includes(type)) return true;
@@ -4432,7 +4433,7 @@
       const id = String(row?.id || "").trim();
       let answer = String(row?.answer || "").trim();
       if (!id || !answer) continue;
-      const el = document.querySelector(`[data-resume-bot-qid="${CSS.escape(id)}"]`);
+      const el = queryAllDeep(`[data-resume-bot-qid="${CSS.escape(id)}"]`)[0];
       if (!el) continue;
       // Combobox / React-Select must never receive free-text AI answers.
       // Rich-text editors can look combobox-adjacent because of their toolbars.
@@ -4459,9 +4460,7 @@
   async function collectUnmatchedChoiceQuestions({ openMenus = true } = {}) {
     const out = [];
     const groupIds = new Map(); // labelNorm -> id (radio/checkbox groups share one)
-    const nodes = [
-      ...document.querySelectorAll('select, input[type="radio"], input[type="checkbox"]')
-    ];
+    const nodes = queryAllDeep('select, input[type="radio"], input[type="checkbox"]');
 
     for (const el of nodes) {
       if (out.length >= MAX_UNMATCHED_CHOICE) break;
@@ -4538,11 +4537,9 @@
     }
 
     const seenLabels = new Set(out.map((q) => normalize(q.label)));
-    const comboNodes = [
-      ...document.querySelectorAll(
-        '[role="combobox"], input.select__input, [aria-haspopup="listbox"]'
-      )
-    ];
+    const comboNodes = queryAllDeep(
+      '[role="combobox"], input.select__input, [aria-haspopup="listbox"]'
+    );
     for (const el of comboNodes) {
       if (out.length >= MAX_UNMATCHED_CHOICE) break;
       if (isEditorChrome(el) || isRichTextEditor(el) || nearestEssayEditor(el)) continue;
@@ -4632,9 +4629,7 @@
       if (!id || !answer) continue;
       if (/^(y|yes|true|1|agree|i agree)$/i.test(answer)) answer = "Yes";
       else if (/^(n|no|false|0|disagree)$/i.test(answer)) answer = "No";
-      const els = [
-        ...document.querySelectorAll(`[data-resume-bot-choice-qid="${CSS.escape(id)}"]`)
-      ];
+      const els = queryAllDeep(`[data-resume-bot-choice-qid="${CSS.escape(id)}"]`);
       if (!els.length) continue;
 
       // When the inventory listed concrete options, refuse answers that match none.
@@ -4669,10 +4664,10 @@
       return { ok: false, error: "Password fields are not filled from the panel." };
     }
 
-    // Prefer elements already stamped during unmatched collection.
+    // Prefer elements already stamped during unmatched collection (incl. shadow DOM).
     let el =
-      document.querySelector(`[data-resume-bot-qid="${CSS.escape(targetId)}"]`) ||
-      document.querySelector(`[data-resume-bot-choice-qid="${CSS.escape(targetId)}"]`);
+      queryAllDeep(`[data-resume-bot-qid="${CSS.escape(targetId)}"]`)[0] ||
+      queryAllDeep(`[data-resume-bot-choice-qid="${CSS.escape(targetId)}"]`)[0];
 
     if (!el) {
       for (const node of collectFillableControls()) {

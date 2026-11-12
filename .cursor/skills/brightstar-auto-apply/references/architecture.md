@@ -23,7 +23,7 @@ background.js  (service worker, type: module)
 2. Queue review → user **Start**
 3. Ensure AI tab → fresh chat → resume prompt + JD → poll JSON → PDFs + `jd.txt`
 4. Same chat → cover letter → sheet append (Ready) → optional Slack on failures only
-5. If hosted auto-apply board: open apply URL → autofill → Submit when allowed → mark Applied
+5. If hosted auto-apply board: open apply URL → autofill (profile → Q&A bank → Codex/AI tab on required leftovers) → Submit when allowed → mark Applied; unanswerable required → pause + Slack (see sibling skill `ats-required-qa`)
 6. Cooldown → delete AI chat → next pending row
 
 ## Submit policy (source of truth)

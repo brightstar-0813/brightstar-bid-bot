@@ -82,11 +82,44 @@ import { csvRowFromFolderName, folderFitsJob, folderSegment } from "./job-folder
 const LAST_DOCS_KEY = "last_generated_docs";
 const JOB_DOCS_KEY = "job_generated_docs";
 const MAX_JOB_DOCS = 40;
-const AUTOFILL_SCRIPT_BUILD = "2026-09-08.detect02";
+const AUTOFILL_SCRIPT_BUILD = "2026-11-12.dice-qa-deep01";
 const APPLY_SETTLE_MS = 2200;
 const LAST_APPLY_TAB_KEY = "last_apply_tab_id";
+/** Persisted Custom Q&A engine: openai | chatgpt | codex (batch Dice recovery reads this). */
+export const CUSTOM_QA_ENGINE_KEY = "custom_qa_engine";
 
 let lastFocusedNormalWindowId = null;
+/** Optional SW hook: (questions, { choice, profileId, site, applicantInfo }) => answers[] */
+let customQaEngineAsker = null;
+
+export function setCustomQaEngineAsker(fn) {
+  customQaEngineAsker = typeof fn === "function" ? fn : null;
+}
+
+export function normalizeCustomQaEngine(value) {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (v === "chatgpt" || v === "agent" || v === "claude") return "chatgpt";
+  if (v === "codex") return "codex";
+  if (v === "openai" || v === "openai-api") return "openai";
+  return "";
+}
+
+export async function getStoredCustomQaEngine() {
+  try {
+    const data = await chrome.storage.local.get([CUSTOM_QA_ENGINE_KEY]);
+    return normalizeCustomQaEngine(data[CUSTOM_QA_ENGINE_KEY]) || "codex";
+  } catch {
+    return "codex";
+  }
+}
+
+export async function setStoredCustomQaEngine(value) {
+  const engine = normalizeCustomQaEngine(value) || "codex";
+  await chrome.storage.local.set({ [CUSTOM_QA_ENGINE_KEY]: engine });
+  return engine;
+}
 
 try {
   chrome.windows.getLastFocused({ windowTypes: ["normal"] }).then((win) => {
@@ -2444,6 +2477,39 @@ export async function resolveCustomQaChatReuse(jobKey = "", { engine = "" } = {}
   };
 }
 
+function pushAiAnswerRow(answers, stillNeed, row, {
+  choice = false,
+  profileId = "",
+  site = "",
+  source = "ai"
+} = {}) {
+  if (!row?.id || !row?.answer) return false;
+  const q = stillNeed.find((item) => item.id === row.id);
+  if (q?.label && !bankAnswerFitsQuestion(q.label, row.answer)) return false;
+  if (choice && !choiceAnswerMatchesOptions(row.answer, q?.options || [])) return false;
+  answers.push({
+    id: row.id,
+    answer: row.answer,
+    source: row.source || source,
+    options: q?.options || []
+  });
+  if (
+    q?.label &&
+    (choice || shouldBankAnswer(q, row.answer, q.fieldType || "text")) &&
+    bankAnswerFitsQuestion(q.label, row.answer)
+  ) {
+    saveQa({
+      profileId: profileId || "",
+      question: q.label,
+      answer: row.answer,
+      fieldType: q.fieldType || (choice ? "select" : "text"),
+      source: row.source || source,
+      site
+    }).catch(() => {});
+  }
+  return true;
+}
+
 async function enrichAnswersWithAi(questions, answers, {
   choice = false,
   profileId = "",
@@ -2457,11 +2523,48 @@ async function enrichAnswersWithAi(questions, answers, {
     if (!q?.id || answered.has(q.id)) return false;
     return choice ? Array.isArray(q.options) && q.options.length : true;
   });
+  if (!stillNeed.length) return { aiHits: 0 };
+
+  const engine = await getStoredCustomQaEngine();
+  const useEngineAsker =
+    forceAi &&
+    typeof customQaEngineAsker === "function" &&
+    engine !== "openai";
+
+  if (useEngineAsker) {
+    let aiHits = 0;
+    try {
+      await setApplyStatus(
+        engine === "chatgpt"
+          ? "Apply: answering required fields via AI tab…"
+          : "Apply: answering required fields via Codex…"
+      ).catch(() => {});
+      const engineAnswers = await customQaEngineAsker(stillNeed, {
+        choice,
+        profileId,
+        site,
+        applicantInfo,
+        jobMeta,
+        engine
+      });
+      for (const row of engineAnswers || []) {
+        if (pushAiAnswerRow(answers, stillNeed, row, { choice, profileId, site, source: engine })) {
+          aiHits += 1;
+        }
+      }
+    } catch (err) {
+      await setApplyStatus(
+        `Engine Q&A skipped (${engine}): ${String(err?.message || err)}`
+      ).catch(() => {});
+    }
+    return { aiHits };
+  }
+
   if (!forceAi && !(await isOpenAiQaAssistEnabled())) {
     return { aiHits: 0 };
   }
   const { apiKey, model } = await getOpenAiSettings();
-  if (!apiKey || !stillNeed.length) return { aiHits: 0 };
+  if (!apiKey) return { aiHits: 0 };
 
   const ctx = await getAutofillAiContext();
   const meta = {
@@ -2500,30 +2603,8 @@ async function enrichAnswersWithAi(questions, answers, {
           resumeText: ctx.resumeText
         });
     for (const row of aiResult.answers || []) {
-      if (!row?.id || !row?.answer) continue;
-      const q = stillNeed.find((item) => item.id === row.id);
-      if (q?.label && !bankAnswerFitsQuestion(q.label, row.answer)) continue;
-      if (choice && !choiceAnswerMatchesOptions(row.answer, q?.options || [])) continue;
-      answers.push({
-        id: row.id,
-        answer: row.answer,
-        source: "ai",
-        options: q?.options || []
-      });
-      aiHits += 1;
-      if (!q?.label) continue;
-      if (
-        (choice || shouldBankAnswer(q, row.answer, q.fieldType || "text")) &&
-        bankAnswerFitsQuestion(q.label, row.answer)
-      ) {
-        saveQa({
-          profileId: profileId || "",
-          question: q.label,
-          answer: row.answer,
-          fieldType: q.fieldType || (choice ? "select" : "text"),
-          source: "ai",
-          site
-        }).catch(() => {});
+      if (pushAiAnswerRow(answers, stillNeed, row, { choice, profileId, site, source: "ai" })) {
+        aiHits += 1;
       }
     }
   } catch (err) {
@@ -2803,8 +2884,57 @@ async function probeValidationOnTab(tabId) {
   return "";
 }
 
+function unmatchedLabelsFromInventory(inventory = {}) {
+  const labels = [];
+  for (const q of inventory.unmatchedChoiceQuestions || []) {
+    const label = String(q?.label || "").trim();
+    if (label) labels.push(label.slice(0, 160));
+  }
+  for (const q of inventory.unmatchedQuestions || []) {
+    const label = String(q?.label || "").trim();
+    if (label) labels.push(label.slice(0, 160));
+  }
+  return [...new Set(labels)].slice(0, 8);
+}
+
 /**
- * Before Submit: if required fields are still empty, refill once; still broken → needs_review reason.
+ * Forced bank → Codex/AI-tab (or OpenAI) pass for leftovers still blocking Next/Submit.
+ */
+async function runEngineRequiredFillPass(tabId, extras, profileId, site, applicantInfo = {}) {
+  const inventory = await collectRemainingUnmatchedFromTab(tabId, applicantInfo);
+  const unmatchedCount =
+    (inventory.unmatchedQuestions?.length || 0) + (inventory.unmatchedChoiceQuestions?.length || 0);
+  if (!unmatchedCount) {
+    return {
+      extraFilled: 0,
+      bankHits: 0,
+      aiHits: 0,
+      unmatchedAfter: 0,
+      unansweredLabels: [],
+      enginePass: true
+    };
+  }
+  const leftover = await fillUnmatchedAnswers(
+    tabId,
+    inventory,
+    extras,
+    profileId,
+    site,
+    applicantInfo,
+    { forceAi: true }
+  );
+  const after = await collectRemainingUnmatchedFromTab(tabId, applicantInfo);
+  return {
+    ...leftover,
+    unmatchedAfter:
+      (after.unmatchedQuestions?.length || 0) + (after.unmatchedChoiceQuestions?.length || 0),
+    unansweredLabels: unmatchedLabelsFromInventory(after),
+    enginePass: true
+  };
+}
+
+/**
+ * Before Submit/Next: if required fields are still empty, refill (bank + engine AI); still broken → needs_review.
  */
 async function ensureRequiredFieldsBeforeSubmit(
   tabId,
@@ -2827,7 +2957,30 @@ async function ensureRequiredFieldsBeforeSubmit(
 
   validationReason = await probeValidationOnTab(tabId);
   if (!validationReason) return { ok: true, metrics };
-  return { ok: false, metrics, validationReason };
+
+  const enginePass = await runEngineRequiredFillPass(
+    tabId,
+    extras,
+    profileId,
+    site,
+    applicantInfo
+  );
+  metrics.extraFilled = Number(metrics.extraFilled || 0) + Number(enginePass.extraFilled || 0);
+  metrics.bankHits = Number(metrics.bankHits || 0) + Number(enginePass.bankHits || 0);
+  metrics.aiHits = Number(metrics.aiHits || 0) + Number(enginePass.aiHits || 0);
+  metrics.enginePassFilled = Number(enginePass.extraFilled || 0);
+  metrics.unmatchedAfterEnginePass = enginePass.unmatchedAfter;
+  metrics.unansweredLabels = enginePass.unansweredLabels || [];
+
+  validationReason = await probeValidationOnTab(tabId);
+  if (!validationReason) return { ok: true, metrics };
+  return {
+    ok: false,
+    metrics,
+    validationReason,
+    unansweredLabels: enginePass.unansweredLabels || [],
+    pauseKind: "unanswerable_required"
+  };
 }
 
 /**
@@ -3481,6 +3634,8 @@ export async function startMultiStepApplyOnTab(
             probe.blockedReason ||
             probe.validationReason ||
             "A required answer needs review.";
+          summary.pauseKind = gate.pauseKind || "unanswerable_required";
+          summary.unansweredLabels = gate.unansweredLabels || [];
           summary.tabId = currentTabId;
           return summary;
         }
@@ -3792,6 +3947,8 @@ export async function startMultiStepApplyOnTab(
                 lastProbe.blockedReason ||
                 lastProbe.validationReason ||
                 "A required answer needs review.";
+              summary.pauseKind = gate.pauseKind || "unanswerable_required";
+              summary.unansweredLabels = gate.unansweredLabels || [];
               return summary;
             }
             if (lastProbe.blockedReason) {
@@ -3841,8 +3998,34 @@ export async function startMultiStepApplyOnTab(
             }
           }
         }
+        // Required blanks often block Next — try bank + Codex/AI-tab once before pausing.
+        const stuckProbe = await getApplyActionFromTab(currentTabId).catch(() => null);
+        if (stuckProbe?.validationReason || stuckProbe?.anyForm) {
+          const gate = await ensureRequiredFieldsBeforeSubmit(
+            currentTabId,
+            extras,
+            metricsPersonId,
+            metricsSiteHost() || liveSite,
+            applicantInfo,
+            summary
+          );
+          if (gate.ok) {
+            noAdvance = 0;
+            continue;
+          }
+          summary.status = "needs_review";
+          summary.detail =
+            gate.validationReason ||
+            stuckProbe.validationReason ||
+            stuckProbe.blockedReason ||
+            "Could not advance past this step (a required field or CAPTCHA likely needs your input).";
+          summary.pauseKind = gate.pauseKind || "unanswerable_required";
+          summary.unansweredLabels = gate.unansweredLabels || [];
+          return summary;
+        }
         summary.status = "needs_review";
         summary.detail =
+          stuckProbe?.blockedReason ||
           "Could not advance past this step (a required field or CAPTCHA likely needs your input).";
         return summary;
       }

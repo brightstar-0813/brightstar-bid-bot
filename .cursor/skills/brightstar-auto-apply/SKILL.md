@@ -7,11 +7,13 @@ description: >-
   mentions adapters, autofill, batch/queue, Greenhouse/Workday/Dice/Indeed
   apply, Email Bid, role tracks, prompts, profiles, Google Sheet, Slack,
   manifest matches, or submit-safety. For capture-tab Load from sheet /
-  listCaptureJobs, also follow the sheet-batch-source skill.
+  listCaptureJobs, also follow the sheet-batch-source skill. For required
+  screening / Custom Q&A recovery (bank → Codex/AI tab → Slack pause) on
+  Dice or when porting that pattern to other ATS, also follow ats-required-qa.
 compatibility: Cursor (Agent Skills / skills.sh layout)
 metadata:
   author: brightstar
-  version: "1.2"
+  version: "1.3"
   ecosystem: https://www.skills.sh/
 ---
 
@@ -23,8 +25,9 @@ Progressive disclosure (per [Agent Skills](https://www.skills.sh/) / agentskills
 
 1. This file — activate and follow first
 2. Sheet capture-tab ingest (CSV \| Google Sheet, `listCaptureJobs`): [sheet-batch-source/SKILL.md](../sheet-batch-source/SKILL.md)
-3. Deeper detail only when needed: [references/architecture.md](references/architecture.md)
-4. Agent install/reload/popup smoke via Chrome DevTools MCP: [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
+3. Required-form Q&A recovery (bank → Codex/AI tab → Slack): [ats-required-qa/SKILL.md](../ats-required-qa/SKILL.md)
+4. Deeper detail only when needed: [references/architecture.md](references/architecture.md)
+5. Agent install/reload/popup smoke via Chrome DevTools MCP: [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
 
 ## Product in one screen
 
@@ -59,6 +62,7 @@ Prefer short control labels and live status text over long instructional hints i
 | Profiles | `profiles.js`, `person-profile-form.js`, `profile-editor.js` |
 | Q&A bank | `qa-store.js`, `qa-editor.js` |
 | OpenAI leftover / Custom Q&A | `ai-answers.js`, `openai.js`, `autofill-runner.js` (`answerCustomQaAsk`, `runCustomOpenAiQaOnTab`), popup Ask panel |
+| Required-form recovery (Dice pattern) | `setCustomQaEngineAsker`, `ensureRequiredFieldsBeforeSubmit`, `custom_qa_engine`; see [ats-required-qa](../ats-required-qa/SKILL.md) |
 | Host matches / permissions | `manifest.json` |
 
 **Thin adapters, thick DOM:** SW-facing host quirks → `ats/adapters.js`; fill logic → `content/autofill.js`.
@@ -101,9 +105,10 @@ Do not change without an explicit product decision:
 ### Autofill / apply
 
 1. Multi-frame: follow `sendMessageToAllFrames` patterns in `autofill-runner.js`.
-2. Blockers (sign-in, CAPTCHA, required blanks) → safe pause, leave tab open.
-3. Click Submit only when `autoSubmit` is true for that run.
-4. Junk/placeholders: `autofill-junk.js`.
+2. Required screening / custom questions: deep collect (`queryAllDeep`) → Q&A bank → Codex or AI tab (`custom_qa_engine`); still empty → pause + Slack with field reason. Reuse this when porting auto-apply beyond Dice — full checklist in [ats-required-qa](../ats-required-qa/SKILL.md).
+3. Blockers (sign-in, CAPTCHA, required blanks after recovery) → safe pause, leave tab open.
+4. Click Submit only when `autoSubmit` is true for that run.
+5. Junk/placeholders: `autofill-junk.js`.
 
 ### Batch / AI generation
 
@@ -153,5 +158,6 @@ State: layer touched, submit-safety impact (yes/no), reload/test steps. If Apps 
 
 - Runtime, pipeline, pitfalls: [references/architecture.md](references/architecture.md)
 - Sheet capture ingest: [sheet-batch-source/SKILL.md](../sheet-batch-source/SKILL.md)
+- Required-form Q&A recovery (port to other ATS): [ats-required-qa/SKILL.md](../ats-required-qa/SKILL.md)
 - Agent extension install/debug (Chrome DevTools MCP): [references/agent-extension-smoke.md](references/agent-extension-smoke.md)
 - Ecosystem: discover/install skills via [skills.sh](https://www.skills.sh/) (`npx skills add <owner/repo>`)
