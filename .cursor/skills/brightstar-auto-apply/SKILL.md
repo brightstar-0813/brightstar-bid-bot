@@ -13,7 +13,7 @@ description: >-
 compatibility: Cursor (Agent Skills / skills.sh layout)
 metadata:
   author: brightstar
-  version: "1.3"
+  version: "1.4"
   ecosystem: https://www.skills.sh/
 ---
 
@@ -73,17 +73,18 @@ Do not change without an explicit product decision:
 
 1. Manual Apply / Auto Apply assist **stops before Submit** unless caller + adapter allow it.
 2. **External Indeed / external company ATS** = capture-only (files OK, never auto-submit).
-3. **Dice** may auto-apply+submit in batch / queue Apply. **All other ATS** (Greenhouse, Workday, Ashby, Lever, Jobgether, Indeed, …) = generate files + **in-page Autofill panel** only (Q&A bank, uploads, fill; submit only when the user runs panel/popup Auto Apply with submit allowed).
-4. **Workday daily path is extension-only** (real employer tab + Autofill panel). Workday panel defaults **Allow auto submit** off (`workdayAllowSubmit`). Sensitive/consequential fields use `content/workday-engine.js` policy (ask user / Q&A — never invent).
-5. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.
-6. Sheet dedupe = **job link** (normalized) only. The same company with a different URL is a new job. **Generate** skips if that link is already on the sheet (Ready or Applied) or already kept earlier in this CSV. Rebuild still overrides the generate skip. **Apply** only skips when the sheet status is Applied for that same link — a Ready row from the just-finished build must not block submit. Sheet **Bid mode** (column H): batch → `Auto bid`, manual one-off → `Manual bid`, Email Bid → `Email bid`, site-profile / 1-click log → `Profile apply`.
-7. CSV upload/refresh and **Load from sheet** **never auto-start** generation — user clicks **Start** after review. Capture-tab reads use **`listCaptureJobs` only** (never `listRows`/`append` on capture tabs — that deletes JD). Ready/Applied still write to the **person bid tab** only.
-8. Bad row: retry once → `failed` → continue batch.
-9. Never commit `.env` / secrets.
-10. After code changes, remind: **Reload** unpacked extension on `chrome://extensions`.
-11. **PDF output:** custom people must get `LastName_Resume` (never bare `Resume`). Save folder under Downloads defaults to the person's **sheet tab name** (e.g. `Lewis-SF`); fallback is `Applications-{Token}`. Source of truth is the active person (`resume-profile.js` + `syncActivePersonOutputContext`); do not freeze batch on generic `Applications` or absolute paths (Chrome saves those as `download`).
-12. **Custom profile parity:** Save-as-mine copies the master resume and employers. A custom resume prompt is optional and, when it includes `{JD}`, replaces the track default (`resetEeo` ≠ `resetPrompts`); person template + sheet config are isolated; `last_resume_json` is scoped by `profileId`; queue rows get `profileId` on ingest/Start.
-13. **Profile apply (1-click / site profile):** Manual Bid **Log apply** saves `jd.txt` only and marks sheet **Applied** with bid mode `Profile apply` (`bidSource: profile-apply`). Never auto-clicks 1-Click Apply; never generates resume/cover PDFs.
+3. **Dice and Greenhouse** may auto-apply+submit in batch / queue Apply (channel ≠ `all`). **All other ATS** (Workday, Ashby, Lever, Jobgether, Indeed, …) = generate files + **in-page Autofill panel** only (Q&A bank, uploads, fill; submit only when the user runs panel/popup Auto Apply with submit allowed).
+4. **Profile exactness (all auto-apply):** identity/contact and mapped profile fields (name, email, phone, address, city/state/zip/country, LinkedIn/GitHub/portfolio, citizenship/work-auth/sponsorship, EEO already on profile, DOB, etc.) fill from **exact** active-person / `applicantInfo` only — never Codex, AI tab, OpenAI leftovers, or Q&A-bank fiction (`shouldExcludeFromAiAndBank`). Missing required identity → pause + Slack, do not invent.
+5. **Workday daily path is extension-only** (real employer tab + Autofill panel). Workday panel defaults **Allow auto submit** off (`workdayAllowSubmit`). Sensitive/consequential fields use `content/workday-engine.js` policy (ask user / Q&A — never invent).
+6. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.
+7. Sheet dedupe = **job link** (normalized) only. The same company with a different URL is a new job. **Generate** skips if that link is already on the sheet (Ready or Applied) or already kept earlier in this CSV. Rebuild still overrides the generate skip. **Apply** only skips when the sheet status is Applied for that same link — a Ready row from the just-finished build must not block submit. Sheet **Bid mode** (column H): batch → `Auto bid`, manual one-off → `Manual bid`, Email Bid → `Email bid`, site-profile / 1-click log → `Profile apply`.
+8. CSV upload/refresh and **Load from sheet** **never auto-start** generation — user clicks **Start** after review. Capture-tab reads use **`listCaptureJobs` only** (never `listRows`/`append` on capture tabs — that deletes JD). Ready/Applied still write to the **person bid tab** only.
+9. Bad row: retry once → `failed` → continue batch.
+10. Never commit `.env` / secrets.
+11. After code changes, remind: **Reload** unpacked extension on `chrome://extensions`.
+12. **PDF output:** custom people must get `LastName_Resume` (never bare `Resume`). Save folder under Downloads defaults to the person's **sheet tab name** (e.g. `Lewis-SF`); fallback is `Applications-{Token}`. Source of truth is the active person (`resume-profile.js` + `syncActivePersonOutputContext`); do not freeze batch on generic `Applications` or absolute paths (Chrome saves those as `download`).
+13. **Custom profile parity:** Save-as-mine copies the master resume and employers. A custom resume prompt is optional and, when it includes `{JD}`, replaces the track default (`resetEeo` ≠ `resetPrompts`); person template + sheet config are isolated; `last_resume_json` is scoped by `profileId`; queue rows get `profileId` on ingest/Start.
+14. **Profile apply (1-click / site profile):** Manual Bid **Log apply** saves `jd.txt` only and marks sheet **Applied** with bid mode `Profile apply` (`bidSource: profile-apply`). Never auto-clicks 1-Click Apply; never generates resume/cover PDFs.
 
 ## Change workflow
 
@@ -98,7 +99,7 @@ Do not change without an explicit product decision:
 1. `ATS_ADAPTERS` in `ats/adapters.js` (`hostPatterns`, `autoSubmitAllowed`, `stepBudget`, flags).
 2. Host matches in `manifest.json` for `content/autofill.js` (+ panel if needed).
 3. DOM only as needed in `content/autofill.js`; reuse generic fill.
-4. Wire interleaved/hosted backlog in `background.js` only if it should auto-apply like Dice.
+4. Wire interleaved/hosted backlog in `background.js` only if it should auto-apply like Dice/Greenhouse (`isHostedBatchAutoApplyJob`).
 5. Tests: `tests/adapters.test.js` (+ site tests when non-trivial).
 6. Default new external/employer links to **no auto-submit**.
 

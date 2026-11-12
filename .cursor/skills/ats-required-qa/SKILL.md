@@ -10,7 +10,7 @@ description: >-
 compatibility: Cursor (Agent Skills / skills.sh layout)
 metadata:
   author: brightstar
-  version: "1.0"
+  version: "1.1"
   ecosystem: https://www.skills.sh/
 ---
 
@@ -18,11 +18,11 @@ metadata:
 
 Pattern pioneered on **Dice** hosted multi-step apply. Reuse the same stack when another board’s auto-apply (or panel Auto Apply) stalls on required screening / custom questions.
 
-Parent invariants (do not weaken): [brightstar-auto-apply](../brightstar-auto-apply/SKILL.md) — especially submit-safety and “Dice may batch-submit; others panel-only unless product decision.”
+Parent invariants (do not weaken): [brightstar-auto-apply](../brightstar-auto-apply/SKILL.md) — especially submit-safety, **Dice+Greenhouse** batch-submit, and **profile exactness**.
 
 ## Goal
 
-Profile fill → stamp unmatched fields → **Q&A bank** → **Codex or AI tab** → fill → Next/Submit. If still required-empty → `needs_review`, leave tab open, **Slack with specific reason**. Never invent past bank/engine for consequential/sensitive labels; never Submit with blank requireds.
+Profile fill (exact identity/contact from applicantInfo) → stamp unmatched fields → **Q&A bank** (screening only) → **Codex or AI tab** (screening only) → fill → Next/Submit. If still required-empty → `needs_review`, leave tab open, **Slack with specific reason**. Identity/contact fields never go to bank/AI (`shouldExcludeFromAiAndBank`); never Submit with blank requireds.
 
 ```mermaid
 flowchart TD
@@ -68,7 +68,7 @@ flowchart TD
 
 Do **not** fork a parallel Q&A stack. Extend this one:
 
-1. **Adapter policy** — `ats/adapters.js`: only raise `autoSubmitAllowed` / wire batch interleaved apply after an explicit product decision (today Dice-only for batch submit).
+1. **Adapter policy** — `ats/adapters.js`: only raise `autoSubmitAllowed` / wire batch interleaved apply after an explicit product decision (today **Dice + Greenhouse** for batch submit via `isHostedBatchAutoApplyJob`).
 2. **DOM** — Prefer generic `queryAllDeep` collectors. Add a site-specific collector (like Workday `formField` / Lever cards) only when labels/options are unreliable; stamp the same `data-resume-bot-qid` / `data-resume-bot-choice-qid`.
 3. **Fill write-back** — Always resolve stamps with `queryAllDeep` (light DOM `querySelector` misses web components).
 4. **Wire recovery** — Call `ensureRequiredFieldsBeforeSubmit` (or `runEngineRequiredFillPass`) before Submit **and** when Next cannot advance due to validation. Set `summary.pauseKind = "unanswerable_required"` + `unansweredLabels`.
@@ -91,7 +91,7 @@ Do **not** fork a parallel Q&A stack. Extend this one:
 
 ## Pause / Slack contract
 
-- **Unanswerable required** (`pauseKind === "unanswerable_required"` or required-validation detail): Slack title like `Dice apply paused — required field unanswered` (adapt board name), message = validation reason + unanswered labels (truncated), plus csv row / company / title / person.
+- **Unanswerable required** (`pauseKind === "unanswerable_required"` or required-validation detail): Slack title `{Board} apply paused — required field unanswered` (Dice or Greenhouse), message = validation reason + unanswered labels (truncated), plus csv row / company / title / person.
 - **CAPTCHA / sign-in**: pause with tab open; do **not** use the unanswerable-required Slack title (existing job-status ping is enough).
 - Slack webhook missing → no-op; never fail the batch on notify errors.
 

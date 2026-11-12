@@ -23,9 +23,11 @@ import {
   isJunkQuestionLabel,
   isInstructionalFieldLabel,
   isSensitiveProfileQuestion,
+  shouldExcludeFromAiAndBank,
   normalizeChoiceAnswerValue,
   isTrackingNoiseLabel
 } from "./autofill-junk.js";
+import { extractGreenhouseSecurityCode } from "./greenhouse-security-code.js";
 import {
   choiceAnswerMatchesOptions,
   isPasswordFieldLabel,
@@ -1688,6 +1690,8 @@ async function resolveQuestionAnswers(
 
   for (const q of list) {
     if (isJunkQuestionLabel(q.label)) continue;
+    // Name/phone/email/address/etc. — profile autofill only; never bank or AI fiction.
+    if (shouldExcludeFromAiAndBank(q.label)) continue;
 
     const certAnswer =
       !choice && isCertificationQuestion(q.label)
@@ -1959,10 +1963,11 @@ async function waitForApplySuccess(tabId, site, timeoutMs = 20000) {
 /**
  * Greenhouse email OTP: read code from an open Outlook web tab, fill, resubmit.
  */
-async function completeGreenhouseEmailVerification(tabId) {
+async function completeGreenhouseEmailVerification(tabId, { afterEpochMs = 0 } = {}) {
   await setApplyStatus("Apply: Greenhouse — waiting for security code (Outlook tab)…");
   const mail = await scrapeOutlookGreenhouseSecurityCode({
-    timeoutMs: 90_000
+    timeoutMs: 90_000,
+    afterEpochMs
   }).catch((err) => ({
     ok: false,
     code: "",
@@ -2026,8 +2031,17 @@ async function completeGreenhouseEmailVerification(tabId) {
 
 /**
  * Read Greenhouse OTP from an already-open Outlook web tab.
+ * Waits until afterEpochMs (post-submit) before scraping so a prior apply's code is not reused.
  */
-async function scrapeOutlookGreenhouseSecurityCode({ timeoutMs = 60_000 } = {}) {
+async function scrapeOutlookGreenhouseSecurityCode({
+  timeoutMs = 60_000,
+  afterEpochMs = 0
+} = {}) {
+  const minEpoch = Number(afterEpochMs) > 0 ? Number(afterEpochMs) : 0;
+  if (minEpoch > Date.now()) {
+    const waitMs = Math.min(minEpoch - Date.now(), 15_000);
+    if (waitMs > 0) await sleep(waitMs);
+  }
   const deadline = Date.now() + timeoutMs;
   const outlookRe = /(^|\.)outlook\.(live|office|office365)\.com$/i;
 
@@ -2049,33 +2063,18 @@ async function scrapeOutlookGreenhouseSecurityCode({ timeoutMs = 60_000 } = {}) 
         func: () => {
           const text = String(document.body?.innerText || document.body?.textContent || "");
           if (!/security\s*code/i.test(text) && !/greenhouse/i.test(text)) {
-            return { ok: false, reason: "no_greenhouse_mail_visible" };
+            return { ok: false, reason: "no_greenhouse_mail_visible", text: "" };
           }
-          const cleaned = text
-            .replace(/\r/g, "")
-            .split(/\n+/)
-            .map((l) => l.trim())
-            .filter(Boolean);
-          const isCode = (token) =>
-            /^[A-Za-z0-9]{6,12}$/.test(token) &&
-            /[A-Za-z]/.test(token) &&
-            /\d/.test(token) &&
-            !/^(security|verification|greenhouse|application|resubmit)$/i.test(token);
-          for (let i = 0; i < cleaned.length; i += 1) {
-            const line = cleaned[i];
-            if (/copy\s+and\s+paste\s+this\s+code|security\s*code/i.test(line)) {
-              for (let j = i; j < Math.min(i + 6, cleaned.length); j += 1) {
-                if (isCode(cleaned[j])) return { ok: true, code: cleaned[j] };
-              }
-            }
-            if (isCode(line)) return { ok: true, code: line };
-          }
-          const m = text.match(/\b([A-Za-z0-9]{8})\b/);
-          if (m && isCode(m[1])) return { ok: true, code: m[1] };
-          return { ok: false, reason: "code_not_found" };
+          return { ok: true, text };
         }
       });
-      return result || { ok: false };
+      const body = String(result?.text || "");
+      if (!result?.ok || !body) {
+        return { ok: false, reason: result?.reason || "no_greenhouse_mail_visible" };
+      }
+      const code = extractGreenhouseSecurityCode(body);
+      if (code) return { ok: true, code };
+      return { ok: false, reason: "code_not_found" };
     } catch (err) {
       return { ok: false, error: String(err?.message || err) };
     }
@@ -2485,6 +2484,7 @@ function pushAiAnswerRow(answers, stillNeed, row, {
 } = {}) {
   if (!row?.id || !row?.answer) return false;
   const q = stillNeed.find((item) => item.id === row.id);
+  if (q?.label && shouldExcludeFromAiAndBank(q.label)) return false;
   if (q?.label && !bankAnswerFitsQuestion(q.label, row.answer)) return false;
   if (choice && !choiceAnswerMatchesOptions(row.answer, q?.options || [])) return false;
   answers.push({
@@ -2521,6 +2521,7 @@ async function enrichAnswersWithAi(questions, answers, {
   const answered = new Set(answers.map((a) => a.id));
   const stillNeed = questions.filter((q) => {
     if (!q?.id || answered.has(q.id)) return false;
+    if (shouldExcludeFromAiAndBank(q.label)) return false;
     return choice ? Array.isArray(q.options) && q.options.length : true;
   });
   if (!stillNeed.length) return { aiHits: 0 };
@@ -2764,7 +2765,7 @@ async function fillInventoryPlannerPass(
       ...q,
       type: q.fieldType || "text"
     }))
-  ];
+  ].filter((q) => !shouldExcludeFromAiAndBank(q.label));
   if (!leftoverFields.length) return first;
 
   if (!forceAi && !(await isOpenAiQaAssistEnabled())) return first;

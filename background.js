@@ -18,6 +18,7 @@ import {
   reconcileQueueWithSheetRows
 } from "./sheet-sync.js";
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
+import { shouldExcludeFromAiAndBank } from "./autofill-junk.js";
 import {
   buildCoverLetterPrompt,
   buildPrompt,
@@ -215,14 +216,25 @@ async function isBatchAutoApplyEnabled() {
   return channel !== "all";
 }
 
-/** Manual Apply assist and non-Dice hosted batch apply. Dice batch always auto-applies. Default on. */
+/** Manual Apply assist and non-hosted batch apply. Hosted Dice/Greenhouse batch always auto-applies. Default on. */
 async function isAutofillEnabled() {
   const data = await chrome.storage.local.get([AUTOFILL_ENABLED_KEY]);
   return data[AUTOFILL_ENABLED_KEY] !== false;
 }
 
+/** Dice + Greenhouse may batch/queue auto-apply+submit (product decision). */
+function isHostedBatchAutoApplyBoard(board = "") {
+  const b = String(board || "").trim();
+  return b === "Dice" || b === "Greenhouse";
+}
+
+function isHostedBatchAutoApplyJob(j = {}) {
+  return isDiceJob(j) || isGreenhouseJob(j);
+}
+
+/** @deprecated Prefer isHostedBatchAutoApplyBoard — kept for older call sites. */
 function isDiceBatchAutoApply(board = "") {
-  return String(board || "").trim() === "Dice";
+  return isHostedBatchAutoApplyBoard(board);
 }
 
 /** A row is retried this many times before the batch moves on without it. */
@@ -1333,9 +1345,11 @@ async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuesti
   }
 }
 
-/** Batch Dice recovery: answer leftover screening questions via Codex or AI tab. */
+/** Batch hosted recovery: answer leftover screening questions via Codex or AI tab. */
 setCustomQaEngineAsker(async (questions = [], { choice = false, engine = "" } = {}) => {
-  const list = Array.isArray(questions) ? questions.slice(0, 8) : [];
+  const list = (Array.isArray(questions) ? questions : [])
+    .filter((q) => q?.id && !shouldExcludeFromAiAndBank(q.label))
+    .slice(0, 8);
   const preferred = normalizeCustomQaEngine(engine) || (await getStoredCustomQaEngine());
   const out = [];
   for (const q of list) {
@@ -2536,6 +2550,8 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
     ...applyResult,
     status: status || "needs_review",
     detail: reviewMsg,
+    board: boardLabel,
+    boardLabel,
     csvRow: jobMeta.csvRow,
     company: jobMeta.companyName || jobMeta.company || "",
     jobTitle: jobMeta.jobTitle || jobMeta.title || "",
@@ -2572,6 +2588,8 @@ function formatUnanswerableSlackMessage(applyResult = {}) {
 
 async function pauseAfterFailedHostedApply(applyResult, jobLabel = "") {
   const detail = String(applyResult?.detail || "Application needs review");
+  const board =
+    String(applyResult?.board || applyResult?.boardLabel || "").trim() || "Dice";
   await setBatchState("paused");
   await setStatus(
     `${jobLabel ? `Row ${jobLabel}: ` : ""}${detail}. Batch paused — fix the form (login/CAPTCHA/Next), then click Start to retry apply.`
@@ -2579,7 +2597,7 @@ async function pauseAfterFailedHostedApply(applyResult, jobLabel = "") {
   await chrome.storage.local.set({ generation_running: false });
   if (isUnanswerableRequiredPause(applyResult)) {
     await trySlackAlert({
-      title: "Dice apply paused — required field unanswered ⛔",
+      title: `${board} apply paused — required field unanswered ⛔`,
       message: formatUnanswerableSlackMessage(applyResult),
       csvRow: applyResult?.csvRow ?? jobLabel,
       company: applyResult?.company || applyResult?.companyName || "",
@@ -2638,10 +2656,9 @@ function isSkippedSheetDuplicateJob(j) {
 }
 
 function isHostedApplyBacklogJob(j, person = null) {
-  // Only Dice runs batch/queue auto-apply. Other ATS (Greenhouse, Workday, …)
-  // use the in-page Autofill panel (Q&A bank, uploads, fill) after Open/Apply.
+  // Dice + Greenhouse: batch/queue auto-apply+submit. Other ATS use Autofill panel only.
   if (
-    !isDiceJob(j) ||
+    !isHostedBatchAutoApplyJob(j) ||
     j.status !== "done" ||
     j.applied ||
     isJobMarkedInactive(j) ||
@@ -10143,10 +10160,12 @@ async function runBatchLoop(outputDir) {
         });
         await setStatus(`Done row ${next.csvRow}. ${result.status}`);
 
-        // Dice only: generate → auto-apply+submit. Other ATS: files only; use Autofill panel.
+        // Dice + Greenhouse: generate → auto-apply+submit. Other ATS: files + Autofill panel.
         // All channel: generate files only — no auto-apply.
         const hostedApplyBoard =
-          batchAutoApply && isDiceJob(next) ? "Dice" : "";
+          batchAutoApply && isHostedBatchAutoApplyJob(next)
+            ? resolveHostedApplyBoard(next)
+            : "";
         if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
           // Apply after build: Ready row on the sheet is expected — only Applied blocks apply.
           const applyRes = await runHostedInterleavedApply({
@@ -10359,7 +10378,10 @@ async function runBatchLoop(outputDir) {
                 company: next.company
               });
               await setStatus(`Done row ${next.csvRow}. ${result.status}`);
-              const hostedApplyBoard = batchAutoApply && isDiceJob(next) ? "Dice" : "";
+              const hostedApplyBoard =
+                batchAutoApply && isHostedBatchAutoApplyJob(next)
+                  ? resolveHostedApplyBoard(next)
+                  : "";
               if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
                 const applyRes = await runHostedInterleavedApply(
                   {
@@ -12958,11 +12980,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const queueJob = { ...(prior || {}), ...jobMeta };
         queueJob.jdLink = String(message.url || queueJob.jdLink || "").trim();
-        const diceAutoApply = isDiceJob(queueJob);
-        // Dice only: skipped Ready rows can resume full auto-apply+submit.
-        // Greenhouse / other ATS: open + in-page Autofill panel (no SW multi-step).
+        const hostedBoard = resolveHostedApplyBoard(queueJob);
+        const hostedAutoApply = isHostedBatchAutoApplyBoard(hostedBoard);
+        // Dice / Greenhouse: skipped Ready rows can resume full auto-apply+submit.
+        // Other ATS: open + in-page Autofill panel (no SW multi-step).
         const continueHostedApply =
-          diceAutoApply && isSkippedSheetDuplicateJob(prior || queueJob);
+          hostedAutoApply && isSkippedSheetDuplicateJob(prior || queueJob);
 
         if (continueHostedApply) {
           const located = await locateJobFolder({
@@ -12987,23 +13010,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             started: true,
             applied: false,
             hostedAutoApply: true,
-            status: `Dice auto apply started for row ${queueJob.csvRow}…`
+            status: `${hostedBoard} auto apply started for row ${queueJob.csvRow}…`
           });
-          const applyRes = await runHostedInterleavedApply(queueJob, "Dice", {
+          const applyRes = await runHostedInterleavedApply(queueJob, hostedBoard, {
             skipDuplicateCheck: true
           });
           const msg =
             applyRes?.status === "submitted"
               ? `Row ${queueJob.csvRow}: submitted and marked Applied.`
               : applyRes?.detail ||
-                `Dice auto apply finished (${applyRes?.status || "needs review"}).`;
+                `${hostedBoard} auto apply finished (${applyRes?.status || "needs review"}).`;
           await setStatus(msg);
           return;
         }
 
-        // Non-Dice (Greenhouse, Workday, …): open job first, mark Applied on sheet in parallel.
-        // Dice with autofill off: same open-only path. Sheet failure must not block the tab.
-        if (!diceAutoApply || !(await isAutofillEnabled())) {
+        // Non-hosted ATS: open job first, mark Applied on sheet in parallel.
+        // Hosted board with autofill off: same open-only path. Sheet failure must not block the tab.
+        if (!hostedAutoApply || !(await isAutofillEnabled())) {
           const href = String(message.url || jobMeta.jdLink || "").trim();
           if (!href) {
             reply({ ok: false, applied: false, started: false, error: "Missing job URL." });
@@ -13020,7 +13043,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               hasFiles: Boolean(jobMeta.jobDir)
             }).catch(() => {});
           }
-          const openHint = diceAutoApply
+          const openHint = hostedAutoApply
             ? "Opening job — recording Applied on sheet…"
             : "Opening job — recording Applied on sheet. Use the Autofill panel to fill (Q&A bank, uploads)…";
           await setStatus(openHint);
@@ -13029,8 +13052,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             applied: true,
             started: false,
             openedOnly: true,
-            autofillSkipped: !diceAutoApply ? false : true,
-            panelOnly: !diceAutoApply,
+            autofillSkipped: !hostedAutoApply ? false : true,
+            panelOnly: !hostedAutoApply,
             appliedDate,
             jobDir: jobMeta.jobDir || "",
             status: openHint
@@ -13071,111 +13094,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const [result, , sheet] = await Promise.all([openPromise, folderPromise, sheetPromise]);
           const sheetLabel = describeSheetAppliedResult(sheet, sheet?.appliedDate || appliedDate);
           const openedDetail =
-            result?.detail || (diceAutoApply ? "Opened job link." : "Autofill panel ready.");
+            result?.detail || (hostedAutoApply ? "Opened job link." : "Autofill panel ready.");
           await setStatus(sheetLabel ? `${openedDetail} ${sheetLabel}.` : openedDetail);
           return;
         }
-        const folderPromise = locateJobFolder({
-          csvRow: jobMeta.csvRow,
-          jobDir: jobMeta.jobDir || "",
-          jdLink: jobMeta.jdLink,
-          company: jobMeta.companyName || jobMeta.company || "",
-          title: jobMeta.jobTitle || jobMeta.title || ""
-        })
-          .then(async (located) => {
-            if (!located?.jobDir) return null;
-            jobMeta.jobDir = located.jobDir;
-            if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-              await updateQueueJob(jobMeta.csvRow, { jobDir: located.jobDir, hasFiles: true }).catch(
-                () => {}
-              );
-              await rememberApplyHistory(jobMeta.csvRow, {
-                jobDir: located.jobDir,
-                jdLink: jobMeta.jdLink || ""
-              }).catch(() => {});
-            }
-            await persistJobContextForAutofill(jobMeta);
-            return located;
-          })
-          .catch(() => null);
-        await persistJobContextForAutofill(jobMeta);
-        const storedAssist = await chrome.storage.local.get(["allowSubmitOnAssist"]);
-        const allowSubmit = Boolean(
-          message.autoSubmit === true ||
-            (message.autoSubmit !== false && storedAssist.allowSubmitOnAssist !== false)
-        );
 
-        const appliedDate = formatApplicationDateTime();
-        if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-          await updateQueueJob(jobMeta.csvRow, {
-            applied: true,
-            appliedDate,
-            jobDir: jobMeta.jobDir || "",
-            hasFiles: Boolean(jobMeta.jobDir)
-          }).catch(() => {});
+        // Hosted Dice/Greenhouse queue Apply: full multi-step with submit.
+        const locatedForApply = await locateJobFolder({
+          csvRow: queueJob.csvRow,
+          jobDir: queueJob.jobDir || jobMeta.jobDir || "",
+          jdLink: queueJob.jdLink,
+          company: queueJob.companyName || queueJob.company || "",
+          title: queueJob.jobTitle || queueJob.title || ""
+        }).catch(() => null);
+        if (locatedForApply?.jobDir) {
+          queueJob.jobDir = locatedForApply.jobDir;
+          if (queueJob.csvRow != null && queueJob.csvRow !== "") {
+            await updateQueueJob(queueJob.csvRow, {
+              jobDir: locatedForApply.jobDir,
+              hasFiles: true
+            }).catch(() => {});
+          }
         }
-        const openingStatus = "Opening job and running Dice Auto Apply — recording Applied on sheet…";
+        await persistJobContextForAutofill(queueJob);
+        const boardName = hostedBoard || "Dice";
+        const openingStatus = `Opening job and running ${boardName} Auto Apply…`;
         await setStatus(openingStatus);
         reply({
           ok: true,
           started: true,
-          applied: true,
-          appliedDate,
-          jobDir: jobMeta.jobDir || "",
+          applied: false,
+          hostedAutoApply: true,
+          jobDir: queueJob.jobDir || "",
           status: openingStatus
         });
-
-        const openPromise = openJobAndApply(message.url, {
-          multiStep: message.multiStep !== false,
-          autoSubmit: allowSubmit,
-          csvRow: jobMeta.csvRow,
-          jobDir: jobMeta.jobDir || "",
-          jdLink: jobMeta.jdLink || message.url || ""
-        }).then(
-          (opened) => opened,
-          (err) => ({
-            status: "error",
-            detail: `Apply assist failed: ${String(err?.message || err)}`,
-            openError: true
-          })
-        );
-        const sheetPromise = markQueueJobAppliedOnSheet(jobMeta);
-        const [result, , sheet] = await Promise.all([openPromise, folderPromise, sheetPromise]);
-        const sheetLabel = describeSheetAppliedResult(sheet, sheet?.appliedDate || appliedDate);
-        if (result?.status === "submitted" && result?.tabId) {
-          await closeApplyTab(result.tabId).catch(() => false);
-        }
-        if (jobMeta.csvRow != null && jobMeta.csvRow !== "") {
-          const docsPatch = {
-            jobDir: result.uploadFolder || jobMeta.jobDir || "",
-            hasFiles: true
-          };
-          if (result.uploadResumeName) docsPatch.resumeName = result.uploadResumeName;
-          if (result.uploadCoverName) docsPatch.coverName = result.uploadCoverName;
-          await rememberApplyHistory(jobMeta.csvRow, {
-            ...docsPatch,
-            jdLink: jobMeta.jdLink || ""
-          }).catch(() => {});
-          await updateQueueJob(jobMeta.csvRow, docsPatch).catch(() => {});
-        }
-        const filled = Number(result.filled || result.filledCount || 0);
-        const files = [result.uploadResumeName, result.uploadCoverName].filter(Boolean).join(" + ");
-        let msg = result.detail || "";
-        if (!msg) {
-          if (result.status === "submitted") {
-            msg = `Apply assist: submitted application` +
-              (result.uploaded ? ` (uploaded ${files || `${result.uploaded} file(s)`})` : "") +
-              `.`;
-          } else {
-            msg =
-              `Apply assist: filled ${filled} field(s)` +
-              (result.uploaded
-                ? `, uploaded ${files || `${result.uploaded} file(s)`}`
-                : "") +
-              `. Review and submit.`;
-          }
-        }
-        if (sheetLabel) msg = `${msg} ${sheetLabel}.`;
+        const applyRes = await runHostedInterleavedApply(queueJob, boardName);
+        const msg =
+          applyRes?.status === "submitted"
+            ? `Row ${queueJob.csvRow}: submitted and marked Applied.`
+            : applyRes?.detail ||
+              `${boardName} auto apply finished (${applyRes?.status || "needs review"}).`;
         await setStatus(msg);
       } catch (err) {
         const msg = `Apply assist failed: ${String(err?.message || err)}`;

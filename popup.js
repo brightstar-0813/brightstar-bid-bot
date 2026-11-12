@@ -1466,7 +1466,9 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
     sourceSubmitHintEl.textContent =
       channelFilter === "dice"
         ? "Dice: builds files and submits."
-        : "Builds files. Apply from the panel.";
+        : channelFilter === "greenhouse"
+          ? "Greenhouse: builds files and submits."
+          : "Builds files. Apply from the panel.";
   }
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   const person = await getActivePerson().catch(() => null);

@@ -7,6 +7,7 @@ import {
   isJunkQuestionLabel,
   isJunkQaRecord,
   isSensitiveProfileQuestion,
+  shouldExcludeFromAiAndBank,
   normalizeChoiceAnswerValue,
   cleanAutofillLabelText,
   isBareChoiceOptionLabel,
@@ -140,6 +141,13 @@ test("isJunkQaRecord combines question and answer checks", () => {
 test("isSensitiveProfileQuestion flags identity fields", () => {
   assert.equal(isSensitiveProfileQuestion("Email Address"), true);
   assert.equal(isSensitiveProfileQuestion("Why do you want this role?"), false);
+});
+
+test("shouldExcludeFromAiAndBank blocks identity from AI/bank fiction", () => {
+  assert.equal(shouldExcludeFromAiAndBank("First Name"), true);
+  assert.equal(shouldExcludeFromAiAndBank("Phone Number"), true);
+  assert.equal(shouldExcludeFromAiAndBank("Mobile"), true);
+  assert.equal(shouldExcludeFromAiAndBank("How many years of Apex experience?"), false);
 });
 
 test("normalizeChoiceAnswerValue canonicalizes yes/no", () => {

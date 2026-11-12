@@ -43,7 +43,7 @@ export const ATS_ADAPTERS = [
     id: "greenhouse",
     label: "Greenhouse",
     hostPatterns: [/(^|\.)greenhouse\.io$/i],
-    // Fill via in-page Autofill panel only — never force-submit without caller flag.
+    // Batch/queue may pass autoSubmit:true (with Dice). Never force without caller flag.
     autoSubmitAllowed: true,
     isEmployerAts: true,
     stepBudget: 18,

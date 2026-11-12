@@ -68,6 +68,15 @@ export function isSensitiveProfileQuestion(label) {
   return SENSITIVE_PROFILE_QUESTION_RE.test(String(label || "").trim());
 }
 
+/**
+ * Identity / contact / profile-mapped questions must use exact applicantInfo only —
+ * never Codex, AI tab, OpenAI leftovers, or Q&A-bank fiction.
+ * Applies to Dice, Greenhouse, panel, and any future auto-apply board.
+ */
+export function shouldExcludeFromAiAndBank(label) {
+  return isSensitiveProfileQuestion(label);
+}
+
 /** ChatGPT/Codex page source mistaken for an application answer. */
 export function isPageScriptAnswer(text) {
   const t = String(text || "").trim();

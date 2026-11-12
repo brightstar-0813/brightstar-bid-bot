@@ -33,7 +33,8 @@ background.js  (service worker, type: module)
 - `autoSubmitAllowed` — site may ever auto-submit
 - `alwaysAutoSubmit` — rare; Dice does not use this. Greenhouse/Ashby/Lever no longer force-submit
 - `resolveEffectiveAutoSubmit(site, callerFlag)` — single decision point
-- Queue / batch **auto-apply+submit** is **Dice only**; other ATS use the in-page Autofill panel
+- Queue / batch **auto-apply+submit** is **Dice + Greenhouse**; other ATS use the in-page Autofill panel
+- Identity/contact fields: exact profile only (`shouldExcludeFromAiAndBank`) — never AI fiction
 - `isEmployerAts` / `isEmployerAtsHost` — aggregator redirect targets (e.g. Jobgether → Workday)
 
 Indeed hosted vs external: `indeed.js` (`hostedApply` / `externalApply` / apply evidence). External = never submit.
