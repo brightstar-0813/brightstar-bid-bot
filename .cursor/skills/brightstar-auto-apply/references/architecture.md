@@ -50,6 +50,8 @@ Indeed hosted vs external: `indeed.js` (`hostedApply` / `externalApply` / apply 
 - Helpers: `resume-profile.js` (`normalizeResumeFilePrefix`, `outputDirFromPerson`, `normalizeDownloadsRelativeDir`)
 - Persist on activate/save: `profiles.js` → `syncActivePersonOutputContext`
 - Save path: `background.js` `resolveOutputDir` + `autoDownloadResumeFiles` (person `Applications-{Token}` wins over bare `Applications`; absolute paths rejected)
+- PDF speed: reuse one debugger render tab per run (`htmlToPdfBase64`); Manual Bid runs sheet `markApplied` in parallel with file save
+- Sheet write speed: Apps Script `append` / `markApplied` use `ensureWriteLayout_` (headers only); full prune stays on `listRows` / Sync — redeploy Web App after `Code.gs` changes
 
 ## Storage
 

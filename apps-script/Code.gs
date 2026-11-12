@@ -25,6 +25,8 @@
  * WorkSphere "Sync from sheet" calls listRows. Older scripts without listRows treated
  * that request as append and wrote blank Ready rows — do not fall through unknown actions.
  * Never run listRows / ensureSheetLayout_ on capture tabs — that deletes the JD column.
+ * append / markApplied use ensureWriteLayout_ (headers only) so large tabs stay fast;
+ * Sync / listRows / listLinks still run full ensureSheetLayout_ (prune + column cleanup).
  */
 function doPost(e) {
   try {
@@ -94,7 +96,8 @@ function doPost(e) {
     const jobTitle = String(data.jobTitle || "").trim();
 
     if (action === "markapplied" || action === "applied") {
-      ensureSheetLayout_(sheet);
+      // Fast path: do not prune/scan the whole tab on every Manual Bid / Apply.
+      ensureWriteLayout_(sheet);
       const appliedOn = String(data.applicationDate || "").trim();
       const status =
         String(data.status || "").trim() || (appliedOn ? "Applied " + appliedOn : "Applied");
@@ -163,7 +166,8 @@ function doPost(e) {
       });
     }
 
-    ensureSheetLayout_(sheet);
+    // Fast path: headers only — full prune runs on listRows / Sync from sheet.
+    ensureWriteLayout_(sheet);
     sheet.appendRow(buildDataRow_(data, data.status || "Ready"));
     var appendedRow = sheet.getLastRow();
 
@@ -573,10 +577,18 @@ function pruneBlankReadyRows_(sheet) {
   return removed;
 }
 
-/** Normalize layout before read/write. Returns blank rows pruned. */
-function ensureSheetLayout_(sheet) {
+/**
+ * Cheap layout for append / markApplied: ensure Status + Bid mode headers only.
+ * Avoids full-sheet prune (deleteRow loops) that make Manual Bid feel stuck.
+ */
+function ensureWriteLayout_(sheet) {
   ensureStatusHeader_(sheet);
   ensureBidModeHeader_(sheet);
+}
+
+/** Normalize layout before Sync/list reads. Returns blank rows pruned. */
+function ensureSheetLayout_(sheet) {
+  ensureWriteLayout_(sheet);
   dropJdColumnIfPresent_(sheet);
   trimColumnsPastBidMode_(sheet);
   return pruneBlankReadyRows_(sheet);

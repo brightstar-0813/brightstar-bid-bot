@@ -633,7 +633,8 @@ let inflightInactiveProbe = null;
 let workflowBlankChatReady = false;
 
 function startKeepAlive() {
-  stopKeepAlive();
+  stopKeepAlive({ keepPdfRender: true });
+  cancelPdfRenderIdleCleanup();
   // MV3 service workers can sleep during long ChatGPT waits; ping storage periodically.
   keepAliveTimer = setInterval(() => {
     chrome.storage.local.set({ generation_heartbeat: Date.now() }).catch(() => {});
@@ -645,7 +646,7 @@ function startKeepAlive() {
   }
 }
 
-function stopKeepAlive() {
+function stopKeepAlive({ keepPdfRender = false } = {}) {
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
     keepAliveTimer = null;
@@ -655,6 +656,8 @@ function stopKeepAlive() {
   } catch {
     // alarms may be unavailable in some contexts
   }
+  // Close the reused PDF tab shortly after a run ends (kept briefly for back-to-back Manual Bids).
+  if (!keepPdfRender) schedulePdfRenderIdleCleanup(45000);
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -2841,9 +2844,9 @@ function assertDownloadsRelativeFilename(filename) {
   return s;
 }
 
-async function downloadDataUrl(url, filename) {
+async function downloadDataUrl(url, filename, { timeoutMs = 60000, pollMs = 1000 } = {}) {
   const downloadId = await startDownload(url, filename);
-  await waitForDownloadComplete(downloadId);
+  await waitForDownloadComplete(downloadId, timeoutMs, pollMs);
   return downloadId;
 }
 
@@ -2852,9 +2855,10 @@ async function downloadDataUrl(url, filename) {
  * interrupted write (blocked, disk full, bad path) used to be reported as a
  * success. Wait for the terminal state and surface the real error instead.
  */
-function waitForDownloadComplete(downloadId, timeoutMs = 60000) {
+function waitForDownloadComplete(downloadId, timeoutMs = 60000, pollMs = 1000) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    const pollEvery = Math.max(100, Number(pollMs) || 1000);
 
     const finish = (err, filename) => {
       if (settled) return;
@@ -2891,7 +2895,7 @@ function waitForDownloadComplete(downloadId, timeoutMs = 60000) {
     const check = () => {
       chrome.downloads.search({ id: downloadId }).then((items) => inspect(items?.[0]), () => {});
     };
-    const poll = setInterval(check, 1000);
+    const poll = setInterval(check, pollEvery);
     check();
 
     const timer = setTimeout(() => {
@@ -2909,12 +2913,13 @@ function downloadTextFile(text, mimeType, filename) {
     body = `${body.slice(0, maxChars)}\n\n---\n[Truncated for download size limit]\n`;
   }
   const url = `data:${mimeType};charset=utf-8,${encodeURIComponent(body)}`;
-  return downloadDataUrl(url, filename);
+  // Small text finishes almost immediately — poll faster / fail soft sooner.
+  return downloadDataUrl(url, filename, { timeoutMs: 15000, pollMs: 200 });
 }
 
 function downloadBase64File(base64, mimeType, filename) {
   const url = `data:${mimeType};base64,${base64}`;
-  return downloadDataUrl(url, filename);
+  return downloadDataUrl(url, filename, { timeoutMs: 60000, pollMs: 300 });
 }
 
 function sanitizePathSegment(value, fallback = "untitled") {
@@ -3220,18 +3225,120 @@ function debuggerCommand(debuggee, method, params = {}) {
   });
 }
 
+/** Reused blank tab + debugger for Manual Bid / batch PDF (avoids create/attach every job). */
+let pdfRenderTabId = null;
+let pdfRenderAttached = false;
+let pdfRenderIdleTimer = null;
+
+function cancelPdfRenderIdleCleanup() {
+  if (pdfRenderIdleTimer) {
+    clearTimeout(pdfRenderIdleTimer);
+    pdfRenderIdleTimer = null;
+  }
+}
+
+function schedulePdfRenderIdleCleanup(delayMs = 45000) {
+  cancelPdfRenderIdleCleanup();
+  pdfRenderIdleTimer = setTimeout(() => {
+    pdfRenderIdleTimer = null;
+    if (isRunning) return;
+    discardPdfRenderSession().catch(() => {});
+  }, delayMs);
+}
+
+async function discardPdfRenderSession() {
+  cancelPdfRenderIdleCleanup();
+  const tabId = pdfRenderTabId;
+  const wasAttached = pdfRenderAttached;
+  pdfRenderTabId = null;
+  pdfRenderAttached = false;
+  if (typeof tabId === "number" && wasAttached) {
+    await debuggerDetach({ tabId }).catch(() => {});
+  }
+  if (typeof tabId === "number") {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch {
+      // tab may already be closed
+    }
+  }
+}
+
+async function ensurePdfRenderTab({ active = false } = {}) {
+  cancelPdfRenderIdleCleanup();
+  if (typeof pdfRenderTabId === "number") {
+    try {
+      const tab = await chrome.tabs.get(pdfRenderTabId);
+      if (tab?.id) {
+        if (active && !tab.active) {
+          await chrome.tabs.update(pdfRenderTabId, { active: true }).catch(() => {});
+        }
+        return pdfRenderTabId;
+      }
+    } catch {
+      pdfRenderTabId = null;
+      pdfRenderAttached = false;
+    }
+  }
+
+  // active:false by default — stealing focus breaks ChatGPT's composer between jobs.
+  const tab = await chrome.tabs.create({ url: "about:blank", active });
+  if (!tab.id) throw new Error("Failed to create render tab.");
+  pdfRenderTabId = tab.id;
+  pdfRenderAttached = false;
+  await withTimeout(
+    waitForTabComplete(tab.id, 10000),
+    12000,
+    "Timed out opening blank render tab."
+  );
+  return pdfRenderTabId;
+}
+
+async function ensurePdfDebuggerAttached(tabId) {
+  const debuggee = { tabId };
+  if (pdfRenderAttached && pdfRenderTabId === tabId) {
+    try {
+      await debuggerCommand(debuggee, "Page.enable");
+      return debuggee;
+    } catch {
+      pdfRenderAttached = false;
+    }
+  }
+
+  try {
+    await withTimeout(
+      debuggerAttach(debuggee),
+      15000,
+      "PDF debugger attach timed out. Click Allow on Chrome's debugger permission prompt, then retry."
+    );
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (/already attached/i.test(msg)) {
+      await debuggerDetach(debuggee).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await withTimeout(
+        debuggerAttach(debuggee),
+        15000,
+        "PDF debugger attach timed out. Click Allow on Chrome's debugger permission prompt, then retry."
+      );
+    } else {
+      throw err;
+    }
+  }
+  pdfRenderAttached = true;
+  await debuggerCommand(debuggee, "Page.enable");
+  // Label the reused tab so staff can tell it apart from a stuck blank page.
+  await debuggerCommand(debuggee, "Runtime.evaluate", {
+    expression: "document.title = 'Brightstar PDF render'"
+  }).catch(() => {});
+  return debuggee;
+}
+
 /**
- * Render HTML → PDF via a background tab + debugger.
+ * Render HTML → PDF via a reused background tab + debugger.
  * Times out if Chrome's "Allow debugger" prompt is ignored.
  */
 async function htmlToPdfBase64Once(html, { active = false } = {}) {
-  // active:false by default — stealing focus here breaks ChatGPT's composer
-  // between jobs. The last retry falls back to a visible tab.
-  const tab = await chrome.tabs.create({ url: "about:blank", active });
-  if (!tab.id) throw new Error("Failed to create render tab.");
-  const tabId = tab.id;
-  const debuggee = { tabId };
-
   const printParams = {
     printBackground: true,
     paperWidth: 8.27,
@@ -3244,57 +3351,53 @@ async function htmlToPdfBase64Once(html, { active = false } = {}) {
   };
 
   try {
-    await withTimeout(waitForTabComplete(tabId, 10000), 12000, "Timed out opening blank render tab.");
-    await withTimeout(
-      debuggerAttach(debuggee),
-      15000,
-      "PDF debugger attach timed out. Click Allow on Chrome's debugger permission prompt, then retry."
-    );
+    const tabId = await ensurePdfRenderTab({ active });
+    const debuggee = await ensurePdfDebuggerAttached(tabId);
+
+    let loaded = false;
+    let usedSetContent = false;
     try {
-      await debuggerCommand(debuggee, "Page.enable");
-
-      let loaded = false;
-      try {
-        const frameTree = await debuggerCommand(debuggee, "Page.getFrameTree");
-        const frameId = frameTree?.frameTree?.frame?.id;
-        if (frameId) {
-          await debuggerCommand(debuggee, "Page.setDocumentContent", {
-            frameId,
-            html: String(html || "")
-          });
-          loaded = true;
-        }
-      } catch {
-        loaded = false;
-      }
-
-      if (!loaded) {
-        // Fallback for environments where setDocumentContent is blocked.
-        await setStatus("PDF fallback: loading HTML via data URL…");
-        await chrome.tabs.update(tabId, {
-          url: `data:text/html;charset=utf-8,${encodeURIComponent(String(html || ""))}`
+      const frameTree = await debuggerCommand(debuggee, "Page.getFrameTree");
+      const frameId = frameTree?.frameTree?.frame?.id;
+      if (frameId) {
+        await debuggerCommand(debuggee, "Page.setDocumentContent", {
+          frameId,
+          html: String(html || "")
         });
-        await withTimeout(waitForTabComplete(tabId, 15000), 18000, "Timed out loading resume HTML for PDF.");
+        loaded = true;
+        usedSetContent = true;
       }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      await setStatus("Printing PDF…");
-      const result = await withTimeout(
-        debuggerCommand(debuggee, "Page.printToPDF", printParams),
-        45000,
-        "Page.printToPDF timed out."
-      );
-      if (!result?.data) throw new Error("PDF generation returned empty data.");
-      return result.data;
-    } finally {
-      await debuggerDetach(debuggee);
-    }
-  } finally {
-    try {
-      await chrome.tabs.remove(tabId);
     } catch {
-      // tab may already be closed
+      loaded = false;
     }
+
+    if (!loaded) {
+      // Fallback for environments where setDocumentContent is blocked.
+      await setStatus("PDF fallback: loading HTML via data URL…");
+      await chrome.tabs.update(tabId, {
+        url: `data:text/html;charset=utf-8,${encodeURIComponent(String(html || ""))}`
+      });
+      await withTimeout(
+        waitForTabComplete(tabId, 15000),
+        18000,
+        "Timed out loading resume HTML for PDF."
+      );
+    }
+
+    // setDocumentContent is synchronous enough — short settle; data-URL nav needs a bit more.
+    await new Promise((resolve) => setTimeout(resolve, usedSetContent ? 120 : 350));
+    await setStatus("Printing PDF…");
+    const result = await withTimeout(
+      debuggerCommand(debuggee, "Page.printToPDF", printParams),
+      45000,
+      "Page.printToPDF timed out."
+    );
+    if (!result?.data) throw new Error("PDF generation returned empty data.");
+    // Keep tab + debugger attached for the next resume/cover PDF in this session.
+    return result.data;
+  } catch (err) {
+    await discardPdfRenderSession();
+    throw err;
   }
 }
 
@@ -3317,7 +3420,7 @@ async function htmlToPdfBase64(html, { attempts = 3 } = {}) {
       // attached) is the common transient case — back off and try again.
       if (attempt < attempts) {
         await setStatus(`PDF attempt ${attempt} failed (${msg}). Retrying…`);
-        await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
       }
     }
   }
@@ -8335,8 +8438,8 @@ async function saveResumeAndCoverLetter(
   resumeData = await finalizeResumeData(resumeData);
   const manualBid = isManualOneOffJob(jobMeta);
 
-  // Resolve sheet config early. Manual Bid marks Applied before debugger PDF work so
-  // Octobrowser/SW networking is still healthy (Log apply already succeeds this way).
+  // Resolve sheet config early so Manual Bid can start Applied in parallel with PDF work
+  // (keeps Octobrowser/SW networking busy before debugger PDF finishes).
   let spreadsheetUrl = String(jobMeta.spreadsheetUrl || "").trim();
   let sheetsWebAppUrl = String(jobMeta.sheetsWebAppUrl || "").trim();
   let sheetTabName = String(jobMeta.sheetTabName || jobMeta.sheetName || "").trim();
@@ -8348,37 +8451,59 @@ async function saveResumeAndCoverLetter(
   }
 
   let manualSheetStatus = "";
+  let manualSheetPromise = null;
   if (manualBid && spreadsheetUrl && sheetsWebAppUrl) {
-    await setStatus("Recording Applied on Google Sheet...");
-    try {
-      const sheetResult = await markJobAppliedOnSpreadsheet({
-        spreadsheetUrl,
-        webAppUrl: sheetsWebAppUrl,
-        sheetName: sheetTabName,
-        jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
-        jobTitle: jobMeta.jobTitle,
-        companyName: jobMeta.companyName,
-        jdLink: jobMeta.jdLink,
-        salary: jobMeta.salary || "",
-        bidSource: jobMeta.bidSource || "one-off"
-      });
-      await rememberSheetIdentityForJob(jobMeta.csvRow, {
-        jobNo: sheetResult.jobNo || jobMeta.csvRow,
-        row: sheetResult.row
-      }).catch(() => {});
-      const label = sheetResult.status || formatAppliedStatus();
-      manualSheetStatus = ` Sheet: ${label}.`;
-    } catch (sheetErr) {
-      manualSheetStatus = `, but sheet update failed: ${String(sheetErr?.message || sheetErr)}`;
-    }
+    manualSheetPromise = (async () => {
+      try {
+        const sheetResult = await markJobAppliedOnSpreadsheet({
+          spreadsheetUrl,
+          webAppUrl: sheetsWebAppUrl,
+          sheetName: sheetTabName,
+          jobNo: jobMeta.csvRow != null ? jobMeta.csvRow : jobMeta.jobNo || "",
+          jobTitle: jobMeta.jobTitle,
+          companyName: jobMeta.companyName,
+          jdLink: jobMeta.jdLink,
+          salary: jobMeta.salary || "",
+          bidSource: jobMeta.bidSource || "one-off"
+        });
+        await rememberSheetIdentityForJob(jobMeta.csvRow, {
+          jobNo: sheetResult.jobNo || jobMeta.csvRow,
+          row: sheetResult.row
+        }).catch(() => {});
+        const label = sheetResult.status || formatAppliedStatus();
+        return ` Sheet: ${label}.`;
+      } catch (sheetErr) {
+        return `, but sheet update failed: ${String(sheetErr?.message || sheetErr)}`;
+      }
+    })();
   }
 
-  await setStatus("Saving jd.txt + resume PDF…");
-  const { jobDir: savedDir, nameToken, resumePdfName, saved } = await autoDownloadResumeFiles(
-    output,
-    resumeData,
-    jobMeta
+  await setStatus(
+    manualSheetPromise
+      ? "Saving jd.txt + resume PDF and recording Applied…"
+      : "Saving jd.txt + resume PDF…"
   );
+  const filesPromise = autoDownloadResumeFiles(output, resumeData, jobMeta);
+  let savedDir;
+  let nameToken;
+  let resumePdfName;
+  let saved;
+  if (manualSheetPromise) {
+    const settled = await Promise.allSettled([filesPromise, manualSheetPromise]);
+    if (settled[1].status === "fulfilled") {
+      manualSheetStatus = settled[1].value || "";
+    } else {
+      manualSheetStatus = `, but sheet update failed: ${String(
+        settled[1].reason?.message || settled[1].reason || "unknown"
+      )}`;
+    }
+    if (settled[0].status === "rejected") {
+      throw settled[0].reason;
+    }
+    ({ jobDir: savedDir, nameToken, resumePdfName, saved } = settled[0].value);
+  } else {
+    ({ jobDir: savedDir, nameToken, resumePdfName, saved } = await filesPromise);
+  }
 
   const parts = [];
   if (saved?.jd) parts.push("jd.txt");
