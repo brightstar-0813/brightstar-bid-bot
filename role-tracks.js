@@ -351,7 +351,8 @@ export function resolveRoleTrackForPerson(person) {
   if (
     id === "raquel-oliveira-de" ||
     id === "jessel-tampus-de" ||
-    id === "shira-leff"
+    id === "shira-leff" ||
+    id === "thayanne-lopes"
   ) {
     return "de";
   }

@@ -596,3 +596,33 @@ CERTIFICATIONS
 - Data Science Foundations: Fundamentals (Lynda.com)
 - Teaching Certificate — Beth Jacob of Jerusalem Teachers Seminary
 `;
+
+export const THAYANNE_LOPES_DE_MASTER = `Thayanne Karla Lopes da Silva
+Senior Data Engineer / Senior Analytics Engineer
+Recife, Pernambuco, Brazil | +55 81 99791 5887 | thayanne.karla@outlook.com
+https://www.linkedin.com/in/thayanne-lopes-a349a2447
+
+SUMMARY
+10 years of overall technology experience, including 8 years delivering data engineering, ETL/ELT, and analytics platforms for consulting, enterprise IT, and digital product teams.
+
+SKILLS
+Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes, data quality; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
+
+EXPERIENCE
+Origen Tech — Senior Data Engineer / Data Platform Architect | Miami, Florida, United States | Remote | Aug 2024 - Sep 2026
+US SAP consulting and products firm. Data platform work alongside cloud, AI, and enterprise reporting environments for multinational clients, including Brazil and broader Latin America compliance and trade operations.
+
+SysTech — Data Engineer | Brasília, Distrito Federal, Brazil | Remote | Feb 2021 - May 2024
+Brazilian IT hardware, software, and services firm serving government and corporate clients, with a United States branch. Data engineering for enterprise infrastructure and digital-transformation programs.
+
+TDW BI Solutions — Junior Data Engineer / ETL Developer | São Paulo, São Paulo, Brazil | On-site | Aug 2018 - Nov 2020
+Brazilian business-intelligence consultancy focused on data warehousing, analytics, and high-volume MPP environments.
+
+Studio Network — Software Engineer Intern / Junior Backend Developer | São Carlos, São Paulo, Brazil | On-site | Sep 2016 - Jun 2018
+São Carlos digital studio building websites, e-commerce, dashboards, custom online systems, and API integrations.
+
+EDUCATION
+Universidade de São Paulo (USP) | Bachelor's Degree in Computer Science | São Paulo, Brazil | Feb 2012 - Dec 2016
+
+CERTIFICATIONS
+None.`;

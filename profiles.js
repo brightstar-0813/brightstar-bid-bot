@@ -14,6 +14,7 @@ import {
   RAQUEL_OLIVEIRA_SF_MASTER,
   SANDEEP_MAHANKALI_MASTER,
   SHIRA_LEFF_MASTER,
+  THAYANNE_LOPES_DE_MASTER,
   VICTOR_HOLANDA_DE_MASTER,
   VICTOR_HOLANDA_SF_MASTER
 } from "./prompts/builtin-master-resumes.js";
@@ -679,6 +680,40 @@ export const BUILTIN_PROFILES = [
       "Search Discovery",
       "Atlanta Kashruth Commission"
     ]
+  },
+  {
+    id: "thayanne-lopes",
+    label: "Thayanne Karla Lopes da Silva (Data Engineering)",
+    roleTrack: "de",
+    promptTemplate: "",
+    templateId: "ats-modern",
+    resumeFilePrefix: "Silva_Resume",
+    sheetTabName: "Thayanne-DE",
+    outputDir: "Thayanne-DE",
+    builtin: true,
+    kind: "resume",
+    name: "Thayanne Karla Lopes da Silva",
+    email: "thayanne.karla@outlook.com",
+    phone: "+55 81 99791 5887",
+    linkedin: "https://www.linkedin.com/in/thayanne-lopes-a349a2447",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Recife, Pernambuco, Brazil",
+    address: "Rua Jaguaruana, 803, Recife, Pernambuco",
+    zip: "50771-670",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "",
+    workAuthorized: "Yes",
+    sponsorship: "Yes",
+    hispanicLatino: "",
+    signatureTitle: "Senior Data Engineer / Senior Analytics Engineer",
+    masterResume: THAYANNE_LOPES_DE_MASTER,
+    coverLetterPrompt: coverLetterDePrompt,
+    autofillExtras: {},
+    requiredExperience: ["Origen Tech", "SysTech", "TDW BI Solutions", "Studio Network"]
   },
   {
     id: COVER_LETTER_PROFILE_ID,
