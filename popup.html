@@ -104,20 +104,32 @@
               <p class="section-title">Jobs queue</p>
             </div>
           </header>
-          <div class="channel-toggle" role="group" aria-label="Batch job source">
-            <span class="channel-label">Load from</span>
-            <div class="channel-grid">
-              <button type="button" class="channel-btn active" id="batchSourceCsv" data-batch-source="csv">
+          <div class="batch-source" role="group" aria-label="Batch job source">
+            <span class="batch-source-label">Load from</span>
+            <div class="batch-source-track">
+              <button
+                type="button"
+                class="batch-source-btn active"
+                id="batchSourceCsv"
+                data-batch-source="csv"
+                aria-pressed="true"
+              >
                 CSV
               </button>
-              <button type="button" class="channel-btn" id="batchSourceSheet" data-batch-source="sheet">
+              <button
+                type="button"
+                class="batch-source-btn"
+                id="batchSourceSheet"
+                data-batch-source="sheet"
+                aria-pressed="false"
+              >
                 Google Sheet
               </button>
             </div>
           </div>
-          <div id="csvBatchSourcePanel">
+          <div id="csvBatchSourcePanel" class="batch-source-panel">
             <div class="field file-field resume-file-field">
-              <span>Upload jobs CSV (optional)</span>
+              <span>Upload jobs CSV</span>
               <div class="resume-file-row">
                 <button
                   type="button"
@@ -184,9 +196,9 @@
               </div>
             </div>
           </div>
-          <div id="sheetBatchSourcePanel" hidden>
+          <div id="sheetBatchSourcePanel" class="batch-source-panel" hidden>
             <label class="field">
-              <span>Jobs sheet URL (capture tab — include gid= for the tab)</span>
+              <span>Jobs sheet URL</span>
               <input
                 id="jobsSheetSourceUrl"
                 type="url"
@@ -202,9 +214,7 @@
                 Save URL
               </button>
             </div>
-            <p class="hint" id="jobsSheetSourceStatus">
-              Uses the Web App URL from Google Sheet setup. Ready/Applied still write to the active person’s tab.
-            </p>
+            <p class="hint" id="jobsSheetSourceStatus">Include gid= for the capture tab. Ready/Applied go to the person tab.</p>
           </div>
           <div class="channel-toggle" role="group" aria-label="Job source filter">
             <span class="channel-label">Source filter</span>

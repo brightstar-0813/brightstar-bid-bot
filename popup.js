@@ -240,6 +240,8 @@ function applyJobBatchSourceUi(source, { persist = false } = {}) {
   const isSheet = jobBatchSource === "sheet";
   batchSourceCsvBtn?.classList.toggle("active", !isSheet);
   batchSourceSheetBtn?.classList.toggle("active", isSheet);
+  batchSourceCsvBtn?.setAttribute("aria-pressed", (!isSheet).toString());
+  batchSourceSheetBtn?.setAttribute("aria-pressed", isSheet.toString());
   if (csvBatchSourcePanel) csvBatchSourcePanel.hidden = isSheet;
   if (sheetBatchSourcePanel) sheetBatchSourcePanel.hidden = !isSheet;
   if (persist) {
