@@ -77,6 +77,7 @@ import {
   AI_PROVIDERS,
   DELETE_AI_CHAT_HISTORY_KEY,
   aiProviderLabel,
+  isApiAiProvider,
   normalizeAiProvider
 } from "./ai-provider.js";
 import {
@@ -374,6 +375,7 @@ const chatgptHardPauseHitsEl = document.getElementById("chatgptHardPauseHits");
 const CHATGPT_PACING_KEY = "chatgpt_pacing";
 const aiProviderChatgptBtn = document.getElementById("aiProviderChatgpt");
 const aiProviderClaudeBtn = document.getElementById("aiProviderClaude");
+const aiProviderClaudeApiBtn = document.getElementById("aiProviderClaudeApi");
 const aiProviderOpenaiBtn = document.getElementById("aiProviderOpenai");
 const aiChatToolsEl = document.getElementById("aiChatTools");
 const aiProviderStateEl = document.getElementById("aiProviderState");
@@ -1034,6 +1036,8 @@ const ENGINE_CHIP_ICONS = {
     '<path d="M21 12a8.5 8.5 0 0 1-8.5 8.5H7l-4 3V12A8.5 8.5 0 1 1 21 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
   claude:
     '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/>',
+  "claude-api":
+    '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="currentColor" stroke-width="1"/>',
   openai:
     '<path d="M12 3 14.5 9.5 21 12 14.5 14.5 12 21 9.5 14.5 3 12 9.5 9.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>'
 };
@@ -1048,13 +1052,18 @@ function renderAiProvider(provider) {
     const icon = ENGINE_CHIP_ICONS[aiProviderCache] || ENGINE_CHIP_ICONS.chatgpt;
     aiProviderStateEl.innerHTML = `<svg class="engine-chip-icon" viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="engine-chip-label">${label}</span>`;
   }
-  for (const btn of [aiProviderChatgptBtn, aiProviderClaudeBtn, aiProviderOpenaiBtn]) {
+  for (const btn of [
+    aiProviderChatgptBtn,
+    aiProviderClaudeBtn,
+    aiProviderClaudeApiBtn,
+    aiProviderOpenaiBtn
+  ]) {
     if (!btn) continue;
     const active = btn.dataset.provider === aiProviderCache;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
   }
-  const apiEngine = aiProviderCache === AI_PROVIDERS.OPENAI;
+  const apiEngine = isApiAiProvider(aiProviderCache);
   aiChatToolsEl?.classList.toggle("is-muted", apiEngine);
   if (deleteAiChatToggleEl) deleteAiChatToggleEl.disabled = apiEngine;
   if (cleanLeftoverAiChatsBtn) cleanLeftoverAiChatsBtn.disabled = apiEngine;
@@ -1065,8 +1074,8 @@ async function setAiProvider(provider) {
   renderAiProvider(next);
   await chrome.storage.local.set({ [AI_PROVIDER_KEY]: next });
   setStatus(
-    next === AI_PROVIDERS.OPENAI
-      ? "AI engine: OpenAI. Resume and cover letter use the API key in .env."
+    isApiAiProvider(next)
+      ? `AI engine: ${aiProviderLabel(next)}. Resume and cover letter use the API key in .env.`
       : `AI engine: ${aiProviderLabel(next)}.`
   );
 }
@@ -4565,6 +4574,9 @@ aiProviderChatgptBtn?.addEventListener("click", () => {
 });
 aiProviderClaudeBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.CLAUDE).catch((e) => setStatus(String(e.message || e)));
+});
+aiProviderClaudeApiBtn?.addEventListener("click", () => {
+  setAiProvider(AI_PROVIDERS.CLAUDE_API).catch((e) => setStatus(String(e.message || e)));
 });
 aiProviderOpenaiBtn?.addEventListener("click", () => {
   setAiProvider(AI_PROVIDERS.OPENAI).catch((e) => setStatus(String(e.message || e)));

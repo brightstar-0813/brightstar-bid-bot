@@ -1,7 +1,7 @@
 /**
  * Application autofill orchestrator.
  * Injects content/autofill.js into all frames, fills from the active person,
- * then answers leftover questions from extras + the Q&A bank, then OpenAI.
+ * then answers leftover questions from extras + the Q&A bank, then OpenAI/Claude API.
  * Multi-step Apply clicks Next/Continue but never auto-submits unless
  * autoSubmit is explicitly enabled for a supported in-site flow.
  */
@@ -40,8 +40,20 @@ import { getEnv } from "./env.js";
 import {
   DEFAULT_OPENAI_MODEL,
   QUALITY_OPENAI_MODEL,
+  chatCompletion as openAiChatCompletion,
   isOpenAiQaAssistEnabled
 } from "./openai.js";
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  QUALITY_ANTHROPIC_MODEL,
+  chatCompletion as anthropicChatCompletion
+} from "./anthropic.js";
+import {
+  AI_PROVIDER_KEY,
+  AI_PROVIDERS,
+  aiProviderLabel,
+  normalizeAiProvider
+} from "./ai-provider.js";
 import { normalizeJobLink } from "./sheets.js";
 import { NATIVE_HOST_NAME } from "./csv-source.js";
 import {
@@ -2323,6 +2335,48 @@ async function getOpenAiSettings() {
   return { apiKey, model };
 }
 
+async function getStoredAiProviderForAutofill() {
+  try {
+    const data = await chrome.storage.local.get(AI_PROVIDER_KEY);
+    return normalizeAiProvider(data[AI_PROVIDER_KEY]);
+  } catch {
+    return AI_PROVIDERS.CHATGPT;
+  }
+}
+
+/**
+ * Leftover / Custom Q&A API backend follows the AI engine when Claude API or OpenAI
+ * is selected; ChatGPT/Claude tab modes still use OPENAI_API_KEY for leftovers.
+ */
+export async function getAutofillLlmSettings({ strongModel = false } = {}) {
+  const provider = await getStoredAiProviderForAutofill();
+  if (provider === AI_PROVIDERS.CLAUDE_API) {
+    const apiKey = await getEnv("ANTHROPIC_API_KEY");
+    const envModel = (await getEnv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL)) || DEFAULT_ANTHROPIC_MODEL;
+    const model = strongModel ? QUALITY_ANTHROPIC_MODEL : envModel;
+    return {
+      provider: AI_PROVIDERS.CLAUDE_API,
+      label: aiProviderLabel(AI_PROVIDERS.CLAUDE_API),
+      envKeyName: "ANTHROPIC_API_KEY",
+      apiKey,
+      model,
+      complete: anthropicChatCompletion,
+      answerSource: "claude-api"
+    };
+  }
+  const { apiKey, model: envModel } = await getOpenAiSettings();
+  const model = strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
+  return {
+    provider: AI_PROVIDERS.OPENAI,
+    label: "OpenAI",
+    envKeyName: "OPENAI_API_KEY",
+    apiKey,
+    model,
+    complete: openAiChatCompletion,
+    answerSource: "openai"
+  };
+}
+
 async function getAutofillAiContext() {
   const data = await chrome.storage.local.get([
     "last_job_title",
@@ -2564,8 +2618,8 @@ async function enrichAnswersWithAi(questions, answers, {
   if (!forceAi && !(await isOpenAiQaAssistEnabled())) {
     return { aiHits: 0 };
   }
-  const { apiKey, model } = await getOpenAiSettings();
-  if (!apiKey) return { aiHits: 0 };
+  const llm = await getAutofillLlmSettings();
+  if (!llm.apiKey) return { aiHits: 0 };
 
   const ctx = await getAutofillAiContext();
   const meta = {
@@ -2588,28 +2642,39 @@ async function enrichAnswersWithAi(questions, answers, {
   try {
     const aiResult = choice
       ? await generateConstrainedChoiceAnswers({
-          apiKey,
-          model,
+          apiKey: llm.apiKey,
+          model: llm.model,
+          complete: llm.complete,
           questions: stillNeed,
           applicantInfo: info,
           jobMeta: meta,
           resumeText: ctx.resumeText
         })
       : await generateHumanizedApplicationAnswers({
-          apiKey,
-          model,
+          apiKey: llm.apiKey,
+          model: llm.model,
+          complete: llm.complete,
           questions: stillNeed,
           applicantInfo: info,
           jobMeta: meta,
           resumeText: ctx.resumeText
         });
     for (const row of aiResult.answers || []) {
-      if (pushAiAnswerRow(answers, stillNeed, row, { choice, profileId, site, source: "ai" })) {
+      if (
+        pushAiAnswerRow(answers, stillNeed, row, {
+          choice,
+          profileId,
+          site,
+          source: llm.answerSource
+        })
+      ) {
         aiHits += 1;
       }
     }
   } catch (err) {
-    await setApplyStatus(`OpenAI answers skipped: ${String(err?.message || err)}`).catch(() => {});
+    await setApplyStatus(`${llm.label} answers skipped: ${String(err?.message || err)}`).catch(
+      () => {}
+    );
   }
   return { aiHits };
 }
@@ -2770,8 +2835,8 @@ async function fillInventoryPlannerPass(
 
   if (!forceAi && !(await isOpenAiQaAssistEnabled())) return first;
 
-  const { apiKey, model } = await getOpenAiSettings();
-  if (!apiKey) return first;
+  const llm = await getAutofillLlmSettings();
+  if (!llm.apiKey) return first;
 
   const info = await withResumeCertifications(applicantInfo);
   const ctx = await getAutofillAiContext();
@@ -2779,8 +2844,9 @@ async function fillInventoryPlannerPass(
   let extraFilled = 0;
   try {
     const planned = await generateFormInventoryAnswers({
-      apiKey,
-      model,
+      apiKey: llm.apiKey,
+      model: llm.model,
+      complete: llm.complete,
       fields: leftoverFields,
       applicantInfo: {
         ...info,
@@ -2807,7 +2873,7 @@ async function fillInventoryPlannerPass(
           question: field.label,
           answer: row.answer,
           fieldType: field.fieldType || (row.kind === "choice" ? "select" : "text"),
-          source: "ai",
+          source: llm.answerSource,
           site
         }).catch(() => {});
       }
@@ -2831,13 +2897,16 @@ async function fillInventoryPlannerPass(
       }
     }
   } catch (err) {
-    await setApplyStatus(`Inventory AI skipped: ${String(err?.message || err)}`).catch(() => {});
+    await setApplyStatus(`${llm.label} inventory skipped: ${String(err?.message || err)}`).catch(
+      () => {}
+    );
   }
 
   return {
     extraFilled: first.extraFilled + extraFilled,
     bankHits: first.bankHits,
-    aiHits: first.aiHits + aiHits
+    aiHits: first.aiHits + aiHits,
+    aiLabel: llm.label
   };
 }
 
@@ -3085,6 +3154,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
   const filledTotal = result.filledCount + leftover.extraFilled + second.extraFilled;
   const controlCount = Number(result.fillableCount || 0) || Math.max(filledTotal, 1);
 
+  const llmForSummary = await getAutofillLlmSettings().catch(() => null);
   const summaryPayload = {
     ok: Boolean(result.ok) || filledTotal > 0,
     tabId: tab.id,
@@ -3098,6 +3168,7 @@ export async function startAutofillOnTab(tabId = null, applyHint = {}) {
     bankHits: leftover.bankHits + second.bankHits,
     extraFilled: leftover.extraFilled + second.extraFilled,
     aiHits: (leftover.aiHits || 0) + (second.aiHits || 0),
+    aiLabel: leftover.aiLabel || second.aiLabel || llmForSummary?.label || "AI",
     unmatchedQuestions: result.unmatchedQuestions,
     unmatchedChoiceQuestions: result.unmatchedChoiceQuestions,
     unmatchedAfterFirst,
@@ -4274,9 +4345,9 @@ export async function answerQuestionsFromBank(
 }
 
 /**
- * Ask dialog: bank match first, then OpenAI grounded on the active person + current job.
- * Reuses one OpenAI message thread per job (same batch / apply). ChatGPT/Claude tab
- * continuity is handled in background.js via prepareCustomQaAsk + newChat flag.
+ * Ask dialog: bank match first, then API (OpenAI or Claude API) grounded on the
+ * active person + current job. Reuses one message thread per job. ChatGPT/Claude
+ * tab continuity is handled in background.js via prepareCustomQaAsk + newChat.
  */
 export async function answerCustomQaAsk({
   question,
@@ -4315,13 +4386,13 @@ export async function answerCustomQaAsk({
     }
   }
 
-  const { apiKey, model: envModel } = await getOpenAiSettings();
-  if (!apiKey) {
+  const llm = await getAutofillLlmSettings({ strongModel });
+  if (!llm.apiKey) {
     throw new Error(
-      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env, or use ChatGPT tab instead."
+      `${llm.label} key is missing. Add ${llm.envKeyName} to the extension .env, or use ChatGPT/Claude tab instead.`
     );
   }
-  const model = strongModel ? QUALITY_OPENAI_MODEL : envModel || DEFAULT_OPENAI_MODEL;
+  const { apiKey, model, complete, answerSource, label } = llm;
   const ctx = await getAutofillAiContext();
   const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
   const chatMode = await resolveCustomQaChatReuse(jobKey);
@@ -4363,6 +4434,8 @@ export async function answerCustomQaAsk({
   const result = await generateSingleProfileAnswer({
     apiKey,
     model,
+    complete,
+    answerSource,
     question: q,
     applicantInfo: info,
     jobMeta: ctx.jobMeta,
@@ -4372,7 +4445,9 @@ export async function answerCustomQaAsk({
     priorMessages
   });
   const answer = cleanCustomQaAnswer(result.answer);
-  if (!answer) throw new Error("OpenAI returned an empty answer. Try again or use ChatGPT tab.");
+  if (!answer) {
+    throw new Error(`${label} returned an empty answer. Try again or use ChatGPT/Claude tab.`);
+  }
   if (Array.isArray(result.messages)) {
     await saveCustomQaSession({
       jobKey,
@@ -4380,18 +4455,19 @@ export async function answerCustomQaAsk({
       agentSeeded: Boolean(chatMode.session?.agentSeeded)
     }).catch(() => null);
   }
+  const bankSource = result.source === "profile" ? "profile" : answerSource;
   // Persist for this profile so the next Autofill can reuse it from the Q&A bank.
   saveQa({
     profileId,
     question: q,
     answer,
     fieldType: "text",
-    source: result.source === "profile" ? "profile" : "openai"
+    source: bankSource
   }).catch(() => {});
   return {
     ok: true,
     answer,
-    source: result.source === "profile" ? "profile" : "openai",
+    source: result.source === "profile" ? "profile" : answerSource,
     model: result.source === "profile" ? undefined : model,
     usage: result.usage || null,
     profileId,
@@ -4648,14 +4724,14 @@ export async function listCustomQaPageQuestions(tabId = null) {
 
 /**
  * Dedicated Apply Assist action: scan empty special questions on the current
- * application tab and answer them via Q&A bank + OpenAI (forced).
+ * application tab and answer them via Q&A bank + API leftovers (OpenAI or Claude API).
  * Use after Autofill when profile aliases cannot map screening / essay fields.
  */
 export async function runCustomOpenAiQaOnTab(tabId = null) {
-  const { apiKey } = await getOpenAiSettings();
-  if (!apiKey) {
+  const llm = await getAutofillLlmSettings();
+  if (!llm.apiKey) {
     throw new Error(
-      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env file, then reload the extension."
+      `${llm.label} key is missing. Add ${llm.envKeyName} to the extension .env file, then reload the extension.`
     );
   }
 
@@ -4706,7 +4782,9 @@ export async function runCustomOpenAiQaOnTab(tabId = null) {
     };
   }
 
-  await setApplyStatus(`Custom Q&A: answering ${pending} question(s) with bank + OpenAI…`);
+  await setApplyStatus(
+    `Custom Q&A: answering ${pending} question(s) with bank + ${llm.label}…`
+  );
   const pass = await fillInventoryPlannerPass(
     tab.id,
     inventory,

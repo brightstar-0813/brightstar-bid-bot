@@ -98,6 +98,12 @@ import {
   isOpenAiDocsEnabled
 } from "./openai-docs.js";
 import {
+  completeClaudeCoverLetter,
+  completeClaudeResumeJson,
+  getClaudeDocsSettings,
+  isClaudeApiDocsEnabled
+} from "./claude-docs.js";
+import {
   cleanCustomQaAnswer,
   extractFreshCustomQaAnswer,
   buildCustomQaJobKey,
@@ -177,6 +183,7 @@ import {
   aiProviderLabel,
   aiProviderNewChatUrl,
   isAiProviderUrl,
+  isApiAiProvider,
   isChatGptUrl,
   isCodexUrl,
   isDeleteAiChatHistoryEnabled,
@@ -953,8 +960,10 @@ async function getOpenAiTab(provider) {
  */
 async function ensureAiTab(provider) {
   const p = normalizeAiProvider(provider || (await getStoredAiProvider()));
-  if (p === AI_PROVIDERS.OPENAI) {
-    throw new Error("OpenAI uses the API key in .env. Switch the AI engine to ChatGPT or Claude for a chat tab.");
+  if (isApiAiProvider(p)) {
+    throw new Error(
+      `${aiProviderLabel(p)} uses the API key in .env. Switch the AI engine to ChatGPT or Claude for a chat tab.`
+    );
   }
   const label = aiProviderLabel(p);
   const existing = await getOpenAiTab(p);
@@ -8982,16 +8991,62 @@ async function pickTemplateAccent(templateId, jobMeta = {}) {
 }
 
 /**
- * Same pipeline as runAutoJob, but resume JSON and the cover letter come from
- * the OpenAI API. Used only when OPENAI_DOCS=1. No ChatGPT/Claude tab.
+ * OpenAI (engine or OPENAI_DOCS=1) or Claude API engine — no ChatGPT/Claude tab.
+ * Claude API wins when that engine is selected, even if OPENAI_DOCS=1 is set.
  */
-async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
-  const { apiKey, model } = await getOpenAiDocsSettings();
-  if (!apiKey) {
+async function resolveApiDocsBackend() {
+  if (await isClaudeApiDocsEnabled()) {
+    const { apiKey, model } = await getClaudeDocsSettings();
+    return {
+      aiProvider: AI_PROVIDERS.CLAUDE_API,
+      label: "Claude API",
+      envKeyName: "ANTHROPIC_API_KEY",
+      apiKey,
+      model,
+      completeResumeJson: completeClaudeResumeJson,
+      completeCoverLetter: completeClaudeCoverLetter
+    };
+  }
+  if (await isOpenAiDocsEnabled()) {
+    const { apiKey, model } = await getOpenAiDocsSettings();
+    return {
+      aiProvider: AI_PROVIDERS.OPENAI,
+      label: "OpenAI",
+      envKeyName: "OPENAI_API_KEY",
+      apiKey,
+      model,
+      completeResumeJson,
+      completeCoverLetter
+    };
+  }
+  return null;
+}
+
+async function isApiDocsEnabled() {
+  return Boolean(await resolveApiDocsBackend());
+}
+
+/**
+ * Same pipeline as runAutoJob, but resume JSON and the cover letter come from
+ * the OpenAI or Anthropic API. No ChatGPT/Claude tab.
+ */
+async function runAutoJobViaApi(jobMeta, { draftOnly = false } = {}) {
+  const backend = await resolveApiDocsBackend();
+  if (!backend?.apiKey) {
+    const keyName = backend?.envKeyName || "OPENAI_API_KEY or ANTHROPIC_API_KEY";
+    const label = backend?.label || "API";
     throw new Error(
-      "OpenAI API key is missing. Add OPENAI_API_KEY to the extension .env, then reload the extension."
+      `${label} key is missing. Add ${keyName} to the extension .env, then reload the extension.`
     );
   }
+  const {
+    apiKey,
+    model,
+    label,
+    aiProvider,
+    completeResumeJson: completeJson,
+    completeCoverLetter: completeCover
+  } = backend;
 
   const jdLink = String(jobMeta.jdLink || "").trim();
   const shouldProbe = Boolean(jdLink) && !isManualOneOffJob(jobMeta);
@@ -9068,7 +9123,7 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
   await setStatus(
     `Row ${rowLabel}${jobMeta.companyName}: Track ${trackStatus}${
       strongHumanize ? " · strong humanize" : ""
-    } · OpenAI API resume…`
+    } · ${label} resume…`
   );
 
   if (batchControl.skipCurrent || batchControl.stop) {
@@ -9099,10 +9154,10 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
     const retryPrompt = isFirst ? prompt : buildJsonRetryPrompt(resumeData);
     await setStatus(
       isFirst
-        ? `Row ${rowLabel}${jobMeta.companyName}: OpenAI resume JSON…`
-        : `Row ${rowLabel}${jobMeta.companyName}: OpenAI resume retry (${attempt}/${MAX_JSON_ATTEMPTS})…`
+        ? `Row ${rowLabel}${jobMeta.companyName}: ${label} resume JSON…`
+        : `Row ${rowLabel}${jobMeta.companyName}: ${label} resume retry (${attempt}/${MAX_JSON_ATTEMPTS})…`
     );
-    rawOutput = await completeResumeJson({ apiKey, model, prompt: retryPrompt });
+    rawOutput = await completeJson({ apiKey, model, prompt: retryPrompt });
     resumeData = extractResumeJson(rawOutput);
     if (isUsableResumeJson(resumeData) || isMinimallySaveableResume(resumeData)) break;
     const missingCos = missingExperienceCompanies(resumeData);
@@ -9128,10 +9183,10 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
         await setStatus(
           `Row ${rowLabel}${jobMeta.companyName}: ${gaps
             .map((g) => `${g.company} proves ${g.covered}/${g.need}`)
-            .join(", ")} — one OpenAI re-prompt for JD-skill bullets…`
+            .join(", ")} — one ${label} re-prompt for JD-skill bullets…`
         );
         try {
-          const bulletsRaw = await completeResumeJson({
+          const bulletsRaw = await completeJson({
             apiKey,
             model,
             prompt: buildJdSkillsRetryPrompt(resumeData, jd, { roles: 2, minBullets: 3, roleTrack })
@@ -9186,10 +9241,10 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
     !batchControl.stop
   ) {
     await setStatus(
-      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — one OpenAI project-bank retry…`
+      `Row ${rowLabel}${jobMeta.companyName}: ATS ${atsEvaluation.score}/100 — one ${label} project-bank retry…`
     );
     try {
-      const retryRaw = await completeResumeJson({
+      const retryRaw = await completeJson({
         apiKey,
         model,
         prompt: buildAtsScoreRetryPrompt(resumeData, atsEvaluation, {
@@ -9257,7 +9312,7 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
       templateId: enrichedMeta.templateId,
       aiTabId: null,
       aiChatId: "",
-      aiProvider: "openai"
+      aiProvider
     });
     await persistOneOffResult({
       ok: true,
@@ -9278,7 +9333,7 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
       enrichedMeta,
       aiTabId: null,
       aiChatId: "",
-      aiProvider: "openai",
+      aiProvider,
       status: `Draft ready · ATS ${atsEvaluation.score}/100 (${atsEvaluation.grade})`
     };
   }
@@ -9294,7 +9349,7 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
     enrichedMeta,
     {
       runCoverLetter: !isManualOneOffJob(enrichedMeta),
-      fetchCoverLetter: (coverPrompt) => completeCoverLetter({ apiKey, model, prompt: coverPrompt })
+      fetchCoverLetter: (coverPrompt) => completeCover({ apiKey, model, prompt: coverPrompt })
     }
   );
 
@@ -9313,7 +9368,12 @@ async function runAutoJobViaOpenAi(jobMeta, { draftOnly = false } = {}) {
     // ignore
   }
 
-  return { ...result, atsEvaluation, aiTabId: null, aiChatId: "", aiProvider: "openai", profileId };
+  return { ...result, atsEvaluation, aiTabId: null, aiChatId: "", aiProvider, profileId };
+}
+
+/** @deprecated Prefer runAutoJobViaApi — kept as alias for clarity in older call sites. */
+async function runAutoJobViaOpenAi(jobMeta, opts) {
+  return runAutoJobViaApi(jobMeta, opts);
 }
 
 /**
@@ -9328,8 +9388,8 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   if (preSkipReason) {
     throw new Error(`__DUPLICATE_SKIP__:${preSkipReason}`);
   }
-  if (await isOpenAiDocsEnabled()) {
-    return runAutoJobViaOpenAi(jobMeta, { draftOnly });
+  if (await isApiDocsEnabled()) {
+    return runAutoJobViaApi(jobMeta, { draftOnly });
   }
 
   const jdLink = String(jobMeta.jdLink || "").trim();
@@ -9903,9 +9963,11 @@ async function runBatchLoop(outputDir) {
   startKeepAlive();
 
   try {
-    const openAiDocs = await isOpenAiDocsEnabled();
-    if (openAiDocs) {
-      await setStatus("OpenAI API docs mode (OPENAI_DOCS=1) — skipping ChatGPT/Claude chat reset.");
+    const apiDocsBackend = await resolveApiDocsBackend();
+    if (apiDocsBackend) {
+      await setStatus(
+        `${apiDocsBackend.label} docs mode — skipping ChatGPT/Claude chat reset.`
+      );
     } else {
       try {
         await resetAiHistoryForNewWorkflow("batch");

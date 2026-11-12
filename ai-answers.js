@@ -1,10 +1,13 @@
 /**
- * Generate application answers with OpenAI (single pass).
+ * Generate application answers via LLM API (OpenAI or Anthropic).
  * Callers must try profile + Q&A bank first; this is last resort.
  */
 
-import { chatCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
+import { chatCompletion as openAiChatCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
 import { isPageScriptAnswer } from "./autofill-junk.js";
+
+/** Default completer; callers may pass Anthropic chatCompletion via `complete`. */
+const chatCompletion = openAiChatCompletion;
 
 function parseJsonObject(text) {
   const raw = String(text || "").trim();
@@ -460,6 +463,7 @@ function answersFromJson(raw, list) {
 export async function generateHumanizedApplicationAnswers({
   apiKey,
   model = DEFAULT_OPENAI_MODEL,
+  complete = chatCompletion,
   questions,
   applicantInfo,
   jobMeta = {},
@@ -486,7 +490,7 @@ export async function generateHumanizedApplicationAnswers({
   if (!stillNeed.length) return { answers: preAnswers, usage: null };
 
   const hasCertQuestion = stillNeed.some((q) => isCertificationQuestion(q.label));
-  const result = await chatCompletion({
+  const result = await complete({
     apiKey,
     model,
     jsonMode: true,
@@ -581,6 +585,7 @@ function pickClosestOption(answer, options = []) {
 export async function generateConstrainedChoiceAnswers({
   apiKey,
   model = DEFAULT_OPENAI_MODEL,
+  complete = chatCompletion,
   questions,
   applicantInfo,
   jobMeta = {},
@@ -593,7 +598,7 @@ export async function generateConstrainedChoiceAnswers({
   if (!list.length) return { answers: [], usage: null };
 
   const profile = compactApplicantContext(applicantInfo);
-  const result = await chatCompletion({
+  const result = await complete({
     apiKey,
     model,
     jsonMode: true,
@@ -684,6 +689,7 @@ export function partitionFormInventory(fields = []) {
 export async function generateFormInventoryAnswers({
   apiKey,
   model = DEFAULT_OPENAI_MODEL,
+  complete = chatCompletion,
   fields,
   applicantInfo,
   jobMeta = {},
@@ -700,7 +706,7 @@ export async function generateFormInventoryAnswers({
   const certs = parseCertificationList(applicantInfo?.certifications);
   const hasCertQuestion = textReady.some((q) => isCertificationQuestion(q.label));
 
-  const result = await chatCompletion({
+  const result = await complete({
     apiKey,
     model,
     jsonMode: true,
@@ -775,6 +781,7 @@ export async function generateFormInventoryAnswers({
 export async function generateRoleSummaries({
   apiKey,
   model = DEFAULT_OPENAI_MODEL,
+  complete = chatCompletion,
   jobs = [],
   jobMeta = {}
 } = {}) {
@@ -791,7 +798,7 @@ export async function generateRoleSummaries({
     .filter((job) => job.company || job.title);
   if (!list.length) return { summaries: [], usage: null };
 
-  const result = await chatCompletion({
+  const result = await complete({
     apiKey,
     model,
     jsonMode: true,
@@ -1117,13 +1124,15 @@ export function buildCustomQaAgentPrompt(opts = {}) {
 }
 
 /**
- * One-shot profile-grounded answer via OpenAI Chat Completions.
+ * One-shot profile-grounded answer via OpenAI or Anthropic Messages API.
  * Pass priorMessages (user/assistant turns for this job) to continue the same thread.
  * @returns {Promise<{ answer: string, usage: object|null, source?: string, messages?: object[] }>}
  */
 export async function generateSingleProfileAnswer({
   apiKey,
   model = DEFAULT_OPENAI_MODEL,
+  complete = chatCompletion,
+  answerSource = "openai",
   question,
   applicantInfo,
   jobMeta = {},
@@ -1164,7 +1173,7 @@ export async function generateSingleProfileAnswer({
     ...history.slice(-12),
     { role: "user", content: userContent }
   ];
-  const result = await chatCompletion({
+  const result = await complete({
     apiKey,
     model,
     jsonMode: false,
@@ -1182,5 +1191,10 @@ export async function generateSingleProfileAnswer({
     { role: "user", content: userContent },
     { role: "assistant", content: answer || String(result.content || "").trim() }
   ].slice(-12);
-  return { answer, usage: result.usage || null, source: "openai", messages: nextMessages };
+  return {
+    answer,
+    usage: result.usage || null,
+    source: answerSource || "openai",
+    messages: nextMessages
+  };
 }

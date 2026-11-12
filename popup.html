@@ -341,8 +341,8 @@
             <input type="checkbox" id="allowSubmitToggle" />
           </label>
           <label class="checkbox-field toggle-field">
-            <span>OpenAI Custom Q&amp;A</span>
-            <input type="checkbox" id="openaiQaToggle" checked title="OpenAI for leftovers" />
+            <span>API Custom Q&amp;A</span>
+            <input type="checkbox" id="openaiQaToggle" checked title="OpenAI or Claude API for leftover questions (follows AI engine)" />
           </label>
           <div class="apply-actions" role="toolbar" aria-label="Apply assist actions">
             <div class="btn-group">
@@ -371,9 +371,9 @@
           </div>
           <div id="customQaAskPanel" class="custom-qa-ask" hidden>
             <div class="custom-qa-engines" role="radiogroup" aria-label="Answer engine">
-              <label class="custom-qa-engine">
+              <label class="custom-qa-engine" title="Uses OpenAI or Claude API based on AI engine">
                 <input type="radio" name="customQaEngine" value="openai" checked />
-                <span>OpenAI</span>
+                <span>API</span>
               </label>
               <label class="custom-qa-engine" title="ChatGPT or Claude tab">
                 <input type="radio" name="customQaEngine" value="chatgpt" />
@@ -1138,10 +1138,13 @@
             <button type="button" class="ai-provider-btn is-active" id="aiProviderChatgpt" data-provider="chatgpt" aria-pressed="true">
               ChatGPT
             </button>
-            <button type="button" class="ai-provider-btn" id="aiProviderClaude" data-provider="claude" aria-pressed="false">
+            <button type="button" class="ai-provider-btn" id="aiProviderClaude" data-provider="claude" aria-pressed="false" title="claude.ai browser tab">
               Claude
             </button>
-            <button type="button" class="ai-provider-btn" id="aiProviderOpenai" data-provider="openai" aria-pressed="false" title="Resume and cover letter via the API key in .env">
+            <button type="button" class="ai-provider-btn" id="aiProviderClaudeApi" data-provider="claude-api" aria-pressed="false" title="Resume and cover letter via ANTHROPIC_API_KEY in .env">
+              Claude API
+            </button>
+            <button type="button" class="ai-provider-btn" id="aiProviderOpenai" data-provider="openai" aria-pressed="false" title="Resume and cover letter via OPENAI_API_KEY in .env">
               OpenAI
             </button>
           </div>
