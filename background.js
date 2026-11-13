@@ -9,6 +9,7 @@ import {
   fetchSheetRows,
   buildKnownLinkSet,
   normalizeJobLink,
+  extractSpreadsheetGid,
   resolveSheetTabNameForPerson,
   emailBidSheetFields
 } from "./sheets.js";
@@ -11951,6 +11952,8 @@ async function handleNativeCsvMessage(msg) {
  * Replaces all_us_jobs like a fresh CSV upload; never auto-starts batch.
  * Bid-tracking dedupe still uses the active person's tab via getSheetConfig().
  */
+const DEFAULT_CAPTURE_TAB = "US-SF-Jobs";
+
 async function ingestSheetJobs({
   spreadsheetUrl = "",
   webAppUrl = "",
@@ -11959,15 +11962,16 @@ async function ingestSheetJobs({
 } = {}) {
   let sourceUrl = String(spreadsheetUrl || "").trim();
   let endpoint = String(webAppUrl || "").trim();
-  if (!sourceUrl || !endpoint) {
-    const stored = await chrome.storage.local.get([
-      "jobs_sheet_source_url",
-      "sheets_web_app_url",
-      "spreadsheet_url"
-    ]);
-    if (!sourceUrl) sourceUrl = String(stored.jobs_sheet_source_url || "").trim();
-    if (!endpoint) endpoint = String(stored.sheets_web_app_url || "").trim();
-  }
+  let tabName = String(sheetName || "").trim();
+  const stored = await chrome.storage.local.get([
+    "jobs_sheet_source_url",
+    "jobs_sheet_source_tab",
+    "sheets_web_app_url",
+    "spreadsheet_url"
+  ]);
+  if (!sourceUrl) sourceUrl = String(stored.jobs_sheet_source_url || "").trim();
+  if (!endpoint) endpoint = String(stored.sheets_web_app_url || "").trim();
+  if (!tabName) tabName = String(stored.jobs_sheet_source_tab || "").trim();
   if (!sourceUrl) {
     throw new Error("Paste a Jobs sheet URL (Google Sheets edit link, with gid for the tab).");
   }
@@ -11975,11 +11979,19 @@ async function ingestSheetJobs({
     throw new Error("Paste the Apps Script Web App URL in the Google Sheet section.");
   }
 
+  const gid =
+    sheetGid !== "" && sheetGid != null
+      ? String(sheetGid).trim()
+      : extractSpreadsheetGid(sourceUrl);
+  if (!tabName && !gid) {
+    tabName = DEFAULT_CAPTURE_TAB;
+  }
+
   const fetched = await fetchCaptureSheetJobs({
     spreadsheetUrl: sourceUrl,
     webAppUrl: endpoint,
-    sheetName,
-    sheetGid
+    sheetName: tabName,
+    sheetGid: gid
   });
   const mapped = captureRowsToJobs(fetched.rows, { sheetName: fetched.sheetName });
   const removedData = await chrome.storage.local.get([

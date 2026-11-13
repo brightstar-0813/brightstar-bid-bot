@@ -206,6 +206,15 @@
                 autocomplete="off"
               />
             </label>
+            <label class="field">
+              <span>Capture tab</span>
+              <input
+                id="jobsSheetSourceTab"
+                type="text"
+                placeholder="US-SF-Jobs"
+                autocomplete="off"
+              />
+            </label>
             <div class="row row-2">
               <button type="button" id="loadSheetJobsBtn" class="primary" title="Load jobs from the sheet URL">
                 Load from sheet
@@ -214,7 +223,7 @@
                 Save URL
               </button>
             </div>
-            <p class="hint" id="jobsSheetSourceStatus">Include gid= for the capture tab. Ready/Applied go to the person tab.</p>
+            <p class="hint" id="jobsSheetSourceStatus">gid= preferred; Capture tab used if missing. Ready/Applied go to the person tab.</p>
           </div>
           <div class="channel-toggle" role="group" aria-label="Job source filter">
             <span class="channel-label">Source filter</span>

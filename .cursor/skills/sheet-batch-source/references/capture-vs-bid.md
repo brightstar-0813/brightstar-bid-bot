@@ -48,6 +48,7 @@ Typical name: `{Firstname}-{TRACK}` (e.g. `Lewis-SF`) from active person `sheetT
 
 ```
 jobs_sheet_source_url + sheets_web_app_url
+  (+ sheetName / jobs_sheet_source_tab / default US-SF-Jobs if no gid)
   → fetchCaptureSheetJobs (listCaptureJobs)
   → captureRowsToJobs
   → ingestSheetJobs → all_us_jobs + job_queue
@@ -60,5 +61,5 @@ jobs_sheet_source_url + sheets_web_app_url
 - `apps-script/Code.gs` — `listCaptureJobs`, `collectCaptureJobRows_`, `resolveExistingSheet_`
 - `sheets.js` — `extractSpreadsheetGid`, `fetchCaptureSheetJobs`
 - `sheet-jobs.js` — mapper
-- `background.js` — `ingestSheetJobs`
-- `popup.js` — source toggle + Load from sheet
+- `background.js` — `ingestSheetJobs` (gid preferred; tab-name fallback)
+- `popup.js` — source toggle + Capture tab + Load from sheet

@@ -224,13 +224,20 @@ const batchSourceSheetBtn = document.getElementById("batchSourceSheet");
 const csvBatchSourcePanel = document.getElementById("csvBatchSourcePanel");
 const sheetBatchSourcePanel = document.getElementById("sheetBatchSourcePanel");
 const jobsSheetSourceUrlEl = document.getElementById("jobsSheetSourceUrl");
+const jobsSheetSourceTabEl = document.getElementById("jobsSheetSourceTab");
 const loadSheetJobsBtn = document.getElementById("loadSheetJobsBtn");
 const saveJobsSheetUrlBtn = document.getElementById("saveJobsSheetUrlBtn");
 const jobsSheetSourceStatusEl = document.getElementById("jobsSheetSourceStatus");
 
 const JOB_BATCH_SOURCE_KEY = "job_batch_source";
 const JOBS_SHEET_SOURCE_URL_KEY = "jobs_sheet_source_url";
+const JOBS_SHEET_SOURCE_TAB_KEY = "jobs_sheet_source_tab";
+const DEFAULT_CAPTURE_TAB = "US-SF-Jobs";
 let jobBatchSource = "csv";
+
+function getJobsSheetSourceTab() {
+  return String(jobsSheetSourceTabEl?.value || "").trim();
+}
 
 function normalizeJobBatchSource(value) {
   return String(value || "").trim().toLowerCase() === "sheet" ? "sheet" : "csv";
@@ -252,13 +259,18 @@ function applyJobBatchSourceUi(source, { persist = false } = {}) {
 
 async function saveJobsSheetSourceUrl() {
   const url = String(jobsSheetSourceUrlEl?.value || "").trim();
+  const sheetName = getJobsSheetSourceTab() || DEFAULT_CAPTURE_TAB;
+  if (jobsSheetSourceTabEl && !getJobsSheetSourceTab()) {
+    jobsSheetSourceTabEl.value = sheetName;
+  }
   await chrome.storage.local.set({
     [JOBS_SHEET_SOURCE_URL_KEY]: url,
+    [JOBS_SHEET_SOURCE_TAB_KEY]: sheetName,
     [JOB_BATCH_SOURCE_KEY]: "sheet"
   });
   if (jobsSheetSourceStatusEl) {
     jobsSheetSourceStatusEl.textContent = url
-      ? "Jobs sheet URL saved. Click Load from sheet when ready."
+      ? `Saved · capture tab ${sheetName}. Click Load from sheet when ready.`
       : "Jobs sheet URL cleared.";
   }
   setStatus(url ? "Jobs sheet URL saved." : "Jobs sheet URL cleared.");
@@ -267,7 +279,7 @@ async function saveJobsSheetSourceUrl() {
 async function loadJobsFromSheet() {
   const url = String(jobsSheetSourceUrlEl?.value || "").trim();
   if (!url) {
-    setStatus("Paste a Jobs sheet URL first (include gid= for the capture tab).");
+    setStatus("Paste a Jobs sheet URL first (gid= preferred, or set Capture tab).");
     return;
   }
   const webAppUrl = String(sheetsWebAppUrlEl?.value || "").trim();
@@ -275,20 +287,31 @@ async function loadJobsFromSheet() {
     setStatus("Paste the Apps Script Web App URL in the Google Sheet section first.");
     return;
   }
+  const sheetName = getJobsSheetSourceTab() || DEFAULT_CAPTURE_TAB;
+  if (jobsSheetSourceTabEl && !getJobsSheetSourceTab()) {
+    jobsSheetSourceTabEl.value = sheetName;
+  }
   applyJobBatchSourceUi("sheet", { persist: true });
-  await chrome.storage.local.set({ [JOBS_SHEET_SOURCE_URL_KEY]: url });
+  await chrome.storage.local.set({
+    [JOBS_SHEET_SOURCE_URL_KEY]: url,
+    [JOBS_SHEET_SOURCE_TAB_KEY]: sheetName
+  });
   if (jobsSheetSourceStatusEl) jobsSheetSourceStatusEl.textContent = "Loading jobs from sheet…";
   setStatus("Loading jobs from sheet…");
   const res = await chrome.runtime.sendMessage({
     type: "ingest_sheet_jobs",
     spreadsheetUrl: url,
-    webAppUrl
+    webAppUrl,
+    sheetName
   });
   if (!res?.ok) {
     const err = String(res?.error || "Sheet load failed");
     if (jobsSheetSourceStatusEl) jobsSheetSourceStatusEl.textContent = err;
     setStatus(err);
     return;
+  }
+  if (jobsSheetSourceTabEl && res.sheetName) {
+    jobsSheetSourceTabEl.value = String(res.sheetName).trim();
   }
   await reloadQueueFromStorage();
   if (csvFileNameEl) csvFileNameEl.textContent = res.fileName || "Sheet";
@@ -1162,7 +1185,7 @@ async function loadSettings() {
     "sheets_web_app_url",
     JOB_BATCH_SOURCE_KEY,
     JOBS_SHEET_SOURCE_URL_KEY,
-    "jobs_sheet_source_tab",
+    JOBS_SHEET_SOURCE_TAB_KEY,
     "slack_webhook_url",
     CHATGPT_PACING_KEY,
     AI_PROVIDER_KEY,
@@ -1220,9 +1243,13 @@ async function loadSettings() {
   if (jobsSheetSourceUrlEl) {
     jobsSheetSourceUrlEl.value = String(data[JOBS_SHEET_SOURCE_URL_KEY] || "").trim();
   }
+  if (jobsSheetSourceTabEl) {
+    jobsSheetSourceTabEl.value =
+      String(data[JOBS_SHEET_SOURCE_TAB_KEY] || "").trim() || DEFAULT_CAPTURE_TAB;
+  }
   applyJobBatchSourceUi(data[JOB_BATCH_SOURCE_KEY] || "csv", { persist: false });
-  if (jobsSheetSourceStatusEl && data.jobs_sheet_source_tab) {
-    jobsSheetSourceStatusEl.textContent = `Last tab: ${data.jobs_sheet_source_tab}. Ready/Applied still write to the active person’s tab.`;
+  if (jobsSheetSourceStatusEl && data[JOBS_SHEET_SOURCE_TAB_KEY]) {
+    jobsSheetSourceStatusEl.textContent = `Last tab: ${data[JOBS_SHEET_SOURCE_TAB_KEY]}. Ready/Applied still write to the active person’s tab.`;
   }
   slackWebhookUrlEl.value = data.slack_webhook_url || "";
   applyCustomQaEngineUi(data[CUSTOM_QA_ENGINE_KEY] || "");
@@ -4292,6 +4319,9 @@ saveJobsSheetUrlBtn?.addEventListener("click", () => {
   saveJobsSheetSourceUrl().catch((e) => setStatus(String(e.message || e)));
 });
 jobsSheetSourceUrlEl?.addEventListener("change", () => {
+  saveJobsSheetSourceUrl().catch(() => {});
+});
+jobsSheetSourceTabEl?.addEventListener("change", () => {
   saveJobsSheetSourceUrl().catch(() => {});
 });
 

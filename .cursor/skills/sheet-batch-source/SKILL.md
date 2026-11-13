@@ -42,7 +42,7 @@ Progressive disclosure:
 | Person bid writes / Sync | `sheets.js` append/markApplied/listRows; `sheet-sync.js` |
 | Tests | `tests/sheet-jobs.test.js` |
 
-Storage keys: `job_batch_source` (`csv` \| `sheet`), `jobs_sheet_source_url`, `jobs_sheet_source_tab`.
+Storage keys: `job_batch_source` (`csv` \| `sheet`), `jobs_sheet_source_url`, `jobs_sheet_source_tab` (capture tab name; UI field + load fallback).
 
 ## Hard safety invariants
 
@@ -57,7 +57,7 @@ Do not change without an explicit product decision:
 5. **Ready / Applied** still go to the person tab from `getSheetConfig()` / `sheetTabName` — never write bid status onto the capture tab from batch.
 6. **Dedupe** before generate/apply uses the **person** tab links (`dedupeQueueAgainstSheet`), not the capture tab.
 7. **Load / refresh from sheet never auto-starts** batch — same as CSV (user clicks **Start**).
-8. Jobs sheet URL should include **`gid=`** so the correct tab is selected (`extractSpreadsheetGid`).
+8. Jobs sheet URL should prefer **`gid=`** (`extractSpreadsheetGid`). If gid is missing, Load uses **Capture tab** name: message `sheetName` → stored `jobs_sheet_source_tab` → default `US-SF-Jobs`. Never use Output folder / person `sheetTabName` for capture reads.
 9. After Apps Script edits: **Save → Deploy → Manage deployments → Edit → Version: New** so `listCaptureJobs` is live. Extension reload alone is not enough for script changes.
 10. After extension code changes: remind **Reload** unpacked extension.
 
@@ -78,9 +78,10 @@ Do not change without an explicit product decision:
 
 ### UI
 
-- Keep **CSV \| Google Sheet** source toggle; CSV controls stay in CSV mode; sheet URL + **Load from sheet** in sheet mode.
+- Keep **CSV \| Google Sheet** source toggle; CSV controls stay in CSV mode; sheet URL + **Capture tab** + **Load from sheet** in sheet mode.
 - Reuse Setup **Web App URL** (`sheets_web_app_url`); do not require a second deploy URL for reads.
 - Short status only — no long instructional copy in the popup.
+- Capture tab field (placeholder `US-SF-Jobs`) persists as `jobs_sheet_source_tab` and is sent as `sheetName` on Load.
 
 ## Verify
 
@@ -89,7 +90,7 @@ npm run check
 npm test -- ./tests/sheet-jobs.test.js
 ```
 
-Manual: redeploy Apps Script → paste capture URL with gid → Load from sheet → confirm JD column still on capture tab → Start → Ready on person tab only.
+Manual: redeploy Apps Script → paste capture URL (with gid, or without gid + Capture tab `US-SF-Jobs`) → Load from sheet → confirm JD column still on capture tab → Start → Ready on person tab only.
 
 ## When shipping
 
