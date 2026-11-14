@@ -4295,6 +4295,184 @@ async function focusTabForInput(tabId) {
   }
 }
 
+/**
+ * Whether the AI composer still holds an unsent prompt (common after a missed
+ * Send click on same-chat cover letters).
+ */
+async function readAiComposerSendState(tabId, provider) {
+  const p = normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT);
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [p],
+      func: (site) => {
+        const claude = site === "claude";
+        const input = claude
+          ? document.querySelector('div[contenteditable="true"][data-testid]') ||
+            document.querySelector("div.ProseMirror[contenteditable='true']") ||
+            document.querySelector('div[contenteditable="true"]')
+          : document.querySelector("#prompt-textarea") ||
+            document.querySelector("div.ProseMirror[contenteditable='true']") ||
+            document.querySelector("textarea[placeholder*='Message']") ||
+            document.querySelector("textarea[placeholder*='Ask']") ||
+            document.querySelector("div[contenteditable='true']");
+        const composerChars = String(
+          input?.innerText || input?.textContent || input?.value || ""
+        ).trim().length;
+        const stopBtn =
+          document.querySelector("button[data-testid='stop-button']") ||
+          document.querySelector("button[aria-label='Stop streaming']") ||
+          document.querySelector("button[aria-label='Stop generating']") ||
+          document.querySelector('[data-is-streaming="true"]');
+        const generating = Boolean(
+          (stopBtn && stopBtn.offsetParent !== null) ||
+            stopBtn?.getAttribute?.("data-is-streaming") === "true"
+        );
+        const sendCandidates = Array.from(
+          document.querySelectorAll(
+            [
+              "button[data-testid='send-button']",
+              "button[data-testid='composer-send-button']",
+              "button[data-testid*='send']",
+              "#composer-submit-button",
+              "button[aria-label*='Send prompt']",
+              "button[aria-label*='Send message']",
+              "button[aria-label='Send']",
+              "button[aria-label*='Send']"
+            ].join(", ")
+          )
+        ).filter((b) => b instanceof HTMLButtonElement);
+        const sendBtn = sendCandidates.find((b) => {
+          const blob = `${b.getAttribute("data-testid") || ""} ${b.getAttribute("aria-label") || ""} ${b.textContent || ""}`.toLowerCase();
+          return !/stop|speech|voice|mic|attach|upload|file/.test(blob);
+        });
+        const sendEnabled = Boolean(
+          sendBtn &&
+            !sendBtn.disabled &&
+            sendBtn.getAttribute("aria-disabled") !== "true" &&
+            !sendBtn.hasAttribute("disabled")
+        );
+        return {
+          composerChars,
+          generating,
+          hasSend: Boolean(sendBtn),
+          sendEnabled,
+          stuck: composerChars >= 80 && !generating
+        };
+      }
+    });
+    return (
+      results?.[0]?.result || {
+        composerChars: 0,
+        generating: false,
+        hasSend: false,
+        sendEnabled: false,
+        stuck: false
+      }
+    );
+  } catch {
+    return {
+      composerChars: 0,
+      generating: false,
+      hasSend: false,
+      sendEnabled: false,
+      stuck: false
+    };
+  }
+}
+
+/**
+ * Re-focus + click Send when a prompt is sitting idle in the composer.
+ * Safe for cover-letter follow-ups; does not re-paste text.
+ */
+async function nudgeStuckAiComposerSend(tabId, provider) {
+  const p = normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT);
+  await focusTabForInput(tabId);
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [p],
+      func: async (site) => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const claude = site === "claude";
+        const findInput = () =>
+          claude
+            ? document.querySelector('div[contenteditable="true"][data-testid]') ||
+              document.querySelector("div.ProseMirror[contenteditable='true']") ||
+              document.querySelector('div[contenteditable="true"]')
+            : document.querySelector("#prompt-textarea") ||
+              document.querySelector("div.ProseMirror[contenteditable='true']") ||
+              document.querySelector("textarea[placeholder*='Message']") ||
+              document.querySelector("div[contenteditable='true']");
+        const input = findInput();
+        const text = String(input?.innerText || input?.textContent || input?.value || "").trim();
+        if (!input || text.length < 80) return { nudged: false, reason: "empty" };
+
+        const stopBtn =
+          document.querySelector("button[data-testid='stop-button']") ||
+          document.querySelector("button[aria-label='Stop streaming']") ||
+          document.querySelector("button[aria-label='Stop generating']") ||
+          document.querySelector('[data-is-streaming="true"]');
+        if (
+          (stopBtn && stopBtn.offsetParent !== null) ||
+          stopBtn?.getAttribute?.("data-is-streaming") === "true"
+        ) {
+          return { nudged: false, reason: "generating" };
+        }
+
+        const isNonSend = (btn) => {
+          const blob = `${btn.getAttribute("data-testid") || ""} ${btn.getAttribute("aria-label") || ""} ${btn.textContent || ""}`.toLowerCase();
+          return /stop|speech|speak|dictat|voice|mic|audio|attach|upload|photo|image|file|plus|model|search|tool|gpt|canvas|deep.?research/.test(
+            blob
+          );
+        };
+        const findSend = () => {
+          const selectors = [
+            "button[data-testid='send-button']",
+            "button[data-testid='composer-send-button']",
+            "button[data-testid*='send']",
+            "#composer-submit-button",
+            "button[aria-label*='Send prompt']",
+            "button[aria-label*='Send message']",
+            "button[aria-label='Send']",
+            "button[aria-label*='Send']"
+          ];
+          for (const sel of selectors) {
+            const btn = document.querySelector(sel);
+            if (btn instanceof HTMLButtonElement && !isNonSend(btn)) return btn;
+          }
+          const composer =
+            input.closest?.("form") ||
+            document.querySelector("[class*='composer']") ||
+            document.body;
+          return (
+            Array.from(composer.querySelectorAll("button")).find(
+              (b) => b instanceof HTMLButtonElement && !isNonSend(b) && /send/i.test(`${b.getAttribute("data-testid") || ""} ${b.getAttribute("aria-label") || ""}`)
+            ) || null
+          );
+        };
+
+        input.focus();
+        await sleep(120);
+        const btn = findSend();
+        if (!btn) return { nudged: false, reason: "no-send" };
+        if (btn.disabled || btn.getAttribute("aria-disabled") === "true") {
+          btn.disabled = false;
+          btn.removeAttribute("disabled");
+          btn.setAttribute("aria-disabled", "false");
+        }
+        if (typeof btn.click === "function") btn.click();
+        else btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        await sleep(600);
+        return { nudged: true, reason: "clicked" };
+      }
+    });
+    return results?.[0]?.result || { nudged: false, reason: "no-result" };
+  } catch (err) {
+    return { nudged: false, reason: String(err?.message || err || "error") };
+  }
+}
+
 /** True when the tab shows an empty composer and zero assistant messages. */
 async function readChatReadiness(tabId, provider) {
   const p = normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT);
@@ -4728,11 +4906,31 @@ async function chatgptSendPrompt(tabId, prompt, startNewChat, { freshChatUrl = "
     if (attempt > 0) {
       // First attempt may have posted the prompt but failed confirmation — do not
       // paste+Send again (that creates two identical resume requests).
+      // Only trust a NEW user bubble (or active generation / cleared composer).
+      // Do NOT use assistantBlocks>0 — same-chat cover letters already have the
+      // resume reply, which falsely skipped re-send while the prompt sat unsent.
       try {
         const state = await readChatReadiness(tabId, AI_PROVIDERS.CHATGPT);
-        if (Number(state.userBlocks || 0) > usersBeforeSend || Number(state.assistantBlocks || 0) > 0) {
+        const userGrew = Number(state.userBlocks || 0) > usersBeforeSend;
+        const composer = await readAiComposerSendState(tabId, AI_PROVIDERS.CHATGPT);
+        if (userGrew || composer.generating) {
           await setStatus("ChatGPT already accepted the prompt — continuing without re-send…");
           return { blocksBefore: 0, latestBefore: "" };
+        }
+        if (composer.stuck) {
+          await setStatus("Prompt still in ChatGPT composer — clicking Send again…");
+          const nudge = await nudgeStuckAiComposerSend(tabId, AI_PROVIDERS.CHATGPT);
+          if (nudge.nudged) {
+            await sleep(900);
+            const after = await readAiComposerSendState(tabId, AI_PROVIDERS.CHATGPT);
+            const usersNow = await readChatReadiness(tabId, AI_PROVIDERS.CHATGPT)
+              .then((s) => Number(s.userBlocks || 0))
+              .catch(() => usersBeforeSend);
+            if (after.generating || usersNow > usersBeforeSend || after.composerChars < 40) {
+              await setStatus("ChatGPT Send registered after nudge — continuing…");
+              return { blocksBefore: 0, latestBefore: "" };
+            }
+          }
         }
       } catch {
         /* fall through to cautious retry */
@@ -5321,6 +5519,27 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
           ) {
             sent = true;
             break;
+          }
+        }
+        // Same-chat follow-ups (cover letter): first click often misses when focus
+        // was stolen by PDF/render. One forced re-click if the prompt is still here.
+        if (!sent && !shouldStartNewChat) {
+          input = findInput() || input;
+          const stillTyped = (input?.innerText || input?.textContent || input?.value || "").trim().length > 40;
+          if (stillTyped) {
+            input.focus();
+            await sleep(150);
+            if (clickSendButton({ force: true }) || submitComposerForm(input)) {
+              await sleep(900);
+              const afterNudge = findInput() || input;
+              if (
+                promptWasSent(afterNudge, usersBefore) ||
+                composerLooksCleared(afterNudge) ||
+                isGenerating()
+              ) {
+                sent = true;
+              }
+            }
           }
         }
       }
@@ -7872,6 +8091,8 @@ async function automateChatGpt(tabId, prompt, options = {}) {
   let postStreamDelayDone = false;
   let qaStableText = "";
   let qaStableHits = 0;
+  /** Cover-letter / Q&A: how many times we re-clicked Send on a stuck composer. */
+  let stuckSendNudges = 0;
   const pollHarvest = () => chatgptPollState(tabId, { harvestJson: expectResumeJson });
 
   function freshQaAnswer(text) {
@@ -8200,8 +8421,23 @@ async function automateChatGpt(tabId, prompt, options = {}) {
 
     // Nothing arrived at all: Send never registered. Fail fast instead of
     // burning the whole timeout — the caller retries with a fresh chat.
-    // Cover letters should fail even sooner (same-chat follow-up).
-    const sendFailSec = expectResumeJson ? 120 : 45;
+    // Cover letters / Q&A: give Send more time, and re-click if the prompt is
+    // still sitting in the composer (common after PDF focus steal).
+    const sendFailSec = expectResumeJson ? 120 : 90;
+    if (!expectResumeJson && !sawGeneration && !state.generating && elapsedSec >= 12) {
+      const nudgeAt = stuckSendNudges === 0 ? 12 : stuckSendNudges === 1 ? 28 : 50;
+      if (elapsedSec >= nudgeAt && stuckSendNudges < 3) {
+        const composer = await readAiComposerSendState(tabId, provider);
+        if (composer.stuck) {
+          stuckSendNudges += 1;
+          await setStatus(
+            `Prompt still in ${providerLabel} composer — clicking Send (nudge ${stuckSendNudges}/3)…`
+          );
+          await nudgeStuckAiComposerSend(tabId, provider);
+          continue;
+        }
+      }
+    }
     if (!sawGeneration && !state.generating && state.blockCount <= blocksBefore && elapsedSec > sendFailSec) {
       if (expectResumeJson) {
         const rescuedNow = await tryRecognizeResumeOnPage(tabId);
@@ -8225,6 +8461,14 @@ async function automateChatGpt(tabId, prompt, options = {}) {
         const letter = extractCoverLetterText(plain) || extractCoverLetterText(lastText);
         if (letter && looksLikeCoverLetterBody(letter)) return letter;
         if (looksLikeCoverLetterBody(plain)) return plain;
+        // Last chance: prompt may still be unsent in the box.
+        const composer = await readAiComposerSendState(tabId, provider);
+        if (composer.stuck && stuckSendNudges < 3) {
+          stuckSendNudges += 1;
+          await setStatus(`Last try: clicking ${providerLabel} Send before failing…`);
+          await nudgeStuckAiComposerSend(tabId, provider);
+          continue;
+        }
       }
       throw new Error(
         `${providerLabel} never started a reply (Send did not register). Keep that tab focused and retry.`
@@ -8609,6 +8853,8 @@ async function saveResumeAndCoverLetter(
       // Brief pause so the AI finishes any post-JSON UI before the CL prompt.
       await sleep(COVER_LETTER_GAP_MS);
       const provider = await getStoredAiProvider();
+      // PDF/render tabs often stole focus — reclaim ChatGPT/Claude before typing.
+      await focusTabForInput(tabId);
       if (provider === AI_PROVIDERS.CHATGPT) {
         await waitOutChatGptRateLimit(tabId).catch(() => {});
       }
@@ -8648,6 +8894,20 @@ async function saveResumeAndCoverLetter(
             await setStatus("Cover letter already on the page — saving it.");
             break;
           }
+          // Prior attempt may have left the prompt unsent — click Send before re-paste.
+          await focusTabForInput(tabId);
+          const stuck = await readAiComposerSendState(tabId, provider);
+          if (stuck.stuck) {
+            await setStatus("Prior cover prompt still in composer — clicking Send…");
+            await nudgeStuckAiComposerSend(tabId, provider);
+            await sleep(2500);
+            const afterNudge = await pickCover("");
+            if (looksLikeCoverLetterBody(afterNudge)) {
+              coverOutput = afterNudge;
+              await setStatus("Cover letter arrived after Send nudge — saving it.");
+              break;
+            }
+          }
         }
         try {
           const prompt =
@@ -8656,6 +8916,7 @@ async function saveResumeAndCoverLetter(
               : attempt === 2
                 ? "Stop. Do NOT return JSON or resume content. Write ONLY a plain-text cover letter body for this job: start with Dear Hiring Manager, then 3–4 short paragraphs. No markdown links, no email/URL lines, no signature block."
                 : "IMPORTANT: Ignore the resume JSON above. Reply with ONLY the cover letter plain text starting with Dear Hiring Manager, — nothing else.";
+          await focusTabForInput(tabId);
           const reply = await automateChatGpt(tabId, prompt, {
             newChat: false,
             expectResumeJson: false,
