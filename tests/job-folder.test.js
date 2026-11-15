@@ -111,3 +111,12 @@ test("folderFitsJob accepts the row-prefixed form", () => {
   assert.equal(folderFitsJob(dir, { companyName: "Acme" }), false);
   assert.equal(folderFitsJob(dir, {}), true);
 });
+
+test("folderFitsJob rejects an old folder that only shares the row number", () => {
+  const stale = "Avash-SF/42_11-2_Bright Vision Technologies-Salesforce Technical Architect";
+  assert.equal(folderFitsJob(stale, { company: "Penn State", title: "Salesforce Administrator" }), false);
+  assert.equal(
+    folderFitsJob(stale, { company: "Bright Vision Technologies", title: "Salesforce Technical Architect" }),
+    true
+  );
+});

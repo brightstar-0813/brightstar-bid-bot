@@ -1552,6 +1552,11 @@ async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   channelFilter = mode;
   syncChannelFilterButtons();
   renderBatchMode();
+  // Guard: some installs have a queue but an empty all_us_jobs (e.g. older ingest paths).
+  // Filtering an empty master list would save an empty queue and wipe every row's status.
+  if (!allUsJobsCache.length && queueCache.length) {
+    allUsJobsCache = queueCache.map((j) => ({ ...j }));
+  }
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   const person = await getActivePerson().catch(() => null);
   queueCache = mergeStatusFromQueue(filtered, queueCache, person?.id || "");

@@ -9282,7 +9282,9 @@ async function rememberApplyHistory(csvRow, entry) {
 
 function mergeApplyHistoryIntoJobs(jobs, hist = {}) {
   return (Array.isArray(jobs) ? jobs : []).map((job) => {
-    const remembered = hist[String(job.csvRow)] || {};
+    const entry = hist[String(job.csvRow)] || {};
+    // History is keyed by row number; only trust it when it points at this job's folder.
+    const remembered = entry.jobDir && job.jobDir && entry.jobDir === job.jobDir ? entry : {};
     return {
       ...job,
       resumeName: job.resumeName || remembered.resumeName || "",
@@ -9298,9 +9300,11 @@ async function hydrateQueueFromDisk() {
   const hist = data[APPLY_HISTORY_KEY] && typeof data[APPLY_HISTORY_KEY] === "object" ? data[APPLY_HISTORY_KEY] : {};
   const nextQueue = mergeApplyHistoryIntoJobs(await hydrateJobsWithFolders(queue), hist);
   const nextAll = mergeApplyHistoryIntoJobs(await hydrateJobsWithFolders(allUs), hist);
+  // Compare both ways so a cleared stale folder (jobDir → "") is saved too.
   const changed =
-    nextQueue.some((j, i) => j.jobDir && j.jobDir !== queue[i]?.jobDir) ||
-    nextAll.some((j, i) => j.jobDir && j.jobDir !== allUs[i]?.jobDir) ||
+    nextQueue.some((j, i) => (j.jobDir || "") !== (queue[i]?.jobDir || "")) ||
+    nextAll.some((j, i) => (j.jobDir || "") !== (allUs[i]?.jobDir || "")) ||
+    nextQueue.some((j, i) => Boolean(j.hasFiles) !== Boolean(queue[i]?.hasFiles)) ||
     nextQueue.some((j, i) => (j.resumeName || "") !== (queue[i]?.resumeName || "")) ||
     nextQueue.some((j, i) => (j.coverName || "") !== (queue[i]?.coverName || ""));
   if (changed) {

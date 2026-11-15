@@ -367,17 +367,22 @@ export async function hydrateJobsWithFolders(jobs = []) {
   return list.map((job) => {
     const n = Number(job.csvRow);
     const existing = String(job.jobDir || "").trim();
+    // Never match on row number alone: a new CSV reuses row numbers, and an old folder with
+    // the same number belongs to a different job (wrong resume would be uploaded).
     const hit =
       folders.find((f) => Number(f.csvRow) === n && folderFitsJob(f.jobDir, job)) ||
-      folders.find((f) => Number(f.csvRow) === n) ||
       folders.find((f) => folderFitsJob(f.jobDir, job));
-    if (existing) {
+    if (existing && folderFitsJob(existing, job)) {
       return {
         ...job,
         hasFiles: true,
         resumeName: job.resumeName || hit?.resumeName || "",
         coverName: job.coverName || hit?.coverName || ""
       };
+    }
+    if (existing) {
+      // Stale link from an earlier CSV with the same row number — drop it.
+      job = { ...job, jobDir: "", hasFiles: false, resumeName: "", coverName: "" };
     }
     if (!hit?.jobDir) return job;
     return {
