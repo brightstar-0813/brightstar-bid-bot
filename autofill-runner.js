@@ -25,9 +25,11 @@ import {
   isSensitiveProfileQuestion,
   shouldExcludeFromAiAndBank,
   normalizeChoiceAnswerValue,
-  isTrackingNoiseLabel
+  isTrackingNoiseLabel,
+  stripAiMarkup
 } from "./autofill-junk.js";
 import { extractGreenhouseSecurityCode } from "./greenhouse-security-code.js";
+import { isCompensationQuestion, standardPayAnswer } from "./standard-answers.js";
 import {
   choiceAnswerMatchesOptions,
   isPasswordFieldLabel,
@@ -765,6 +767,18 @@ export async function resolveUploadDocs({ csvRow, jobDir, jdLink } = {}) {
   }
 
   return docs;
+}
+
+/** Posted pay ("$120,000–$130,000") of the job currently being applied to, from the queue. */
+async function getActiveJobPostedPay() {
+  const d = await chrome.storage.local.get(["last_apply_csv_row", "last_apply_jd_link", "job_queue"]);
+  const q = Array.isArray(d.job_queue) ? d.job_queue : [];
+  const row = d.last_apply_csv_row;
+  const link = String(d.last_apply_jd_link || "").trim();
+  const job =
+    q.find((j) => row !== "" && row != null && Number(j.csvRow) === Number(row)) ||
+    q.find((j) => link && String(j.jdLink || "").trim() === link);
+  return String(job?.salary || "").trim();
 }
 
 export async function setActiveApplyJob({ csvRow, jobDir, jdLink } = {}) {
@@ -1705,8 +1719,18 @@ async function resolveQuestionAnswers(
   let extraHits = 0;
   const certs = parseCertificationList(applicantInfo.certifications);
 
+  let postedPay = null;
   for (const q of list) {
     if (isJunkQuestionLabel(q.label)) continue;
+    // Pay / rate questions: user-approved rule (lowest posted value, else $150k/yr) —
+    // never AI or Q&A-bank fiction (an AI answer once invented "$40/hour").
+    if (!choice && isCompensationQuestion(q.label)) {
+      if (postedPay === null) postedPay = await getActiveJobPostedPay().catch(() => "");
+      const pay = standardPayAnswer({ label: q.label, postedPay });
+      resolved.push({ id: q.id, answer: String(pay.amount), source: "standard" });
+      extraHits += 1;
+      continue;
+    }
     // Name/phone/email/address/etc. — profile autofill only; never bank or AI fiction.
     if (shouldExcludeFromAiAndBank(q.label)) continue;
 
@@ -2542,6 +2566,8 @@ function pushAiAnswerRow(answers, stillNeed, row, {
   source = "ai"
 } = {}) {
   if (!row?.id || !row?.answer) return false;
+  row = { ...row, answer: stripAiMarkup(row.answer) };
+  if (!row.answer) return false;
   const q = stillNeed.find((item) => item.id === row.id);
   if (q?.label && shouldExcludeFromAiAndBank(q.label)) return false;
   if (q?.label && !bankAnswerFitsQuestion(q.label, row.answer)) return false;

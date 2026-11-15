@@ -63,9 +63,14 @@ export function isTrackingNoiseLabel(label) {
   return false;
 }
 
+/** Rate / wage wording that SENSITIVE_PROFILE_QUESTION_RE misses (AI invented "$40/hour"). */
+const PAY_RATE_QUESTION_RE =
+  /\b(wage|wages|(hourly|pay|bill|billing|expected|desired|target|contract|asking)\s+rate|rate\s+(expectation|requirement)s?|per hour)\b/i;
+
 /** @param {string} label */
 export function isSensitiveProfileQuestion(label) {
-  return SENSITIVE_PROFILE_QUESTION_RE.test(String(label || "").trim());
+  const l = String(label || "").trim();
+  return SENSITIVE_PROFILE_QUESTION_RE.test(l) || PAY_RATE_QUESTION_RE.test(l);
 }
 
 /**
@@ -75,6 +80,18 @@ export function isSensitiveProfileQuestion(label) {
  */
 export function shouldExcludeFromAiAndBank(label) {
   return isSensitiveProfileQuestion(label);
+}
+
+/**
+ * Remove ChatGPT "canvas"/document wrappers and chat chrome from an AI answer before it is
+ * typed into a form, e.g. `<WritingBlock id="5332" variant="document">Dear …</WritingBlock>`.
+ */
+export function stripAiMarkup(text) {
+  let s = String(text || "");
+  s = s.replace(/<\/?\s*(WritingBlock|Document|Canvas|textdoc|artifact)\b[^>]*>/gi, "");
+  s = s.replace(/【[^】]*】/g, ""); // citation marks
+  s = s.replace(/```[a-z]*\s*/gi, "").replace(/```/g, "");
+  return s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** ChatGPT/Codex page source mistaken for an application answer. */
