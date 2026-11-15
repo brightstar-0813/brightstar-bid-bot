@@ -2436,7 +2436,10 @@ function renderQueue() {
     actions.appendChild(revealBtn);
     actions.appendChild(removeBtn);
 
-    if (job.status === "done" && !job.applied && !job.inactive) {
+    // Duplicate-skipped rows (already on the sheet as Ready) can still be submitted by hand
+    // later — let the user record them as Applied too.
+    const dupSkipped = job.status === "skipped" && /duplicate/i.test(String(job.error || ""));
+    if ((job.status === "done" || dupSkipped) && !job.applied && !job.inactive) {
       const markBtn = document.createElement("button");
       markBtn.type = "button";
       markBtn.className = "secondary";
