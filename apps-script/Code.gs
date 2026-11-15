@@ -12,6 +12,10 @@
  *
  * POST body (text/plain JSON):
  *   action: "append" (default) | "listRows" | "listLinks" | "listCaptureJobs" | "markApplied"
+ *           | "appendWarehouse" | "replaceWarehouse"   (jobs warehouse, used by brightstar-sf-job-capture)
+ *
+ * SHARED SCRIPT: brightstar-bid-bot and brightstar-sf-job-capture deploy to the SAME web app.
+ * Keep apps-script/Code.gs identical in both repos — deploying either one must keep every action.
  *   spreadsheetId, optional sheetName (tab per profile; created if missing)
  *   listCaptureJobs also accepts sheetGid (from the sheet URL ?gid= / #gid=)
  *   and for append: jobNo, applicationDate, jobTitle, companyName, jobLink, salary, status, bidMode
@@ -50,7 +54,9 @@ function doPost(e) {
       });
     }
 
-    const sheet = resolveSheet_(ss, data.sheetName);
+    const warehouse =
+      action === "appendwarehouse" || String(data.mode || "").toLowerCase() === "warehouse";
+    const sheet = resolveSheet_(ss, data.sheetName, warehouse);
 
     if (action === "listlinks") {
       ensureSheetLayout_(sheet);
@@ -136,11 +142,25 @@ function doPost(e) {
       });
     }
 
+    if (action === "replacewarehouse") {
+      return replaceWarehouse_(sheet, data);
+    }
+
+    if (warehouse) {
+      return appendWarehouse_(
+        sheet,
+        data,
+        String(data.jobTitle || "").trim(),
+        String(data.companyName || "").trim(),
+        String(data.jobLink || "").trim()
+      );
+    }
+
     if (action && action !== "append") {
       throw new Error(
         'Unknown action "' +
           String(data.action || "") +
-          '". Supported: append, listRows, listLinks, listCaptureJobs, markApplied.'
+          '". Supported: append, appendWarehouse, replaceWarehouse, listRows, listLinks, listCaptureJobs, markApplied.'
       );
     }
 
@@ -199,7 +219,7 @@ function json_(obj) {
 }
 
 /** Pick an existing tab by name, or create it with the standard header row. */
-function resolveSheet_(ss, sheetName) {
+function resolveSheet_(ss, sheetName, warehouse) {
   var name = String(sheetName || "")
     .trim()
     .replace(/[:\\\/\?\*\[\]]/g, " ")
@@ -213,6 +233,10 @@ function resolveSheet_(ss, sheetName) {
   var existing = ss.getSheetByName(name);
   if (existing) return existing;
   var created = ss.insertSheet(name);
+  if (warehouse) {
+    created.getRange(1, 1, 1, WAREHOUSE_HEADERS.length).setValues([WAREHOUSE_HEADERS]);
+    return created;
+  }
   created.getRange(1, 1, 1, 8).setValues([
     ["No", "Date", "Title", "Company", "Link", "Salary", "Status", "Bid mode"]
   ]);
@@ -509,10 +533,20 @@ function ensureBidModeHeader_(sheet) {
   sheet.getRange(1, bidCol).setValue("Bid mode");
 }
 
+/** Warehouse / capture tabs (Role + JD, no Status) must never be reshaped. */
+function isWarehouseTab_(headers) {
+  return (
+    rowLooksLikeHeader_(headers) &&
+    findNamedColumnIndex_(headers, ["role"]) >= 0 &&
+    findNamedColumnIndex_(headers, ["jd", "job description", "description"]) >= 0
+  );
+}
+
 /** Remove a previously added JD column so Status / Bid mode stay aligned. */
 function dropJdColumnIfPresent_(sheet) {
   var headers = headerRow_(sheet);
   if (!rowLooksLikeHeader_(headers)) return;
+  if (isWarehouseTab_(headers)) return;
   var jdIdx = findNamedColumnIndex_(headers, ["jd", "job description", "description", "job desc"]);
   if (jdIdx >= 0) sheet.deleteColumn(jdIdx + 1);
 }
@@ -520,6 +554,7 @@ function dropJdColumnIfPresent_(sheet) {
 /** Drop orphan columns past Bid mode (keeps Status + Bid mode). */
 function trimColumnsPastBidMode_(sheet) {
   var headers = headerRow_(sheet);
+  if (isWarehouseTab_(headers)) return;
   var lastKeep;
   if (rowLooksLikeHeader_(headers)) {
     lastKeep = Math.max(statusColumnIndex_(headers), bidModeColumnIndex_(headers)) + 1;
@@ -588,6 +623,7 @@ function ensureWriteLayout_(sheet) {
 
 /** Normalize layout before Sync/list reads. Returns blank rows pruned. */
 function ensureSheetLayout_(sheet) {
+  if (isWarehouseTab_(headerRow_(sheet))) return 0;
   ensureWriteLayout_(sheet);
   dropJdColumnIfPresent_(sheet);
   trimColumnsPastBidMode_(sheet);
@@ -862,4 +898,135 @@ function findRowByLink_(sheet, jobLink) {
 
 function linkExists_(sheet, jobLink) {
   return findRowByLink_(sheet, jobLink) > 0;
+}
+
+// ---- Jobs warehouse (brightstar-sf-job-capture) ----
+
+var WAREHOUSE_HEADERS = ["Role", "Company", "Link", "JD", "Salary"];
+
+function appendWarehouse_(sheet, data, jobTitle, companyName, jobLink) {
+  if (!rowHasJobIdentity_(jobTitle, companyName, jobLink)) {
+    throw new Error("Refusing to append an empty row (need title, company, or link).");
+  }
+  ensureWarehouseLayout_(sheet);
+  // Only match the Link column — scanning JD false-positives on URLs in descriptions.
+  if (jobLink) {
+    var dupRow = findWarehouseLinkRow_(sheet, jobLink);
+    if (dupRow > 0) {
+      return json_({
+        ok: true,
+        duplicate: true,
+        reason: "link",
+        sheetName: sheet.getName(),
+        row: dupRow
+      });
+    }
+  }
+  sheet.appendRow(buildWarehouseRow_(data));
+  return json_({
+    ok: true,
+    duplicate: false,
+    warehouse: true,
+    sheetName: sheet.getName(),
+    row: sheet.getLastRow()
+  });
+}
+
+/** Warehouse dedupe: exact normalized match on Link column only (ignore JD body URLs). */
+function findWarehouseLinkRow_(sheet, jobLink) {
+  var target = normalizeLink_(jobLink);
+  if (!target) return -1;
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) return -1;
+  var hasHeader = rowLooksLikeHeader_(values[0]);
+  var start = hasHeader ? 1 : 0;
+  var linkCol = hasHeader ? linkColumnIndex_(values[0]) : 2;
+  for (var r = start; r < values.length; r++) {
+    var cell = String((values[r] || [])[linkCol] || "").trim();
+    if (!cell) continue;
+    if (normalizeLink_(cell) === target) return r + 1;
+  }
+  return -1;
+}
+
+function replaceWarehouse_(sheet, data) {
+  sheet.clear();
+  sheet.getRange(1, 1, 1, WAREHOUSE_HEADERS.length).setValues([WAREHOUSE_HEADERS]);
+  var rows = Array.isArray(data.rows) ? data.rows : [];
+  var appended = 0;
+  var skipped = 0;
+  var seen = {};
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var title = String(row.jobTitle || row.title || row.role || "").trim();
+    var company = String(row.companyName || row.company || "").trim();
+    var link = String(row.jobLink || row.link || row.url || "").trim();
+    if (!rowHasJobIdentity_(title, company, link)) {
+      skipped += 1;
+      continue;
+    }
+    var key = normalizeLink_(link) || (title + "|" + company).toLowerCase();
+    if (key && seen[key]) {
+      skipped += 1;
+      continue;
+    }
+    if (key) seen[key] = true;
+    sheet.appendRow(
+      buildWarehouseRow_({
+        jobTitle: title,
+        companyName: company,
+        jobLink: link,
+        jd: row.jd || row.description || "",
+        salary: row.salary || ""
+      })
+    );
+    appended += 1;
+  }
+  return json_({
+    ok: true,
+    replaced: true,
+    warehouse: true,
+    sheetName: sheet.getName(),
+    appended: appended,
+    skipped: skipped,
+    headers: WAREHOUSE_HEADERS
+  });
+}
+
+/** Role | Company | Link | JD | Salary */
+function buildWarehouseRow_(data) {
+  var jd = String(data.jd || data.description || data.jobDescription || "").trim();
+  if (jd.length > 45000) jd = jd.slice(0, 44999) + "…";
+  return [
+    String(data.jobTitle || data.title || data.role || "").trim(),
+    String(data.companyName || data.company || "").trim(),
+    String(data.jobLink || data.link || data.url || "").trim(),
+    jd,
+    String(data.salary || "").trim()
+  ];
+}
+
+function ensureWarehouseLayout_(sheet) {
+  var headers = headerRow_(sheet);
+  var looksWarehouse =
+    rowLooksLikeHeader_(headers) &&
+    findNamedColumnIndex_(headers, ["role", "title", "job title"]) >= 0 &&
+    findNamedColumnIndex_(headers, ["jd", "job description", "description"]) >= 0 &&
+    findNamedColumnIndex_(headers, ["status", "bid mode", "bidmode"]) < 0;
+
+  if (!looksWarehouse) {
+    sheet.getRange(1, 1, 1, WAREHOUSE_HEADERS.length).setValues([WAREHOUSE_HEADERS]);
+  } else {
+    // Normalize header labels if present under aliases.
+    var roleIdx = findNamedColumnIndex_(headers, ["role", "title", "job title"]);
+    var companyIdx = findNamedColumnIndex_(headers, ["company", "compay", "company name"]);
+    var linkIdx = findNamedColumnIndex_(headers, ["link", "job link", "url"]);
+    var jdIdx = findNamedColumnIndex_(headers, ["jd", "job description", "description"]);
+    var salaryIdx = findNamedColumnIndex_(headers, ["salary", "comp", "compensation"]);
+    if (roleIdx >= 0) sheet.getRange(1, roleIdx + 1).setValue("Role");
+    if (companyIdx >= 0) sheet.getRange(1, companyIdx + 1).setValue("Company");
+    if (linkIdx >= 0) sheet.getRange(1, linkIdx + 1).setValue("Link");
+    if (jdIdx >= 0) sheet.getRange(1, jdIdx + 1).setValue("JD");
+    if (salaryIdx >= 0) sheet.getRange(1, salaryIdx + 1).setValue("Salary");
+  }
 }
