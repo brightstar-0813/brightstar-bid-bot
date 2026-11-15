@@ -5100,7 +5100,11 @@ setInterval(async () => {
     INDEED_GRAB_STATUS_KEY,
     "csv_source_settings"
   ]);
+  const prevBatchState = batchState;
   batchState = data[BATCH_STATE_KEY] || "idle";
+  // Row buttons (Remove / Mark applied) are enabled at render time from batchState —
+  // re-render when it changes, or they stay disabled after Pause/Stop until a reload.
+  const batchStateChanged = prevBatchState !== batchState;
   renderIndeedGrabState(data[INDEED_GRAB_STATUS_KEY]);
   setBusy(Boolean(data.generation_running) || batchState === "running");
   if (typeof data.generation_status === "string") {
@@ -5125,7 +5129,8 @@ setInterval(async () => {
         displayOrder: j.displayOrder ?? prev?.displayOrder
       };
     });
-    const changed = queueRenderSignature(nextQueue) !== queueRenderSignature(queueCache);
+    const changed =
+      batchStateChanged || queueRenderSignature(nextQueue) !== queueRenderSignature(queueCache);
     queueCache = nextQueue;
     if (changed) {
       renderQueue();

@@ -7204,9 +7204,24 @@
     return best || document;
   }
 
+  // Action labels are short ("Next", "Save and Continue") or start with the action verb.
+  // A job title such as "Salesforce Marketing Cloud Next Developer" must not count as Next —
+  // on Dice that title is a link to the job page, and clicking it opened a new tab per step.
+  const ACTION_LEAD_RE =
+    /^(next|continue|save|submit|send|finish|complete|review|preview|proceed|forward|agree|confirm|apply)\b/i;
+  function looksLikeActionLabel(text) {
+    const t = String(text || "")
+      .replace(/[→›»>←‹«<]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!t) return false;
+    return t.split(" ").length <= 4 || ACTION_LEAD_RE.test(t);
+  }
+
   function classifyActionButton(text) {
     const t = String(text || "").trim();
     if (!t || t.length > 80) return null;
+    if (!looksLikeActionLabel(t)) return null;
     if (EASY_NEXT_RE.test(t)) return "next";
     if (EASY_REVIEW_RE.test(t)) return "review";
     if (EASY_SUBMIT_RE.test(t)) return "submit";
