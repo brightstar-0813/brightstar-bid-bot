@@ -5003,6 +5003,16 @@ loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || er
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  // Keep every open bot page (window, side panel, popup) on the same source filter, so a stale
+  // page can't later re-apply its old filter and rebuild the queue from it.
+  if (changes[JOB_CHANNEL_FILTER_KEY]?.newValue) {
+    const next = normalizeChannelFilter(changes[JOB_CHANNEL_FILTER_KEY].newValue);
+    if (next !== channelFilter) {
+      channelFilter = next;
+      syncChannelFilterButtons();
+      renderBatchMode();
+    }
+  }
   if (changes[BATCH_RUN_MODE_KEY] || changes[BATCH_APPLY_ALL_SOURCES_KEY]) {
     if (changes[BATCH_RUN_MODE_KEY]) batchRunModeStored = String(changes[BATCH_RUN_MODE_KEY].newValue || "");
     if (changes[BATCH_APPLY_ALL_SOURCES_KEY]) {

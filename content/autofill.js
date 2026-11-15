@@ -7222,6 +7222,8 @@
     const t = String(text || "").trim();
     if (!t || t.length > 80) return null;
     if (!looksLikeActionLabel(t)) return null;
+    // "AI CV Review" / "Review my CV" / "Resume review" are upsell tools, not a form step.
+    if (/\b(cv|resume|résumé|profile)\b/i.test(t) && /\breview\b/i.test(t)) return null;
     if (EASY_NEXT_RE.test(t)) return "next";
     if (EASY_REVIEW_RE.test(t)) return "review";
     if (EASY_SUBMIT_RE.test(t)) return "submit";
@@ -7249,8 +7251,13 @@
         buttons.push(el);
       }
       // Catch plain links labeled Submit/Next that lack role=button / btn classes.
+      // Site navigation / footer links are never form steps (Jobgether footer "AI CV Review"
+      // was taken for a Review step and led to a sign-in page instead of the employer ATS).
       for (const el of queryAllDeep("a", scopeEl)) {
         if (seen.has(el) || !isElVisible(el)) continue;
+        if (el.closest?.('footer, nav, header, [role="contentinfo"], [role="navigation"], [role="banner"]')) {
+          continue;
+        }
         const text = elActionText(el);
         if (
           !classifyActionButton(text) &&
@@ -7446,6 +7453,25 @@
     scored.sort((a, b) => b.score - a.score);
 
     const best = scored[0];
+    // Never click an off-site APPLY: when signed out, Jobgether intercepts the click with its
+    // "Create your Jobgether account" wall (which autofill then mistook for an application and
+    // filled — name, email, password). Hand the employer URL to the runner to open directly.
+    if (best?.href && !isSameSiteApplyUrl(best.href, "jobgether")) {
+      let externalUrl = best.href;
+      try {
+        externalUrl = new URL(best.href, location.href).toString();
+      } catch {
+        /* keep raw */
+      }
+      return {
+        ok: true,
+        clicked: true,
+        noClick: true,
+        text: elActionText(best.el) || "APPLY",
+        followExternal: true,
+        externalUrl
+      };
+    }
     if (best) {
       scrollElIntoView(best.el);
       safeClick(best.el);
@@ -7645,6 +7671,14 @@
     const emailVerification = detectGreenhouseEmailVerification();
     const workdayWizard = isWorkdayPage() ? detectWorkdayWizardState() : null;
     let action = findActionButton();
+    // Jobgether job page (/offer/…): the only valid step is the external APPLY link to the
+    // employer ATS. Its hidden "report this job" modal (expired / fake / advertisement radios)
+    // must never be treated as an application form or submitted.
+    if (isJobgetherPage() && /\/offer\//i.test(location.pathname)) {
+      probe.isApplicationForm = false;
+      probe.fillableCount = 0;
+      action = { type: "entry", el: null, text: "APPLY" };
+    }
     // On a job listing (not the form yet), "Apply" / "Apply now" is an entry
     // control — not the final submit. Remap so the SW can click through.
     if (action?.type === "submit" && !probe.isApplicationForm) {

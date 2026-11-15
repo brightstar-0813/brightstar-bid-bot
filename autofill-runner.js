@@ -3511,6 +3511,21 @@ export async function startMultiStepApplyOnTab(
         }
       }
 
+      // Jobgether hands back the employer URL without clicking APPLY (clicking shows its
+      // sign-up wall when signed out). Open it directly, whatever the ATS; sites without an
+      // adapter then fill and pause for a hand-off as usual.
+      let directFollowed = false;
+      if (followExternal && followUrl && !isUrlOnApplySite(followUrl, "jobgether")) {
+        await setApplyStatus(`Apply: Jobgether → ${hostnameFromUrl(followUrl) || "employer site"}…`);
+        await chrome.tabs.update(currentTabId, { url: followUrl });
+        await waitForTabComplete(currentTabId, 30000).catch(() => {});
+        await sleep(1500);
+        syncLiveSiteFromUrl(followUrl);
+        await rememberApplyTab(currentTabId);
+        probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+        directFollowed = true;
+      }
+
       if (alreadyOpen) {
         probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
         if (probe.applySuccess) {
@@ -3520,7 +3535,10 @@ export async function startMultiStepApplyOnTab(
           return summary;
         }
       }
-      if (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry"))) {
+      if (
+        !directFollowed &&
+        (!alreadyOpen || (!probe.anyForm && !(probe.best && probe.best.action.type !== "entry")))
+      ) {
         if (followExternal) {
           await setApplyStatus(
             `Apply: Jobgether — waiting for Workday / Greenhouse…`
