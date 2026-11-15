@@ -120,7 +120,7 @@ export async function notifySlackBatchComplete({
  * Per-job status ping (success / fail / retry) so you can watch the bot live.
  * @param {{
  *   webhookUrl: string,
- *   outcome: "done"|"failed"|"error"|"skipped",
+ *   outcome: "done"|"failed"|"error"|"skipped"|"applied"|"handoff",
  *   csvRow?: number|string,
  *   company?: string,
  *   jobTitle?: string,
@@ -132,8 +132,16 @@ export async function notifySlackBatchComplete({
  *   progress?: { done?: number, failed?: number, remaining?: number, total?: number }
  * }} opts
  */
-export async function notifySlackJobStatus({
-  webhookUrl,
+export async function notifySlackJobStatus({ webhookUrl, ...opts }) {
+  return postSlackMessage(webhookUrl, buildSlackJobStatusText(opts));
+}
+
+/**
+ * Text for a per-job Slack status. Pure (unit-tested).
+ * Outcomes: done · failed · error · skipped · applied (submitted / marked applied) ·
+ * handoff (batch paused on a site the bot can't submit — the user/agent finishes it).
+ */
+export function buildSlackJobStatusText({
   outcome,
   csvRow,
   company = "",
@@ -143,19 +151,25 @@ export async function notifySlackJobStatus({
   jdLink = "",
   attempts,
   maxAttempts,
-  progress
-}) {
+  progress,
+  board = "",
+  unansweredLabels = []
+} = {}) {
   const icons = {
     done: "✅",
     failed: "❌",
     error: "⚠️",
-    skipped: "⏭️"
+    skipped: "⏭️",
+    applied: "✅",
+    handoff: "🖐️"
   };
   const labels = {
     done: "Job done",
     failed: "Job failed",
     error: "Job error — retrying",
-    skipped: "Job skipped"
+    skipped: "Job skipped",
+    applied: "Applied",
+    handoff: "Needs hand-off"
   };
   const key = String(outcome || "error");
   const icon = icons[key] || "•";
@@ -165,7 +179,18 @@ export async function notifySlackJobStatus({
   const lines = [`*BrightStar Bid Bot* — ${label} ${icon}`];
   lines.push(csvRow != null ? `• Job: #${csvRow} ${who}` : `• Job: ${who}`);
   if (personLabel) lines.push(`• Person: ${personLabel}`);
-  if (key === "done" && message) lines.push(`• Status: ${truncate(message, 200)}`);
+  if (board && (key === "applied" || key === "handoff")) lines.push(`• Site: ${board}`);
+  if ((key === "done" || key === "applied" || key === "skipped") && message) {
+    lines.push(`• Status: ${truncate(message, 200)}`);
+  }
+  if (key === "handoff") {
+    if (message) lines.push(`• Waiting on: ${truncate(message, 300)}`);
+    const pending = (Array.isArray(unansweredLabels) ? unansweredLabels : [])
+      .map((l) => String(l || "").trim())
+      .filter(Boolean);
+    if (pending.length) lines.push(`• Unanswered: ${truncate(pending.slice(0, 6).join(" · "), 300)}`);
+    lines.push("• Batch paused until it is finished and marked applied.");
+  }
   if ((key === "failed" || key === "error") && message) {
     lines.push(`• Error: ${truncate(message, 400)}`);
   }
@@ -188,7 +213,7 @@ export async function notifySlackJobStatus({
   }
   if (jdLink) lines.push(`• Link: ${jdLink}`);
 
-  return postSlackMessage(webhookUrl, lines.join("\n"));
+  return lines.join("\n");
 }
 
 /**

@@ -1504,6 +1504,10 @@ button.primary:hover,
   flex-wrap: wrap;
 }
 
+.batch-mode-switch {
+  margin: 2px 0 8px;
+}
+
 .topbar > .allow-batch-switch + .allow-batch-switch {
   margin-top: 0;
 }

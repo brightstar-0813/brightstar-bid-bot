@@ -270,6 +270,31 @@
             <input id="outputDir" type="text" placeholder="Lewis-SF" autocomplete="off" />
           </label>
           <p class="hint" id="outputDirHint">Sheet tab name. Saved under Downloads.</p>
+          <div class="allow-batch-switch batch-mode-switch" role="group" aria-label="Batch mode">
+            <span class="allow-batch-label">Batch mode</span>
+            <div class="allow-batch-chips" role="radiogroup" aria-label="Batch mode">
+              <button
+                type="button"
+                class="allow-batch-chip"
+                id="batchModeGenerate"
+                data-batch-mode="generate"
+                aria-pressed="false"
+                title="Build files only — no applying"
+              >
+                Generate
+              </button>
+              <button
+                type="button"
+                class="allow-batch-chip"
+                id="batchModeApply"
+                data-batch-mode="apply"
+                aria-pressed="false"
+                title="Build files, then apply each job before the next (all sources)"
+              >
+                Generate + Apply
+              </button>
+            </div>
+          </div>
           <div class="batch-toolbar" role="toolbar" aria-label="Batch and queue controls">
             <div class="batch-toolbar-cluster" role="group" aria-label="Run controls">
               <div class="btn-group">

@@ -51,6 +51,11 @@ import {
 import { queueDisplayNo, SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
 import { ensureQueueDisplayOrder } from "./queue-sort.js";
 import {
+  BATCH_RUN_MODE_KEY,
+  BATCH_APPLY_ALL_SOURCES_KEY,
+  resolveBatchRunMode
+} from "./batch-apply-policy.js";
+import {
   formatQueueDuration,
   resolveQueueDurationMs
 } from "./queue-timing.js";
@@ -460,6 +465,11 @@ const resetBtn = document.getElementById("reset");
 const qaBankNoteEl = document.getElementById("qaBankNote");
 const qaLearnToggleEl = document.getElementById("qaLearnToggle");
 const allowSubmitToggleEl = document.getElementById("allowSubmitToggle");
+const batchModeGenerateBtn = document.getElementById("batchModeGenerate");
+const batchModeApplyBtn = document.getElementById("batchModeApply");
+/** Stored choice ("generate" | "apply" | "" when never chosen). */
+let batchRunModeStored = "";
+let batchApplyAllSourcesLegacy = false;
 const openaiQaToggleEl = document.getElementById("openaiQaToggle");
 const deleteAiChatToggleEl = document.getElementById("deleteAiChatToggle");
 const cleanLeftoverAiChatsBtn = document.getElementById("cleanLeftoverAiChatsBtn");
@@ -1204,6 +1214,8 @@ async function loadSettings() {
     INDEED_GRAB_STATUS_KEY,
     "qa_learn_enabled",
     "allowSubmitOnAssist",
+    BATCH_RUN_MODE_KEY,
+    BATCH_APPLY_ALL_SOURCES_KEY,
     AUTOFILL_ENABLED_KEY,
     OPENAI_QA_ASSIST_KEY,
     DELETE_AI_CHAT_HISTORY_KEY,
@@ -1315,6 +1327,9 @@ async function loadSettings() {
   await loadCsvSourceForm().catch(() => {});
   if (qaLearnToggleEl) qaLearnToggleEl.checked = data.qa_learn_enabled !== false;
   if (allowSubmitToggleEl) allowSubmitToggleEl.checked = Boolean(data.allowSubmitOnAssist);
+  batchRunModeStored = String(data[BATCH_RUN_MODE_KEY] || "");
+  batchApplyAllSourcesLegacy = data[BATCH_APPLY_ALL_SOURCES_KEY] === true;
+  renderBatchMode();
   if (openaiQaToggleEl) openaiQaToggleEl.checked = data[OPENAI_QA_ASSIST_KEY] !== false;
   if (deleteAiChatToggleEl) deleteAiChatToggleEl.checked = data[DELETE_AI_CHAT_HISTORY_KEY] !== false;
   syncAutofillUi(data[AUTOFILL_ENABLED_KEY] !== false);
@@ -1491,21 +1506,52 @@ function syncQueueDisplayOrder() {
   return ordered;
 }
 
+function currentBatchRunMode() {
+  return resolveBatchRunMode({
+    mode: batchRunModeStored,
+    legacyAllSources: batchApplyAllSourcesLegacy,
+    channel: channelFilter
+  });
+}
+
+function renderBatchMode() {
+  const mode = currentBatchRunMode();
+  for (const btn of [batchModeGenerateBtn, batchModeApplyBtn]) {
+    if (!btn) continue;
+    const active = btn.dataset.batchMode === mode;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+  syncSourceSubmitHint();
+}
+
+async function setBatchRunMode(mode) {
+  batchRunModeStored = mode === "apply" ? "apply" : "generate";
+  await chrome.storage.local.set({ [BATCH_RUN_MODE_KEY]: batchRunModeStored }).catch(() => {});
+  renderBatchMode();
+  setStatus(
+    batchRunModeStored === "apply"
+      ? "Batch mode: Generate + Apply — each job is applied right after its files."
+      : "Batch mode: Generate — files only, no applying."
+  );
+}
+
+function syncSourceSubmitHint() {
+  const el = document.getElementById("sourceSubmitHint");
+  if (!el) return;
+  el.textContent =
+    currentBatchRunMode() === "apply"
+      ? "Builds files, then applies each job before the next."
+      : "Builds files only. Apply from the panel.";
+}
+
 async function applyChannelFilter(nextFilter, { persist = true } = {}) {
   let mode = normalizeChannelFilter(nextFilter || DEFAULT_CHANNEL_FILTER);
   // Indeed filter is hidden in the UI — migrate any saved selection.
   if (mode === "indeed") mode = DEFAULT_CHANNEL_FILTER;
   channelFilter = mode;
   syncChannelFilterButtons();
-  const sourceSubmitHintEl = document.getElementById("sourceSubmitHint");
-  if (sourceSubmitHintEl) {
-    sourceSubmitHintEl.textContent =
-      channelFilter === "dice"
-        ? "Dice: builds files and submits."
-        : channelFilter === "greenhouse"
-          ? "Greenhouse: builds files and submits."
-          : "Builds files. Apply from the panel.";
-  }
+  renderBatchMode();
   const filtered = filterJobsByChannel(allUsJobsCache, channelFilter);
   const person = await getActivePerson().catch(() => null);
   queueCache = mergeStatusFromQueue(filtered, queueCache, person?.id || "");
@@ -1614,6 +1660,7 @@ const ACTION_ICON_PATHS = {
   apply: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5m4-5v5"/>',
   retry: '<path d="M20 7v5h-5"/><path d="M19 12a8 8 0 1 0 1 5"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
   start: '<path d="M8 5v14l11-7z"/>',
   pause: '<path d="M7 5h3v14H7zM14 5h3v14h-3z"/>',
   skip: '<path d="M5 5v14l9-7z"/><path d="M17 5v14"/>',
@@ -2382,6 +2429,16 @@ function renderQueue() {
     actions.appendChild(revealBtn);
     actions.appendChild(removeBtn);
 
+    if (job.status === "done" && !job.applied && !job.inactive) {
+      const markBtn = document.createElement("button");
+      markBtn.type = "button";
+      markBtn.className = "secondary";
+      setIconButton(markBtn, "check", "Mark applied");
+      markBtn.disabled = batchState === "running";
+      markBtn.addEventListener("click", () => markJobApplied(job));
+      actions.appendChild(markBtn);
+    }
+
     if (job.status === "error" || job.status === "failed") {
       const retryBtn = document.createElement("button");
       retryBtn.type = "button";
@@ -2771,6 +2828,17 @@ async function syncQueueWithSheetUi() {
   renderQueue();
   updateCsvSummaryFromQueue();
   setStatus(res.status || "Sheet sync complete.");
+}
+
+async function markJobApplied(job) {
+  const res = await chrome.runtime.sendMessage({ type: "mark_queue_job_applied", csvRow: job.csvRow });
+  if (!res?.ok) {
+    setStatus(res?.error || `Could not mark row ${job.csvRow} applied.`);
+    return;
+  }
+  if (Array.isArray(res.queue)) queueCache = res.queue;
+  renderQueue();
+  updateCsvSummaryFromQueue();
 }
 
 async function revealJobFiles(job) {
@@ -4528,6 +4596,9 @@ qaExportBtn?.addEventListener("click", () => {
 qaLearnToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ qa_learn_enabled: Boolean(qaLearnToggleEl.checked) }).catch(() => {});
 });
+batchModeGenerateBtn?.addEventListener("click", () => setBatchRunMode("generate"));
+batchModeApplyBtn?.addEventListener("click", () => setBatchRunMode("apply"));
+
 allowSubmitToggleEl?.addEventListener("change", () => {
   chrome.storage.local.set({ allowSubmitOnAssist: Boolean(allowSubmitToggleEl.checked) }).catch(() => {});
 });
@@ -4927,6 +4998,13 @@ loadSettings().catch((err) => setStatus(`Init failed: ${String(err.message || er
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes[BATCH_RUN_MODE_KEY] || changes[BATCH_APPLY_ALL_SOURCES_KEY]) {
+    if (changes[BATCH_RUN_MODE_KEY]) batchRunModeStored = String(changes[BATCH_RUN_MODE_KEY].newValue || "");
+    if (changes[BATCH_APPLY_ALL_SOURCES_KEY]) {
+      batchApplyAllSourcesLegacy = changes[BATCH_APPLY_ALL_SOURCES_KEY].newValue === true;
+    }
+    renderBatchMode();
+  }
   if (changes.allowSubmitOnAssist && allowSubmitToggleEl && changes.allowSubmitOnAssist.newValue !== undefined) {
     allowSubmitToggleEl.checked = Boolean(changes.allowSubmitOnAssist.newValue);
   }

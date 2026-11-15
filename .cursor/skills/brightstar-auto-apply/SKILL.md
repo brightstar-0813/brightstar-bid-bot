@@ -44,6 +44,7 @@ Prefer short control labels and live status text over long instructional hints i
 | Concern | Primary files |
 |---------|----------------|
 | Batch, downloads, sheet/Slack, keep-alive | `background.js` |
+| Batch mode (Generate / Generate + Apply), which rows apply, board labels | `batch-apply-policy.js` (+ `tests/batch-apply-policy.test.js`); popup chips `#batchModeGenerate` / `#batchModeApply` |
 | Sheet batch ingest (capture tab → queue) | `sheet-jobs.js`, `sheets.js` (`fetchCaptureSheetJobs`), `apps-script/Code.gs` (`listCaptureJobs`); see [sheet-batch-source](../sheet-batch-source/SKILL.md) |
 | Apply orchestration, docs, multi-frame | `autofill-runner.js` |
 | DOM fill / Apply / Submit clicks | `content/autofill.js` |
@@ -73,7 +74,11 @@ Do not change without an explicit product decision:
 
 1. Manual Apply / Auto Apply assist **stops before Submit** unless caller + adapter allow it.
 2. **External Indeed / external company ATS** = capture-only (files OK, never auto-submit).
-3. **Dice and Greenhouse** may auto-apply+submit in batch / queue Apply (channel ≠ `all`). **All other ATS** (Workday, Ashby, Lever, Jobgether, Indeed, …) = generate files + **in-page Autofill panel** only (Q&A bank, uploads, fill; submit only when the user runs panel/popup Auto Apply with submit allowed).
+3. **Batch mode** (popup chips above Start, storage `batch_run_mode`, rules in `batch-apply-policy.js`) — product decision 2026-11-14:
+   - **Generate** = files only; the batch never applies (any source, Dice included).
+   - **Generate + Apply** = build job N → apply job N → build N+1, on any channel incl. `all`. The runner passes `autoSubmit` and `resolveEffectiveAutoSubmit` decides: adapter sites (Dice, Greenhouse, Workday, Ashby, Lever, Jobgether, hosted Indeed) submit; an aggregator that redirects to an adapter ATS submits there; sites without an adapter fill and **pause the batch** for the user/agent, who submits by hand and clicks row **Mark applied** (`mark_queue_job_applied`). External Indeed passes `autoSubmit: false` (invariant 2). **LinkedIn rows are never batch-applied** (`isNeverBatchApplyJob`, product decision 2026-11-14) — no apply tab, no hand-off pause; the Manual Bid LinkedIn scraper is unaffected.
+   - **Unset** = legacy: Dice / Greenhouse channel → apply (Dice + Greenhouse rows only); every other channel → files only.
+   - Manual row **Apply** / panel Auto Apply are unchanged (submit only with Allow auto submit + adapter).
 4. **Profile exactness (all auto-apply):** identity/contact and mapped profile fields (name, email, phone, address, city/state/zip/country, LinkedIn/GitHub/portfolio, citizenship/work-auth/sponsorship, EEO already on profile, DOB, etc.) fill from **exact** active-person / `applicantInfo` only — never Codex, AI tab, OpenAI leftovers, or Q&A-bank fiction (`shouldExcludeFromAiAndBank`). Missing required identity → pause + Slack, do not invent.
 5. **Workday daily path is extension-only** (real employer tab + Autofill panel). Workday panel defaults **Allow auto submit** off (`workdayAllowSubmit`). Sensitive/consequential fields use `content/workday-engine.js` policy (ask user / Q&A — never invent).
 6. Submit decision: only `resolveEffectiveAutoSubmit(site, autoSubmitCaller)` in `ats/adapters.js`.

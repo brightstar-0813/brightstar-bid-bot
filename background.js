@@ -144,6 +144,15 @@ import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
 import { applyQueueJobTiming } from "./queue-timing.js";
 import {
+  BATCH_RUN_MODE_KEY,
+  BATCH_APPLY_ALL_SOURCES_KEY,
+  resolveBatchRunMode,
+  isBatchApplyJob,
+  resolveBatchApplyBoard,
+  batchApplyAutoSubmitForBoard,
+  isHandoffBoard
+} from "./batch-apply-policy.js";
+import {
   parseJobsCsv,
   filterJobsByChannel,
   normalizeChannelFilter,
@@ -217,11 +226,28 @@ const ONE_OFF_DRAFT_KEY = "one_off_draft";
 const DEFAULT_CHANNEL_FILTER = "dice";
 const AUTOFILL_ENABLED_KEY = "autofill_enabled";
 
-/** All-channel batch runs generate files only — never auto-apply. */
+/** Popup "Batch mode": "generate" (files only) or "apply" (build → apply each job). */
+async function getBatchRunMode() {
+  const data = await chrome.storage.local.get([
+    BATCH_RUN_MODE_KEY,
+    BATCH_APPLY_ALL_SOURCES_KEY,
+    JOB_CHANNEL_FILTER_KEY
+  ]);
+  return resolveBatchRunMode({
+    mode: data[BATCH_RUN_MODE_KEY],
+    legacyAllSources: data[BATCH_APPLY_ALL_SOURCES_KEY] === true,
+    channel: normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER)
+  });
+}
+
+/** Batch applies only in "Generate + Apply" mode. */
 async function isBatchAutoApplyEnabled() {
-  const data = await chrome.storage.local.get([JOB_CHANNEL_FILTER_KEY]);
-  const channel = normalizeChannelFilter(data[JOB_CHANNEL_FILTER_KEY] || DEFAULT_CHANNEL_FILTER);
-  return channel !== "all";
+  return (await getBatchRunMode()) === "apply";
+}
+
+/** In "Generate + Apply" every linked row (any source) is applied right after its build. */
+async function isBatchApplyAllSourcesEnabled() {
+  return (await getBatchRunMode()) === "apply";
 }
 
 /** Manual Apply assist and non-hosted batch apply. Hosted Dice/Greenhouse batch always auto-applies. Default on. */
@@ -236,8 +262,9 @@ function isHostedBatchAutoApplyBoard(board = "") {
   return b === "Dice" || b === "Greenhouse";
 }
 
-function isHostedBatchAutoApplyJob(j = {}) {
-  return isDiceJob(j) || isGreenhouseJob(j);
+/** Dice + Greenhouse by default; any linked row when opts.allSources (batch-apply-policy.js). */
+function isHostedBatchAutoApplyJob(j = {}, opts = {}) {
+  return isBatchApplyJob(j, opts);
 }
 
 /** @deprecated Prefer isHostedBatchAutoApplyBoard — kept for older call sites. */
@@ -2325,20 +2352,7 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
     await setStatus(`Row ${jobMeta.csvRow}: autofill disabled — files ready, apply skipped.`);
     return { status: "skipped", detail: "Autofill disabled", tabId: null, needsPause: false };
   }
-  const boardLabel =
-    board === "Indeed"
-      ? "Indeed"
-      : board === "Workday"
-        ? "Workday"
-        : board === "Greenhouse"
-          ? "Greenhouse"
-          : board === "Ashby"
-            ? "Ashby"
-            : board === "Lever"
-              ? "Lever"
-              : board === "Jobgether"
-                ? "Jobgether"
-                : "Dice";
+  const boardLabel = String(board || "").trim() || "Dice";
   const jdLink = String(jobMeta.jdLink || "").trim();
   const prevAttempts = Number(jobMeta.applyAttempts || 0);
 
@@ -2447,7 +2461,8 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
   try {
     applyResult = await openJobAndApply(jdLink, {
       multiStep: true,
-      autoSubmit: true,
+      // Runner still applies ats/adapters.js policy; external Indeed is withheld here.
+      autoSubmit: batchApplyAutoSubmitForBoard(boardLabel),
       csvRow: jobMeta.csvRow,
       jobDir: jobMeta.jobDir || "",
       jdLink
@@ -2531,6 +2546,20 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
         ? `Row ${jobMeta.csvRow}: submitted, but sheet mark failed (${sheet.error}). Continuing…`
         : `Row ${jobMeta.csvRow}: submitted and marked Applied. Closing tab…`
     );
+    await trySlackJobStatus({
+      outcome: "applied",
+      csvRow: jobMeta.csvRow,
+      company: jobMeta.companyName || jobMeta.company || "",
+      jobTitle: jobMeta.jobTitle || jobMeta.title || "",
+      jdLink,
+      board: boardLabel,
+      message: sheet?.error
+        ? `Submitted by the bot — sheet mark failed: ${sheet.error}`
+        : applyResult?.alreadyApplied
+          ? "Already applied — marked Applied on the sheet"
+          : "Submitted by the bot — sheet marked Applied",
+      progress: await queueSlackProgress().catch(() => null)
+    }).catch(() => {});
     await closeApplyTab(applyResult?.tabId).catch(() => false);
     return applyResult;
   }
@@ -2546,15 +2575,21 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
     error: reviewMsg.slice(0, 240)
   }).catch(() => {});
   await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}`);
+  // Sites without an auto-submit adapter pause by design → "Needs hand-off", not an error.
+  // A second pass on the same hand-off row means it was left unfinished → "skipped".
+  const handoff = isHandoffBoard(boardLabel);
   await trySlackJobStatus({
-    outcome: "error",
+    outcome: handoff ? (exhausted ? "skipped" : "handoff") : "error",
     csvRow: jobMeta.csvRow,
     company: jobMeta.companyName || jobMeta.company || "",
     jobTitle: jobMeta.jobTitle || jobMeta.title || "",
     jdLink,
-    message: `${boardLabel} auto-apply: ${reviewMsg}`,
-    attempts: nextAttempts,
-    maxAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+    board: boardLabel,
+    message: handoff
+      ? (exhausted ? `Not applied — moved on (${reviewMsg})` : reviewMsg)
+      : `${boardLabel} auto-apply: ${reviewMsg}`,
+    unansweredLabels: Array.isArray(applyResult?.unansweredLabels) ? applyResult.unansweredLabels : [],
+    ...(handoff ? {} : { attempts: nextAttempts, maxAttempts: MAX_HOSTED_APPLY_ATTEMPTS }),
     progress: await queueSlackProgress().catch(() => null)
   }).catch(() => {});
 
@@ -2608,7 +2643,7 @@ async function pauseAfterFailedHostedApply(applyResult, jobLabel = "") {
     `${jobLabel ? `Row ${jobLabel}: ` : ""}${detail}. Batch paused — fix the form (login/CAPTCHA/Next), then click Start to retry apply.`
   );
   await chrome.storage.local.set({ generation_running: false });
-  if (isUnanswerableRequiredPause(applyResult)) {
+  if (!isHandoffBoard(board) && isUnanswerableRequiredPause(applyResult)) {
     await trySlackAlert({
       title: `${board} apply paused — required field unanswered ⛔`,
       message: formatUnanswerableSlackMessage(applyResult),
@@ -2640,15 +2675,8 @@ function isIndeedHostedApplyJob(j) {
   return isExplicitlyHostedIndeedJob(j);
 }
 
-function resolveHostedApplyBoard(j = {}) {
-  if (isDiceJob(j)) return "Dice";
-  if (isIndeedHostedApplyJob(j)) return "Indeed";
-  if (isWorkdayJob(j)) return "Workday";
-  if (isGreenhouseJob(j)) return "Greenhouse";
-  if (isAshbyJob(j)) return "Ashby";
-  if (isLeverJob(j)) return "Lever";
-  if (isJobgetherJob(j)) return "Jobgether";
-  return "";
+function resolveHostedApplyBoard(j = {}, opts = {}) {
+  return resolveBatchApplyBoard(j, opts);
 }
 
 /** Older skips that matched the employer name, not the job URL. */
@@ -2668,10 +2696,11 @@ function isSkippedSheetDuplicateJob(j) {
   return /duplicate|already on google sheet|already earlier in this csv/i.test(String(j.error || ""));
 }
 
-function isHostedApplyBacklogJob(j, person = null) {
-  // Dice + Greenhouse: batch/queue auto-apply+submit. Other ATS use Autofill panel only.
+function isHostedApplyBacklogJob(j, person = null, opts = {}) {
+  // Dice + Greenhouse: batch/queue auto-apply+submit. Other ATS use Autofill panel only —
+  // unless opts.allSources ("Apply after each build (all sources)").
   if (
-    !isHostedBatchAutoApplyJob(j) ||
+    !isHostedBatchAutoApplyJob(j, opts) ||
     j.status !== "done" ||
     j.applied ||
     isJobMarkedInactive(j) ||
@@ -10391,16 +10420,17 @@ async function runBatchLoop(outputDir) {
       const queue = await getQueue();
       const activePerson = await getActivePerson().catch(() => null);
       const batchAutoApply = await isBatchAutoApplyEnabled();
+      const applyOpts = { allSources: await isBatchApplyAllSourcesEnabled() };
 
       // Dice only: apply already-built rows (no ChatGPT). Other boards = generate + panel.
       // Gated by job type — All channel is build only. Active person's rows only.
       const backlog = batchAutoApply
-        ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson))
+        ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson, applyOpts))
         : null;
       if (backlog) {
         // Apply can take long enough that a check started during cooldown goes stale.
         discardInflightInactiveProbe();
-        const backlogBoard = resolveHostedApplyBoard(backlog) || "Dice";
+        const backlogBoard = resolveHostedApplyBoard(backlog, applyOpts) || "Dice";
         if (batchControl.skipCurrent) {
           batchControl.skipCurrent = false;
           await updateQueueJob(backlog.csvRow, {
@@ -10612,8 +10642,8 @@ async function runBatchLoop(outputDir) {
         // Dice + Greenhouse: generate → auto-apply+submit. Other ATS: files + Autofill panel.
         // All channel: generate files only — no auto-apply.
         const hostedApplyBoard =
-          batchAutoApply && isHostedBatchAutoApplyJob(next)
-            ? resolveHostedApplyBoard(next)
+          batchAutoApply && isHostedBatchAutoApplyJob(next, applyOpts)
+            ? resolveHostedApplyBoard(next, applyOpts)
             : "";
         if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
           // Apply after build: Ready row on the sheet is expected — only Applied blocks apply.
@@ -10828,8 +10858,8 @@ async function runBatchLoop(outputDir) {
               });
               await setStatus(`Done row ${next.csvRow}. ${result.status}`);
               const hostedApplyBoard =
-                batchAutoApply && isHostedBatchAutoApplyJob(next)
-                  ? resolveHostedApplyBoard(next)
+                batchAutoApply && isHostedBatchAutoApplyJob(next, applyOpts)
+                  ? resolveHostedApplyBoard(next, applyOpts)
                   : "";
               if (hostedApplyBoard && !batchControl.stop && result.coverLetterSaved) {
                 const applyRes = await runHostedInterleavedApply(
@@ -12729,6 +12759,64 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           skipped: 0,
           error: String(err?.message || err)
         });
+      }
+    })();
+    return true;
+  }
+
+  // Row was submitted by hand (or by an agent) after the batch paused on it — record it as
+  // Applied so Start does not re-open / re-apply it.
+  if (type === "mark_queue_job_applied") {
+    (async () => {
+      try {
+        const csvRow = Number(message.csvRow);
+        if (!Number.isFinite(csvRow)) throw new Error("Missing CSV row.");
+        const queue = await getQueue();
+        const job = (queue || []).find((j) => Number(j.csvRow) === csvRow);
+        if (!job) throw new Error(`Row ${csvRow} was not found.`);
+        if (job.status === "running") throw new Error("Row is still running — pause first.");
+        const jobMeta = {
+          csvRow,
+          jobTitle: job.title || "",
+          companyName: job.company || "",
+          jdLink: job.jdLink || "",
+          salary: job.salary || "",
+          jobDir: job.jobDir || ""
+        };
+        const sheet = await markQueueJobAppliedOnSheet(jobMeta);
+        const appliedDate = sheet?.appliedDate || formatApplicationDateTime();
+        await updateQueueJob(csvRow, {
+          applied: true,
+          applyAttempted: true,
+          appliedDate,
+          error: sheet?.error ? `Applied; sheet mark failed: ${sheet.error}` : ""
+        });
+        await rememberApplyHistory(csvRow, {
+          jobDir: job.jobDir || "",
+          jdLink: job.jdLink || "",
+          applied: true,
+          appliedDate
+        }).catch(() => {});
+        await setStatus(
+          sheet?.error
+            ? `Row ${csvRow}: marked Applied (sheet failed: ${sheet.error}).`
+            : `Row ${csvRow}: marked Applied.`
+        );
+        await trySlackJobStatus({
+          outcome: "applied",
+          csvRow,
+          company: job.company || "",
+          jobTitle: job.title || "",
+          jdLink: job.jdLink || "",
+          board: resolveHostedApplyBoard(job, { allSources: true }) || "",
+          message: sheet?.error
+            ? `Finished by hand — sheet mark failed: ${sheet.error}`
+            : "Finished by hand — marked Applied",
+          progress: await queueSlackProgress().catch(() => null)
+        }).catch(() => {});
+        safeSendResponse(sendResponse, { ok: true, appliedDate, queue: await getQueue() });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }
     })();
     return true;
