@@ -145,11 +145,12 @@ Intrado Life & Safety Inc — Senior Salesforce Engineer | Longmont, Colorado, U
 Simplus — Senior Salesforce Developer | Admin | Salt Lake City, Utah, United States | Nov 2021 - Apr 2023
 Third Pillar — Senior Salesforce Developer | Integration Engineer | Makati, Metro Manila, Philippines | Sep 2020 - Oct 2021
 Pointwest Squad Inc — Salesforce Developer | Makati, Metro Manila, Philippines | Mar 2016 - Aug 2020
-Deloitte — Software Engineer Intern / Junior Salesforce Developer | Singapore, Singapore | Jun 2012 - Dec 2015
+Deloitte — Software Engineer Internship / Junior Salesforce Developer | Taguig, NCR, Philippines | Jun 2012 - Dec 2015
 No recorded work mode for these employers.
+Intrado Life & Safety Inc (intrado.com) is a Longmont, Colorado emergency-response and public-safety technology company (founded 1979; ~1,001-5,000 employees) focused on preparing for, responding to, and recovering from critical events. Simplus (simplus.com) is a Salt Lake City Salesforce consultancy (founded 2014; ~501-1,000 employees) delivering advisory-led Sales Cloud, Experience Cloud, CPQ, billing/CLM, quote-to-cash, Pardot, change management, and managed services. Third Pillar Business Applications, Inc. (3rd-pillar.com) is a Makati Globe Business Company CRM and digital-transformation partner (founded 2013; ~51-200 employees) specializing in Salesforce, Tableau, DocuSign, Vlocity, eProcurement, eSignature, data cleansing, and hyperautomation across telecom, banking, insurance, real estate, and healthcare. Pointwest Squad Inc (staffpsi.com) is a Makati IT staffing and onboarding firm (~11-50 employees). Deloitte is a global professional-services network delivering consulting, advisory, risk, audit, and tax engagements.
 
 EDUCATION
-National University of Singapore (NUS) | Bachelor of Computing in Computer Science | Singapore, Singapore | Apr 2008 - May 2012
+University of the East | Bachelor of Computing in Computer Science | Manila, Metro Manila, Philippines | Apr 2008 - May 2012
 
 CERTIFICATIONS
 None.`;
