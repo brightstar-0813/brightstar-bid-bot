@@ -208,7 +208,7 @@ function doPost(e) {
 
 function doGet() {
   return ContentService.createTextOutput(
-    "Brightstar Bid bot sheet append + duplicate-check endpoint is running."
+    "Brightstar shared sheet web app v2026-11-15 (merged: listCaptureJobs + warehouse) is running."
   );
 }
 
