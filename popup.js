@@ -123,7 +123,8 @@ import {
   exportQa,
   importQa,
   parseQaBankPayload,
-  loadBundledQaBank
+  loadBundledQaBank,
+  pruneJunkQa
 } from "./qa-store.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
 import { OPENAI_QA_ASSIST_KEY } from "./openai.js";
@@ -476,6 +477,7 @@ const cleanLeftoverAiChatsBtn = document.getElementById("cleanLeftoverAiChatsBtn
 const autofillEnabledToggleEl = document.getElementById("autofillEnabledToggle");
 const qaOpenEditorBtn = document.getElementById("qaOpenEditorBtn");
 const qaImportBundledBtn = document.getElementById("qaImportBundledBtn");
+const qaPruneJunkBtn = document.getElementById("qaPruneJunkBtn");
 const qaImportBtn = document.getElementById("qaImportBtn");
 const qaExportBtn = document.getElementById("qaExportBtn");
 const qaImportInput = document.getElementById("qaImportInput");
@@ -4583,6 +4585,24 @@ resetBtn.addEventListener("click", resetWorkflow);
 qaOpenEditorBtn?.addEventListener("click", () => {
   openQaEditor().catch((e) => setStatus(String(e.message || e)));
 });
+qaPruneJunkBtn?.addEventListener("click", async () => {
+  const ok = await confirmDialog({
+    title: "Clean junk Q&A?",
+    message:
+      "Delete saved answers that are page junk (buttons, trackers, cookie toggles, placeholders, report-job options, markup). Real answers and editor entries are kept.",
+    confirmText: "Clean",
+    danger: true
+  });
+  if (!ok) return;
+  try {
+    const res = await pruneJunkQa(null);
+    setStatus(`Q&A bank cleaned: removed ${res.removed} junk, kept ${res.kept}.`);
+    await refreshQaBank().catch(() => {});
+  } catch (e) {
+    setStatus(`Q&A clean failed: ${String(e?.message || e)}`);
+  }
+});
+
 qaImportBundledBtn?.addEventListener("click", () => {
   importBundledQaBank().catch((e) => setStatus(`Bundled import failed: ${String(e.message || e)}`));
 });
@@ -4984,6 +5004,7 @@ if (resetBtn) setIconButton(resetBtn, "reset", "Reset");
 
 if (qaOpenEditorBtn) setIconButton(qaOpenEditorBtn, "editor", "Open editor");
 if (qaImportBundledBtn) setIconButton(qaImportBundledBtn, "bundled", "Load bundled bank");
+if (qaPruneJunkBtn) setIconButton(qaPruneJunkBtn, "remove", "Clean junk Q&A");
 if (qaImportBtn) setIconButton(qaImportBtn, "import", "Import JSON");
 if (qaExportBtn) setIconButton(qaExportBtn, "export", "Export JSON");
 

@@ -7,8 +7,8 @@
  * New AI answers are written back here, building the bank over time.
  */
 
-import { isJunkAutofillAnswer, isJunkQuestionLabel } from "./autofill-junk.js";
-import { shouldOverwriteQaRecord } from "./autofill-classify.js";
+import { isJunkAutofillAnswer, isJunkQuestionLabel, isBankableQa } from "./autofill-junk.js";
+import { shouldOverwriteQaRecord, qaSourcePriority } from "./autofill-classify.js";
 
 export const QA_FIELD_TYPES = [
   { value: "text", label: "Text field" },
@@ -155,21 +155,34 @@ async function getRecordsForProfiles(profileIds) {
  * the similarity threshold.
  * @returns {Promise<{ record: object, score: number, exact: boolean } | null>}
  */
-export async function findQaMatch(profileId, question, { threshold = 0.82, fieldType = "" } = {}) {
+export async function findQaMatch(profileId, question, opts = {}) {
+  const [best] = await findQaMatches(profileId, question, { ...opts, limit: 1 });
+  return best || null;
+}
+
+/**
+ * Ranked bank candidates above the threshold (best first). Callers that apply extra
+ * fit checks should walk the list instead of giving up when the top row fails —
+ * one off-topic top match used to hide a usable answer ranked second.
+ * @returns {Promise<Array<{ record: object, score: number, exact: boolean }>>}
+ */
+export async function findQaMatches(profileId, question, { threshold = 0.82, fieldType = "", limit = 5 } = {}) {
   const norm = normalizeQuestion(question);
-  if (!norm) return null;
+  if (!norm) return [];
 
   const profiles = profileId ? [profileId, ""] : [""];
   const records = await getRecordsForProfiles([...new Set(profiles)]);
-  if (!records.length) return null;
+  if (!records.length) return [];
 
   const wantType = normalizeFieldType(fieldType);
-  let best = null;
+  const scored = [];
   for (const rec of records) {
     if (!rec || !rec.answer) continue;
     if (isJunkQuestionLabel(rec.question) || isJunkAutofillAnswer(rec.answer, { questionLabel: rec.question })) {
       continue;
     }
+    // Rows saved before the bank gate existed may still be junk — never let them win.
+    if (rec.source !== "user-editor" && !isBankableQa(rec.question, rec.answer)) continue;
     const recNorm = rec.questionNorm || normalizeQuestion(rec.question);
     let score = questionSimilarity(norm, recNorm);
     if (wantType) {
@@ -177,11 +190,15 @@ export async function findQaMatch(profileId, question, { threshold = 0.82, field
       if (recType === wantType) score += 0.04;
       else if (isChoiceFieldType(wantType) !== isChoiceFieldType(recType)) score -= 0.12;
     }
-    if (!best || score > best.score) best = { record: rec, score, exact: recNorm === norm };
+    if (score >= threshold) scored.push({ record: rec, score, exact: recNorm === norm });
   }
-
-  if (best && best.score >= threshold) return best;
-  return null;
+  scored.sort(
+    (x, y) =>
+      y.score - x.score ||
+      qaSourcePriority(y.record.source) - qaSourcePriority(x.record.source) ||
+      Number(y.record.timesUsed || 0) - Number(x.record.timesUsed || 0)
+  );
+  return scored.slice(0, Math.max(1, limit));
 }
 
 /**
@@ -203,11 +220,14 @@ export async function saveQa({
   fieldType = "text",
   source = "ai",
   site = "",
-  silent = false
+  silent = false,
+  trusted = false
 }) {
   const q = String(question || "").trim();
   const a = String(answer || "").trim();
   if (!q || !a) return null;
+  // Central gate for every source (page scrape, learn mode, AI). Hand-entered editor rows are trusted.
+  if (!trusted && !isBankableQa(q, a)) return null;
 
   const questionNorm = normalizeQuestion(q);
   const db = await openDb();
@@ -286,6 +306,25 @@ export async function getQaById(id) {
 export async function getQaCount(profileId = null) {
   const rows = await getAllQa(profileId);
   return rows.length;
+}
+
+/**
+ * Delete stored rows that the bank gate now rejects (junk captured by older versions).
+ * @param {string|null} profileId  null = all profiles
+ * @returns {Promise<{ checked: number, removed: number, kept: number }>}
+ */
+export async function pruneJunkQa(profileId = null) {
+  const rows = await getAllQa(profileId);
+  let removed = 0;
+  for (const r of rows) {
+    if (r?.source === "user-editor") continue;
+    if (!isBankableQa(r?.question, r?.answer)) {
+      await deleteQa(r.id);
+      removed += 1;
+    }
+  }
+  if (removed) notifyQaChanged();
+  return { checked: rows.length, removed, kept: rows.length - removed };
 }
 
 export async function deleteQa(id) {

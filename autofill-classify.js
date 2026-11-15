@@ -133,8 +133,11 @@ export function choiceAnswerMatchesOptions(answer, options = []) {
 
 /** Source priority when deciding whether a scraped answer may overwrite an existing bank row. */
 const SOURCE_PRIORITY = {
+  "user-editor": 60, // typed in the Q&A editor — never overwritten by captures or AI
   user: 50,
   ai: 40,
+  codex: 40,
+  chatgpt: 40,
   profile: 35,
   extra: 30,
   scraped: 10

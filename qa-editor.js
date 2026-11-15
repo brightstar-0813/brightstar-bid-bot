@@ -304,7 +304,7 @@ function renderList() {
 
     const src = document.createElement("span");
     const sourceLabel =
-      row.source === "user"
+      row.source === "user" || row.source === "user-editor"
         ? "manual"
         : row.source === "scraped"
           ? "scraped"
@@ -313,7 +313,7 @@ function renderList() {
             : row.source === "profile"
               ? "profile"
               : "ai";
-    src.className = `qa-source-tag ${row.source === "user" ? "qa-source-user" : "qa-source-ai"}`;
+    src.className = `qa-source-tag ${row.source === "user" || row.source === "user-editor" ? "qa-source-user" : "qa-source-ai"}`;
     src.textContent = sourceLabel;
     meta.appendChild(src);
 
@@ -399,8 +399,9 @@ async function saveForm() {
     question,
     answer,
     fieldType: els.formFieldType.value || "text",
-    source: "user",
-    site: existing?.site || ""
+    source: "user-editor",
+    site: existing?.site || "",
+    trusted: true
   });
 
   if (editingId && saved?.id && saved.id !== editingId) {

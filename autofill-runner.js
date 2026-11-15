@@ -17,7 +17,7 @@ import {
   educationHistoryForAutofill,
   getStoredResumeJson as readScopedResumeJson
 } from "./history.js";
-import { findQaMatch, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
+import { findQaMatch, findQaMatches, saveQa, recordQaUsage, normalizeQuestion, questionSimilarity } from "./qa-store.js";
 import {
   isJunkAutofillAnswer,
   isJunkQuestionLabel,
@@ -1395,18 +1395,21 @@ async function annotateScanFieldsWithBank(fields = [], profileId = "") {
       out.push(field);
       continue;
     }
-    let match = null;
+    let candidates = [];
     try {
-      match = await findQaMatch(profileId, field.label, { fieldType: field.type || "" });
+      candidates = await findQaMatches(profileId, field.label, { fieldType: field.type || "" });
     } catch {
-      match = null;
+      candidates = [];
     }
-    const answer = String(match?.record?.answer || "").trim();
-    if (
-      answer &&
-      !isJunkAutofillAnswer(answer, { questionLabel: field.label }) &&
-      bankAnswerFitsQuestion(field.label, answer)
-    ) {
+    const fits = candidates.some((m) => {
+      const answer = String(m?.record?.answer || "").trim();
+      return (
+        answer &&
+        !isJunkAutofillAnswer(answer, { questionLabel: field.label }) &&
+        bankAnswerFitsQuestion(field.label, answer)
+      );
+    });
+    if (fits) {
       out.push({ ...field, matchSource: "bank", currentValue: field.currentValue || "" });
     } else {
       out.push(field);
@@ -1752,23 +1755,32 @@ async function resolveQuestionAnswers(
       continue;
     }
 
-    let match = null;
+    let candidates = [];
     try {
-      match = await findQaMatch(profileId, q.label, { fieldType: q.fieldType || "" });
+      candidates = await findQaMatches(profileId, q.label, { fieldType: q.fieldType || "" });
     } catch {
-      match = null;
+      candidates = [];
     }
-    let bankAnswer = String(match?.record?.answer || "").trim();
-    if (choice) bankAnswer = normalizeChoiceAnswerValue(bankAnswer) || bankAnswer;
     const essayLike = Boolean(q.multiline) || q.fieldType === "textarea";
-    const bankOk =
-      bankAnswer &&
-      !isJunkAutofillAnswer(bankAnswer, { questionLabel: q.label }) &&
-      bankAnswerFitsQuestion(q.label, bankAnswer) &&
-      (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question)) &&
-      shortAnswerBankMatchIsSpecific(q.label, match.record?.question, bankAnswer) &&
-      (!choice || choiceAnswerMatchesOptions(bankAnswer, q.options || []));
-    if (bankOk) {
+    // Walk ranked candidates: the top row failing a fit check must not hide a good second one.
+    let bankPick = null;
+    for (const match of candidates) {
+      let bankAnswer = String(match?.record?.answer || "").trim();
+      if (choice) bankAnswer = normalizeChoiceAnswerValue(bankAnswer) || bankAnswer;
+      const bankOk =
+        bankAnswer &&
+        !isJunkAutofillAnswer(bankAnswer, { questionLabel: q.label }) &&
+        bankAnswerFitsQuestion(q.label, bankAnswer) &&
+        (!essayLike || essayBankMatchIsSpecific(q.label, match.record.question)) &&
+        shortAnswerBankMatchIsSpecific(q.label, match.record?.question, bankAnswer) &&
+        (!choice || choiceAnswerMatchesOptions(bankAnswer, q.options || []));
+      if (bankOk) {
+        bankPick = { match, bankAnswer };
+        break;
+      }
+    }
+    if (bankPick) {
+      const { match, bankAnswer } = bankPick;
       const answerOut = choice ? normalizeChoiceAnswerValue(bankAnswer) || bankAnswer : bankAnswer;
       resolved.push({ id: q.id, answer: answerOut, source: "bank", options: q.options || [] });
       recordQaUsage(match.record.id).catch(() => {});

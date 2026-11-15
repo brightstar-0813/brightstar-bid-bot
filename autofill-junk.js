@@ -94,6 +94,78 @@ export function stripAiMarkup(text) {
   return s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// ---- Q&A bank gate (what may be saved / kept) ------------------------------------------
+// Built from real junk found in the banks on 2026-11-15.
+
+/** Empty dropdown / unanswered placeholders. */
+const PLACEHOLDER_ANSWER_RE =
+  /^(?:-+|—+|-+\s*no answer\s*-+|no answer|not answered|select(?: one| an option| an item| a value)?\.{0,3}|please select\.{0,3}|choose(?: one| an option)?\.{0,3}|none selected|open dropdown.*)$/i;
+
+/** Page buttons / nav text captured as an "answer". */
+const UI_TEXT_ANSWER_RE =
+  /^(?:save(?: job)?|saved|create (?:job )?alert|apply(?: now)?|easy apply|quick apply|submit|next|back|continue|cancel|close|ok|learn more|view (?:all )?jobs?|share|report|sign in|sign up|log in)$/i;
+
+/** Tracking / meta / script names captured as a "question". */
+const NOISE_QUESTION_RE =
+  /^(?:expv\d*\s*\d+|pmd\b|og[:\s]|twitter\b|fb[:\s]|meta\b|no section \d+ question \d+)|\b(?:navigator|nodetype|vendor search handler|leave this page|data-[a-z-]+)\b|=>|&&|\|\||function\s*\(/i;
+
+/** Cookie banners, consent, generic widget chrome — never reusable answers. */
+const CONSENT_WIDGET_QUESTION_RE =
+  /\b(?:cookies?|cookie settings|targeting|strictly necessary|i agree|terms(?: of (?:use|service))?|privacy polic(?:y|ies)|consent to|permission to text)\b|^(?:checkbox label|switch label(?: label)?|toggle|radio|label|field|input|text|textbox)$/i;
+
+/** Job-board "report this job" options (Jobgether) captured as questions. */
+const REPORT_JOB_OPTION_RE =
+  /\b(?:fake job|offer is expired|is an advertisement|offensive|discriminatory|it is inaccurate|not fully remote|remote location is not correct|don'?t show this again)\b/i;
+
+/** Repeating employment-history fields: the first employer's value is wrong for the next one. */
+const HISTORY_SECTION_QUESTION_RE =
+  /^(?:company name|employer(?: name)?|position|job title|title|responsibilities|duties|start date|end date|from|to|reason for leaving|currently working here|supervisor|company (?:website|phone(?: number)?))\b/i;
+
+function normForCompare(s) {
+  return String(s || "").toLowerCase().replace(/\(required\)|\*/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * May this question/answer pair be stored in (or kept in) the Q&A bank?
+ * Central gate used by qa-store saveQa for every source (scraped, user, codex, AI).
+ */
+export function isBankableQa(question, answer) {
+  const q = cleanAutofillLabelText(question);
+  const a = String(answer || "").trim();
+  if (!q || !a) return false;
+  if (isJunkQuestionLabel(q) || isSensitiveProfileQuestion(q) || isTrackingNoiseLabel(q)) return false;
+  if (isJunkAutofillAnswer(a, { questionLabel: q })) return false;
+  if (NOISE_QUESTION_RE.test(q) || CONSENT_WIDGET_QUESTION_RE.test(q)) return false;
+  if (REPORT_JOB_OPTION_RE.test(q) || REPORT_JOB_OPTION_RE.test(a)) return false;
+  if (HISTORY_SECTION_QUESTION_RE.test(q)) return false;
+  if (PLACEHOLDER_ANSWER_RE.test(a) || UI_TEXT_ANSWER_RE.test(a)) return false;
+  if (/<\/?[a-z][^>]*>/i.test(a)) return false; // markup (e.g. <WritingBlock>)
+  if (/^[a-z]{1,3}\d$/i.test(a)) return false; // cryptic tokens like "ah0", "bc1"
+  if (normForCompare(q) === normForCompare(a)) return false; // option label echoed as answer
+  if (EXTRA_NOISE_QUESTION_RE.test(q) || GLUED_SENSITIVE_RE.test(q)) return false;
+  if (BROKEN_ANSWER_RE.test(a)) return false;
+  if (/^https?:\/\//i.test(a)) return false; // links are profile data or page chrome
+  // "Please specify" / "If other, please specify" have no context of their own — never reuse.
+  if (/^(?:if (?:other|yes|no)[,.]?\s*)?(?:please )?(?:specify|explain|describe|other)\.?$/i.test(q)) return false;
+  // Yes/No answer to an open "which / what / list" question = mis-filled control.
+  if (/^(?:yes|no)$/i.test(a) && /^(?:which|what|list|name|describe)\b/i.test(q)) return false;
+  // Pure numbers for non-numeric questions = dropdown option ids ("United States → 1").
+  if (/^\d+$/.test(a) && !/\b(how many|years?|number|count|gpa|percent|%|rate|age|hours?)\b/i.test(q)) return false;
+  // Answer that starts with the question text (label + option list glued together).
+  if (normForCompare(a).startsWith(normForCompare(q)) && normForCompare(q).length > 6) return false;
+  return true;
+}
+
+/** More page chrome / parser garbage / volatile fields seen in the banks. */
+const EXTRA_NOISE_QUESTION_RE =
+  /\b(?:\d+ results? (?:are|is) available|select (?:resume|file)|upload|link to this job|don['’]?t show this again|section \d+ question \d+|login|username|user name|person ?profile|gdpr|leg\.?\s*interest|consent|acknowledge note|county|date available|available to start|availability date)\b|\bv=[\w-]{8,}|(?:company|school|summary|field of study|degree|title) start date$/i;
+
+/** Sensitive words glued to option text ("GenderDecline to answerFemaleMale"). */
+const GLUED_SENSITIVE_RE = /gender|ethnic|veteran|disabilit|hispanic|latin[oa]/i;
+
+/** Broken / empty-looking answers. */
+const BROKEN_ANSWER_RE = /^\?|undefined|\bnull\b|^\[object |^NaN$/i;
+
 /** ChatGPT/Codex page source mistaken for an application answer. */
 export function isPageScriptAnswer(text) {
   const t = String(text || "").trim();
