@@ -20,6 +20,7 @@ import {
 } from "./sheet-sync.js";
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
 import { shouldExcludeFromAiAndBank } from "./autofill-junk.js";
+import { findAppliedSameJob } from "./job-dedupe.js";
 import {
   buildCoverLetterPrompt,
   buildPrompt,
@@ -2261,7 +2262,7 @@ function jobBelongsToPerson(job, person) {
  *   generate — any sheet row (Ready or Applied) blocks resume build
  *   apply — only Applied (or queue.applied) blocks auto-apply; Ready is expected after build
  */
-async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "generate" } = {}) {
+async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "generate", company = "", title = "" } = {}) {
   const linkKey = normalizeJobLink(jdLink || "");
   if (!linkKey) return { covered: false };
 
@@ -2269,6 +2270,19 @@ async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "gener
   const forApply = purpose === "apply";
 
   const queue = await getQueue();
+  // Same job via another listing site (different link): same company + matching title already Applied.
+  if (company && title) {
+    const same = findAppliedSameJob({ company, title }, queue, {
+      excludeCsvRow,
+      belongs: person ? (j) => jobBelongsToPerson(j, person) : undefined
+    });
+    if (same) {
+      return {
+        covered: true,
+        reason: `same company and title as applied row ${same.csvRow} (different listing link)`
+      };
+    }
+  }
   for (const j of queue) {
     if (excludeCsvRow != null && Number(j.csvRow) === Number(excludeCsvRow)) continue;
     if (person && !jobBelongsToPerson(j, person)) continue;
@@ -2324,7 +2338,9 @@ async function getPreGenerateSkipReason(jobMeta = {}) {
   if (jobMeta.forceRebuild || jobMeta.forceRegenerate) return "";
   const linkDup = await isJobLinkAlreadyCovered(jobMeta.jdLink || "", {
     excludeCsvRow: jobMeta.csvRow,
-    purpose: "generate"
+    purpose: "generate",
+    company: jobMeta.companyName || jobMeta.company || "",
+    title: jobMeta.jobTitle || jobMeta.title || ""
   });
   if (linkDup.covered) {
     return linkDup.reason || "duplicate job link";
@@ -2369,7 +2385,9 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
   if (!skipDuplicateCheck) {
     const linkDup = await isJobLinkAlreadyCovered(jdLink, {
       excludeCsvRow: jobMeta.csvRow,
-      purpose: "apply"
+      purpose: "apply",
+      company: jobMeta.companyName || jobMeta.company || "",
+      title: jobMeta.jobTitle || jobMeta.title || ""
     });
     if (linkDup.covered) {
       const queueSnap = await getQueue().catch(() => []);
