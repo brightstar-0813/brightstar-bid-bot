@@ -23,6 +23,7 @@ import {
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
 import { shouldExcludeFromAiAndBank } from "./autofill-junk.js";
 import { findAppliedSameJob } from "./job-dedupe.js";
+import { canFetchJdFromLink, cleanJobPageText, isUsableJdText } from "./jd-from-page.js";
 import {
   buildCoverLetterPrompt,
   buildPrompt,
@@ -3209,6 +3210,49 @@ a, a:visited {
   }
 
   return `<!doctype html><html><head><style>${css}</style></head><body>${html}</body></html>`;
+}
+
+/** Runs in the job page: text of the biggest description-like block, else the whole page. */
+function readJobDescriptionInPage() {
+  const body = document.body;
+  if (!body) return "";
+  const sel = [
+    '[itemprop="description"]',
+    '[class*="jobDescription" i]',
+    '[class*="job-description" i]',
+    '[class*="description" i]',
+    '[id*="description" i]',
+    "article",
+    "main"
+  ].join(",");
+  let best = "";
+  for (const el of document.querySelectorAll(sel)) {
+    const t = String(el.innerText || "");
+    if (t.length > best.length) best = t;
+  }
+  return best.length >= 400 ? best : String(body.innerText || "");
+}
+
+/** Open the job link in a background tab, read the posting text, close the tab. */
+async function fetchJdTextFromLink(url) {
+  if (!canFetchJdFromLink(url)) return "";
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab?.id ?? null;
+    if (typeof tabId !== "number") return "";
+    await waitForTabComplete(tabId, 30000).catch(() => {});
+    await sleep(2500); // JS-rendered boards fill the description after "complete"
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: readJobDescriptionInPage
+    });
+    return cleanJobPageText(results?.[0]?.result || "");
+  } catch {
+    return "";
+  } finally {
+    if (typeof tabId === "number") await chrome.tabs.remove(tabId).catch(() => {});
+  }
 }
 
 function waitForTabComplete(tabId, timeoutMs = 15000) {
@@ -10603,11 +10647,23 @@ async function runBatchLoop(outputDir) {
       }
 
       if (!String(next.jdText || "").trim()) {
-        await updateQueueJob(next.csvRow, {
-          status: "error",
-          error: "Empty job description in CSV"
-        });
-        continue;
+        // Empty JD cell: read the posting from the job link before giving up.
+        let pageJd = "";
+        if (canFetchJdFromLink(next.jdLink)) {
+          await setStatus(`Row ${next.csvRow}: job description empty — reading it from the job link…`);
+          pageJd = await fetchJdTextFromLink(next.jdLink).catch(() => "");
+        }
+        if (!isUsableJdText(pageJd)) {
+          await updateQueueJob(next.csvRow, {
+            status: "error",
+            error: next.jdLink
+              ? "Empty job description in CSV (job link had no readable description)"
+              : "Empty job description in CSV"
+          });
+          continue;
+        }
+        next.jdText = pageJd;
+        await updateQueueJob(next.csvRow, { jdText: pageJd });
       }
 
       // Validate duplicates BEFORE ChatGPT — do not build a resume we will skip.
