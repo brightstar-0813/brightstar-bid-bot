@@ -1219,6 +1219,28 @@
     "fieldOfStudy"
   ]);
 
+  /**
+   * Phone input with its own dial-code picker nearby (intl-tel-input flag, Greenhouse "Country +1"
+   * react-select, a <select> of "+NN" codes): the number field wants national digits only.
+   */
+  function hasSeparateDialCodeControl(el) {
+    if (!el) return false;
+    if (el.closest?.(".iti, .intl-tel-input, [class*='PhoneInput'], [class*='phone-input']")) return true;
+    let node = el.parentElement;
+    for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+      if (node.querySelector?.(".iti__selected-dial-code, .iti__flag-container, .selected-dial-code")) return true;
+      for (const c of node.querySelectorAll?.("select, [role='combobox'], input, [class*='single-value']") || []) {
+        if (c === el) continue;
+        const text = c.tagName === "SELECT"
+          ? [...c.options].slice(0, 40).map((o) => o.textContent).join(" ")
+          : `${c.value || ""} ${c.textContent || ""} ${c.id || ""} ${c.getAttribute?.("aria-label") || ""}`;
+        if (/(^|\s)\+\d{1,4}\b/.test(text) || /\b(country|dial)[ _-]?code\b/i.test(text)) return true;
+      }
+      if (node.matches?.("fieldset, form, [class*='field-wrapper'], [class*='application--question']")) break;
+    }
+    return false;
+  }
+
   /** US national phone for Workday (country code is a separate control). */
   function formatPhoneForWorkday(raw) {
     const digits = String(raw || "").replace(/\D/g, "");
@@ -2239,7 +2261,31 @@
   }
   // @pure-end option-polarity
 
+  // @pure-begin phone-dial (tests/autofill-phone-dial.test.js runs this block alone)
+  /**
+   * Phone country pickers label options "United States +1" / "Albania+355" (Greenhouse 2026-11-16).
+   * Drop the dial code so "United States" matches and "+1" never fuzzy-hits "+1268".
+   */
+  function stripDialCode(text) {
+    const raw = String(text || "").trim();
+    const out = raw
+      .replace(/\s*\(?\+\d{1,4}\)?\s*$/, "")
+      .replace(/^\s*\(?\+\d{1,4}\)?\s+/, "")
+      .trim();
+    return out || raw;
+  }
+
+  /** US number as 10 national digits ("+1 (703) 705-2182" → "7037052182"); "" if not US-shaped. */
+  function usNationalPhone(raw) {
+    let digits = String(raw || "").replace(/\D/g, "");
+    if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
+    return digits.length === 10 ? digits : "";
+  }
+  // @pure-end phone-dial
+
   function optionMatches(optionText, desired) {
+    const dialStripped = stripDialCode(optionText);
+    if (dialStripped && dialStripped !== String(optionText || "").trim()) optionText = dialStripped;
     const opt = normalize(optionText);
     const want = normalize(desired);
     if (!opt || !want) return false;
@@ -2614,11 +2660,21 @@
         return ok;
       }
 
-      // Keyboard fallback: highlight first filtered option and confirm.
+      // Keyboard fallback: highlight the first filtered option and confirm — but only when the
+      // highlighted option is the one we want. A blind Enter on an unfiltered / virtualised list
+      // picked "Albania +355" for a US phone country (Greenhouse FormativGroup 2026-11-16).
       input.dispatchEvent(
         new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown", code: "ArrowDown" })
       );
       await sleep(60);
+      const focusedOpt = document.querySelector(
+        ".select__option--is-focused, [class*='option--is-focused'], [role='option'][aria-selected='true']"
+      );
+      if (!focusedOpt || !optionMatchesAny(focusedOpt.textContent, candidates)) {
+        if (reactSelect) clearReactSelectFilter(input);
+        input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape", code: "Escape" }));
+        return false;
+      }
       input.dispatchEvent(
         new KeyboardEvent("keydown", { bubbles: true, key: "Enter", code: "Enter" })
       );
@@ -3521,6 +3577,10 @@
     if (key === "phone" && onWorkday) {
       const formatted = formatPhoneForWorkday(fillValue);
       if (formatted) fillValue = formatted;
+    } else if (key === "phone" && hasSeparateDialCodeControl(el)) {
+      // Country picker already supplies +1 — "+1 (703)…" here reads as too long (Greenhouse).
+      const national = usNationalPhone(fillValue);
+      if (national) fillValue = national;
     }
     if (key === "zipCode" && onWorkday) {
       const countryHint =
