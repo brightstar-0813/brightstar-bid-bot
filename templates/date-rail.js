@@ -52,7 +52,13 @@ const CSS = `
       color: #374151;
     }
 
-    .contact { margin: 0; font-size: 9pt; }
+    .contact {
+      margin: 0;
+      font-size: 9pt;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+    }
 
     a, a:visited { color: #111; text-decoration: none; }
 

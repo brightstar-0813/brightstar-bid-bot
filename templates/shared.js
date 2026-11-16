@@ -122,6 +122,23 @@ function cleanUrl(value) {
   return url.replace(/[),.]+$/g, "").replace(/\/+$/, "").trim();
 }
 
+/**
+ * Compact LinkedIn text for a single contact line (href stays absolute).
+ * Long /in/ slugs drop the linkedin.com host so phone|email|LI|location fits.
+ */
+export function compactLinkedInLabel(value) {
+  const cleaned = cleanUrl(value)
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/+$/, "");
+  const m = cleaned.match(/(?:^|\.)linkedin\.com\/(in\/[^/?#]+)/i);
+  if (!m) return cleaned;
+  const path = m[1];
+  // Keep host for short slugs; long ones use in/slug only.
+  if (path.length > 24) return path;
+  return `linkedin.com/${path}`;
+}
+
 export function contactLine(data, { linkColor } = {}) {
   const parts = [];
   if (data.location) {
@@ -139,8 +156,9 @@ export function contactLine(data, { linkColor } = {}) {
   if (data.linkedin) {
     const url = cleanUrl(data.linkedin);
     const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    const label = compactLinkedInLabel(url);
     parts.push(
-      `<a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(href)}</a>`
+      `<a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(label)}</a>`
     );
   }
   const style = linkColor ? ` style="color:${linkColor}"` : "";

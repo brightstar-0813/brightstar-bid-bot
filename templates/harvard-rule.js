@@ -58,8 +58,11 @@ const CSS = `
 
     .contact {
       margin: 0;
-      font-size: 9.5pt;
+      font-size: 9pt;
       font-family: Calibri, Arial, sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
     }
 
     a, a:visited { color: #111; text-decoration: underline; }

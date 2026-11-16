@@ -58,6 +58,9 @@ const CSS = `
       margin: 0;
       font-size: 9pt;
       color: #c5d0dc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
     }
 
     .contact a, .contact a:visited {

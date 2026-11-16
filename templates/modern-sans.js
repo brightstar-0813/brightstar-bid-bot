@@ -59,7 +59,14 @@ const CSS = `
       border: 0;
     }
 
-    .contact { margin: 0; font-size: 9pt; color: #475569; }
+    .contact {
+      margin: 0;
+      font-size: 9pt;
+      color: #475569;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+    }
 
     .contact a, .contact a:visited {
       color: #0f766e;

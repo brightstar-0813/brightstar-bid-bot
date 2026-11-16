@@ -1,4 +1,5 @@
 import {
+  compactLinkedInLabel,
   educationLocationLine,
   educationYearLine,
   stripEducationDatesFromPlace,
@@ -61,8 +62,11 @@ const CSS = `
 
     .contact {
       margin: 0 0 6px;
-      font-size: 10pt;
+      font-size: 9pt;
       color: #e8772e;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
     }
 
     .contact .tag { font-weight: 700; }
@@ -184,7 +188,7 @@ const CSS = `
     .certifications { margin: 0; padding-left: 16px; }
 `;
 
-function shortLink(value) {
+function shortEmail(value) {
   return String(value || "")
     .trim()
     .replace(/^\[([^\]]*)\]\(([^)]+)\)$/, "$2")
@@ -202,16 +206,16 @@ function labeledContact(data) {
     );
   }
   if (data.email) {
-    const email = shortLink(data.email);
+    const email = shortEmail(data.email);
     bits.push(
       `<span class="tag">E:</span> <a href="mailto:${escapeHtml(email)}"${pathAttr("email")}>${escapeHtml(email)}</a>`
     );
   }
   if (data.linkedin) {
-    const shown = shortLink(data.linkedin);
-    const href = /^https?:\/\//i.test(String(data.linkedin))
+    const shown = compactLinkedInLabel(data.linkedin);
+    const href = /^https?:\/\//i.test(String(data.linkedin).trim())
       ? String(data.linkedin).trim()
-      : `https://${shown}`;
+      : `https://${String(data.linkedin).trim().replace(/^www\./i, "")}`;
     bits.push(
       `<span class="tag">LI:</span> <a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(shown)}</a>`
     );

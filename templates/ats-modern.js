@@ -52,7 +52,10 @@ const CSS = `
 
     .contact {
       margin: 0;
-      font-size: 10pt;
+      font-size: 9pt;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
     }
 
     a, a:visited { color: #000; text-decoration: underline; }

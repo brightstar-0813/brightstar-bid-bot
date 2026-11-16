@@ -8,6 +8,7 @@ import {
   resumeJsonToHtml,
   TEMPLATE_ACCENTS
 } from "../templates/index.js";
+import { compactLinkedInLabel, contactLine } from "../templates/shared.js";
 
 function resumeWithEducation(eduBody) {
   return `DAVID LEANDRO DE OLIVEIRA
@@ -529,12 +530,49 @@ test("Orange Banner puts company above the title and uses orange section bars", 
   assert.match(html, /JavaScript, Python, APIs/);
   assert.match(html, /P:<\/span>/);
   assert.match(html, /LI:<\/span>/);
+  assert.match(html, /white-space:\s*nowrap/);
   assert.match(html, /Example Partners/);
   assert.match(html, /Senior Software Specialist/);
   assert.match(html, /Concentration in software engineering/);
   const companyAt = html.indexOf("Example Partners");
   const titleAt = html.indexOf("Senior Software Specialist");
   assert.ok(companyAt > -1 && titleAt > companyAt);
+});
+
+test("contact line keeps LinkedIn compact so P|E|LI|L fits one row", () => {
+  assert.equal(
+    compactLinkedInLabel("https://www.linkedin.com/in/example/"),
+    "linkedin.com/in/example"
+  );
+  assert.equal(
+    compactLinkedInLabel(
+      "https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/"
+    ),
+    "in/michael-haries-ibea-0baa0a417"
+  );
+  const line = contactLine({
+    phone: "+63 948 803 6855",
+    email: "michaelhariesibea3@gmail.com",
+    linkedin: "https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/",
+    location: "Trece Martires, Calabarzon"
+  });
+  assert.match(line, />in\/michael-haries-ibea-0baa0a417</);
+  assert.match(line, /href="https:\/\/www\.linkedin\.com\/in\/michael-haries-ibea-0baa0a417"/);
+  const orange = resumeJsonToHtml(
+    {
+      name: "Michael Haries Namuco Ibea",
+      headline: "Senior Salesforce Developer",
+      phone: "9488036855",
+      email: "michaelhariesibea3@gmail.com",
+      linkedin: "https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/",
+      location: "Trece Martires, Calabarzon",
+      profile: "Summary.",
+      experience: []
+    },
+    "orange-banner"
+  );
+  assert.match(orange, /LI:<\/span> <a[^>]*>in\/michael-haries-ibea-0baa0a417<\/a>/);
+  assert.match(orange, /white-space:\s*nowrap/);
 });
 
 test("concise professional templates keep skill categories and role content", () => {
