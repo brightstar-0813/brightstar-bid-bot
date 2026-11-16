@@ -296,3 +296,20 @@ test("skip status replaces Ready with a reason and never reads as Applied", () =
   assert.ok(!/^\s*applied\b/i.test(formatSkipStatus("applied elsewhere")));
   assert.ok(formatSkipStatus("x".repeat(300)).length <= 120);
 });
+
+import { shortSkipReason } from "../sheets.js";
+
+test("short skip reasons for the sheet", () => {
+  assert.equal(
+    shortSkipReason("same company and title as applied row 75 (different listing link)"),
+    "duplicate of applied row 75"
+  );
+  assert.equal(shortSkipReason("Duplicate — same job link already in Google Sheet (or earlier in this CSV)"), "duplicate");
+  assert.equal(shortSkipReason("not applied (Apply needs review (login, CAPTCHA, or form blocker))"), "needs review");
+  assert.equal(shortSkipReason("Inactive job"), "closed");
+  assert.equal(shortSkipReason("Hybrid — 3 days in office"), "hybrid/on-site");
+  assert.equal(shortSkipReason("UK only"), "non-US");
+  assert.equal(shortSkipReason("Skipped — hybrid"), "hybrid/on-site");
+  assert.equal(shortSkipReason(""), "");
+  assert.ok(shortSkipReason("x".repeat(100)).length <= 40);
+});

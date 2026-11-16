@@ -107,6 +107,32 @@ export function formatSkipStatus(reason = "") {
   return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
 
+/**
+ * Short sheet reason from a long row error ("Apply needs review (login, CAPTCHA…)" → "needs review").
+ * Unknown text is kept, cut to 40 chars. User decision 2026-11-16: short reasons on the sheet.
+ */
+export function shortSkipReason(text = "") {
+  const raw = String(text || "")
+    .replace(/^\s*(skipped|not applied)\s*[—:-]\s*/i, "")
+    .replace(/^\s*not applied\s*\((.*)\)\s*$/i, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!raw) return "";
+  const s = raw.toLowerCase();
+  const row = /applied row (\d+)/.exec(s);
+  if (row) return `duplicate of applied row ${row[1]}`;
+  if (/duplicate|same job link|already in google sheet/.test(s)) return "duplicate";
+  if (/linkedin/.test(s)) return "LinkedIn";
+  if (/inactive|closed|no longer|unavailable|not found|expired|position (has been )?filled/.test(s)) return "closed";
+  if (/hybrid|on-?site|in[- ]office/.test(s)) return "hybrid/on-site";
+  if (/\b(uk|united kingdom|canada|india|latam|europe|emea|non-us|outside (the )?us)\b/.test(s)) return "non-US";
+  if (/empty (jd|job description)|no job description/.test(s)) return "no job description";
+  if (/needs review|form blocker/.test(s)) return "needs review";
+  if (/captcha/.test(s)) return "CAPTCHA";
+  if (/log ?in|sign[- ]?in|account/.test(s)) return "login wall";
+  return raw.length > 40 ? `${raw.slice(0, 37)}...` : raw;
+}
+
 /** Sheet "Bid mode" labels (column H, next to Status). */
 export const BID_MODE_AUTO = "Auto bid";
 export const BID_MODE_MANUAL = "Manual bid";

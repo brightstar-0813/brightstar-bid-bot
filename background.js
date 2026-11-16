@@ -3,6 +3,7 @@ import {
   markJobAppliedOnSpreadsheet,
   formatAppliedStatus,
   formatSkipStatus,
+  shortSkipReason,
   formatApplicationDateTime,
   fetchExistingJobLinks,
   fetchExistingSheetDedupKeys,
@@ -2407,7 +2408,7 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
       if (!alreadyApplied && (prior?.jobDir || prior?.hasFiles)) {
         await markQueueJobAppliedOnSheet(
           { ...jobMeta, jdLink: jdLink || jobMeta.jdLink },
-          formatSkipStatus(linkDup.reason)
+          formatSkipStatus(shortSkipReason(linkDup.reason))
         ).catch(() => null);
       }
       await setStatus(
@@ -2607,7 +2608,7 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
     // Out of attempts and not applied: replace "Ready" on the sheet with the reason.
     await markQueueJobAppliedOnSheet(
       { ...jobMeta, jdLink: jdLink || jobMeta.jdLink },
-      formatSkipStatus(`not applied (${reviewMsg})`)
+      formatSkipStatus(shortSkipReason(reviewMsg))
     ).catch(() => null);
   }
   // Sites without an auto-submit adapter pause by design → "Needs hand-off", not an error.
@@ -12919,8 +12920,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (job.status === "running") throw new Error("Row is still running — pause first.");
         if (job.applied) throw new Error(`Row ${csvRow} is already Applied.`);
         const reason =
-          String(message.reason || job.error || "").replace(/^skippeds*[—-]s*/i, "").trim() ||
-          "skipped by hand";
+          String(message.reason || "").trim() || shortSkipReason(job.error) || "skipped by hand";
         const statusText = formatSkipStatus(reason);
         const sheet = await markQueueJobAppliedOnSheet(
           {

@@ -46,7 +46,8 @@ import { isResumePreviewable } from "./templates/preview-sample.js";
 import {
   extractSpreadsheetId,
   formatApplicationDate,
-  formatApplicationDateTime
+  formatApplicationDateTime,
+  shortSkipReason
 } from "./sheets.js";
 import { queueDisplayNo, SHEET_SYNC_MISSING_FOLDER } from "./sheet-sync.js";
 import { ensureQueueDisplayOrder } from "./queue-sort.js";
@@ -2863,7 +2864,17 @@ async function markJobApplied(job) {
 }
 
 async function markJobSkipped(job) {
-  const res = await chrome.runtime.sendMessage({ type: "mark_queue_job_skipped", csvRow: job.csvRow });
+  // Short reason for the sheet ("closed", "hybrid/on-site", "non-US", …), editable before saving.
+  const reason = window.prompt(
+    `Row ${job.csvRow}: reason for skipping (written to the sheet as "Skipped — <reason>")`,
+    shortSkipReason(job.error) || "skipped by hand"
+  );
+  if (reason == null) return;
+  const res = await chrome.runtime.sendMessage({
+    type: "mark_queue_job_skipped",
+    csvRow: job.csvRow,
+    reason: reason.trim()
+  });
   if (!res?.ok) {
     setStatus(res?.error || `Could not mark row ${job.csvRow} skipped.`);
     return;
