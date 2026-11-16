@@ -36,10 +36,15 @@ export function cleanJobPageText(raw, { maxChars = 12000 } = {}) {
 const GONE_RE =
   /\b(no longer (available|accepting)|job (has )?expired|position (has been )?filled|page not found|job not found|this job is closed)\b/i;
 
-/** Enough real posting text to tailor a resume (not a login wall / 404 / closed notice). */
+// Bot-check / block pages (Glassdoor "Humans only" + Cloudflare Ray ID, 2026-11-16 row 159).
+const BLOCK_PAGE_RE =
+  /\b(humans only|verify (that )?you are (a )?human|are you a robot|checking your browser|just a moment|access denied|request blocked|unusual traffic|enable (javascript|cookies)|ray id|cloudflare location|captcha|sign in to (view|see) (this|the) job|log in to (view|see|continue))\b/i;
+
+/** Enough real posting text to tailor a resume (not a login wall / bot check / 404 / closed notice). */
 export function isUsableJdText(text, { minChars = 400 } = {}) {
   const t = String(text || "").trim();
   if (t.length < minChars) return false;
+  if (t.length < 3000 && BLOCK_PAGE_RE.test(t)) return false;
   if (t.length < 1500 && GONE_RE.test(t)) return false;
   return true;
 }

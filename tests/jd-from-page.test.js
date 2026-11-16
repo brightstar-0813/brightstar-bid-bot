@@ -22,3 +22,14 @@ test("usable JD: long posting yes, short or closed notice no", () => {
   assert.equal(isUsableJdText("Sign in to continue"), false);
   assert.equal(isUsableJdText(`This job is no longer available. ${"Browse other jobs. ".repeat(30)}`), false);
 });
+
+test("bot-check pages are not a JD (Glassdoor 'Humans only', row 159)", () => {
+  const glassdoorBlock =
+    "Humans only\nGlassdoor has been built on the contributions of real employees and job seekers. " +
+    "We use advanced security systems to keep our site safe and prevent misuse or unauthorized access.\n" +
+    "In rare cases, security protections may mistakenly block legitimate activity from real users. " +
+    "If you have been mistakenly blocked from accessing our site, please review our Help Center article.\n" +
+    "Ray ID: a5b882f52cf6f079\nCloudflare Location: US\nRequested URL: https://www.glassdoor.com/job-listing/j?jl=1";
+  assert.equal(isUsableJdText(glassdoorBlock), false);
+  assert.equal(isUsableJdText(`Just a moment... Checking your browser. ${"x ".repeat(300)}`), false);
+});
