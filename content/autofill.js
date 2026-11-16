@@ -7289,6 +7289,20 @@
     return t.split(" ").length <= 4 || ACTION_LEAD_RE.test(t);
   }
 
+  // @pure-begin bookmark-label (tests/autofill-bookmark-label.test.js runs this block alone)
+  /**
+   * Job-board bookmark buttons ("Save", "Saved", "Save job") are never a form Submit, even when
+   * they are type=submit (Himalayas listing: "Reached Submit (Save)", 2026-11-15/16).
+   */
+  function isBookmarkSaveLabel(text) {
+    const t = String(text || "")
+      .replace(/[^\p{L}\p{N} ]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return /^(un)?(save|saved|bookmark|bookmarked)( (this )?(job|role|position|listing|for later))?$/i.test(t);
+  }
+  // @pure-end bookmark-label
+
   function classifyActionButton(text) {
     const t = String(text || "").trim();
     if (!t || t.length > 80) return null;
@@ -7359,6 +7373,7 @@
         if (EASY_BACK_RE.test(text) && !EASY_NEXT_RE.test(text) && !EASY_SUBMIT_RE.test(text)) {
           continue;
         }
+        if (!autoCls && isBookmarkSaveLabel(text)) continue;
         const cls = autoCls || classifyActionButton(text);
         if (cls === "next" && !next) next = { type: "next", el: btn, text: text || "Next" };
         else if (cls === "review" && !review) review = { type: "review", el: btn, text };
