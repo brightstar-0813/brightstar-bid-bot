@@ -2,6 +2,7 @@ import {
   appendJobToSpreadsheet,
   markJobAppliedOnSpreadsheet,
   formatAppliedStatus,
+  formatSkipStatus,
   formatApplicationDateTime,
   fetchExistingJobLinks,
   fetchExistingSheetDedupKeys,
@@ -2402,6 +2403,13 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
           ? ""
           : `Skipped — ${linkDup.reason}`
       }).catch(() => {});
+      // Built rows sit at "Ready" on the sheet — record why they were not applied.
+      if (!alreadyApplied && (prior?.jobDir || prior?.hasFiles)) {
+        await markQueueJobAppliedOnSheet(
+          { ...jobMeta, jdLink: jdLink || jobMeta.jdLink },
+          formatSkipStatus(linkDup.reason)
+        ).catch(() => null);
+      }
       await setStatus(
         alreadyApplied
           ? `Row ${jobMeta.csvRow}: already Applied on sheet — skipping apply.`
@@ -2595,6 +2603,13 @@ async function runHostedInterleavedApply(jobMeta = {}, board = "Dice", { skipDup
     error: reviewMsg.slice(0, 240)
   }).catch(() => {});
   await setStatus(`Row ${jobMeta.csvRow}: ${reviewMsg}`);
+  if (exhausted && status !== "unavailable") {
+    // Out of attempts and not applied: replace "Ready" on the sheet with the reason.
+    await markQueueJobAppliedOnSheet(
+      { ...jobMeta, jdLink: jdLink || jobMeta.jdLink },
+      formatSkipStatus(`not applied (${reviewMsg})`)
+    ).catch(() => null);
+  }
   // Sites without an auto-submit adapter pause by design → "Needs hand-off", not an error.
   // A second pass on the same hand-off row means it was left unfinished → "skipped".
   const handoff = isHandoffBoard(boardLabel);

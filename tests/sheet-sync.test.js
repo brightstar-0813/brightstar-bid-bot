@@ -283,3 +283,16 @@ test("running jobs keep local identity during sync", () => {
   assert.equal(queue[0].sheetJobNo, undefined);
   assert.equal(queue[0].sheetRow, undefined);
 });
+
+import { formatSkipStatus } from "../sheets.js";
+
+test("skip status replaces Ready with a reason and never reads as Applied", () => {
+  assert.equal(
+    formatSkipStatus("same company and title as applied row 75 (different listing link)"),
+    "Skipped — same company and title as applied row 75 (different listing link)"
+  );
+  assert.equal(formatSkipStatus("Skipped — duplicate"), "Skipped — duplicate");
+  assert.equal(formatSkipStatus(""), "Skipped");
+  assert.ok(!/^\s*applied\b/i.test(formatSkipStatus("applied elsewhere")));
+  assert.ok(formatSkipStatus("x".repeat(300)).length <= 120);
+});

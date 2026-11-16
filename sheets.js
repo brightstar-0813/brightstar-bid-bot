@@ -93,6 +93,20 @@ export function formatAppliedStatus(date = new Date()) {
   return `Applied ${formatApplicationDateTime(date)}`;
 }
 
+/**
+ * Status cell for a built row that was deliberately not applied, so it does not sit at "Ready".
+ * Never starts with "Applied" (Apps Script statusLooksApplied_ must stay false).
+ * e.g. "Skipped — same company and title as applied row 75"
+ */
+export function formatSkipStatus(reason = "") {
+  const r = String(reason || "")
+    .replace(/^\s*(skipped|not applied)\s*[—:-]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const text = r ? `Skipped — ${r}` : "Skipped";
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
 /** Sheet "Bid mode" labels (column H, next to Status). */
 export const BID_MODE_AUTO = "Auto bid";
 export const BID_MODE_MANUAL = "Manual bid";
