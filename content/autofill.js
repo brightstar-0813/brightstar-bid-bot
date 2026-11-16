@@ -1726,6 +1726,26 @@
    * formField containers, aria-labelledby, etc.).
    */
   function questionLabelForControl(el) {
+    // Unlabeled address sub-fields (JazzHR: City / State/Province / Postal under one "Address" label)
+    // are named only by their placeholder; otherwise nearestOwnFieldLabel returns the group's
+    // "Address" and all three get the street. Checked before the nearest-label walk.
+    const ph = cleanLabelText(el.getAttribute?.("placeholder") || "");
+    if (
+      ph &&
+      ph.length <= 30 &&
+      /^(city|town|state|province|state ?\/ ?province|postal|postal code|zip|zip ?code|zip ?\/ ?postal code|county|country)$/i.test(ph) &&
+      !el.getAttribute("aria-label") &&
+      !el.getAttribute("aria-labelledby")
+    ) {
+      let hasForLabel = false;
+      try {
+        hasForLabel = Boolean(el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`));
+      } catch {
+        /* ignore */
+      }
+      if (!hasForLabel && !el.closest?.("label")) return ph;
+    }
+
     const own = nearestOwnFieldLabel(el);
     if (own) return own;
 
@@ -2198,6 +2218,27 @@
    * For yes/no, prefer options that start with Yes/No — never use naive substring
    * matching (avoids "no" matching "Non-binary" / "non-hispanic").
    */
+  // @pure-begin option-polarity (tests/autofill-option-polarity.test.js runs this block alone)
+  /**
+   * True when an option clearly answers the opposite way to the desired text:
+   * leading Yes vs No, or a negated answer ("No, I do not have a disability") vs an option
+   * with no negation ("Yes, I have a disability, or have had one in the past").
+   * Inputs are normalized lower-case strings (punctuation already stripped).
+   * MongoDB Greenhouse 2026-11-16: token overlap picked "Yes, I have a disability".
+   */
+  function optionPolarityConflict(optLoose, wantLoose) {
+    const lead = (s) => {
+      const m = /^(yes|no)\b/.exec(String(s || "").trim());
+      return m ? m[1] : "";
+    };
+    const wl = lead(wantLoose);
+    const ol = lead(optLoose);
+    if (wl && ol && wl !== ol) return true;
+    const negated = (s) => /\b(no|not|don t|dont|do not|never|none|without)\b/.test(String(s || ""));
+    return negated(wantLoose) !== negated(optLoose);
+  }
+  // @pure-end option-polarity
+
   function optionMatches(optionText, desired) {
     const opt = normalize(optionText);
     const want = normalize(desired);
@@ -2223,6 +2264,14 @@
       return opt === "no" || opt === "n" || opt.startsWith("no ") || opt.startsWith("no,");
     }
 
+    // Short answers ("Male", "Man", "M", "Asian") must match whole words: "female" contains "male"
+    // (Yoga Alliance JazzHR 2026-11-15 picked Female for a Male profile).
+    if (wantLoose.length <= 4 || optLoose.length <= 4) {
+      const hasWord = (hay, needle) => Boolean(needle) && ` ${hay} `.includes(` ${needle} `);
+      return hasWord(optLoose, wantLoose) || hasWord(wantLoose, optLoose);
+    }
+    // Fuzzy paths below must never cross Yes/No or negated/affirmative answers.
+    if (optionPolarityConflict(optLoose, wantLoose)) return false;
     if (opt.includes(want) || want.includes(opt) || optLoose.includes(wantLoose) || wantLoose.includes(optLoose)) {
       return true;
     }

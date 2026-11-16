@@ -37,6 +37,7 @@ import {
   matchSourceRank
 } from "./autofill-classify.js";
 import { formatAutofillSummary } from "./autofill-summary.js";
+import { pickAutofillJobMeta } from "./autofill-job-context.js";
 import { pickCitizenshipOption, normalizeCitizenshipLabel } from "./autofill-citizenship.js";
 import { getEnv } from "./env.js";
 import {
@@ -2426,6 +2427,7 @@ async function getAutofillAiContext() {
     "last_jd_text",
     "last_jd_link",
     "last_apply_jd_link",
+    "last_apply_csv_row",
     "job_queue",
     "active_apply_job"
   ]);
@@ -2438,45 +2440,8 @@ async function getAutofillAiContext() {
   const recentRoles = normalizeRecentRoles(
     resume.experience || resume.workHistory || person?.workHistory || []
   );
-  let jobTitle = data.last_job_title || "";
-  let companyName = data.last_company_name || data.last_job_company || "";
-  let jdText = String(data.last_jd_text || "").trim();
-  let jdLink = data.last_jd_link || data.last_apply_jd_link || "";
-
-  // If panel/apply wiped or never set JD text, recover from the matching queue row.
-  if (!jdText || !jobTitle || !companyName) {
-    try {
-      const queue = Array.isArray(data.job_queue) ? data.job_queue : [];
-      const active = data.active_apply_job && typeof data.active_apply_job === "object"
-        ? data.active_apply_job
-        : {};
-      const csvRow = active.csvRow != null && String(active.csvRow).trim() !== ""
-        ? Number(active.csvRow)
-        : NaN;
-      const linkNorm = String(jdLink || active.jdLink || "")
-        .trim()
-        .toLowerCase()
-        .replace(/\/+$/, "");
-      const row =
-        queue.find((j) => Number.isFinite(csvRow) && Number(j.csvRow) === csvRow) ||
-        queue.find((j) => {
-          const jl = String(j.jdLink || j.url || "")
-            .trim()
-            .toLowerCase()
-            .replace(/\/+$/, "");
-          return linkNorm && jl && jl === linkNorm;
-        }) ||
-        null;
-      if (row) {
-        if (!jdText) jdText = String(row.jdText || "").trim();
-        if (!jobTitle) jobTitle = String(row.jobTitle || row.title || "").trim();
-        if (!companyName) companyName = String(row.companyName || row.company || "").trim();
-        if (!jdLink) jdLink = String(row.jdLink || row.url || "").trim();
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  // Active queue row beats stale last_* keys (batch apply doesn't refresh them).
+  const { jobTitle, companyName, jdText, jdLink } = pickAutofillJobMeta(data);
 
   return {
     jobMeta: {
