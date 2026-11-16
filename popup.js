@@ -2449,6 +2449,17 @@ function renderQueue() {
       actions.appendChild(markBtn);
     }
 
+    // Rows the user decided not to apply to: write "Skipped — <reason>" on the sheet.
+    if ((job.status === "done" || job.status === "skipped") && !job.applied && !job.skippedByHand) {
+      const skipMarkBtn = document.createElement("button");
+      skipMarkBtn.type = "button";
+      skipMarkBtn.className = "secondary";
+      setIconButton(skipMarkBtn, "skip", "Mark skipped");
+      skipMarkBtn.disabled = batchState === "running";
+      skipMarkBtn.addEventListener("click", () => markJobSkipped(job));
+      actions.appendChild(skipMarkBtn);
+    }
+
     if (job.status === "error" || job.status === "failed") {
       const retryBtn = document.createElement("button");
       retryBtn.type = "button";
@@ -2844,6 +2855,17 @@ async function markJobApplied(job) {
   const res = await chrome.runtime.sendMessage({ type: "mark_queue_job_applied", csvRow: job.csvRow });
   if (!res?.ok) {
     setStatus(res?.error || `Could not mark row ${job.csvRow} applied.`);
+    return;
+  }
+  if (Array.isArray(res.queue)) queueCache = res.queue;
+  renderQueue();
+  updateCsvSummaryFromQueue();
+}
+
+async function markJobSkipped(job) {
+  const res = await chrome.runtime.sendMessage({ type: "mark_queue_job_skipped", csvRow: job.csvRow });
+  if (!res?.ok) {
+    setStatus(res?.error || `Could not mark row ${job.csvRow} skipped.`);
     return;
   }
   if (Array.isArray(res.queue)) queueCache = res.queue;

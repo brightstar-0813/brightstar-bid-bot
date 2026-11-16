@@ -12905,6 +12905,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // User decided not to apply to this row (closed, hybrid, non-US, duplicate, …): write
+  // "Skipped — <reason>" over "Ready" on the sheet and use up its apply attempts so Start
+  // never re-opens it. Never touches Applied rows.
+  if (type === "mark_queue_job_skipped") {
+    (async () => {
+      try {
+        const csvRow = Number(message.csvRow);
+        if (!Number.isFinite(csvRow)) throw new Error("Missing CSV row.");
+        const queue = await getQueue();
+        const job = (queue || []).find((j) => Number(j.csvRow) === csvRow);
+        if (!job) throw new Error(`Row ${csvRow} was not found.`);
+        if (job.status === "running") throw new Error("Row is still running — pause first.");
+        if (job.applied) throw new Error(`Row ${csvRow} is already Applied.`);
+        const reason =
+          String(message.reason || job.error || "").replace(/^skippeds*[—-]s*/i, "").trim() ||
+          "skipped by hand";
+        const statusText = formatSkipStatus(reason);
+        const sheet = await markQueueJobAppliedOnSheet(
+          {
+            csvRow,
+            jobTitle: job.title || "",
+            companyName: job.company || "",
+            jdLink: job.jdLink || "",
+            salary: job.salary || "",
+            jobDir: job.jobDir || ""
+          },
+          statusText
+        );
+        await updateQueueJob(csvRow, {
+          applied: false,
+          applyAttempted: true,
+          applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+          skippedByHand: true,
+          error: sheet?.error ? `${statusText} (sheet failed: ${sheet.error})` : statusText
+        });
+        await setStatus(
+          sheet?.error
+            ? `Row ${csvRow}: marked skipped (sheet failed: ${sheet.error}).`
+            : `Row ${csvRow}: marked skipped on the sheet.`
+        );
+        safeSendResponse(sendResponse, { ok: true, status: statusText, queue: await getQueue() });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (type === "remove_queue_job") {
     (async () => {
       try {
