@@ -6688,6 +6688,9 @@
     const on = (k) => /^(true|1)$/i.test(q.get(k) || "");
     if (on("not_found") || on("job_not_found") || on("notfound")) return true;
     if (/(^|\.)greenhouse\.io$/i.test(u.hostname) && on("error")) return true;
+    // Himalayas sends a removed listing to the board root (/jobs), never a job page
+    // (Humana #105, 2026-11-16: the bot "filled" the board and paused).
+    if (/(^|\.)himalayas\.app$/i.test(u.hostname) && /^\/jobs\/?$/i.test(u.pathname)) return true;
     return false;
   }
   // @pure-end job-gone-url
