@@ -6671,8 +6671,30 @@
     return parts.join("  ").slice(0, 8000);
   }
 
+  // @pure-begin job-gone-url (tests/autofill-job-gone-url.test.js runs this block alone)
+  /**
+   * Closed postings that only say so in the URL: Workable redirects a dead job to the
+   * company board with ?not_found=true (Hunt St via Jobgether, 2026-11-16); Greenhouse
+   * redirects to the board with ?error=true.
+   */
+  function jobGoneFromUrl(href) {
+    let u;
+    try {
+      u = new URL(String(href || ""));
+    } catch {
+      return false;
+    }
+    const q = u.searchParams;
+    const on = (k) => /^(true|1)$/i.test(q.get(k) || "");
+    if (on("not_found") || on("job_not_found") || on("notfound")) return true;
+    if (/(^|\.)greenhouse\.io$/i.test(u.hostname) && on("error")) return true;
+    return false;
+  }
+  // @pure-end job-gone-url
+
   /** @returns {string} a short reason when the job is gone, else "" */
   function detectJobUnavailable() {
+    if (jobGoneFromUrl(location.href)) return "inactive job";
     const match = unavailableTextSnippet().match(JOB_GONE_RE);
     if (match) {
       return "inactive job";
