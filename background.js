@@ -177,7 +177,9 @@ import {
 } from "./csv-source.js";
 import {
   isExplicitlyHostedIndeedJob,
+  isIndeedSearchChromeTitle,
   isIndeedUrl,
+  indeedViewJobLink,
   normalizeIndeedCapturedJob
 } from "./indeed.js";
 import {
@@ -3294,25 +3296,21 @@ async function discardPdfRenderSession() {
   }
 }
 
-async function ensurePdfRenderTab({ active = false } = {}) {
+async function ensurePdfRenderTab() {
   cancelPdfRenderIdleCleanup();
   if (typeof pdfRenderTabId === "number") {
     try {
       const tab = await chrome.tabs.get(pdfRenderTabId);
-      if (tab?.id) {
-        if (active && !tab.active) {
-          await chrome.tabs.update(pdfRenderTabId, { active: true }).catch(() => {});
-        }
-        return pdfRenderTabId;
-      }
+      if (tab?.id) return pdfRenderTabId;
     } catch {
       pdfRenderTabId = null;
       pdfRenderAttached = false;
     }
   }
 
-  // active:false by default — stealing focus breaks ChatGPT's composer between jobs.
-  const tab = await chrome.tabs.create({ url: "about:blank", active });
+  // Never active — focusing this tab flashes the resume HTML and steals focus
+  // from ChatGPT / the side panel during Export PDF and batch runs.
+  const tab = await chrome.tabs.create({ url: "about:blank", active: false });
   if (!tab.id) throw new Error("Failed to create render tab.");
   pdfRenderTabId = tab.id;
   pdfRenderAttached = false;
@@ -3322,6 +3320,30 @@ async function ensurePdfRenderTab({ active = false } = {}) {
     "Timed out opening blank render tab."
   );
   return pdfRenderTabId;
+}
+
+async function restoreTabFocus(tabId) {
+  if (typeof tabId !== "number") return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab?.id) await chrome.tabs.update(tab.id, { active: true });
+  } catch {
+    /* previous tab may be gone */
+  }
+}
+
+async function blankPdfRenderDocument(debuggee) {
+  try {
+    const frameTree = await debuggerCommand(debuggee, "Page.getFrameTree");
+    const frameId = frameTree?.frameTree?.frame?.id;
+    if (!frameId) return;
+    await debuggerCommand(debuggee, "Page.setDocumentContent", {
+      frameId,
+      html: "<!doctype html><title>Brightstar PDF render</title><body></body>"
+    });
+  } catch {
+    /* best-effort — tab may still be reused next call */
+  }
 }
 
 async function ensurePdfDebuggerAttached(tabId) {
@@ -3367,8 +3389,9 @@ async function ensurePdfDebuggerAttached(tabId) {
 /**
  * Render HTML → PDF via a reused background tab + debugger.
  * Times out if Chrome's "Allow debugger" prompt is ignored.
+ * Never focuses the render tab — Export PDF / batch must not flash the resume.
  */
-async function htmlToPdfBase64Once(html, { active = false } = {}) {
+async function htmlToPdfBase64Once(html) {
   const printParams = {
     printBackground: true,
     paperWidth: 8.27,
@@ -3381,7 +3404,7 @@ async function htmlToPdfBase64Once(html, { active = false } = {}) {
   };
 
   try {
-    const tabId = await ensurePdfRenderTab({ active });
+    const tabId = await ensurePdfRenderTab();
     const debuggee = await ensurePdfDebuggerAttached(tabId);
 
     let loaded = false;
@@ -3405,7 +3428,8 @@ async function htmlToPdfBase64Once(html, { active = false } = {}) {
       // Fallback for environments where setDocumentContent is blocked.
       await setStatus("PDF fallback: loading HTML via data URL…");
       await chrome.tabs.update(tabId, {
-        url: `data:text/html;charset=utf-8,${encodeURIComponent(String(html || ""))}`
+        url: `data:text/html;charset=utf-8,${encodeURIComponent(String(html || ""))}`,
+        active: false
       });
       await withTimeout(
         waitForTabComplete(tabId, 15000),
@@ -3423,6 +3447,8 @@ async function htmlToPdfBase64Once(html, { active = false } = {}) {
       "Page.printToPDF timed out."
     );
     if (!result?.data) throw new Error("PDF generation returned empty data.");
+    // Clear HTML so a leftover render tab does not look like an opened resume.
+    await blankPdfRenderDocument(debuggee);
     // Keep tab + debugger attached for the next resume/cover PDF in this session.
     return result.data;
   } catch (err) {
@@ -3433,26 +3459,38 @@ async function htmlToPdfBase64Once(html, { active = false } = {}) {
 
 /** Render HTML → PDF, retrying transient debugger/attach failures automatically. */
 async function htmlToPdfBase64(html, { attempts = 3 } = {}) {
+  let prevTabId = null;
+  try {
+    const [prev] = await chrome.tabs.query({ active: true, currentWindow: true });
+    prevTabId = prev?.id ?? null;
+  } catch {
+    prevTabId = null;
+  }
+
   let lastErr = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      const lastTry = attempt === attempts;
-      await setStatus(
-        attempt === 1
-          ? "Generating PDF… (click Allow if Chrome asks about debugging)"
-          : `Generating PDF… retry ${attempt}/${attempts}${lastTry ? " (visible tab)" : ""}`
-      );
-      return await htmlToPdfBase64Once(html, { active: lastTry });
-    } catch (err) {
-      lastErr = err;
-      const msg = String(err?.message || err);
-      // A debuggee already attached (DevTools open, or a previous run left it
-      // attached) is the common transient case — back off and try again.
-      if (attempt < attempts) {
-        await setStatus(`PDF attempt ${attempt} failed (${msg}). Retrying…`);
-        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+  try {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        await setStatus(
+          attempt === 1
+            ? "Generating PDF… (click Allow if Chrome asks about debugging)"
+            : `Generating PDF… retry ${attempt}/${attempts}`
+        );
+        return await htmlToPdfBase64Once(html);
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err?.message || err);
+        // A debuggee already attached (DevTools open, or a previous run left it
+        // attached) is the common transient case — back off and try again.
+        if (attempt < attempts) {
+          await setStatus(`PDF attempt ${attempt} failed (${msg}). Retrying…`);
+          await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+        }
       }
     }
+  } finally {
+    // Debugger Allow often focuses the render tab — put the user back where they were.
+    await restoreTabFocus(prevTabId);
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr || "PDF generation failed."));
 }
@@ -11712,13 +11750,16 @@ async function scrapeActiveJobTab() {
 
   let isDice = false;
   let isLinkedIn = false;
+  let isIndeed = false;
   try {
     const host = new URL(url).hostname;
     isDice = /(^|\.)dice\.com$/i.test(host);
     isLinkedIn = /(^|\.)linkedin\.com$/i.test(host);
+    isIndeed = /(^|\.)indeed\.com$/i.test(host);
   } catch {
     isDice = false;
     isLinkedIn = false;
+    isIndeed = false;
   }
 
   // LinkedIn: resolve live currentJobId first so guest JD can run even if DOM scrape is thin.
@@ -11802,7 +11843,8 @@ async function scrapeActiveJobTab() {
     guestOk = enriched.guestOk;
   }
 
-  const jobTitle = String(d.jobTitle || d.title || "").trim();
+  let jobTitle = String(d.jobTitle || d.title || "").trim();
+  if (isIndeed && isIndeedSearchChromeTitle(jobTitle)) jobTitle = "";
   const companyName = String(d.companyName || d.company || "").trim();
   const jdText = isLinkedIn
     ? linkedInCleanJdText(d.jdText || "")
@@ -11816,6 +11858,10 @@ async function scrapeActiveJobTab() {
     } catch {
       /* keep scraped link */
     }
+  }
+  if (isIndeed) {
+    const viewLink = indeedViewJobLink(jdLink || url, url);
+    if (viewLink) jdLink = viewLink;
   }
   if (isLinkedIn) {
     jobId =

@@ -8,7 +8,7 @@
   // this script would otherwise block the updated one from installing.
   // Scrape entry is always rebound via window.__brightstarScrapeJobPage so Manual
   // Bid keeps working after extension reload without requiring a LinkedIn refresh.
-  const SCRIPT_BUILD = "2026-11-05.linkedin-jd10";
+  const SCRIPT_BUILD = "2026-11-16.indeed-title";
   const alreadyMsgBound = Boolean(window.__brightstarAutofillMsgBound);
   if (
     window.__brightstarAutofillBuild === SCRIPT_BUILD &&
@@ -9095,17 +9095,66 @@
         /* fall through */
       }
     }
-    return canonicalPageUrl();
+    // Prefer the live SERP/viewjob URL over <link rel=canonical> (often a
+    // generic /q-*-jobs.html landing page that is not the selected posting).
+    try {
+      const u = new URL(location.href);
+      u.hash = "";
+      return u.toString();
+    } catch {
+      return location.href;
+    }
+  }
+
+  /** Keep in sync with indeed.js isIndeedSearchChromeTitle. */
+  function isIndeedSearchChromeTitle(title) {
+    const t = String(title || "").trim();
+    if (!t || t.length < 3) return true;
+    if (/\d+\s+jobs?\s+in\b/i.test(t)) return true;
+    if (/^job\s*post\s*details\b/i.test(t)) return true;
+    if (/^hiring\b/i.test(t) && /\bjobs?\b/i.test(t) && t.length < 80) return true;
+    if (
+      /^[\w +"'\-/&]+ jobs$/i.test(t) &&
+      !/\b(developer|engineer|administrator|architect|consultant|analyst|manager|specialist)\b/i.test(
+        t
+      )
+    ) {
+      return true;
+    }
+    if (/^(jobs?|search|results?|indeed|filter|sign\s*in|log\s*in)\b/i.test(t)) return true;
+    return false;
+  }
+
+  function pickIndeedJobTitle(...candidates) {
+    for (const raw of candidates) {
+      const t = String(raw || "").trim();
+      if (t && !isIndeedSearchChromeTitle(t)) return t;
+    }
+    return "";
+  }
+
+  function indeedSelectedCardTitle(doc, jobKey) {
+    const key = String(jobKey || "").trim();
+    if (!key || !doc?.querySelector) return "";
+    const card =
+      doc.querySelector(`[data-jk="${CSS.escape(key)}"]`) ||
+      doc.querySelector(`a[data-jk="${CSS.escape(key)}"]`)?.closest("[data-jk], li, article, div");
+    if (!card) return "";
+    return (
+      elementText(card.querySelector("h2 a, a.jcs-JobTitle, h2.jobTitle, [class*='jobTitle'] a")) ||
+      elementText(card.querySelector("h2, a[id*='jobTitle']")) ||
+      ""
+    );
   }
 
   function scrapeIndeedDom(doc = document) {
-    const root =
+    const pane =
       doc.querySelector("#jobsearch-ViewjobPaneWrapper") ||
       doc.querySelector(".jobsearch-JobComponent") ||
-      doc.querySelector("main") ||
-      doc.body ||
-      doc;
-    const text = (selector) => elementText(root.querySelector(selector));
+      doc.querySelector('[data-testid="desktop-job-header"]')?.closest("main, section, div") ||
+      null;
+    const root = pane || doc.querySelector("main") || doc.body || doc;
+    const text = (selector, scope = root) => elementText(scope.querySelector?.(selector));
     const desc = queryLongestDescription(root, [
       "#jobDescriptionText",
       '[data-testid="jobDescriptionText"]',
@@ -9125,7 +9174,7 @@
       /\b(full[- ]time|part[- ]time|contract|temporary|internship|per diem)\b/i.test(item)
     );
     const salaryText =
-      meta.find((item) => /\$|salary|hour|year|compensation/i.test(item)) ||
+      meta.find((item) => /\$|₱|php|salary|hour|year|compensation|a month/i.test(item)) ||
       text('[data-testid="attribute_snippet_testid"]') ||
       "";
     const location =
@@ -9136,16 +9185,43 @@
       root.querySelector(
         '#indeedApplyButton, button[id*="indeedApply"], a[id*="indeedApply"], [data-testid*="indeedApply"], [data-testid*="indeed-apply"]'
       )
-    ) || /\bapply with indeed\b|\beasily apply\b|\bapply on indeed\b/i.test(pageText);
+    ) || /\bapply with indeed\b|\beasily apply\b|\bapply on indeed\b|\bapply now\b/i.test(pageText);
+
+    const jobKey = indeedJobKey();
+    // New Aurora SERP uses vj-job-title; classic SERP uses JobInfoHeader-title.
+    // Never accept the left-rail search H1 ("Salesforce jobs").
+    const jobTitle = pickIndeedJobTitle(
+      text('[data-testid="vj-job-title"]'),
+      text('[data-testid="vj-job-title-compact"]'),
+      text('[data-testid="jobsearch-JobInfoHeader-title"]'),
+      text(".jobsearch-JobInfoHeader-title"),
+      text('[data-testid="jobsearch-JobInfoHeader-title"] span'),
+      indeedSelectedCardTitle(doc, jobKey),
+      pane ? "" : text("h1"),
+      text('[itemprop="title"]')
+    );
+
+    let companyName =
+      text('[data-testid="inlineHeader-companyName"]') ||
+      text('[data-company-name="true"]') ||
+      text(".jobsearch-InlineCompanyRating-companyHeader") ||
+      "";
+    if (!companyName) {
+      const cmpLinks = Array.from(
+        root.querySelectorAll('a[href*="/cmp/"], [data-testid="company-info-title-row"] a')
+      );
+      for (const a of cmpLinks) {
+        const label = elementText(a);
+        if (label && label.length < 120 && !isIndeedSearchChromeTitle(label)) {
+          companyName = label;
+          break;
+        }
+      }
+    }
+
     return {
-      jobTitle:
-        text('[data-testid="jobsearch-JobInfoHeader-title"]') ||
-        text(".jobsearch-JobInfoHeader-title") ||
-        text("h1"),
-      companyName:
-        text('[data-testid="inlineHeader-companyName"]') ||
-        text('[data-company-name="true"]') ||
-        text(".jobsearch-InlineCompanyRating-companyHeader"),
+      jobTitle,
+      companyName,
       jdText: desc || "",
       jobLocation: location,
       employmentType: employmentType || "",
@@ -11895,8 +11971,13 @@
         const title = String(data?.jobTitle || "").trim();
         const jd = String(data?.jdText || "").trim();
         if (!data || (!title && !jd)) continue;
-        // Reject obvious search-chrome titles (e.g. "213 jobs in United States…").
+        // Reject obvious search-chrome titles (e.g. "213 jobs in United States…",
+        // or Indeed SERP H1 "Salesforce jobs").
         if (title && /\d+\s+jobs?\s+in\b/i.test(title)) continue;
+        if (scraper.id === "indeed" && title && isIndeedSearchChromeTitle(title)) {
+          if (!jd) continue;
+          data.jobTitle = "";
+        }
         return { ok: true, site: scraper.id, jobData: data, build: SCRIPT_BUILD };
       } catch {
         /* fall through to the generic scraper */

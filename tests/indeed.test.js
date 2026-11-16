@@ -3,15 +3,19 @@ import assert from "node:assert/strict";
 
 import {
   buildIndeedSearchUrl,
+  indeedJobKeyFromUrl,
+  indeedViewJobLink,
   isExplicitlyHostedIndeedJob,
   isIndeedCaptureEligible,
+  isIndeedSearchChromeTitle,
   isIndeedUrl,
   isPostedWithinDays,
   isSalesforceRelevantJob,
   isUsRemoteIndeedJob,
   mergeIndeedApplyEvidence,
   normalizeIndeedCapturedJob,
-  parseIndeedPostedAt
+  parseIndeedPostedAt,
+  pickIndeedJobTitle
 } from "../indeed.js";
 import {
   filterJobsByChannel,
@@ -240,4 +244,36 @@ test("merge deduplicates captured URLs while preserving completed state", () => 
   assert.equal(merged.added, 0);
   assert.equal(merged.allUsJobs[0].status, "done");
   assert.equal(merged.allUsJobs[0].jobDir, "Applications/4");
+});
+
+test("Indeed SERP chrome titles are rejected; viewjob link uses vjk/jk", () => {
+  assert.equal(isIndeedSearchChromeTitle("Salesforce jobs"), true);
+  assert.equal(isIndeedSearchChromeTitle("Hiring Salesforce Jobs"), true);
+  assert.equal(isIndeedSearchChromeTitle("Job Post Details"), true);
+  assert.equal(
+    isIndeedSearchChromeTitle(
+      "Salesforce Developer — AI-Assisted Integrations (Temporary)"
+    ),
+    false
+  );
+  assert.equal(
+    pickIndeedJobTitle(
+      "Salesforce jobs",
+      "Job Post Details",
+      "Salesforce Developer — AI-Assisted Integrations (Temporary)"
+    ),
+    "Salesforce Developer — AI-Assisted Integrations (Temporary)"
+  );
+
+  const serp =
+    "https://ph.indeed.com/jobs?q=%22Salesforce%22&l=&fromage=7&vjk=2b675a9df213944f";
+  assert.equal(indeedJobKeyFromUrl(serp), "2b675a9df213944f");
+  assert.equal(
+    indeedViewJobLink("https://ph.indeed.com/q-salesforce-jobs.html", serp),
+    "https://ph.indeed.com/viewjob?jk=2b675a9df213944f"
+  );
+  assert.equal(
+    indeedViewJobLink(serp),
+    "https://ph.indeed.com/viewjob?jk=2b675a9df213944f"
+  );
 });

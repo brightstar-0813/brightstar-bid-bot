@@ -21,6 +21,63 @@ export function isIndeedUrl(value) {
   }
 }
 
+/** Job key from an Indeed SERP / viewjob URL (`jk` or `vjk`). */
+export function indeedJobKeyFromUrl(value) {
+  try {
+    const u = new URL(String(value || ""));
+    return (
+      u.searchParams.get("jk") ||
+      u.searchParams.get("vjk") ||
+      u.pathname.match(/\/viewjob\/([A-Za-z0-9]+)/i)?.[1] ||
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+/** Canonical per-job link — never the SERP `rel=canonical` search landing page. */
+export function indeedViewJobLink(urlOrKey, pageUrl = "") {
+  const key = indeedJobKeyFromUrl(urlOrKey) || String(urlOrKey || "").trim();
+  const jobKey = /^[A-Za-z0-9]+$/.test(key) ? key : indeedJobKeyFromUrl(pageUrl);
+  if (!jobKey) return "";
+  let host = "www.indeed.com";
+  try {
+    const base = String(pageUrl || urlOrKey || "");
+    if (isIndeedUrl(base)) host = new URL(base).hostname;
+  } catch {
+    /* keep www */
+  }
+  return `https://${host}/viewjob?jk=${encodeURIComponent(jobKey)}`;
+}
+
+/**
+ * Indeed SERP search chrome (not a real posting title).
+ * Keep in sync with content/autofill.js scrapeIndeedDom.
+ */
+export function isIndeedSearchChromeTitle(title) {
+  const t = String(title || "").trim();
+  if (!t || t.length < 3) return true;
+  if (/\d+\s+jobs?\s+in\b/i.test(t)) return true;
+  if (/^job\s*post\s*details\b/i.test(t)) return true;
+  if (/^hiring\b/i.test(t) && /\bjobs?\b/i.test(t) && t.length < 80) return true;
+  // "Salesforce jobs", "Remote jobs", "Software Engineer jobs"
+  if (/^[\w +"'\-/&]+ jobs$/i.test(t) && !/\b(developer|engineer|administrator|architect|consultant|analyst|manager|specialist)\b/i.test(t)) {
+    return true;
+  }
+  if (/^(jobs?|search|results?|indeed|filter|sign\s*in|log\s*in)\b/i.test(t)) return true;
+  return false;
+}
+
+/** First non-empty title that is not SERP chrome. */
+export function pickIndeedJobTitle(...candidates) {
+  for (const raw of candidates) {
+    const t = String(raw || "").trim();
+    if (t && !isIndeedSearchChromeTitle(t)) return t;
+  }
+  return "";
+}
+
 /**
  * Build / normalize an Indeed search URL for Salesforce · US remote · last 7 days.
  * Existing URLs are kept on indeed.com but forced onto those capture filters.
