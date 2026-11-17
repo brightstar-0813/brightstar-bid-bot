@@ -9,6 +9,10 @@
 
 export const BRIDGE_ROW_LIMIT = 50;
 
+export function isGoogleSheetUrl(url) {
+  return /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]{10,}/.test(String(url || "")) && String(url).length <= 500;
+}
+
 /** LinkedIn is never selected (apply-control CLAUDE.md rule 11; isNeverBatchApplyJob). */
 export const NEVER_FILTERS = new Set(["linkedin"]);
 
@@ -122,7 +126,12 @@ export function planCommand(cmd, args = {}) {
       return { kind: "select", selector: "#profileSelect", value: String(value) };
     case "captureTab":
       if (!String(value || "").trim() || String(value).length > 100) throw new Error("bad capture tab");
-      return { kind: "input", selector: "#jobsSheetSourceTab", value: String(value).trim() };
+      return { kind: "input", selector: "#jobsSheetSourceTab", value: String(value).trim(), save: "#saveJobsSheetUrlBtn" };
+    case "sheetUrl": {
+      const url = String(value || "").trim();
+      if (!isGoogleSheetUrl(url)) throw new Error("not a Google Sheets link (https://docs.google.com/spreadsheets/…)");
+      return { kind: "input", selector: "#jobsSheetSourceUrl", value: url, save: "#saveJobsSheetUrlBtn" };
+    }
     case "rowApply": case "rowMarkApplied": case "rowRemove": {
       const row = Number(args?.row);
       if (!Number.isInteger(row) || row < 1) throw new Error("bad row");

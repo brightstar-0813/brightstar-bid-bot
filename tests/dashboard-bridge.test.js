@@ -40,6 +40,14 @@ test("planCommand maps to the popup's own controls", () => {
   assert.equal(planCommand("loadSheet").kind, "loadSheet");
 });
 
+test("sheet link and capture tab go into the bot's own fields and Save", () => {
+  const url = "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOp/edit#gid=0";
+  assert.deepEqual(planCommand("sheetUrl", { value: url }), { kind: "input", selector: "#jobsSheetSourceUrl", value: url, save: "#saveJobsSheetUrlBtn" });
+  assert.equal(planCommand("captureTab", { value: " US-SF-Jobs " }).value, "US-SF-Jobs");
+  assert.throws(() => planCommand("sheetUrl", { value: "https://evil.example.com/spreadsheets/d/1AbCdEfGhIjKlMnOp" }), /Google Sheets/);
+  assert.throws(() => planCommand("captureTab", { value: "  " }));
+});
+
 test("planCommand refuses LinkedIn, bad input and unknown commands", () => {
   assert.throws(() => planCommand("filter", { value: "linkedin" }), /LinkedIn/);
   assert.throws(() => planCommand("filter", { value: 'x"]' }), /bad filter/);

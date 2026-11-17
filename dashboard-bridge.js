@@ -44,7 +44,7 @@ function rowActions(row) {
 async function buildState() {
   const s = await chrome.storage.local.get([
     "job_queue", "batch_state", "batch_run_mode", "job_channel_filter", "job_batch_source",
-    "jobs_sheet_source_tab"
+    "jobs_sheet_source_tab", "jobs_sheet_source_url"
   ]);
   const queue = Array.isArray(s.job_queue) ? s.job_queue : [];
   const sel = $("#profileSelect");
@@ -75,6 +75,7 @@ async function buildState() {
     source: s.job_batch_source || "",
     sheetName: s.jobs_sheet_source_tab || "",
     captureTab: s.jobs_sheet_source_tab || "",
+    sheetUrl: String(s.jobs_sheet_source_url || "").slice(0, 500),
     rows: buildRows(queue, rowActions, BRIDGE_ROW_LIMIT),
     rowsTotal: queue.length,
     ts: Date.now()
@@ -126,6 +127,7 @@ async function run(cmd, args) {
       el.value = plan.value;
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
+      if (plan.save) { await sleep(150); $(plan.save)?.click(); }
       break;
     }
     case "row": {
