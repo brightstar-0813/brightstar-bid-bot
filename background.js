@@ -20,7 +20,7 @@ import {
   formatSheetSyncStatus,
   reconcileQueueWithSheetRows
 } from "./sheet-sync.js";
-import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates } from "./slack.js";
+import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates, slackKindAllowed } from "./slack.js";
 import { shouldExcludeFromAiAndBank } from "./autofill-junk.js";
 import { findAppliedSameJob } from "./job-dedupe.js";
 import { canFetchJdFromLink, cleanJobPageText, isUsableJdText } from "./jd-from-page.js";
@@ -1437,13 +1437,15 @@ async function setStatus(status) {
 /** Fire-and-forget Slack alert; never throws into the batch loop. */
 async function trySlackAlert(opts) {
   try {
-    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const data = await chrome.storage.local.get(["slack_webhook_url", "dashboard_public_url"]);
     const webhookUrl = String(data.slack_webhook_url || "").trim();
     if (!webhookUrl) return false;
     const person = await getActivePerson().catch(() => null);
+    const dash = String(data.dashboard_public_url || "").trim();
     await notifySlackAlert({
       webhookUrl,
       personLabel: person?.label || person?.name || "",
+      footer: dash.startsWith("https://") ? `👉 Open Mission Control: ${dash}` : "",
       ...opts
     });
     return true;
@@ -1455,7 +1457,8 @@ async function trySlackAlert(opts) {
 /** Per-job Slack status (done / failed / retry). Never throws. */
 async function trySlackJobStatus(opts) {
   try {
-    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const data = await chrome.storage.local.get(["slack_webhook_url", "slack_level"]);
+    if (!slackKindAllowed(data.slack_level, "job")) return false; // only alerts that need a person
     const webhookUrl = String(data.slack_webhook_url || "").trim();
     if (!webhookUrl) return false;
     const person = await getActivePerson().catch(() => null);
@@ -1482,7 +1485,8 @@ async function queueSlackProgress(queue) {
 
 async function trySlackBatchComplete(summary) {
   try {
-    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const data = await chrome.storage.local.get(["slack_webhook_url", "slack_level"]);
+    if (!slackKindAllowed(data.slack_level, "batch")) return false; // only alerts that need a person
     const webhookUrl = String(data.slack_webhook_url || "").trim();
     if (!webhookUrl) return false;
     const person = await getActivePerson().catch(() => null);
@@ -1499,7 +1503,8 @@ async function trySlackBatchComplete(summary) {
 
 async function trySlackDuplicates(duplicates, sheetLinkCount) {
   try {
-    const data = await chrome.storage.local.get(["slack_webhook_url"]);
+    const data = await chrome.storage.local.get(["slack_webhook_url", "slack_level"]);
+    if (!slackKindAllowed(data.slack_level, "duplicates")) return false; // only alerts that need a person
     const webhookUrl = String(data.slack_webhook_url || "").trim();
     if (!webhookUrl || !duplicates?.length) return false;
     const person = await getActivePerson().catch(() => null);

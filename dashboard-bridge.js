@@ -14,6 +14,7 @@ let botId = null;
 let results = [];
 let failures = 0;
 let busy = false;
+let lastPublicUrl = null;
 
 async function getBotId() {
   const { dashboard_bot_id: id } = await chrome.storage.local.get("dashboard_bot_id");
@@ -155,7 +156,12 @@ async function syncOnce() {
   } finally { clearTimeout(t); }
   if (!res.ok) throw new Error(`sync ${res.status}`);
   results = [];
-  const { commands = [] } = await res.json();
+  const { commands = [], publicUrl } = await res.json();
+  // Link for the bot's own Slack alerts ("Open Mission Control: …"); only an https URL from the server.
+  if (typeof publicUrl === "string" && publicUrl.startsWith("https://") && publicUrl !== lastPublicUrl) {
+    lastPublicUrl = publicUrl;
+    await chrome.storage.local.set({ dashboard_public_url: publicUrl.slice(0, 200) });
+  }
   for (const c of commands) {
     try { results.push({ id: c.id, ok: true, message: await run(c.cmd, c.args || {}) }); }
     catch (e) { results.push({ id: c.id, ok: false, message: String(e?.message || e) }); }

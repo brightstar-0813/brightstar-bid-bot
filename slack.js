@@ -235,8 +235,24 @@ export async function notifySlackAlert({
   personLabel = "",
   csvRow,
   company = "",
-  jobTitle = ""
+  jobTitle = "",
+  footer = ""
 }) {
+  const lines = buildSlackAlertLines({ title, message, personLabel, csvRow, company, jobTitle, footer });
+  return postSlackMessage(webhookUrl, lines.join("\n"));
+}
+
+/**
+ * Slack level (storage `slack_level`): "action" (default) sends only alerts that need a person
+ * (batch paused / failed / required field) — routine job status, duplicates and batch-complete
+ * summaries are skipped (they are in the Mission Control dashboard). "all" = legacy, everything.
+ */
+export function slackKindAllowed(level, kind) {
+  if (String(level || "").toLowerCase() === "all") return true;
+  return kind === "alert";
+}
+
+export function buildSlackAlertLines({ title, message = "", personLabel = "", csvRow, company = "", jobTitle = "", footer = "" }) {
   const lines = [`*BrightStar Bid Bot* — ${String(title || "Alert").trim()}`];
   if (csvRow != null || company || jobTitle) {
     const who = [company, jobTitle].filter(Boolean).join(" / ");
@@ -246,7 +262,8 @@ export async function notifySlackAlert({
   }
   if (personLabel) lines.push(`• Person: ${personLabel}`);
   if (message) lines.push(`• ${truncate(message, 500)}`);
-  return postSlackMessage(webhookUrl, lines.join("\n"));
+  if (footer) lines.push(String(footer).slice(0, 300));
+  return lines;
 }
 
 /**

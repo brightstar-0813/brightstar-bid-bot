@@ -47,3 +47,17 @@ test("planCommand refuses LinkedIn, bad input and unknown commands", () => {
   assert.throws(() => planCommand("rowRemove", { row: "0" }));
   assert.throws(() => planCommand("evalScript"), /unknown/);
 });
+
+import { slackKindAllowed, buildSlackAlertLines } from "../slack.js";
+
+test("slack_level: default sends only alerts that need a person; 'all' sends everything", () => {
+  for (const level of [undefined, "", "action"]) {
+    assert.equal(slackKindAllowed(level, "alert"), true);
+    assert.equal(slackKindAllowed(level, "job"), false);
+    assert.equal(slackKindAllowed(level, "batch"), false);
+    assert.equal(slackKindAllowed(level, "duplicates"), false);
+  }
+  assert.equal(slackKindAllowed("all", "job"), true);
+  const lines = buildSlackAlertLines({ title: "Batch paused ⛔", message: "m", footer: "👉 Open Mission Control: https://x.ts.net" });
+  assert.equal(lines.at(-1), "👉 Open Mission Control: https://x.ts.net");
+});
