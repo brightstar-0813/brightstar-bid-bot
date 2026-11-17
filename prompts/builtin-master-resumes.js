@@ -384,30 +384,28 @@ CERTIFICATIONS
 None.`;
 
 export const DAVID_OLIVEIRA_DE_MASTER = `David de Oliveira
-Senior Analytics Engineer / Senior Data Engineer
+Senior Data Engineer
 Paulista, Pernambuco, Brazil | +55 61 8212 1297 | davidoliveira2308l@gmail.com
-https://www.linkedin.com/in/davidleandrodeoliveria95/
+https://www.linkedin.com/in/davidleandro/
 
 SUMMARY
-9+ years of overall technology experience, including 8+ years delivering data engineering, ETL/ELT, and analytics platforms for security, digital-product, and software-engineering teams.
+9+ years of overall technology experience, including 8+ years delivering data engineering, ETL/ELT, and analytics platforms for consulting, software-product, digital, and cybersecurity teams.
 
 SKILLS
-Python, SQL, Java, Scala; Apache Airflow, dbt, ETL/ELT, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes; Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB; Azure Data Factory, AWS (S3, Lambda, IAM), GCP, Microsoft Azure; Docker, GitHub Actions, CI/CD; REST APIs, JSON integration.
+Python, SQL, Java, Scala, Apache PySpark; Databricks, Apache Airflow, dagster, dbt, Informatica, Fivetran, ETL/ELT pipelines, data modeling (star schema, fact and dimension tables), data warehousing, streaming and batch processing, data lakes.
+Apache Kafka, Apache Flink, Hadoop, Apache NiFi, SSIS, SSRS; Snowflake, Amazon Redshift, Google BigQuery, MongoDB, Azure Cosmos DB, Amazon Aurora, Amazon RDS.
+Azure Data Factory, Azure Synapse, Azure Key Vault, Azure Delta Lake, Azure Blob Storage, One Lake, Microsoft Fabric, AWS (S3, Lambda, IAM, Glue, Athena, Kinesis, CloudWatch), GCP (Pub/Sub, Cloud Storage, ADLS Gen2), Datadog.
+Docker, GitHub Actions, CI/CD; REST APIs, JSON integration; Power BI, Tableau, Google Analytics 4 (GA4).
 
 EXPERIENCE
-Clevertech — Analytics Engineer | New York, United States | Remote | Jan 2024 - Present
-
+Clevertech — Analytics Engineer / Senior Data Engineer | New York, United States | Remote | Jan 2024 - Present
 Softbinator Technologies — Senior Data Engineer | Bucharest, Romania | Remote | Mar 2021 - Nov 2023
-Romanian software engineering company building distributed product teams for fintech, healthcare, media, ecommerce, and blockchain.
-
-Concrete Solutions — Backend Engineer / Data Engineer | São Paulo, Brazil | On-site | Aug 2018 - Feb 2021
-Accenture digital-product studio in Brazil delivering web, mobile, and cloud software with agile teams.
-
-Tempest Security Intelligence — Software Engineer Intern / Backend Developer | Recife, Pernambuco, Brazil | On-site | Jan 2017 - Jun 2018
-Brazilian cybersecurity firm focused on digital-fraud prevention, threat intelligence, managed security, and application security.
+Concrete Solutions — Data Analyst / Data Engineer | São Paulo, Brazil | On-site | Aug 2018 - Feb 2021
+Tempest Security Intelligence — Software Engineer Intern / Python Developer | Recife, Pernambuco, Brazil | On-site | Jan 2017 - Jun 2018
+Clevertech (Lumenalta / lumenalta.com) is a New York IT services and consulting firm (~501-1,000 employees) delivering custom AI and software builds, analytics and data transformation, cloud, automation, security, and industry solutions across automotive, retail, energy, financial services, healthcare, and manufacturing. Softbinator Technologies (softbinator.com) is a publicly traded full-stack and GenAI software engineering company (HQ San Mateo; ~51-200 employees) building distributed product teams for fintech, medtech, healthcare, blockchain, media, and ecommerce. Concrete Solutions (accenture.com/br-pt) is an Accenture digital studio in São Paulo delivering web, mobile, and AWS cloud products with agile teams for large Brazilian enterprises. Tempest Security Intelligence (tempest.com.br) is Brazil's leading cybersecurity and digital-fraud prevention firm (HQ Recife; ~201-500 employees) with offices in Recife, São Paulo, and London, offering consultancy, digital identity, managed security services, and threat intelligence.
 
 EDUCATION
-Federal University of Pernambuco | Bachelor's Degree in Mathematics and Computer Science | Sep 2013 - Dec 2017
+Federal University of Pernambuco | Bachelor's Degree in Mathematics and Computer Science | Recife, Pernambuco, Brazil | Sep 2013 - Dec 2017
 
 CERTIFICATIONS
 None.`;
