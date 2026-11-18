@@ -1946,6 +1946,13 @@
         ) {
           continue;
         }
+        // "Who referred you? Enter their first and last name" asks for someone else's name.
+        if (
+          ["fullName", "firstName", "lastName", "middleName", "preferredName", "signatureName"].includes(key) &&
+          /\b(referred|referrer|referral|referring)\b/.test(primary)
+        ) {
+          continue;
+        }
         if (key === "workAuthorized" && /\bsponsorship\b/.test(primary)) continue;
         if (key === "workAuthorized" && /\bcitizen/.test(primary)) continue;
         if (key === "citizenship" && /\b(authorized|eligible)\b/.test(primary) && /\bwork\b/.test(primary) && !/\bcitizen/.test(primary)) {
