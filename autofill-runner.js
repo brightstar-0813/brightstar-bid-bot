@@ -904,19 +904,19 @@ async function ensureAutofillScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      files: ["content/autofill.js"]
+      files: ["content/ats-auth-hosts.js", "content/autofill.js"]
     });
   } catch {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content/autofill.js"]
+      files: ["content/ats-auth-hosts.js", "content/autofill.js"]
     }).catch(() => {});
   }
   await sleep(250);
   if (await ping()) return;
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ["content/autofill.js"]
+    files: ["content/ats-auth-hosts.js", "content/autofill.js"]
   }).catch(() => {});
 }
 
@@ -940,7 +940,7 @@ async function listTabFrameIds(tabId) {
     // way also guarantees the autofill script is present in each one.
     const infos = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      files: ["content/autofill.js"]
+      files: ["content/ats-auth-hosts.js", "content/autofill.js"]
     });
     const ids = (infos || [])
       .map((row) => row.frameId)

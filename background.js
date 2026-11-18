@@ -11183,7 +11183,7 @@ async function invokeTabJobScrape(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      files: ["content/autofill.js"]
+      files: ["content/ats-auth-hosts.js", "content/autofill.js"]
     });
   } catch {
     // Already injected or host not injectable.

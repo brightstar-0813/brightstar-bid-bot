@@ -5570,7 +5570,7 @@
       password: String(credentials.password || "")
     };
     const credResult = fillLoginCredentials(creds);
-    if (isWorkdayPage() && credResult.filledCount > 0) {
+    if ((isWorkdayPage() || isEmployerAtsAuthPage()) && credResult.filledCount > 0) {
       const authSubmit = queryAllDeep("button, a, [role='button'], input[type='submit']").find((el) => {
         if (!isElVisible(el) || !isElEnabled(el)) return false;
         const t = elActionText(el);
@@ -5722,6 +5722,21 @@
     try {
       const host = new URL(String(url || location.href)).hostname.toLowerCase();
       return /(^|\.)myworkdayjobs\.com$/.test(host) || /(^|\.)workdayjobs\.com$/.test(host);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Employer ATS sign-in / sign-up page (not Workday, which has its own path) with a
+   * visible password field. Host list lives in content/ats-auth-hosts.js (Q35).
+   */
+  function isEmployerAtsAuthPage(url = location.href) {
+    try {
+      const host = new URL(String(url || location.href)).hostname;
+      if (isWorkdayPage(url)) return false;
+      if (globalThis.BrightstarAtsAuthHosts?.isEmployerAtsAuthHost?.(host) !== true) return false;
+      return Array.from(document.querySelectorAll('input[type="password"]')).some((el) => isFieldFillable(el));
     } catch {
       return false;
     }
@@ -5948,6 +5963,18 @@
         return "A security challenge is on the page. Complete it, then retry.";
       }
       if (eng?.isSecurityChallengeText?.(sample) && /\bmfa\b|two[- ]factor|verification email|enter (the )?code/i.test(sample)) {
+        return "MFA or email verification is required. Complete it in this tab, then retry.";
+      }
+      return "";
+    }
+    // Employer ATS sign-in / sign-up (UKG, iCIMS, Taleo, …): credential autofill handles it
+    // (Q35, 2026-11-18). Job boards / aggregators keep the sign-in blocker.
+    if (isEmployerAtsAuthPage()) {
+      if (hasActiveCaptchaChallenge()) {
+        return "A CAPTCHA is on the page. Solve it, then retry.";
+      }
+      const sample = (document.body?.innerText || "").slice(0, 4000);
+      if (/\bmfa\b|two[- ]factor|verification code|enter (the )?code|check your email|verify your email/i.test(sample)) {
         return "MFA or email verification is required. Complete it in this tab, then retry.";
       }
       return "";
