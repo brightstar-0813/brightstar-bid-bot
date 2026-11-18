@@ -5574,6 +5574,8 @@
       const authSubmit = queryAllDeep("button, a, [role='button'], input[type='submit']").find((el) => {
         if (!isElVisible(el) || !isElEnabled(el)) return false;
         const t = elActionText(el);
+        if (isSocialSignInLabel(t) || isSocialSignInLabel(el.textContent || "")) return false;
+        if (el.closest?.('form[data-provider], [data-provider], [class*="social" i]')) return false;
         return /^(create account|create an account|sign in|log in|register|continue)$/i.test(t.trim());
       });
       if (authSubmit) {
@@ -7400,12 +7402,21 @@
   }
   // @pure-end bookmark-label
 
+  function isSocialSignInLabel(text) {
+    return /\b(continue|sign in|sign up|log in|login|apply|register)\s+(with|using|via)\s+(google|microsoft|apple|linkedin|facebook|github|indeed|outlook|yahoo|seek|x)\b/i.test(
+      String(text || "")
+    );
+  }
+
   function classifyActionButton(text) {
     const t = String(text || "").trim();
     if (!t || t.length > 80) return null;
     if (!looksLikeActionLabel(t)) return null;
     // "AI CV Review" / "Review my CV" / "Resume review" are upsell tools, not a form step.
     if (/\b(cv|resume|résumé|profile)\b/i.test(t) && /\breview\b/i.test(t)) return null;
+    // Social sign-in ("Continue with Google" on UKG/Auth0) is never a form step: it leaves
+    // the employer ATS for a third-party login.
+    if (isSocialSignInLabel(t)) return null;
     if (EASY_NEXT_RE.test(t)) return "next";
     if (EASY_REVIEW_RE.test(t)) return "review";
     if (EASY_SUBMIT_RE.test(t)) return "submit";
