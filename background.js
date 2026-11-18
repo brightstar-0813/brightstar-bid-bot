@@ -8021,11 +8021,20 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
           const pool = roots.length ? roots : turnNodes;
           const message = pool[pool.length - 1] || null;
           if (message) {
-            const clone = message.cloneNode(true);
+            const widgetBoxes = message.querySelectorAll(
+              "[data-client-defined-widget] [role='textbox']"
+            );
+            const source = widgetBoxes.length ? widgetBoxes[widgetBoxes.length - 1] : message;
+            const clone = source.cloneNode(true);
             clone.querySelectorAll("pre, code, button, [data-is-streaming]").forEach((node) => {
               node.remove();
             });
-            latest = String(clone.innerText || clone.textContent || "")
+            // A detached clone has no layout: innerText would glue paragraphs together.
+            clone.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+            clone.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6, div").forEach((node) => {
+              node.append(node.tagName === "P" ? "\n\n" : "\n");
+            });
+            latest = String(clone.textContent || "")
               .replace(/\n{3,}/g, "\n\n")
               .trim();
           }

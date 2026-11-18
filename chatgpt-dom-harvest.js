@@ -360,12 +360,62 @@
     return testid.includes("user-message") || testid === "user";
   }
 
+  const BREAK_BLOCK_TAGS = new Set([
+    "P", "DIV", "LI", "UL", "OL", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE",
+    "SECTION", "ARTICLE", "HEADER", "FOOTER", "TR", "TABLE", "PRE"
+  ]);
+
+  /**
+   * innerText of a detached clone has no layout, so it equals textContent and
+   * glues paragraphs together ("…modernization.I bring…"). Rebuild breaks from tags.
+   */
+  function textWithBreaks(el) {
+    if (!el) return "";
+    if (el.isConnected !== false || !el.childNodes) return el.innerText || el.textContent || "";
+    let out = "";
+    const walk = (node) => {
+      if (node.nodeType === 3) {
+        out += node.nodeValue || "";
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      const tag = String(node.tagName || "").toUpperCase();
+      if (tag === "BR") {
+        out += "\n";
+        return;
+      }
+      const block = BREAK_BLOCK_TAGS.has(tag);
+      if (block) out += "\n";
+      for (const child of node.childNodes) walk(child);
+      if (block) out += tag === "P" ? "\n\n" : "\n";
+    };
+    walk(el);
+    return out
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
   function plainText(el) {
     if (!el) return "";
-    return tidyChunk(el.innerText || el.textContent || "");
+    return tidyChunk(textWithBreaks(el));
+  }
+
+  /** ChatGPT UI 2026-11: a letter can come in a "Writing" widget (header + textbox + suggestion chips). */
+  function writingWidgetTextbox(el) {
+    if (!el || typeof el.querySelectorAll !== "function") return null;
+    try {
+      const boxes = Array.from(el.querySelectorAll("[data-client-defined-widget] [role='textbox']"));
+      return boxes.length ? boxes[boxes.length - 1] : null;
+    } catch {
+      return null;
+    }
   }
 
   function readElementProse(el, { stripCode = false } = {}) {
+    const widgetBox = writingWidgetTextbox(el);
+    if (widgetBox) el = widgetBox;
     if (!el || typeof el.cloneNode !== "function") return plainText(el);
     let clone;
     try {

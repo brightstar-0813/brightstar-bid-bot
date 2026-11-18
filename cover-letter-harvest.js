@@ -10,6 +10,9 @@ export function stripChatGptChrome(text) {
     .replace(/^(?:the\s+)?(?:chatgpt|claude|gpt(?:-\d+(?:\.\d+)?)?|assistant|you)\s+said\b\s*[:：\-–—.]?\s*/i, "")
     .replace(/^(?:[.…]{2,}|…)\s*(?:show more|show less)?\s*/i, "")
     .replace(/^(?:show more|show less)\b\s*/i, "")
+    // ChatGPT UI 2026-11 "Writing" widget label above the letter.
+    .replace(/^Writing\s*\n+/i, "")
+    .replace(/^Writing(?=Dear\b)/, "")
     .replace(/The\s*ChatGPT can make mistakes\.?/gi, "")
     .replace(/ChatGPT can make mistakes\.?/gi, "")
     .replace(/Check important info\.?/gi, "")

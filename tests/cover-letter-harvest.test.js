@@ -290,3 +290,12 @@ test("rejects resume JSON that has no letter after it", () => {
   assert.equal(looksLikeCoverLetterBody(resumeJson), false);
   assert.equal(extractCoverLetterText(""), "");
 });
+
+test("ChatGPT UI 2026-11: drops the Writing widget label before the salutation", () => {
+  const body =
+    "I bring years of Salesforce development across Apex, LWC and integrations, and I have supported releases for business teams.\n\nIn my recent role I fixed broken integrations and kept deployments steady for users across regions and time zones.\n\nThank you for your time and consideration.";
+  for (const raw of [`Writing\n\nDear Hiring Team,\n\n${body}`, `WritingDear Hiring Team,\n\n${body}`]) {
+    const out = extractCoverLetterText(raw);
+    assert.ok(out.startsWith("Dear Hiring Team,"), out.slice(0, 40));
+  }
+});
