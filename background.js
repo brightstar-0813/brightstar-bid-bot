@@ -348,7 +348,7 @@ async function deepHarvestResumeFromTab(tabId) {
         };
         const blocks = Array.from(
           document.querySelectorAll(
-            "[data-message-author-role='assistant'], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [class*='font-claude-message'], [class*='assistant-message']"
+            "[data-message-author-role='assistant'], [data-response-body], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [class*='font-claude-message'], [class*='assistant-message']"
           )
         );
         const startBi = Math.max(0, blocks.length - 20);
@@ -4650,14 +4650,14 @@ async function readChatReadiness(tabId, provider) {
                 '[data-testid="assistant-message"], [data-testid="assistant"], [data-is-streaming="true"]'
               ).length
             : document.querySelectorAll(
-                "[data-message-author-role='assistant'], [data-message-role='assistant'], [data-turn='assistant']"
+                "[data-message-author-role='assistant'], [data-response-body], [data-message-role='assistant'], [data-turn='assistant']"
               ).length;
         const userBlocks = shared
           ? Number(shared.userBlocks) || 0
           : claude
             ? document.querySelectorAll('[data-testid="user-message"], [data-testid="user"]').length
             : document.querySelectorAll(
-                "[data-message-author-role='user'], [data-message-role='user'], [data-turn='user']"
+                "[data-message-author-role='user'], [data-user-message-bubble], [data-message-role='user'], [data-turn='user']"
               ).length;
         return {
           hasInput: Boolean(input && input.offsetParent !== null),
@@ -5440,7 +5440,7 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         if (shared && Number.isFinite(Number(shared.userBlocks))) return Number(shared.userBlocks);
         return document.querySelectorAll(
           [
-            "[data-message-author-role='user']",
+            "[data-message-author-role='user'], [data-user-message-bubble]",
             "[data-message-author-role=user]",
             "[data-message-role='user']",
             "[data-turn='user']",
@@ -5480,7 +5480,7 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         return Array.from(
           document.querySelectorAll(
             [
-              "[data-message-author-role='assistant']",
+              "[data-message-author-role='assistant'], [data-response-body]",
               "[data-message-role='assistant']",
               "[data-turn='assistant']",
               '[data-testid="assistant-message"]',
@@ -5528,7 +5528,7 @@ async function chatgptSendPromptOnce(tabId, prompt, needsInPageNewChat) {
         const nodes = Array.from(
           document.querySelectorAll(
             [
-              "[data-message-author-role='assistant']",
+              "[data-message-author-role='assistant'], [data-response-body]",
               "[data-message-role='assistant']",
               "[data-turn='assistant']",
               '[data-testid="assistant-message"]'
@@ -6795,7 +6795,7 @@ async function deleteCurrentAiConversation(
           Boolean(document.querySelector('div[contenteditable="true"]'));
         const hasMessages =
           document.querySelectorAll(
-            '[data-message-author-role], [data-testid*="conversation-turn"]'
+            '[data-message-author-role], [data-response-body], [data-user-message-bubble], [data-testid*="conversation-turn"]'
           ).length > 0;
         return hasComposer && !hasMessages;
       };
@@ -7182,7 +7182,7 @@ async function deleteCurrentAiConversation(
           if (await verifyDeleted(id, { polls: 2 })) return { ok: true, via: "already-gone" };
           const hasMessages =
             document.querySelectorAll(
-              '[data-message-author-role], [data-testid*="conversation-turn"]'
+              '[data-message-author-role], [data-response-body], [data-user-message-bubble], [data-testid*="conversation-turn"]'
             ).length > 0;
           if (!id && !hasMessages) return { ok: true, via: "already-blank" };
           return { ok: false, error: "no-delete-menu" };
@@ -7265,7 +7265,7 @@ async function deleteCurrentAiConversation(
       const pageLooksLikeBlankNewChat = () => {
         const hasMessages =
           document.querySelectorAll(
-            '[data-message-author-role], [data-testid*="conversation-turn"]'
+            '[data-message-author-role], [data-response-body], [data-user-message-bubble], [data-testid*="conversation-turn"]'
           ).length > 0;
         if (hasMessages) return false;
         const path = String(location.pathname || "");
@@ -7653,7 +7653,7 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
         }
 
         const blocks = document.querySelectorAll(
-          "[data-message-author-role='assistant'], [data-message-author-role=assistant], [data-message-role='assistant'], [data-message-role=assistant], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [data-is-streaming], [class*='assistant-message'], [class*='font-claude-message']"
+          "[data-message-author-role='assistant'], [data-response-body], [data-message-author-role=assistant], [data-message-role='assistant'], [data-message-role=assistant], [data-turn='assistant'], section[data-turn='assistant'], [data-testid='assistant-message'], [data-testid='assistant'], [data-is-streaming], [class*='assistant-message'], [class*='font-claude-message']"
         );
         if (blocks.length) {
           const start = Math.max(0, blocks.length - 20);
@@ -7982,7 +7982,7 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
       const blocks = Array.from(
         document.querySelectorAll(
           [
-            "[data-message-author-role='assistant']",
+            "[data-message-author-role='assistant'], [data-response-body]",
             "[data-message-role='assistant']",
             "[data-turn='assistant']",
             "section[data-turn='assistant']",
@@ -8015,7 +8015,7 @@ async function chatgptPollState(tabId, { harvestJson = false } = {}) {
           ).filter(
             (turn) =>
               !turn.querySelector(
-                "[data-message-author-role='user'], [data-turn='user'], [data-testid*='user-message']"
+                "[data-message-author-role='user'], [data-user-message-bubble], [data-turn='user'], [data-testid*='user-message']"
               )
           );
           const pool = roots.length ? roots : turnNodes;

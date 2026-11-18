@@ -13,7 +13,9 @@
     "[data-message-role='user']",
     "[data-message-role=user]",
     "[data-turn='user']",
-    "[data-testid*='user-message']"
+    "[data-testid*='user-message']",
+    // ChatGPT UI 2026-11: user prompt bubble.
+    "[data-user-message-bubble]"
   ].join(", ");
   const ASSISTANT_SELECTOR = [
     "[data-message-author-role='assistant']",
@@ -24,11 +26,14 @@
     "section[data-turn='assistant']",
     "[data-testid='assistant-message']",
     "[data-testid='assistant']",
+    // ChatGPT UI 2026-11: assistant reply body (role marker is only an sr-only h4).
+    "[data-response-body]",
     "[data-is-streaming]",
     "[class*='assistant-message']",
     "[class*='font-claude-message']"
   ].join(", ");
-  const TURN_SELECTOR = "article[data-testid^='conversation-turn'], [data-testid^='conversation-turn']";
+  const TURN_SELECTOR =
+    "article[data-testid^='conversation-turn'], [data-testid^='conversation-turn'], [data-turn-key]";
   const SKIP_SELECTOR = [
     "#prompt-textarea",
     "textarea",
@@ -350,6 +355,7 @@
     if (!el || typeof el.getAttribute !== "function") return false;
     const role = `${el.getAttribute("data-message-author-role") || ""} ${el.getAttribute("data-message-role") || ""} ${el.getAttribute("data-turn") || ""}`.toLowerCase();
     if (/\buser\b/.test(role)) return true;
+    if (el.hasAttribute?.("data-user-message-bubble")) return true;
     const testid = String(el.getAttribute("data-testid") || "").toLowerCase();
     return testid.includes("user-message") || testid === "user";
   }
@@ -588,6 +594,13 @@
   function readNewestAssistantTurn(doc) {
     const turns = queryAll(doc, TURN_SELECTOR);
     const lastTurn = turns.length ? turns[turns.length - 1] : null;
+    // ChatGPT UI 2026-11: the turn wrapper also holds a date separator; read its reply body.
+    if (lastTurn && typeof lastTurn.querySelectorAll === "function") {
+      const bodies = Array.from(lastTurn.querySelectorAll("[data-response-body]"));
+      const body = bodies.length ? bodies[bodies.length - 1] : null;
+      const text = body ? tidyChunk(readElementProse(body, { stripCode: false })) : "";
+      if (text) return text.slice(0, 20000);
+    }
     if (lastTurn && !isUserElement(lastTurn)) {
       const fromTurn = tidyChunk(readElementProse(lastTurn, { stripCode: false }));
       const showSplit = fromTurn.split(/show more/i);

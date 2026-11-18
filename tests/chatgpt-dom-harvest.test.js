@@ -20,6 +20,8 @@ function matchSelector(el, selector) {
     rest = rest.slice(tag[0].length);
     if (!rest) return true;
   }
+  const present = rest.match(/^\[([^\]=~|^$*]+)\]$/);
+  if (present) return el.getAttribute(present[1]) != null;
   const attr = rest.match(/^\[([^\]=~|^$*]+)([~|^$*]?=)['"]?([^'"\]]+)['"]?\]$/);
   if (!attr) return false;
   const name = attr[1];
@@ -272,4 +274,24 @@ test("treats the composer and user turns as off-limits", () => {
   assert.equal(isComposerOrUserNode(composer), true);
   assert.equal(isComposerOrUserNode(userTurn), true);
   assert.equal(isComposerOrUserNode(canvas), false);
+});
+
+test("ChatGPT UI 2026-11: reads the letter from [data-response-body] inside a [data-turn-key] turn", () => {
+  const letter =
+    "Dear Hiring Manager,\n\nI am excited to apply for the Salesforce Developer role, where I can bring years of Apex, LWC and integration work to your team.\n\nIn my recent work I supported Sales Cloud releases, fixed broken integrations, and kept deployments steady for business users across regions.\n\nThank you for your consideration.";
+  const doc = buildDoc([
+    node({ roleAttr: "data-turn-key", role: "k1", children: [
+      node({ text: "Today 3:10 PM" }),
+      node({ roleAttr: "data-user-message-bubble", role: "true", text: "Rewrite this resume. Return JSON." }),
+      node({ roleAttr: "data-response-body", role: "m1", text: '{"name":"X","experience":[]}' })
+    ] }),
+    node({ roleAttr: "data-turn-key", role: "k2", children: [
+      node({ text: "Today 3:12 PM" }),
+      node({ roleAttr: "data-user-message-bubble", role: "true", text: "Write the cover letter. OUTPUT RULES: Return PLAIN TEXT only. Start with Dear Hiring Manager," }),
+      node({ roleAttr: "data-response-body", role: "m2", text: letter })
+    ] })
+  ]);
+  const api = sandbox.__brightstarDomHarvest;
+  assert.equal(api.readNewestAssistantTurn(doc), letter);
+  assert.equal(api.readNewestAssistantProse(doc), letter);
 });
