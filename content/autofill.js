@@ -5981,9 +5981,13 @@
       }
       return "";
     }
-    const loginForm = document.querySelector(
-      'input[type="password"], form[action*="login" i], form[action*="signin" i], [data-testid*="login" i] input'
-    );
+    // Only a *visible* sign-in control counts: Dice's apply wizard keeps a hidden
+    // (display:none) login modal in the DOM while the user is signed in (2026-11-18).
+    const loginForm = Array.from(
+      document.querySelectorAll(
+        'input[type="password"], form[action*="login" i], form[action*="signin" i], [data-testid*="login" i] input'
+      )
+    ).find((el) => isElVisible(el));
     if (loginForm || (isIndeedPage() && /\/account\/login|\/auth|\/m\/basecamp/i.test(href))) {
       return "A sign-in form is on the page. Log in, then retry.";
     }
