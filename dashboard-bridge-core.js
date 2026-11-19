@@ -7,7 +7,7 @@
  * changes submit policy; it only clicks what a person could click.
  */
 
-export const BRIDGE_ROW_LIMIT = 50;
+export const BRIDGE_ROW_LIMIT = 500; // whole queue in practice: the dashboard tiles and job-board / ATS tables count from these rows
 
 export function isGoogleSheetUrl(url) {
   return /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]{10,}/.test(String(url || "")) && String(url).length <= 500;
