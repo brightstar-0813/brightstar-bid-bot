@@ -60,14 +60,18 @@ const CSS = `
       color: #6b7280;
     }
 
+    /* One line: nowrap, and no overflow clipping so a long value is never hidden.
+       contactSizeClass() picks fit-8 / fit-7 for long contact values (A4 content width). */
     .contact {
       margin: 0 0 6px;
       font-size: 9pt;
       color: #e8772e;
       white-space: nowrap;
-      overflow: hidden;
-      text-overflow: clip;
     }
+
+    .contact.fit-8 { font-size: 8pt; }
+    .contact.fit-7 { font-size: 7pt; }
+    .contact.fit-65 { font-size: 6.5pt; }
 
     .contact .tag { font-weight: 700; }
 
@@ -204,6 +208,19 @@ function shortEmail(value) {
     .replace(/\/$/, "");
 }
 
+/**
+ * One-line fit. Measured in Chrome: at 9pt the contact text is ~5px per character and the
+ * A4 content width is 673px, so 9pt holds ~130 characters, 8pt ~146, 7pt ~160, 6.5pt ~170.
+ * Length is taken from the rendered labels (entities count longer, which is the safe side).
+ */
+export function contactSizeClass(contactHtml) {
+  const plainLength = String(contactHtml || "").replace(/<[^>]+>/g, "").length;
+  if (plainLength <= 130) return "";
+  if (plainLength <= 146) return "fit-8";
+  if (plainLength <= 160) return "fit-7";
+  return "fit-65";
+}
+
 function labeledContact(data) {
   const bits = [];
   if (data.phone) {
@@ -218,7 +235,8 @@ function labeledContact(data) {
     );
   }
   if (data.linkedin) {
-    const shown = compactLinkedInLabel(data.linkedin);
+    // "LI:" already says LinkedIn; dropping the host keeps the whole contact line on one row.
+    const shown = compactLinkedInLabel(data.linkedin).replace(/^linkedin\.com\//i, "");
     const href = /^https?:\/\//i.test(String(data.linkedin).trim())
       ? String(data.linkedin).trim()
       : `https://${String(data.linkedin).trim().replace(/^www\./i, "")}`;
@@ -316,7 +334,7 @@ export const orangeBannerTemplate = {
   <header class="top">
     <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
     ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
-    ${contact ? `<p class="contact">${contact}</p>` : ""}
+    ${contact ? `<p class="contact ${contactSizeClass(contact)}">${contact}</p>` : ""}
   </header>
   ${profile ? `<section><h2 class="plain">About me</h2><p${pathAttr("profile")}>${richHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2 class="plain">Technical summary</h2>${tech}</section>` : ""}
