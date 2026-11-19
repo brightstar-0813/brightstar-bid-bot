@@ -69,6 +69,10 @@ export function confirmDialog({
 
 /**
  * Job details form for style-export / Manual Bid-style save.
+ *
+ * With `templateOnly` the header gets a switch. On: the job fields hide, a format picker
+ * shows, and the result carries `templateOnly: true` with empty job fields, so the caller
+ * can download the styled resume without any job context. Off (default): unchanged.
  * @param {{
  *   title?: string,
  *   confirmText?: string,
@@ -76,19 +80,31 @@ export function confirmDialog({
  *   previewText?: string,
  *   clearText?: string,
  *   templates?: Array<{ id: string, label: string, description?: string }>,
+ *   templateOnly?: null | {
+ *     label?: string,
+ *     hint?: string,
+ *     title?: string,
+ *     note?: string,
+ *     confirmText?: string,
+ *     formats?: Array<{ id: string, label: string }>
+ *   },
  *   onPreview?: (values: {
  *     jobTitle: string,
  *     companyName: string,
  *     jdLink: string,
  *     jdText: string,
- *     templateId: string
+ *     templateId: string,
+ *     templateOnly: boolean,
+ *     format: string
  *   }) => void | Promise<void>,
  *   initial?: {
  *     jobTitle?: string,
  *     companyName?: string,
  *     jdLink?: string,
  *     jdText?: string,
- *     templateId?: string
+ *     templateId?: string,
+ *     templateOnly?: boolean,
+ *     format?: string
  *   }
  * }} opts
  * @returns {Promise<null | {
@@ -96,7 +112,9 @@ export function confirmDialog({
  *   companyName: string,
  *   jdLink: string,
  *   jdText: string,
- *   templateId: string
+ *   templateId: string,
+ *   templateOnly: boolean,
+ *   format: string
  * }>}
  */
 export function jobDetailsDialog({
@@ -106,6 +124,7 @@ export function jobDetailsDialog({
   previewText = "Preview",
   clearText = "Clear",
   templates = [],
+  templateOnly = null,
   onPreview = null,
   initial = {}
 } = {}) {
@@ -122,35 +141,60 @@ export function jobDetailsDialog({
       .join("");
 
     const showPreview = typeof onPreview === "function";
+    const toggle = templateOnly && typeof templateOnly === "object" ? templateOnly : null;
+    const formatOptions = (Array.isArray(toggle?.formats) ? toggle.formats : [])
+      .map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.label || f.id)}</option>`)
+      .join("");
+    const switchHtml = toggle
+      ? `<label class="ui-dialog-switch" title="${escapeHtml(toggle.hint || "")}">
+            <input type="checkbox" name="templateOnly" role="switch" />
+            <span class="ui-dialog-switch-track" aria-hidden="true"></span>
+            <span class="ui-dialog-switch-label">${escapeHtml(toggle.label || "Template only")}</span>
+          </label>`
+      : "";
     const host = document.createElement("div");
     host.className = "ui-dialog-host";
     host.innerHTML = `
       <div class="ui-dialog-backdrop" data-ui-dismiss></div>
       <div class="ui-dialog ui-dialog-form" role="dialog" aria-labelledby="ui-job-dialog-title">
-        <p class="ui-dialog-title" id="ui-job-dialog-title">${escapeHtml(title)}</p>
+        <div class="ui-dialog-head">
+          <p class="ui-dialog-title" id="ui-job-dialog-title">${escapeHtml(title)}</p>
+          ${switchHtml}
+        </div>
         <form class="ui-dialog-fields" autocomplete="off">
           <label class="field">
             <span>Resume style</span>
             <select name="templateId" aria-label="Resume style">${templateOptions}</select>
           </label>
-          <div class="ui-dialog-grid">
+          ${
+            toggle
+              ? `<label class="field ui-dialog-template-only-field" hidden>
+            <span>Download as</span>
+            <select name="format" aria-label="Download format">${formatOptions}</select>
+          </label>
+          <p class="ui-dialog-note ui-dialog-template-only-field" hidden>${escapeHtml(toggle.note || "")}</p>`
+              : ""
+          }
+          <div class="ui-dialog-job-fields">
+            <div class="ui-dialog-grid">
+              <label class="field">
+                <span>Job title</span>
+                <input name="jobTitle" type="text" placeholder="Senior Software Engineer" />
+              </label>
+              <label class="field">
+                <span>Company</span>
+                <input name="companyName" type="text" placeholder="Company" />
+              </label>
+            </div>
             <label class="field">
-              <span>Job title</span>
-              <input name="jobTitle" type="text" placeholder="Senior Software Engineer" />
+              <span>JD link</span>
+              <input name="jdLink" type="text" placeholder="https://… (optional for direct jobs)" />
             </label>
             <label class="field">
-              <span>Company</span>
-              <input name="companyName" type="text" placeholder="Company" />
+              <span>Job description</span>
+              <textarea name="jdText" rows="12" placeholder="Paste the job description…"></textarea>
             </label>
           </div>
-          <label class="field">
-            <span>JD link</span>
-            <input name="jdLink" type="text" placeholder="https://… (optional for direct jobs)" />
-          </label>
-          <label class="field">
-            <span>Job description</span>
-            <textarea name="jdText" rows="12" placeholder="Paste the job description…"></textarea>
-          </label>
           <p class="ui-dialog-error" hidden></p>
           <div class="ui-dialog-actions">
             <button type="button" class="ghost ui-dialog-cancel">${escapeHtml(cancelText)}</button>
@@ -175,6 +219,27 @@ export function jobDetailsDialog({
     const errEl = host.querySelector(".ui-dialog-error");
     const previewBtn = host.querySelector(".ui-dialog-preview");
     const clearBtn = host.querySelector(".ui-dialog-clear");
+    const switchEl = host.querySelector('[name="templateOnly"]');
+    const formatEl = host.querySelector('[name="format"]');
+    const dialogTitleEl = host.querySelector(".ui-dialog-title");
+    const confirmBtn = host.querySelector(".ui-dialog-confirm");
+    const jobFieldsEl = host.querySelector(".ui-dialog-job-fields");
+    const templateOnlyFieldEls = host.querySelectorAll(".ui-dialog-template-only-field");
+
+    const isTemplateOnly = () => Boolean(switchEl?.checked);
+
+    /** Template-only hides every job field; the confirm label and title say what will happen. */
+    const applyMode = () => {
+      const on = isTemplateOnly();
+      if (jobFieldsEl) jobFieldsEl.hidden = on;
+      templateOnlyFieldEls.forEach((el) => {
+        el.hidden = !on;
+      });
+      if (clearBtn) clearBtn.hidden = on;
+      if (dialogTitleEl) dialogTitleEl.textContent = on ? toggle?.title || title : title;
+      if (confirmBtn) confirmBtn.textContent = on ? toggle?.confirmText || "Download" : confirmText;
+      showError("");
+    };
 
     const wantedTemplate = String(initial.templateId || "").trim();
     if (templateEl && wantedTemplate) {
@@ -216,13 +281,19 @@ export function jobDetailsDialog({
       errEl.textContent = msg || "";
     };
 
-    const readValues = () => ({
-      jobTitle: String(titleEl.value || "").trim(),
-      companyName: String(companyEl.value || "").trim(),
-      jdLink: String(linkEl.value || "").trim(),
-      jdText: String(textEl.value || "").trim(),
-      templateId: String(templateEl?.value || "").trim()
-    });
+    const readValues = () => {
+      const on = isTemplateOnly();
+      return {
+        // Template-only never carries job context, even if fields were typed earlier.
+        jobTitle: on ? "" : String(titleEl.value || "").trim(),
+        companyName: on ? "" : String(companyEl.value || "").trim(),
+        jdLink: on ? "" : String(linkEl.value || "").trim(),
+        jdText: on ? "" : String(textEl.value || "").trim(),
+        templateId: String(templateEl?.value || "").trim(),
+        templateOnly: on,
+        format: String(formatEl?.value || "").trim()
+      };
+    };
 
     const clearJobFields = () => {
       titleEl.value = "";
@@ -236,7 +307,7 @@ export function jobDetailsDialog({
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const values = readValues();
-      if (!values.jobTitle && !values.companyName) {
+      if (!values.templateOnly && !values.jobTitle && !values.companyName) {
         showError("Add a job title or company.");
         titleEl.focus();
         return;
@@ -260,6 +331,16 @@ export function jobDetailsDialog({
       chrome.storage.local.set({ selected_template_id: tid }).catch(() => {});
       chrome.runtime.sendMessage({ type: "template_preview_show", templateId: tid }).catch(() => {});
     });
+
+    if (switchEl) {
+      const wantedFormat = String(initial.format || "").trim();
+      if (formatEl && Array.from(formatEl.options).some((o) => o.value === wantedFormat)) {
+        formatEl.value = wantedFormat;
+      }
+      switchEl.checked = Boolean(initial.templateOnly);
+      switchEl.addEventListener("change", applyMode);
+      applyMode();
+    }
 
     document.body.appendChild(host);
     document.addEventListener("keydown", onKey);

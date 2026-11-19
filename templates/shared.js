@@ -202,7 +202,7 @@ export function renderSkills(skills) {
       const category = String(row?.category || "").trim();
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
-      if (isKeywordDumpSkillsCategory(category)) return "";
+      if (row?.verbatim !== true && isKeywordDumpSkillsCategory(category)) return "";
       return `<tr>
   <td class="skill-cat"${pathAttr(`skills.${si}.category`)}>${richHtml(category)}</td>
   <td class="skill-items"${pathAttr(`skills.${si}.items`)}>${richHtml(items)}</td>
@@ -236,6 +236,30 @@ export function renderCerts(certs, { listClass = "certifications" } = {}) {
     .join("\n");
   if (!items) return "";
   return `<ul class="${listClass}">${items}</ul>`;
+}
+
+/**
+ * Source lines the pasted-text parser could not place (see resume-fidelity.js).
+ * Plain <section><h2><ul><li> markup so every template's own CSS styles it;
+ * rendered after the template body so nothing the user pasted is dropped.
+ */
+export function renderAdditionalSections(sections) {
+  if (!Array.isArray(sections)) return "";
+  return sections
+    .map((section, si) => {
+      const lines = (Array.isArray(section?.lines) ? section.lines : [])
+        .map((line, li) => {
+          const text = String(line || "").trim();
+          if (!text) return "";
+          return `<li${pathAttr(`additionalSections.${si}.lines.${li}`)}>${richHtml(text)}</li>`;
+        })
+        .filter(Boolean);
+      if (!lines.length) return "";
+      const title = String(section?.title || "").trim() || "Additional Information";
+      return `<section class="additional-section"><h2>${escapeHtml(title)}</h2><ul>${lines.join("\n")}</ul></section>`;
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Technical Summary: array of highlight bullets (strings). */
@@ -609,7 +633,7 @@ export function renderSkillsStacked(skills) {
       const category = String(row?.category || "").trim();
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
-      if (isKeywordDumpSkillsCategory(category)) return "";
+      if (row?.verbatim !== true && isKeywordDumpSkillsCategory(category)) return "";
       // Keep a literal space between the spans: .skill-cat is display:block, so
       // this is invisible, but PDF text extraction would otherwise glue the
       // category onto the first skill ("IntegrationREST, SOAP").
@@ -631,7 +655,7 @@ export function renderSkillsInline(skills) {
       const category = String(row?.category || "").trim();
       const items = String(row?.items || "").trim();
       if (!category && !items) return "";
-      if (isKeywordDumpSkillsCategory(category)) return "";
+      if (row?.verbatim !== true && isKeywordDumpSkillsCategory(category)) return "";
       if (!category) {
         return `<div class="skill-inline"${pathAttr(`skills.${si}.items`)}>${richHtml(items)}</div>`;
       }

@@ -499,6 +499,9 @@ export function isKeywordStubBullet(line) {
  */
 export function sanitizeResumeData(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  // `verbatim` = the user's own pasted text for template-only export: bot rewrite rules
+  // (clearance / claim stripping, employment types, intern titles) must not touch it.
+  if (data.verbatim === true) return { ...data };
   const out = { ...data };
 
   const stripMd = (v) =>
@@ -1188,6 +1191,11 @@ export function buildJdSkillsRetryPrompt(data, jdText, { roles = 2, minBullets =
 
 export function extractResumeJson(responseText) {
   return sanitizeResumeData(coerceResumeObject(tryParseJson(responseText)));
+}
+
+/** Same parse without sanitizing: for text the user wrote and wants printed as given. */
+export function extractResumeJsonRaw(responseText) {
+  return coerceResumeObject(tryParseJson(responseText));
 }
 
 export function totalExperienceBullets(data) {

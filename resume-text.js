@@ -5,6 +5,7 @@
 import { extractProfileFromResumeText } from "./resume-profile.js";
 import {
   extractResumeJson,
+  extractResumeJsonRaw,
   isMinimallySaveableResume,
   isUsableResumeJson,
   sanitizeResumeData
@@ -63,6 +64,44 @@ function normalizeContactLine(line) {
     .trim();
 }
 
+/** Lines shaped like a document title, never a person ("# Resume", "Curriculum Vitae"). */
+const DOC_TITLE_LINE_RE = /^(r[eé]sum[eé]|curriculum\s+vitae|cv)$/i;
+
+/** Heading / bold wrappers off the first lines only; the body keeps its Markdown. */
+function stripHeaderMarkdown(text, maxLines = 15) {
+  const lines = String(text || "").split("\n");
+  return lines.map((l, i) => (i < maxLines ? stripMarkdownDecor(l) : l)).join("\n");
+}
+
+/**
+ * Last-resort name for a paste whose header the strict detector rejected
+ * (lowercase, Markdown-wrapped, unusual casing). Only a short, letters-only
+ * line near the top qualifies; titles, section headers, and contact lines never do.
+ */
+function firstLineNameCandidate(text) {
+  const lines = String(text || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .slice(0, 12);
+  for (const line of lines) {
+    const t = stripMarkdownDecor(line).replace(/\s+/g, " ").trim();
+    if (!t || DOC_TITLE_LINE_RE.test(t)) continue;
+    if (looksLikeSectionHeader(line)) return "";
+    if (t.length < 4 || t.length > 60) return "";
+    const words = t.split(" ");
+    if (words.length < 2 || words.length > 5) return "";
+    if (!words.every((w) => /^[\p{L}][\p{L}'’.\-]*$/u.test(w))) return "";
+    if (looksLikeJobTitle(t) || isCorporateSuffixLine(t)) return "";
+    return t;
+  }
+  return "";
+}
+
+/** True for a bare section title ("EDUCATION", "## Skills"); never content. */
+export function isKnownSectionHeader(line, opts = {}) {
+  return looksLikeSectionHeader(line, opts);
+}
+
 function linesOf(text) {
   return String(text || "")
     .replace(/\r\n/g, "\n")
@@ -92,7 +131,14 @@ function headerLabel(line) {
     .trim();
 }
 
-function looksLikeSectionHeader(line) {
+/**
+ * Sections the resume model has no field for. Only recognised when the caller opts in
+ * (`keepExtraSections`); otherwise they keep leaking into the previous section as before.
+ */
+const EXTRA_SECTION_RE =
+  /^(?:awards?(?:\s*(?:&|and)\s*honou?rs?)?|honou?rs?(?:\s*(?:&|and)\s*awards?)?|languages?|volunteer(?:ing)?(?:\s+(?:work|experience))?|publications?|interests?|hobbies|(?:professional\s+)?training|courses|affiliations?|memberships?|patents?|references?|leadership|activities|extracurricular(?:\s+activities)?|speaking(?:\s+engagements)?|presentations?|additional(?:\s+information)?|other|personal(?:\s+information)?)$/i;
+
+function looksLikeSectionHeader(line, { extras = false } = {}) {
   const t = headerLabel(line);
   if (!t || t.length > 64) return false;
   if (/[.?!]$/.test(t)) return false;
@@ -100,13 +146,15 @@ function looksLikeSectionHeader(line) {
   // Markdown heading markers strongly suggest a section/role title
   const raw = String(line || "").trim();
   if (/^#{1,2}\s+\S/.test(raw) && SECTION_ALIASES.some((s) => s.re.test(t))) return true;
-  return SECTION_ALIASES.some((s) => s.re.test(t));
+  if (SECTION_ALIASES.some((s) => s.re.test(t))) return true;
+  return extras && EXTRA_SECTION_RE.test(t);
 }
 
-function sectionKeyFor(line) {
+function sectionKeyFor(line, { extras = false } = {}) {
   const t = headerLabel(line);
   const hit = SECTION_ALIASES.find((s) => s.re.test(t));
-  return hit?.key || "";
+  if (hit) return hit.key;
+  return extras && EXTRA_SECTION_RE.test(t) ? `extra:${t}` : "";
 }
 
 function stripBullet(line) {
@@ -145,13 +193,13 @@ function splitTableCells(line) {
     .map((c) => stripMarkdownDecor(c).trim());
 }
 
-function splitSections(text) {
+function splitSections(text, opts = {}) {
   const lines = compactBlankLines(linesOf(text));
   const sections = { preamble: [] };
   let current = "preamble";
   for (const line of lines) {
-    if (looksLikeSectionHeader(line)) {
-      current = sectionKeyFor(line) || current;
+    if (looksLikeSectionHeader(line, opts)) {
+      current = sectionKeyFor(line, opts) || current;
       if (!sections[current]) sections[current] = [];
       continue; // never keep the section title as content
     }
@@ -566,7 +614,7 @@ function parseCerts(lines) {
 }
 
 const TITLE_WORD_RE =
-  /\b(engineer|developer|architect|specialist|administrator|consultant|manager|analyst|lead|director|intern|principal|staff|owner|scientist|designer|coordinator|associate|founder|head|officer)\b/i;
+  /\b(engineer|developer|architect|specialist|administrator|consultant|manager|analyst|lead|director|intern|principal|staff|owner|scientist|designer|coordinator|associate|founder|head|officer|president|vp|svp|evp|avp|chief|ceo|cfo|cto|coo|cio|controller|comptroller|accountant|treasurer|auditor|partner|banker|advisor|adviser|executive|supervisor|representative|strategist|planner|underwriter|trader|broker|assistant|clerk|technician|recruiter|generalist|economist|actuary|attorney|counsel|paralegal)\b/i;
 
 /** True when a pipe/meta segment is only a date range (e.g. "September 2024 – Present"). */
 function isDateRangeSegment(seg) {
@@ -1120,6 +1168,27 @@ function parseExperience(lines) {
   }));
 }
 
+/**
+ * Sections with no model field (Awards, Languages, …) → { title, lines }.
+ * One output line per source line, in order: nothing is merged, reflowed, or dropped.
+ */
+function extraSectionsFrom(sections) {
+  const out = [];
+  for (const [key, lines] of Object.entries(sections || {})) {
+    if (!key.startsWith("extra:")) continue;
+    const kept = [];
+    for (const line of lines || []) {
+      if (!String(line).trim() || isMarkdownTableSep(line)) continue;
+      const text = isMarkdownTableRow(line)
+        ? splitTableCells(line).filter(Boolean).join(" — ")
+        : stripBullet(line);
+      if (text) kept.push(text);
+    }
+    if (kept.length) out.push({ title: key.slice("extra:".length), lines: kept });
+  }
+  return out;
+}
+
 function nonEmptyBody(data) {
   if (String(data?.profile || "").trim().length >= 20) return true;
   if (Array.isArray(data?.technicalSummary) && data.technicalSummary.some((x) => String(x || "").trim())) {
@@ -1143,20 +1212,28 @@ export function isStyledExportResume(data) {
  * @param {string} text
  * @param {{ person?: object }} [opts]
  */
-export function plainTextToResumeData(text, { person = null } = {}) {
+export function plainTextToResumeData(
+  text,
+  { person = null, keepExtraSections = false, verbatim = false } = {}
+) {
   const raw = String(text || "").trim();
   if (!raw) return null;
 
-  // Normalize contact markdown before profile extraction.
-  const rawForExtract = raw.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+  // Normalize contact markdown before profile extraction. The header zone also loses
+  // heading/bold wrappers so "# Alan Jeong" / "**Alan Jeong**" still read as a name.
+  const rawForExtract = stripHeaderMarkdown(raw.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1"));
   const extracted = extractProfileFromResumeText(rawForExtract);
-  const sections = splitSections(raw);
+  const sections = splitSections(raw, { extras: keepExtraSections });
+  const resolvedName =
+    extracted.name ||
+    String(person?.name || person?.label || "").trim() ||
+    firstLineNameCandidate(raw);
 
   const preambleLines = (sections.preamble || []).map(normalizeContactLine);
   const preambleBody = preambleLines.filter((line) => {
     const t = line.trim();
     if (!t) return false;
-    if (extracted.name && t === extracted.name) return false;
+    if (resolvedName && t === resolvedName) return false;
     if (extracted.headline && t === extracted.headline) return false;
     if (/@/.test(t) || /linkedin\.com/i.test(t)) return false;
     if (/\+?\d[\d\s().-]{8,}\d/.test(t) && t.length < 80) return false;
@@ -1175,10 +1252,7 @@ export function plainTextToResumeData(text, { person = null } = {}) {
     experience = parseExperience(sections.projects);
   }
 
-  const name =
-    extracted.name ||
-    String(person?.name || person?.label || "").trim() ||
-    "Resume";
+  const name = resolvedName || "Resume";
 
   const emailFromText = (rawForExtract.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i) || [])[0] || "";
   const phoneFromText =
@@ -1201,6 +1275,11 @@ export function plainTextToResumeData(text, { person = null } = {}) {
     certifications: parseCerts(sections.certifications || [])
   };
 
+  if (keepExtraSections) {
+    const extra = extraSectionsFrom(sections);
+    if (extra.length) data.additionalSections = extra;
+  }
+
   // Last resort: entire text as profile + one role so templates still render.
   if (!nonEmptyBody(data)) {
     const all = paragraphsFrom(linesOf(raw)).filter((p) => p !== name && p !== data.headline);
@@ -1216,29 +1295,48 @@ export function plainTextToResumeData(text, { person = null } = {}) {
     ];
   }
 
+  if (verbatim) return markVerbatim(data);
   return sanitizeResumeData(data) || data;
+}
+
+/**
+ * Flag a resume as the user's own text: sanitizers and template filters leave it untouched.
+ * Skill rows carry the flag too because templates filter row by row.
+ */
+export function markVerbatim(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  return {
+    ...data,
+    verbatim: true,
+    skills: Array.isArray(data.skills)
+      ? data.skills.map((row) => (row && typeof row === "object" ? { ...row, verbatim: true } : row))
+      : data.skills
+  };
 }
 
 /**
  * Resolve paste into resume JSON: prefer real JSON, else plain-text / Markdown conversion.
  */
-export function resolvePastedResume(rawText, { person = null } = {}) {
+export function resolvePastedResume(
+  rawText,
+  { person = null, keepExtraSections = false, verbatim = false } = {}
+) {
   const raw = String(rawText || "").trim();
   if (!raw) return null;
 
   // Prefer structured JSON when the paste clearly is JSON.
   if (/^\s*[{[]/.test(raw) || /```(?:json)?/i.test(raw)) {
-    const fromJson = extractResumeJson(raw);
+    const fromJson = verbatim ? extractResumeJsonRaw(raw) : extractResumeJson(raw);
     if (isUsableResumeJson(fromJson) || isMinimallySaveableResume(fromJson) || isStyledExportResume(fromJson)) {
-      return fromJson;
+      return verbatim ? markVerbatim(fromJson) : fromJson;
     }
   }
 
-  const fromText = plainTextToResumeData(raw, { person });
+  const fromText = plainTextToResumeData(raw, { person, keepExtraSections, verbatim });
   if (isStyledExportResume(fromText)) return fromText;
 
-  const soft = extractResumeJson(raw);
-  if (isStyledExportResume(soft)) return soft;
+  const soft = verbatim ? extractResumeJsonRaw(raw) : extractResumeJson(raw);
+  if (isStyledExportResume(soft)) return verbatim ? markVerbatim(soft) : soft;
 
   return fromText;
 }

@@ -98,6 +98,101 @@
   gap: 10px;
 }
 
+/* Title left, "Template only" switch right. */
+.ui-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 8px;
+}
+
+.ui-dialog-head .ui-dialog-title {
+  margin: 0;
+}
+
+.ui-dialog-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ui-dialog-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.ui-dialog-switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.12));
+  background: var(--field-bg, rgba(0, 0, 0, 0.22));
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.ui-dialog-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted, #9aa8bc);
+  transition: transform 0.14s ease, background 0.14s ease;
+}
+
+.ui-dialog-switch input:checked + .ui-dialog-switch-track {
+  background: linear-gradient(
+    180deg,
+    var(--accent-soft-18, rgba(47, 191, 143, 0.35)),
+    var(--accent-soft-08, rgba(47, 191, 143, 0.15))
+  );
+  border-color: var(--accent-border-55, rgba(47, 191, 143, 0.55));
+}
+
+.ui-dialog-switch input:checked + .ui-dialog-switch-track::after {
+  transform: translateX(14px);
+  background: var(--gold-bright, #7ee2b8);
+}
+
+.ui-dialog-switch input:focus-visible + .ui-dialog-switch-track {
+  outline: 2px solid var(--accent-border-55, rgba(47, 191, 143, 0.55));
+  outline-offset: 2px;
+}
+
+.ui-dialog-switch-label {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink, #f4f7fb);
+}
+
+.ui-dialog-job-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ui-dialog-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted, #9aa8bc);
+}
+
+/* Flex/grid rules above would otherwise beat the UA [hidden] rule. */
+.ui-dialog-fields [hidden] {
+  display: none !important;
+}
+
 .ui-dialog-fields .field {
   display: flex;
   flex-direction: column;

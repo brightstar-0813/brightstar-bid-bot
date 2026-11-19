@@ -33,6 +33,7 @@ const saveBtn = document.getElementById("saveResume");
 const discardBtn = document.getElementById("discardEdits");
 const formatBar = document.getElementById("formatBar");
 const downloadDocxBtn = document.getElementById("downloadDocx");
+const downloadPdfBtn = document.getElementById("downloadPdf");
 
 const params = new URLSearchParams(location.search);
 let templateId = params.get("template") || DEFAULT_TEMPLATE_ID;
@@ -94,6 +95,9 @@ function updateEditChrome() {
   if (discardBtn) discardBtn.disabled = !editable || !editMode;
   if (formatBar) formatBar.hidden = !editable || !editMode;
   if (downloadDocxBtn) downloadDocxBtn.disabled = !editable || !workingResumeData;
+  if (downloadPdfBtn && !downloadPdfBtn.dataset.busy) {
+    downloadPdfBtn.disabled = !editable || !workingResumeData;
+  }
 }
 
 function collectPathEdits(doc) {
@@ -588,6 +592,36 @@ downloadDocxBtn?.addEventListener("click", () => {
   link.download = resumeDocxFileName(workingResumeData);
   link.click();
   URL.revokeObjectURL(url);
+});
+
+/** PDF is rendered by the service worker (debugger print); no job folder, sheet, or profile. */
+downloadPdfBtn?.addEventListener("click", async () => {
+  if (!workingResumeData || downloadPdfBtn.dataset.busy) return;
+  if (editMode) {
+    workingResumeData = applyPathEdits(
+      workingResumeData,
+      collectPathEdits(pageEl.contentDocument)
+    );
+  }
+  downloadPdfBtn.dataset.busy = "1";
+  downloadPdfBtn.disabled = true;
+  setStatus("Saving PDF… (click Allow if Chrome asks about debugging)", "ok");
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: "export_styled_resume_standalone",
+      resumeData: workingResumeData,
+      templateId,
+      format: "pdf"
+    });
+    if (!res?.ok) throw new Error(res?.error || "PDF export failed.");
+    setStatus(res.status, "ok");
+    showToast(res.status, { kind: "ok", placement: "center" });
+  } catch (err) {
+    setStatus(String(err?.message || err), "err");
+  } finally {
+    delete downloadPdfBtn.dataset.busy;
+    updateEditChrome();
+  }
 });
 
 accentSwatchesEl?.addEventListener("click", (event) => {

@@ -134,6 +134,12 @@ const CSS = `
       color: #111;
     }
 
+    .project {
+      margin: 0 0 2px;
+      font-size: 10pt;
+      font-style: italic;
+    }
+
     .job-dates, .edu-year {
       flex: 0 0 auto;
       white-space: nowrap;
@@ -235,6 +241,7 @@ function renderJobs(jobs) {
       const title = String(job.title || "").trim();
       const dates = String(job.dates || "").trim();
       const location = String(job.location || "").trim();
+      const project = String(job.project || "").trim();
       const org = [company, location].filter(Boolean).join(" | ");
       const bullets = (job.bullets || [])
         .map((bullet, bi) => {
@@ -250,6 +257,7 @@ function renderJobs(jobs) {
     ${title ? `<p class="job-title"${pathAttr(`experience.${ji}.title`)}>${richHtml(title)}</p>` : "<p class=\"job-title\"></p>"}
     ${dates ? `<span class="job-dates"${pathAttr(`experience.${ji}.dates`)}>${escapeHtml(dates)}</span>` : ""}
   </div>
+  ${project ? `<p class="project"${pathAttr(`experience.${ji}.project`)}>${richHtml(project)}</p>` : ""}
   ${bullets ? `<ul>\n${bullets}\n</ul>` : ""}
 </article>`;
     })

@@ -146,6 +146,13 @@ import {
 } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
 import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
+import { buildResumeDocx } from "./resume-docx.js";
+import { resolveLosslessResume } from "./resume-fidelity.js";
+import {
+  buildStandaloneExportPlan,
+  bytesToBase64,
+  standaloneStatusLine
+} from "./standalone-export.js";
 import { applyQueueJobTiming } from "./queue-timing.js";
 import {
   BATCH_RUN_MODE_KEY,
@@ -3750,6 +3757,58 @@ async function exportStyledResumePdf(jsonText, { templateId = "", jobMeta = {}, 
 
   await setStatus(result.status);
   return { ok: true, status: result.status, savedDir: result.savedDir, templateId: tid, resumeData };
+}
+
+/**
+ * Template + resume text/JSON → PDF and/or DOCX in Downloads/StyledResumes.
+ * No job title / company / JD, no person profile, no queue row, no Sheet write —
+ * the job-bound `exportStyledResumePdf` above is unchanged and stays the Manual Bid path.
+ */
+async function exportStyledResumeStandalone(
+  jsonText,
+  { templateId = "", format = "", resumeData: providedResume = null } = {}
+) {
+  let resumeData = null;
+  if (providedResume && typeof providedResume === "object") {
+    resumeData = sanitizeResumeData(providedResume) || providedResume;
+  } else {
+    const raw = String(jsonText || "").trim();
+    if (!raw) throw new Error("Paste resume text first.");
+    // No profile fallback, no bot rewrite rules, every pasted line kept (resume-fidelity.js).
+    resumeData = resolveLosslessResume(raw).data;
+  }
+  if (!isStyledExportResume(resumeData)) {
+    throw new Error(
+      "Could not build a resume from that paste. Include a name and body text (summary, experience, or skills)."
+    );
+  }
+
+  const stored = await chrome.storage.local.get("selected_template_id").catch(() => ({}));
+  const tid =
+    String(templateId || stored?.selected_template_id || "").trim() || DEFAULT_TEMPLATE_ID;
+  const plan = buildStandaloneExportPlan(resumeData, { format });
+
+  for (const file of plan.files) {
+    if (file.format === "pdf") {
+      await setStatus("Building resume HTML…");
+      const accentId = await pickTemplateAccent(tid, {});
+      const html = resumeJsonToHtml(resumeData, tid, { accentId });
+      const pdfBase64 = await htmlToPdfBase64(html);
+      await setStatus(`Downloading ${file.fileName}…`);
+      await downloadBase64File(pdfBase64, file.mimeType, file.path);
+    } else {
+      await setStatus(`Downloading ${file.fileName}…`);
+      await downloadBase64File(bytesToBase64(buildResumeDocx(resumeData)), file.mimeType, file.path);
+    }
+  }
+
+  return {
+    ok: true,
+    status: standaloneStatusLine(plan),
+    savedDir: plan.dir,
+    files: plan.files.map((f) => f.fileName),
+    templateId: tid
+  };
 }
 
 /** Status fragment for a best-effort Email Bid / Reply sheet write. */
@@ -14963,6 +15022,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return false;
+  }
+
+  if (type === "export_styled_resume_standalone") {
+    if (isRunning) {
+      safeSendResponse(sendResponse, { ok: false, error: "Generation already in progress." });
+      return false;
+    }
+    isRunning = true;
+    startKeepAlive();
+    chrome.storage.local.set({ generation_running: true });
+    (async () => {
+      try {
+        const result = await exportStyledResumeStandalone(message.jsonText || "", {
+          templateId: message.templateId || "",
+          format: message.format || "",
+          resumeData: message.resumeData || null
+        });
+        await setStatus(result.status);
+        safeSendResponse(sendResponse, result);
+      } catch (err) {
+        const error = String(err?.message || err);
+        await setStatus(`Style export failed: ${error}`);
+        safeSendResponse(sendResponse, { ok: false, error });
+      } finally {
+        await chrome.storage.local.set({ generation_running: false }).catch(() => {});
+        isRunning = false;
+        stopKeepAlive();
+      }
+    })();
+    // Async response: popup stays busy until the files are actually saved.
+    return true;
   }
 
   if (type === "save_from_json") {

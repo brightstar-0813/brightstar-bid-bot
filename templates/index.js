@@ -10,6 +10,7 @@ import { orangeBannerTemplate } from "./orange-banner.js";
 import { dateRailTemplate } from "./date-rail.js";
 import { stripClearanceFromTitle } from "../resume-json.js";
 import { accentOverrideCss } from "./accent.js";
+import { renderAdditionalSections } from "./shared.js";
 
 export {
   TEMPLATE_ACCENTS,
@@ -71,6 +72,8 @@ export function getTemplateById(templateId) {
  * @param {{ accentId?: string }} [options]
  */
 function sanitizeResumeData(raw) {
+  // Template-only export: the user's text is printed exactly as given (see resume-fidelity.js).
+  if (raw && raw.verbatim === true) return { ...raw };
   const data = { ...(raw || {}) };
   const headline = stripClearanceFromTitle(String(data.headline || "").trim());
   if (
@@ -111,6 +114,12 @@ export function resumeJsonToHtml(data, templateId, options = {}) {
   const clean = sanitizeResumeData(data);
   const template = getTemplateById(templateId);
   let html = template.render(clean);
+  const extra = renderAdditionalSections(clean?.additionalSections);
+  if (extra) {
+    // Last </main> (every built-in wraps its body in <main>); fall back to </body>.
+    const at = html.lastIndexOf("</main>") >= 0 ? html.lastIndexOf("</main>") : html.lastIndexOf("</body>");
+    html = at >= 0 ? `${html.slice(0, at)}${extra}\n${html.slice(at)}` : `${html}${extra}`;
+  }
   const align = clean?.headingAlign === "center" ? "center" : clean?.headingAlign === "left" ? "left" : "";
   if (align) {
     html = html.replace("</style>", `    h2 { text-align: ${align}; }\n  </style>`);

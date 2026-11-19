@@ -282,6 +282,12 @@ export function resumeDocumentXml(resume = {}) {
     sections.push(["Technical summary", summaryLines(resume.technicalSummary)]);
   }
 
+  // Lines the text parser could not place keep their own headings, after the known sections.
+  for (const extra of Array.isArray(resume.additionalSections) ? resume.additionalSections : []) {
+    const lines = summaryLines(Array.isArray(extra?.lines) ? extra.lines : []);
+    if (lines) sections.push([String(extra?.title || "").trim() || "Additional Information", lines]);
+  }
+
   for (const [title, body] of sections) {
     if (!body) continue;
     chunks.push(
@@ -348,7 +354,7 @@ function experienceLines(jobs) {
 function educationLines(rows) {
   return rows
     .map((row) => {
-      const line = [row?.degree, row?.school, row?.year, row?.location]
+      const line = [row?.degree, row?.school, row?.details, row?.year, row?.location]
         .filter((part) => plainTextFromRich(part))
         .join(" — ");
       return fieldParagraphs(line, { size: 11, font: "Calibri" }, 40);

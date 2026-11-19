@@ -42,6 +42,7 @@ import {
   accentById
 } from "./templates/index.js";
 import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
+import { resolveLosslessResume } from "./resume-fidelity.js";
 import { isResumePreviewable } from "./templates/preview-sample.js";
 import {
   extractSpreadsheetId,
@@ -3116,11 +3117,19 @@ async function testSlackWebhook() {
   }
 }
 
-function parseStyleExportPaste() {
+/**
+ * Pasted text → resume JSON.
+ * Default (job export): selected profile fills missing contact fields.
+ * `templateOnly`: no profile, no bot rewrite rules, every pasted line kept (resume-fidelity.js).
+ */
+function parseStyleExportPaste({ templateOnly = false } = {}) {
   const raw = String(styleExportPasteEl?.value || "").trim();
   if (!raw) throw new Error("Paste resume text first.");
-  const person = profilesCache.find((p) => p.id === profileSelectEl?.value) || null;
-  const resumeData = resolvePastedResume(raw, { person });
+  const resumeData = templateOnly
+    ? resolveLosslessResume(raw).data
+    : resolvePastedResume(raw, {
+        person: profilesCache.find((p) => p.id === profileSelectEl?.value) || null
+      });
   if (!isStyledExportResume(resumeData)) {
     throw new Error("Could not build a resume from that paste. Include a name and body text.");
   }
@@ -3128,6 +3137,27 @@ function parseStyleExportPaste() {
 }
 
 const STYLE_EXPORT_PASTE_KEY = "style_export_paste_json";
+/** Remembered dialog choices so the toggle stays where the user left it. */
+const STYLE_EXPORT_MODE_KEY = "style_export_template_only";
+const STYLE_EXPORT_FORMAT_KEY = "style_export_format";
+const TEMPLATE_ONLY_FORMATS = [
+  { id: "pdf", label: "PDF" },
+  { id: "docx", label: "Word (DOCX)" },
+  { id: "both", label: "PDF + Word" }
+];
+const TEMPLATE_ONLY_DIALOG = {
+  label: "Template only",
+  hint: "Apply the style only: no job details, profile, or sheet",
+  title: "Download styled resume",
+  note: "Your pasted text is kept exactly as written. Nothing is saved to jobs or the sheet.",
+  confirmText: "Download",
+  formats: TEMPLATE_ONLY_FORMATS
+};
+
+/** Saved preview JSON is only reusable in the mode that produced it (verbatim vs job). */
+function savedResumeMatchesMode(resume, templateOnly) {
+  return isResumePreviewable(resume) && Boolean(resume.verbatim) === Boolean(templateOnly);
+}
 
 async function clearStyleExport() {
   if (styleExportPasteEl) styleExportPasteEl.value = "";
@@ -3140,8 +3170,8 @@ styleExportPasteEl?.addEventListener("input", () => {
   chrome.storage.local.remove(STYLE_EXPORT_PASTE_KEY).catch(() => {});
 });
 
-async function openStyleExportPreview(templateId = "") {
-  const resumeData = parseStyleExportPaste();
+async function openStyleExportPreview(templateId = "", { templateOnly = false } = {}) {
+  const resumeData = parseStyleExportPaste({ templateOnly });
   const tid =
     String(templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
   await chrome.storage.local.set({
@@ -3223,7 +3253,8 @@ async function exportStyleExportPdf() {
     setStatus("Paste resume text first.");
     return;
   }
-  parseStyleExportPaste();
+  const prefs = await chrome.storage.local.get([STYLE_EXPORT_MODE_KEY, STYLE_EXPORT_FORMAT_KEY]);
+  parseStyleExportPaste({ templateOnly: Boolean(prefs[STYLE_EXPORT_MODE_KEY]) });
 
   const storedTemplate = (await chrome.storage.local.get("selected_template_id")).selected_template_id;
   const activeTemplateId =
@@ -3238,15 +3269,18 @@ async function exportStyleExportPdf() {
     confirmText: "Export & save",
     previewText: "Preview",
     templates: templatesCache.length ? templatesCache : getAllTemplates(),
+    templateOnly: TEMPLATE_ONLY_DIALOG,
     initial: {
       jobTitle: (jobTitleEl?.value || "").trim(),
       companyName: (companyNameEl?.value || "").trim(),
       jdLink: (jdLinkEl?.value || "").trim(),
       jdText: (jdTextEl?.value || "").trim(),
-      templateId: activeTemplateId
+      templateId: activeTemplateId,
+      templateOnly: Boolean(prefs[STYLE_EXPORT_MODE_KEY]),
+      format: String(prefs[STYLE_EXPORT_FORMAT_KEY] || "pdf")
     },
-    onPreview: async ({ templateId }) => {
-      await openStyleExportPreview(templateId);
+    onPreview: async ({ templateId, templateOnly }) => {
+      await openStyleExportPreview(templateId, { templateOnly });
     }
   });
   if (!details) {
@@ -3254,12 +3288,23 @@ async function exportStyleExportPdf() {
     return;
   }
 
+  const { templateOnly, format, ...jobDetails } = details;
+  chrome.storage.local
+    .set({ [STYLE_EXPORT_MODE_KEY]: templateOnly, [STYLE_EXPORT_FORMAT_KEY]: format || "pdf" })
+    .catch(() => {});
+
+  // Template only: style + download. Manual Bid fields, queue, profile, and sheet stay untouched.
+  if (templateOnly) {
+    await exportStyleTemplateOnly(raw, { templateId: details.templateId, format });
+    return;
+  }
+
   // Keep Manual Bid fields + active style in sync.
-  if (jobTitleEl) jobTitleEl.value = details.jobTitle;
-  if (companyNameEl) companyNameEl.value = details.companyName;
-  if (jdLinkEl) jdLinkEl.value = details.jdLink;
-  if (jdTextEl) jdTextEl.value = details.jdText;
-  const templateId = details.templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
+  if (jobTitleEl) jobTitleEl.value = jobDetails.jobTitle;
+  if (companyNameEl) companyNameEl.value = jobDetails.companyName;
+  if (jdLinkEl) jdLinkEl.value = jobDetails.jdLink;
+  if (jdTextEl) jdTextEl.value = jobDetails.jdText;
+  const templateId = jobDetails.templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID;
   if (templateSelectEl && templateId) {
     templateSelectEl.value = templateId;
     syncTemplatePickerLabel();
@@ -3269,13 +3314,11 @@ async function exportStyleExportPdf() {
   // Flush dirty preview edits, then prefer saved paste JSON over re-parsing the textarea.
   const flushed = await flushPreviewEditsIfOpen();
   const fromFlush =
-    flushed?.ok &&
-    flushed.source === "paste" &&
-    isResumePreviewable(flushed.resumeData)
+    flushed?.ok && flushed.source === "paste" && savedResumeMatchesMode(flushed.resumeData, false)
       ? flushed.resumeData
       : null;
   const storedPaste = (await chrome.storage.local.get(STYLE_EXPORT_PASTE_KEY))[STYLE_EXPORT_PASTE_KEY];
-  const savedResume = fromFlush || (isResumePreviewable(storedPaste) ? storedPaste : null);
+  const savedResume = fromFlush || (savedResumeMatchesMode(storedPaste, false) ? storedPaste : null);
   const fallbackResume = savedResume ? null : parseStyleExportPaste();
 
   const { outputDir, person } = await resolveUiOutputDir();
@@ -3288,7 +3331,7 @@ async function exportStyleExportPdf() {
     resumeData: savedResume || fallbackResume || null,
     templateId,
     jobMeta: {
-      ...details,
+      ...jobDetails,
       outputDir,
       templateId,
       spreadsheetUrl: spreadsheetUrlEl.value.trim(),
@@ -3303,6 +3346,47 @@ async function exportStyleExportPdf() {
     setStatus(res?.error || "Style export failed to start.");
     setBusy(false);
   }
+}
+
+/**
+ * Template-only export: pasted resume + template → PDF / DOCX in Downloads/StyledResumes.
+ * No job details, profile, queue row, or Sheet write; the user's text is printed as pasted.
+ * @param {string} raw pasted resume text
+ * @param {{ templateId?: string, format?: string }} opts
+ */
+async function exportStyleTemplateOnly(raw, { templateId = "", format = "pdf" } = {}) {
+  const tid = String(templateId || templateSelectEl?.value || DEFAULT_TEMPLATE_ID).trim() || DEFAULT_TEMPLATE_ID;
+  if (templateSelectEl) {
+    templateSelectEl.value = tid;
+    syncTemplatePickerLabel();
+  }
+  chrome.storage.local.set({ selected_template_id: tid }).catch(() => {});
+
+  // Prefer what the user edited in an open preview (verbatim copy only); otherwise the
+  // service worker re-parses the raw paste with the same lossless rules.
+  const flushed = await flushPreviewEditsIfOpen();
+  const fromFlush =
+    flushed?.ok && flushed.source === "paste" && savedResumeMatchesMode(flushed.resumeData, true)
+      ? flushed.resumeData
+      : null;
+  const storedPaste = (await chrome.storage.local.get(STYLE_EXPORT_PASTE_KEY))[STYLE_EXPORT_PASTE_KEY];
+  const savedResume = fromFlush || (savedResumeMatchesMode(storedPaste, true) ? storedPaste : null);
+
+  setBusy(true);
+  setStatus(format === "docx" ? "Saving Word file…" : "Saving PDF…");
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({
+      type: "export_styled_resume_standalone",
+      jsonText: savedResume ? "" : raw,
+      resumeData: savedResume || null,
+      templateId: tid,
+      format
+    });
+  } finally {
+    setBusy(false);
+  }
+  setStatus(res?.ok ? res.status : res?.error || "Style export failed.");
 }
 
 async function openDetachedWindow() {
@@ -4984,8 +5068,7 @@ if (styleExportClearBtn) {
 }
 if (styleExportPdfBtn) {
   setIconButton(styleExportPdfBtn, "pdf", "Export PDF", { showLabel: true });
-}
-if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrape", { showLabel: true });
+}if (fillFromOpenTabBtn) setIconButton(fillFromOpenTabBtn, "scrape", "Scrape", { showLabel: true });
 if (clearOneOffFieldsBtn) setIconButton(clearOneOffFieldsBtn, "remove", "Clear", { showLabel: true });
 if (runOneOffBtn) setIconButton(runOneOffBtn, "draft", "Generate draft", { showLabel: true });
 if (logProfileApplyBtn) {
