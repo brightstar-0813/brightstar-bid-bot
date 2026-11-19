@@ -7406,6 +7406,23 @@
   }
   // @pure-end bookmark-label
 
+  // @pure-begin pager-control (tests/autofill-pager-control.test.js runs this block alone)
+  /**
+   * List pagination ("next" / "previous" / "page 3" inside a pagination nav) is never a form
+   * step. Workday's job search (<nav aria-label="pagination"> with a "next" button) was clicked
+   * as the wizard's Next, so the run paged through the job list (Leidos, 2026-11-19).
+   */
+  const PAGER_ANCESTOR_SEL =
+    'nav[aria-label*="pagination" i], [role="navigation"][aria-label*="pagination" i], ul.pagination, nav.pagination, [data-uxi-widget-type="paginationControl"]';
+  function isPagerControl(el) {
+    try {
+      return Boolean(el?.closest?.(PAGER_ANCESTOR_SEL));
+    } catch {
+      return false;
+    }
+  }
+  // @pure-end pager-control
+
   function isSocialSignInLabel(text) {
     return /\b(continue|sign in|sign up|log in|login|apply|register)\s+(with|using|via)\s+(google|microsoft|apple|linkedin|facebook|github|indeed|outlook|yahoo|seek|x)\b/i.test(
       String(text || "")
@@ -7471,6 +7488,7 @@
       let review = null;
       let submit = null;
       for (const btn of buttons) {
+        if (isPagerControl(btn)) continue;
         const text = elActionText(btn);
         const autoCls = workdayAutomationAction(btn);
         // Keep disabled Submit visible in the snapshot (Dice enables it late);
@@ -7935,6 +7953,7 @@
       let match = null;
       for (const root of roots) {
         const buttons = queryAllDeep(ACTION_CONTROL_SEL, root).filter((el) => {
+          if (isPagerControl(el)) return false;
           const text = elActionText(el);
           if (preferredType === "submit" && looksLikeSubmitControl(el, text)) return isElVisible(el);
           return isElVisible(el) && isElEnabled(el);
