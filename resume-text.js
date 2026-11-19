@@ -613,6 +613,56 @@ function parseCerts(lines) {
   return filtered.length ? filtered : out;
 }
 
+/** Certification labels from the source resume text (same parser as pasted resumes). */
+export function certificationsFromSourceText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const sections = splitSections(raw, { extras: true });
+  return parseCerts(sections.certifications || []);
+}
+
+/** Comparable name of a certification: the part before the issuer, lowercased, letters and digits only. */
+function certNameKey(value) {
+  const label = typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : String(value?.name || value?.title || value?.certification || value?.label || value?.text || "");
+  return label
+    .split(/\s+[—–|-]\s+/)[0]
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Append source certifications the draft left out. Matching is by name, so an AI
+ * reply that shortens "X — Issuer" to "X" still counts as present.
+ * Returns the (new) resume data plus the labels that were added.
+ */
+export function mergeMissingCertifications(resumeData, sourceCerts) {
+  const source = (Array.isArray(sourceCerts) ? sourceCerts : []).filter(Boolean);
+  const current = Array.isArray(resumeData?.certifications) ? resumeData.certifications : [];
+  if (!source.length) return { data: resumeData, added: [] };
+  const haveKeys = current.map(certNameKey).filter(Boolean);
+  const added = [];
+  for (const label of source) {
+    const key = certNameKey(label);
+    if (!key) continue;
+    const present = haveKeys.some(
+      (have) =>
+        have === key ||
+        (Math.min(key.length, have.length) >= 8 && (have.includes(key) || key.includes(have)))
+    );
+    if (present) continue;
+    added.push(String(label).trim());
+    haveKeys.push(key);
+  }
+  if (!added.length) return { data: resumeData, added };
+  return {
+    data: { ...resumeData, certifications: [...current, ...added] },
+    added
+  };
+}
+
 const TITLE_WORD_RE =
   /\b(engineer|developer|architect|specialist|administrator|consultant|manager|analyst|lead|director|intern|principal|staff|owner|scientist|designer|coordinator|associate|founder|head|officer|president|vp|svp|evp|avp|chief|ceo|cfo|cto|coo|cio|controller|comptroller|accountant|treasurer|auditor|partner|banker|advisor|adviser|executive|supervisor|representative|strategist|planner|underwriter|trader|broker|assistant|clerk|technician|recruiter|generalist|economist|actuary|attorney|counsel|paralegal)\b/i;
 

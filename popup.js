@@ -3803,6 +3803,12 @@ async function confirmOneOffSave() {
     setStatus("No draft to confirm. Generate a draft first.");
     return;
   }
+  // Confirm reads the saved draft, so push any open preview edits into it first.
+  const flushed = await flushPreviewEditsIfOpen();
+  if (flushed && flushed.ok === false) {
+    setStatus(`Preview edits were not saved, so nothing was confirmed: ${flushed.error || "unknown error"}`);
+    return;
+  }
   const { outputDir, person } = await resolveUiOutputDir();
   await persistJobFields();
   setBusy(true);

@@ -144,7 +144,12 @@ import {
   accentById,
   resolveAccentId
 } from "./templates/index.js";
-import { resolvePastedResume, isStyledExportResume } from "./resume-text.js";
+import {
+  resolvePastedResume,
+  isStyledExportResume,
+  certificationsFromSourceText,
+  mergeMissingCertifications
+} from "./resume-text.js";
 import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
 import { buildResumeDocx } from "./resume-docx.js";
 import { resolveLosslessResume } from "./resume-fidelity.js";
@@ -3647,8 +3652,11 @@ async function autoDownloadResumeFiles(rawText, resumeData, jobMeta = {}) {
     throw new Error(`Resume HTML render failed: ${String(err?.message || err)}`);
   }
 
+  const certCount = Array.isArray(resumeData?.certifications)
+    ? resumeData.certifications.filter(Boolean).length
+    : 0;
   await setStatus(
-    `Saving ${resumePdfName}… (Allow debugger if Chrome prompts — do not ignore the dialog)`
+    `Saving ${resumePdfName} with ${certCount} certification${certCount === 1 ? "" : "s"}… (Allow debugger if Chrome prompts — do not ignore the dialog)`
   );
   try {
     const pdfBase64 = await htmlToPdfBase64(html);
@@ -9367,6 +9375,25 @@ async function persistOneOffDraft({
   return draft;
 }
 
+/**
+ * The model sometimes returns fewer certifications than the person's master resume.
+ * Restore the dropped ones so the draft (and the PDF/DOCX made from it) keeps them all.
+ * Returns the resume data plus a short status line for the progress bar.
+ */
+async function restoreSourceCertifications(resumeData, person, rowLabel = "", companyName = "") {
+  const sourceCerts = certificationsFromSourceText(person?.masterResume || "");
+  if (!sourceCerts.length) return { resumeData, status: "" };
+  const merged = mergeMissingCertifications(resumeData, sourceCerts);
+  const haveCount = Array.isArray(merged.data?.certifications) ? merged.data.certifications.length : 0;
+  const restored = merged.added.length
+    ? ` (restored ${merged.added.length} the model had dropped)`
+    : "";
+  return {
+    resumeData: merged.data,
+    status: `Row ${rowLabel}${companyName}: ${sourceCerts.length} certifications in source, ${haveCount} in resume${restored}`
+  };
+}
+
 async function clearOneOffDraft() {
   await chrome.storage.local.remove([ONE_OFF_DRAFT_KEY, LAST_ONE_OFF_ATS_KEY, LAST_ONE_OFF_RESULT_KEY]);
 }
@@ -9779,6 +9806,12 @@ async function runAutoJobViaApi(jobMeta, { draftOnly = false } = {}) {
 
   if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     throw new Error(describeUnusableResume(rawOutput, resumeData));
+  }
+
+  {
+    const certRestore = await restoreSourceCertifications(resumeData, person, rowLabel, jobMeta.companyName);
+    resumeData = certRestore.resumeData;
+    if (certRestore.status) await setStatus(certRestore.status);
   }
 
   {
@@ -10299,6 +10332,18 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
 
   if (!isUsableResumeJson(resumeData) && !isMinimallySaveableResume(resumeData)) {
     throw new Error(describeUnusableResume(rawOutput, resumeData));
+  }
+
+  {
+    const certPerson = await getActivePerson().catch(() => null);
+    const certRestore = await restoreSourceCertifications(
+      resumeData,
+      certPerson,
+      jobMeta.csvRow != null ? `${jobMeta.csvRow} · ` : "",
+      jobMeta.companyName
+    );
+    resumeData = certRestore.resumeData;
+    if (certRestore.status) await setStatus(certRestore.status);
   }
 
   // ChatGPT drops JD-required Salesforce products even when the prompt forbids

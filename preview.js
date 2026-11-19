@@ -8,7 +8,7 @@ import {
   accentById,
   resolveAccentId
 } from "./templates/index.js";
-import { applyPathEdits } from "./templates/shared.js";
+import { applyPathEdits, LIST_EDITS_KEY } from "./templates/shared.js";
 import { isPlainResumePath, sanitizeRichHtml } from "./resume-rich.js";
 import { buildResumeDocx, resumeDocxFileName } from "./resume-docx.js";
 import { getActivePerson } from "./profiles.js";
@@ -100,25 +100,53 @@ function updateEditChrome() {
   }
 }
 
+/**
+ * Edits from the preview DOM. Plain fields map path -> value. List items
+ * (`<li data-bs-path="prefix.N">`) are grouped by prefix and kept in DOM order under
+ * LIST_EDITS_KEY, so added, removed or reordered items survive Save; index-by-index
+ * edits could not represent those.
+ */
+function fieldValueFromElement(el, path) {
+  if (isPlainResumePath(path)) {
+    return String(el.innerText || el.textContent || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\r\n/g, "\n")
+      .trim();
+  }
+  let html = sanitizeRichHtml(el.innerHTML || "");
+  const align = String(el.style?.textAlign || "").toLowerCase();
+  if ((align === "center" || align === "left") && /^(headline|profile)$/.test(path)) {
+    html = `<div style="text-align:${align}">${html}</div>`;
+  }
+  return html;
+}
+
 function collectPathEdits(doc) {
   const edits = {};
   if (!doc) return edits;
+
+  const lists = new Map();
+  const listItems = new Set();
+  for (const el of doc.querySelectorAll("li[data-bs-path]")) {
+    const path = String(el.getAttribute("data-bs-path") || "").trim();
+    const m = path.match(/^(.+)\.\d+$/);
+    if (!m) continue;
+    if (!lists.has(m[1])) lists.set(m[1], []);
+    lists.get(m[1]).push(el);
+    listItems.add(el);
+  }
+  if (lists.size) {
+    edits[LIST_EDITS_KEY] = {};
+    for (const [prefix, items] of lists) {
+      edits[LIST_EDITS_KEY][prefix] = items.map((el) => fieldValueFromElement(el, `${prefix}.0`));
+    }
+  }
+
   for (const el of doc.querySelectorAll("[data-bs-path]")) {
+    if (listItems.has(el)) continue;
     const path = String(el.getAttribute("data-bs-path") || "").trim();
     if (!path) continue;
-    if (isPlainResumePath(path)) {
-      edits[path] = String(el.innerText || el.textContent || "")
-        .replace(/\u00a0/g, " ")
-        .replace(/\r\n/g, "\n")
-        .trim();
-      continue;
-    }
-    let html = sanitizeRichHtml(el.innerHTML || "");
-    const align = String(el.style?.textAlign || "").toLowerCase();
-    if ((align === "center" || align === "left") && /^(headline|profile)$/.test(path)) {
-      html = `<div style="text-align:${align}">${html}</div>`;
-    }
-    edits[path] = html;
+    edits[path] = fieldValueFromElement(el, path);
   }
   return edits;
 }
@@ -311,10 +339,15 @@ async function renderPreview({ keepWorkingCopy = false } = {}) {
   pageEl.srcdoc = html;
   if (ledeEl) {
     ledeEl.hidden = false;
-    if (kind === "draft") ledeEl.textContent = `Manual draft · ${template.label}`;
-    else if (kind === "paste") ledeEl.textContent = `Pasted resume · ${template.label}`;
-    else if (kind === "last") ledeEl.textContent = `Last generated · ${template.label}`;
-    else ledeEl.textContent = `Sample · ${template.label}`;
+    // Same data the PDF/DOCX is built from, so a missing item is visible here first.
+    const certCount = Array.isArray(renderData?.certifications)
+      ? renderData.certifications.filter(Boolean).length
+      : 0;
+    const certSuffix = ` · ${certCount} certification${certCount === 1 ? "" : "s"}`;
+    if (kind === "draft") ledeEl.textContent = `Manual draft · ${template.label}${certSuffix}`;
+    else if (kind === "paste") ledeEl.textContent = `Pasted resume · ${template.label}${certSuffix}`;
+    else if (kind === "last") ledeEl.textContent = `Last generated · ${template.label}${certSuffix}`;
+    else ledeEl.textContent = `Sample · ${template.label}${certSuffix}`;
   }
   if (kind === "draft") {
     setStatus(
