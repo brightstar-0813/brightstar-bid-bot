@@ -8,7 +8,7 @@ import {
   resumeJsonToHtml,
   TEMPLATE_ACCENTS
 } from "../templates/index.js";
-import { compactLinkedInLabel, contactLine } from "../templates/shared.js";
+import { contactLine, linkedInDisplay } from "../templates/shared.js";
 
 function resumeWithEducation(eduBody) {
   return `DAVID LEANDRO DE OLIVEIRA
@@ -539,16 +539,14 @@ test("Orange Banner puts company above the title and uses orange section bars", 
   assert.ok(companyAt > -1 && titleAt > companyAt);
 });
 
-test("contact line keeps LinkedIn compact so P|E|LI|L fits one row", () => {
+test("contact line: P/E/L on one row, LinkedIn URL on its own row", () => {
   assert.equal(
-    compactLinkedInLabel("https://www.linkedin.com/in/example/"),
+    linkedInDisplay("https://www.linkedin.com/in/example/"),
     "linkedin.com/in/example"
   );
   assert.equal(
-    compactLinkedInLabel(
-      "https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/"
-    ),
-    "in/michael-haries-ibea-0baa0a417"
+    linkedInDisplay("https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/"),
+    "linkedin.com/in/michael-haries-ibea-0baa0a417"
   );
   const line = contactLine({
     phone: "+63 948 803 6855",
@@ -556,8 +554,13 @@ test("contact line keeps LinkedIn compact so P|E|LI|L fits one row", () => {
     linkedin: "https://www.linkedin.com/in/michael-haries-ibea-0baa0a417/",
     location: "Trece Martires, Calabarzon"
   });
-  assert.match(line, />in\/michael-haries-ibea-0baa0a417</);
-  assert.match(line, /href="https:\/\/www\.linkedin\.com\/in\/michael-haries-ibea-0baa0a417"/);
+  const rows = [...line.matchAll(/<span class="contact-row"[^>]*>([\s\S]*?)<\/span>(?=<span class="contact-row"|$)/g)].map((m) => m[1]);
+  assert.equal(rows.length, 2);
+  assert.doesNotMatch(rows[0], /linkedin/);
+  assert.match(rows[0], /\+63 948 803 6855[\s\S]*michaelhariesibea3@gmail\.com[\s\S]*Trece Martires/);
+  assert.match(rows[1], />linkedin\.com\/in\/michael-haries-ibea-0baa0a417</);
+  assert.match(rows[1], /href="https:\/\/www\.linkedin\.com\/in\/michael-haries-ibea-0baa0a417"/);
+  assert.match(line, /white-space:nowrap/);
   const orange = resumeJsonToHtml(
     {
       name: "Michael Haries Namuco Ibea",

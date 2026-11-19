@@ -1,4 +1,5 @@
 import {
+  linkedInDisplay,
   educationLocationLine,
   educationYearLine,
   stripEducationDatesFromPlace,
@@ -248,7 +249,7 @@ function labeledContact(data) {
   if (data.linkedin) {
     const raw = String(data.linkedin).trim();
     const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^www\./i, "")}`;
-    const shown = raw.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+    const shown = linkedInDisplay(raw);
     linkedin = `<span class="tag">LI:</span> <a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(shown)}</a>`;
   }
   return { main: bits.join(" | "), linkedin };

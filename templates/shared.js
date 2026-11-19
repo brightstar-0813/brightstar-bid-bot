@@ -29,7 +29,54 @@ export function editableText(path, text, tag = "span") {
  * Apply preview edits (path → plain text) onto a deep clone of resume JSON.
  * Numeric path segments are treated as array indices.
  */
+/** Reserved edits key: `{ "<list path>": ["item html", ...] }`, replaced in DOM order. */
+export const LIST_EDITS_KEY = "@lists";
+
+/**
+ * Apply preview edits onto a deep clone of resume JSON.
+ * Plain path edits set single values; list edits replace the whole array in the order
+ * the user left it, so added, removed and reordered items are kept.
+ */
 export function applyPathEdits(resumeData, edits) {
+  const { [LIST_EDITS_KEY]: lists, ...pathEdits } = edits || {};
+  const next = applyPathEditsByIndex(resumeData, pathEdits);
+  for (const [prefix, items] of Object.entries(lists || {})) {
+    applyListEdit(next, prefix, items);
+  }
+  return next;
+}
+
+function applyListEdit(next, prefix, items) {
+  const parts = String(prefix || "").split(".").map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return;
+  const plain = isPlainResumePath(`${prefix}.0`);
+  const values = (Array.isArray(items) ? items : [])
+    .map((raw) => (plain ? plainTextFromRich(raw) : richHtml(raw)))
+    .filter((value) => String(value ?? "").trim() !== "");
+
+  let parent = next;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parent[parts[i]] == null || typeof parent[parts[i]] !== "object") {
+      parent[parts[i]] = {};
+    }
+    parent = parent[parts[i]];
+  }
+  const key = parts[parts.length - 1];
+  const current = parent[key];
+  const replaceable = current == null || (Array.isArray(current) && current.every((x) => typeof x === "string"));
+  if (replaceable) {
+    parent[key] = values;
+    return;
+  }
+  // Structured items (objects) are not rebuilt from text; update them in place by index.
+  if (Array.isArray(current)) {
+    values.forEach((value, index) => {
+      if (index < current.length) current[index] = value;
+    });
+  }
+}
+
+function applyPathEditsByIndex(resumeData, edits) {
   const next =
     typeof structuredClone === "function"
       ? structuredClone(resumeData || {})
@@ -123,76 +170,76 @@ function cleanUrl(value) {
 }
 
 /**
- * Compact LinkedIn text for a single contact line (href stays absolute).
- * Long /in/ slugs drop the linkedin.com host so phone|email|LI|location fits.
+ * Visible LinkedIn text: the full profile URL without protocol or "www.", e.g.
+ * "linkedin.com/in/name-123". The href stays the absolute URL.
  */
-export function compactLinkedInLabel(value) {
-  const cleaned = cleanUrl(value)
+export function linkedInDisplay(value) {
+  return cleanUrl(value)
     .replace(/^https?:\/\//i, "")
     .replace(/^www\./i, "")
     .replace(/\/+$/, "");
-  const m = cleaned.match(/(?:^|\.)linkedin\.com\/(in\/[^/?#]+)/i);
-  if (!m) return cleaned;
-  const path = m[1];
-  // Keep host for short slugs; long ones use in/slug only.
-  if (path.length > 24) return path;
-  return `linkedin.com/${path}`;
 }
 
-export function contactLine(data, { linkColor } = {}) {
-  const parts = [];
-  if (data.location) {
-    parts.push(`<span${pathAttr("location")}>${escapeHtml(data.location)}</span>`);
-  }
+/**
+ * Contact information as two rows:
+ *   main     - location, phone, email on one row (joined with " | ")
+ *   linkedin - the LinkedIn URL on its own row
+ * Returned as HTML fragments; wrap each non-empty row with contactRow().
+ */
+export function contactRows(data, { linkColor } = {}) {
+  const style = linkColor ? ` style="color:${linkColor}"` : "";
+  // Only anchors take the link colour; spans keep the template's text colour.
+  const tint = (html) => (style ? html.replace(/<a /g, `<a${style} `) : html);
+
+  // Order matches the Orange Banner: phone, email, location.
+  const main = [];
   if (data.phone) {
-    parts.push(`<span${pathAttr("phone")}>${escapeHtml(data.phone)}</span>`);
+    main.push(`<span${pathAttr("phone")}>${escapeHtml(data.phone)}</span>`);
   }
   if (data.email) {
     const email = cleanEmail(data.email);
-    parts.push(
-      `<a href="mailto:${escapeHtml(email)}"${pathAttr("email")}>${escapeHtml(email)}</a>`
-    );
+    main.push(`<a href="mailto:${escapeHtml(email)}"${pathAttr("email")}>${escapeHtml(email)}</a>`);
   }
+  if (data.location) {
+    main.push(`<span${pathAttr("location")}>${escapeHtml(data.location)}</span>`);
+  }
+
+  let linkedin = "";
   if (data.linkedin) {
     const url = cleanUrl(data.linkedin);
     const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    const label = compactLinkedInLabel(url);
-    parts.push(
-      `<a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(label)}</a>`
-    );
+    linkedin = `<a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(linkedInDisplay(url))}</a>`;
   }
-  const style = linkColor ? ` style="color:${linkColor}"` : "";
-  if (style) {
-    return parts
-      .map((part) => (part.startsWith("<a ") ? part.replace("<a ", `<a${style} `) : part))
-      .join(" | ");
-  }
-  return parts.join(" | ");
+
+  return {
+    main: tint(main.join(" | ")),
+    linkedin: tint(linkedin)
+  };
+}
+
+/**
+ * One contact row: a block that never wraps, so the row stays on one line.
+ * Very long rows step the font down (relative to the template's own size) so they
+ * still fit the printable width instead of running off the page.
+ */
+function contactRow(html) {
+  const visibleLength = html.replace(/<[^>]+>/g, "").length;
+  const pct = visibleLength > 170 ? 70 : visibleLength > 150 ? 80 : visibleLength > 130 ? 90 : 100;
+  const size = pct === 100 ? "" : `font-size:${pct}%;`;
+  return `<span class="contact-row" style="display:block;white-space:nowrap;${size}">${html}</span>`;
+}
+
+/** Contact line for the header `<p class="contact">`: P/E/L on one row, LinkedIn on the next. */
+export function contactLine(data, opts = {}) {
+  const { main, linkedin } = contactRows(data, opts);
+  return [main && contactRow(main), linkedin && contactRow(linkedin)].filter(Boolean).join("");
 }
 
 /** Stacked contact block (left column under name/headline). */
 export function renderContactBlock(data, { linkColor = "#000" } = {}) {
-  const lines = [];
-  if (data.location) {
-    lines.push(`<div${pathAttr("location")}>${escapeHtml(data.location)}</div>`);
-  }
-  if (data.phone) {
-    lines.push(`<div${pathAttr("phone")}>${escapeHtml(data.phone)}</div>`);
-  }
-  if (data.email) {
-    const email = cleanEmail(data.email);
-    lines.push(
-      `<div><a href="mailto:${escapeHtml(email)}" style="color:${linkColor}"${pathAttr("email")}>${escapeHtml(email)}</a></div>`
-    );
-  }
-  if (data.linkedin) {
-    const url = cleanUrl(data.linkedin);
-    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    lines.push(
-      `<div><a href="${escapeHtml(href)}" style="color:${linkColor}"${pathAttr("linkedin")}>${escapeHtml(href)}</a></div>`
-    );
-  }
-  return lines.length ? `<div class="contact-block">${lines.join("\n")}</div>` : "";
+  const { main, linkedin } = contactRows(data, { linkColor });
+  const rows = [main && contactRow(main), linkedin && contactRow(linkedin)].filter(Boolean);
+  return rows.length ? `<div class="contact-block">${rows.join("\n")}</div>` : "";
 }
 
 /** Two-column skills table: Category | Technologies (ATS-friendly HTML table). */
