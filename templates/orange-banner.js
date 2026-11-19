@@ -1,5 +1,4 @@
 import {
-  compactLinkedInLabel,
   educationLocationLine,
   educationYearLine,
   stripEducationDatesFromPlace,
@@ -60,14 +59,16 @@ const CSS = `
       color: #6b7280;
     }
 
-    /* One line: nowrap, and no overflow clipping so a long value is never hidden.
-       contactSizeClass() picks fit-8 / fit-7 for long contact values (A4 content width). */
+    /* Each contact row is one line: nowrap, and no overflow clipping so a long value is never hidden.
+       contactSizeClass() picks fit-8 / fit-7 for long rows (A4 content width). */
     .contact {
-      margin: 0 0 6px;
+      margin: 0;
       font-size: 9pt;
       color: #e8772e;
       white-space: nowrap;
     }
+
+    .contact.contact-li { margin: 0 0 6px; }
 
     .contact.fit-8 { font-size: 8pt; }
     .contact.fit-7 { font-size: 7pt; }
@@ -221,6 +222,10 @@ export function contactSizeClass(contactHtml) {
   return "fit-65";
 }
 
+/**
+ * Contact block as two rows: `main` (phone, email, location) and `linkedin` on its own line.
+ * Each row is a separate one-line paragraph; the LinkedIn URL is shown in full.
+ */
 function labeledContact(data) {
   const bits = [];
   if (data.phone) {
@@ -234,22 +239,19 @@ function labeledContact(data) {
       `<span class="tag">E:</span> <a href="mailto:${escapeHtml(email)}"${pathAttr("email")}>${escapeHtml(email)}</a>`
     );
   }
-  if (data.linkedin) {
-    // "LI:" already says LinkedIn; dropping the host keeps the whole contact line on one row.
-    const shown = compactLinkedInLabel(data.linkedin).replace(/^linkedin\.com\//i, "");
-    const href = /^https?:\/\//i.test(String(data.linkedin).trim())
-      ? String(data.linkedin).trim()
-      : `https://${String(data.linkedin).trim().replace(/^www\./i, "")}`;
-    bits.push(
-      `<span class="tag">LI:</span> <a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(shown)}</a>`
-    );
-  }
   if (data.location) {
     bits.push(
       `<span class="tag">L:</span> <span${pathAttr("location")}>${escapeHtml(data.location)}</span>`
     );
   }
-  return bits.join(" | ");
+  let linkedin = "";
+  if (data.linkedin) {
+    const raw = String(data.linkedin).trim();
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^www\./i, "")}`;
+    const shown = raw.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+    linkedin = `<span class="tag">LI:</span> <a href="${escapeHtml(href)}"${pathAttr("linkedin")}>${escapeHtml(shown)}</a>`;
+  }
+  return { main: bits.join(" | "), linkedin };
 }
 
 function renderJobs(jobs) {
@@ -325,6 +327,7 @@ export const orangeBannerTemplate = {
     const edu = renderEducation(data.education);
     const certs = (data.certifications || []).length ? renderCerts(data.certifications) : "";
     const contact = labeledContact(data);
+    // labeledContact gives { main, linkedin } so each row can be sized separately.
 
     return wrapHtmlDocument({
       title: `${name} - Resume`,
@@ -334,7 +337,8 @@ export const orangeBannerTemplate = {
   <header class="top">
     <h1${pathAttr("name")}>${escapeHtml(name)}</h1>
     ${headline ? `<p class="headline"${pathAttr("headline")}>${richHtml(headline)}</p>` : ""}
-    ${contact ? `<p class="contact ${contactSizeClass(contact)}">${contact}</p>` : ""}
+    ${contact.main ? `<p class="contact ${contactSizeClass(contact.main)}">${contact.main}</p>` : ""}
+    ${contact.linkedin ? `<p class="contact contact-li">${contact.linkedin}</p>` : ""}
   </header>
   ${profile ? `<section><h2 class="plain">About me</h2><p${pathAttr("profile")}>${richHtml(profile)}</p></section>` : ""}
   ${tech ? `<section><h2 class="plain">Technical summary</h2>${tech}</section>` : ""}

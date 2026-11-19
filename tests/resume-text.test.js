@@ -571,7 +571,8 @@ test("contact line keeps LinkedIn compact so P|E|LI|L fits one row", () => {
     },
     "orange-banner"
   );
-  assert.match(orange, /LI:<\/span> <a[^>]*>in\/michael-haries-ibea-0baa0a417<\/a>/);
+  // Orange Banner puts LinkedIn on its own row, shown in full.
+  assert.match(orange, /<p class="contact contact-li"><span class="tag">LI:<\/span> <a[^>]*>linkedin\.com\/in\/michael-haries-ibea-0baa0a417<\/a><\/p>/);
   assert.match(orange, /white-space:\s*nowrap/);
 });
 
