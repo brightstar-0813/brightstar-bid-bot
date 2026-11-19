@@ -1,7 +1,9 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const crypto = require("node:crypto");
-const { sha3_512, solvePow } = require("../chatgpt-sentinel.js");
+import test from "node:test";
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import "../chatgpt-sentinel.js"; // classic script: publishes globalThis.__brightstarSentinel
+
+const { sha3_512, solvePow } = globalThis.__brightstarSentinel;
 
 function hex(bytes) {
   return Buffer.from(bytes).toString("hex");
