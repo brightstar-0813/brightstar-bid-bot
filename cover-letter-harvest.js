@@ -43,6 +43,34 @@ function isJobPostingDump(text) {
   );
 }
 
+const SIGNOFF_RE =
+  /^(sincerely|regards|best regards|kind regards|warm regards|best|respectfully|yours truly|thank you)\b[,.!]?(?:\s+(.{0,80}))?$/i;
+
+/**
+ * The PDF template appends its own "Sincerely, <name>" block. When ChatGPT
+ * writes one too (retry prompts), lines are joined per paragraph, so the
+ * letter ends "Sincerely, <name>" and may be followed by ChatGPT follow-up
+ * suggestion chips. Drop a trailing sign-off paragraph (bare, or followed by
+ * the candidate's name) and everything after it.
+ */
+export function dropTrailingSignoff(paragraphs, name = "") {
+  const list = Array.isArray(paragraphs) ? paragraphs.slice() : [];
+  const nameLc = String(name || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const firstLc = nameLc.split(" ")[0] || "";
+  // Only look at the tail so a "Thank you …" sentence inside the body is safe.
+  const from = Math.max(0, list.length - 4);
+  for (let i = from; i < list.length; i += 1) {
+    const p = String(list[i] || "").replace(/\s+/g, " ").trim();
+    const m = p.match(SIGNOFF_RE);
+    if (!m) continue;
+    const rest = String(m[2] || "").toLowerCase().trim();
+    if (!rest || (nameLc && rest.startsWith(nameLc)) || (firstLc && rest === firstLc)) {
+      return list.slice(0, i);
+    }
+  }
+  return list;
+}
+
 export function looksLikeCoverLetterBody(text) {
   const s = stripChatGptChrome(text);
   // Resume JSON dumped into the "letter" slot.

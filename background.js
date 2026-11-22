@@ -235,6 +235,7 @@ import {
 import { harvestContactsFromAiText } from "./email-contacts.js";
 import { harvestEmailDraftFromAiText } from "./prompts/email-compose.js";
 import {
+  dropTrailingSignoff,
   extractCoverLetterText,
   looksLikeCoverLetterBody,
   readNewestAssistantProseInPage,
@@ -4218,7 +4219,8 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
   const uiLabelRe =
     /^(edit|copy code|copy|share|regenerate( response)?|read aloud|good response|bad response|continue|stop generating)$/i;
 
-  return paragraphs.filter((p) => {
+  // "Sincerely, <name>" (lines joined) + ChatGPT suggestion chips after it.
+  return dropTrailingSignoff(paragraphs, name).filter((p) => {
     const lc = p.toLowerCase().trim();
     if (!lc) return false;
     if (uiLabelRe.test(lc)) return false; // ChatGPT message-toolbar button labels
@@ -9356,7 +9358,7 @@ async function saveResumeAndCoverLetter(
               ? coverPrompt
               : attempt === 2
                 ? "Stop. Do NOT return JSON or resume content. Write ONLY a plain-text cover letter body for this job: start with Dear Hiring Manager, then 3–4 short paragraphs. No markdown links, no email/URL lines, no signature block."
-                : "IMPORTANT: Ignore the resume JSON above. Reply with ONLY the cover letter plain text starting with Dear Hiring Manager, — nothing else.";
+                : "IMPORTANT: Ignore the resume JSON above. Reply with ONLY the cover letter plain text starting with Dear Hiring Manager, — no signature block, nothing else.";
           await focusTabForInput(tabId);
           const reply = await automateChatGpt(tabId, prompt, {
             newChat: false,
