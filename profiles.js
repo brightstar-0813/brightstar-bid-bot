@@ -2148,7 +2148,9 @@ export function personToApplicantInfo(person = {}) {
   info.country = loc.country || extras.country || "United States";
   info.cityCountryOfResidence = String(person.location || "").trim();
   info.gender = genderToken(person.gender);
-  info.raceEthnicity = raceToken(person.ethnicity) || "not_specified";
+  // Blank ethnicity stays blank (like gender): never auto-pick "Decline / Not specified".
+  // A required race question then pauses the row so the real value can be asked for.
+  info.raceEthnicity = raceToken(person.ethnicity);
   info.disabilityStatus = disabilityToken(person.disability);
   info.veteranStatus = veteranToken(person.veteran);
   info.hispanicLatino = yesNoToken(person.hispanicLatino) || String(person.hispanicLatino || "").trim();
