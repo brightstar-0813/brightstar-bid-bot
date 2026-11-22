@@ -3527,6 +3527,42 @@ export async function startMultiStepApplyOnTab(
         await rememberApplyTab(currentTabId);
         probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
         directFollowed = true;
+
+        // The employer link is usually the ATS job page, not the form (Cencora / Veradigm
+        // Workday, rows 92/95/96/97 on 2026-11-21 paused "No application form found"). Press
+        // that page's own Apply entry once — the same entry click a direct ATS row gets — then
+        // re-probe. Entry clicks never submit; the usual form / pause logic runs after it.
+        const onJobPage =
+          !probe.applySuccess &&
+          !probe.jobUnavailable &&
+          !probe.anyForm &&
+          !(probe.best && probe.best.action?.type !== "entry");
+        if (onJobPage) {
+          const jobPageUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || followUrl;
+          const jobPageSig = probe.signature || "";
+          await setApplyStatus(
+            `Apply: ${hostnameFromUrl(jobPageUrl) || "employer site"} — opening the application from the job page…`
+          );
+          const employerEntry = await sendMessageToTab(
+            currentTabId,
+            { type: "click_easy_apply_entry" },
+            { attempts: 2 }
+          ).catch(() => null);
+          if (employerEntry?.clicked) {
+            const advanced = await waitForApplyAdvance(currentTabId, jobPageSig, jobPageUrl, 20000);
+            currentTabId = advanced.tabId || currentTabId;
+            await rememberApplyTab(currentTabId);
+            const afterUrl = (await chrome.tabs.get(currentTabId).catch(() => null))?.url || "";
+            syncLiveSiteFromUrl(afterUrl);
+            if (advanced.applySuccess) {
+              summary.status = "submitted";
+              summary.detail = advanced.applySuccessText || "Your application is on its way";
+              summary.tabId = currentTabId;
+              return summary;
+            }
+            probe = await getApplyActionFromTab(currentTabId).catch(() => probe);
+          }
+        }
       }
 
       if (alreadyOpen) {
