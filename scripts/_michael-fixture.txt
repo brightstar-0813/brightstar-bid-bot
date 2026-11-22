@@ -1,0 +1,109 @@
+MICHAEL HARIES NAMUCO IBEA
+SENIOR SALESFORCE DEVELOPER
+
+Trece Martires, Cavite, Philippines | +63 948 803 6855 | michaelhariesibea3@gmail.com | linkedin.com/in/michael-haries-ibea-0baa0a417
+
+PROFESSIONAL SUMMARY
+
+Senior Salesforce Developer with 10 years of experience designing, developing, integrating, and supporting enterprise Salesforce solutions. Hands-on expertise across Sales Cloud, Service Cloud, Health Cloud, Communications Cloud, Data Cloud, Agentforce, and Salesforce Industries. Strong development background in Apex, Lightning Web Components, Flow, SOQL, OmniScripts, FlexCards, DataRaptors, Integration Procedures, and REST APIs. Experienced in enterprise integrations, asynchronous processing, security, data quality, release management, production support, and stakeholder-led solution delivery.
+
+TECHNICAL SKILLS
+Category	Technologies / Skills
+Salesforce Clouds	Sales Cloud, Service Cloud, Health Cloud, Communications Cloud, Data Cloud, Salesforce Platform
+Salesforce Industries and OmniStudio	OmniStudio, OmniScripts, FlexCards, DataRaptors, Integration Procedures, Vlocity, Guided Digital Processes
+Salesforce AI	Agentforce, Agent Topics, Agent Actions, Prompt Templates, Grounded Responses, Flow Actions
+Salesforce Development	Apex, Apex Triggers, Batch Apex, Queueable Apex, Scheduled Apex, Lightning Web Components, Visualforce, SOQL, SOSL
+Salesforce Automation	Record-Triggered Flow, Screen Flow, Scheduled Flow, Approval Processes, Assignment Rules, Validation Rules
+Data Cloud	Data Streams, Data Lake Objects, Data Model Objects, Identity Resolution, Unified Profiles, Calculated Insights, Segmentation, Activation
+Salesforce Architecture	Data Modeling, Integration Boundaries, Transaction Design, Bulk Processing, Governor-Limit Management, Reusable Services
+Integrations and APIs	REST APIs, Apex Callouts, JSON, Named Credentials, OAuth, Webhooks, SFTP, Platform Events, Asynchronous Processing
+Security	Profiles, Permission Sets, Permission Set Groups, Role Hierarchy, Sharing Rules, CRUD/FLS Enforcement, Integration Access
+Enterprise Systems	Dynamics 365 Finance & Operations, HubSpot, LexisNexis, TaskRay, Azure Logic Apps, Azure Data Factory, Magic xpi, Active Directory
+DevOps and Releases	Gearset, Change Sets, Salesforce CLI, Git, Deployment Validation, Apex Test Classes, Rollback Planning
+Testing and Support	Unit Testing, Integration Testing, Regression Testing, UAT, ServiceNow, Jira, Root-Cause Analysis, Salesforce Inspector, Workbench
+Delivery	Requirements Analysis, Technical Design, Agile Delivery, Stakeholder Workshops, Documentation, Production Support
+PROFESSIONAL EXPERIENCE
+Intrado Life & Safety Inc.
+
+Senior Salesforce Application Systems Analyst / Salesforce Developer
+Dec 2024 – Present
+Longmont, Colorado, USA | Remote
+
+Enterprise Customer, Order, and Service Transformation
+
+Own technical analysis, Salesforce development, integration support, and production troubleshooting across an enterprise ecosystem supporting customer management, sales, quoting, orders, service cases, compliance, and operational delivery.
+Design scalable solutions across Sales Cloud, Service Cloud, Communications Cloud, and the Salesforce Platform using Apex, Lightning Web Components, Flow, approval processes, and Salesforce Industries capabilities.
+Build guided customer and service workflows with OmniScripts, using conditional steps, reusable components, server-side validation, and responsive navigation to simplify complex user processes.
+Develop FlexCards that consolidate customer, service, order, and operational information into contextual views with actions that launch OmniScripts, Flows, or supporting Salesforce processes.
+Configure DataRaptors for extract, transform, load, and validation operations, separating data access from presentation logic and reducing unnecessary custom Apex.
+Build Integration Procedures that orchestrate Salesforce data, reusable actions, and external service calls while controlling payload size, response handling, and transaction behavior.
+Develop Apex service classes, triggers, Queueable Apex, Batch Apex, optimized SOQL, exception handling, and test classes for complex processing that exceeds declarative or OmniStudio capabilities.
+Support Data Cloud implementations using data streams, Data Lake Objects, Data Model Objects, identity-resolution rules, unified customer profiles, calculated insights, segments, and activation into Salesforce workflows.
+Configure Agentforce topics, instructions, actions, and Flow-based capabilities for supported service scenarios, grounding responses in approved Salesforce records and maintaining human review for sensitive actions.
+Design and support integration between Salesforce and Dynamics 365 Finance & Operations for customer, product, order, and operational data, validating JSON payloads and reconciling failed transactions.
+Maintain integrations involving HubSpot, LexisNexis, Azure Logic Apps, Azure Data Factory, Health Advocate SFTP feeds, TaskRay, and Magic xpi workflows connecting business applications and Active Directory.
+Configure secure external connectivity through Named Credentials, OAuth-based authentication, controlled integration users, permission sets, and field-level access.
+Apply asynchronous processing, structured error logging, retry controls, external identifiers, and reconciliation procedures to isolate integration failures and protect user-facing transactions.
+Diagnose production incidents through debug logs, Salesforce Inspector, Workbench, SOQL, API payload analysis, ServiceNow, and Jira, tracing issues across automation, permissions, data, and connected systems.
+Lead technical validation, regression testing, UAT support, deployment planning, and post-release verification while documenting dependencies, rollback procedures, and production support requirements.
+Promote metadata through Gearset and Change Sets, reviewing Apex test results, deployment dependencies, access changes, and configuration differences before release.
+Smart Park Inc.
+
+Salesforce Developer / CRM Systems Engineer
+Jun 2021 – Oct 2024
+Philadelphia, Pennsylvania, USA | Remote
+
+Reservation, Customer Service, and Parking Operations Platform
+
+Developed and supported a Salesforce platform for airport parking reservations, customer service, payments, shuttle coordination, loyalty activity, parking capacity, and operational reporting.
+Designed custom objects and relationships for customers, reservations, vehicles, parking products, payments, shuttle requests, service cases, and capacity records.
+Built Apex classes, triggers, Batch Apex, Queueable Apex, scheduled processing, and optimized SOQL for booking validation, availability checks, operational updates, and data reconciliation.
+Developed Lightning Web Components that provided customer-service and operations teams with consolidated reservation, payment, vehicle, shuttle, and case information.
+Created OmniScripts for guided reservation creation, booking changes, cancellation handling, payment review, and customer-service intake, applying conditional navigation and input validation.
+Built FlexCards to present reservation summaries, parking status, customer history, and service actions without requiring users to navigate across multiple Salesforce records.
+Used DataRaptors to retrieve and update customer, booking, and operational data, and built Integration Procedures to coordinate multi-step server-side processes and external API interactions.
+Automated confirmations, reservation updates, service routing, customer follow-ups, shuttle tasks, and exception handling through record-triggered Flows, Screen Flows, scheduled automation, and approval logic.
+Developed REST API integrations with booking, payment, notification, and operational services using Apex callouts, JSON serialization, authentication controls, and structured error handling.
+Protected interactive booking processes by moving long-running external calls and reconciliation work into Queueable Apex and scheduled jobs with controlled retry behavior.
+Applied Data Cloud capabilities to combine customer, reservation, service, and engagement data into unified profiles supporting customer segmentation and more informed service interactions.
+Supported Agentforce service use cases with controlled topics and Flow actions for reservation lookup, case summarization, and guided next steps while keeping payment and record-changing actions under user control.
+Implemented external identifiers, duplicate controls, validation rules, and reconciliation processes to maintain consistent customer, reservation, and payment data across connected systems.
+Configured profiles, permission sets, sharing rules, and field-level security for customer-service, parking-operations, shuttle, finance, and management users.
+Wrote Apex test classes covering bulk, negative, integration, and exception scenarios and performed regression testing before promoting changes between Salesforce environments.
+Investigated booking failures, payment mismatches, access issues, automation defects, and API errors using debug logs, SOQL, integration responses, and controlled data correction.
+Clibase Technology Inc.
+
+Salesforce Developer / CRM Platform Developer
+Jul 2018 – May 2021
+Imus, Cavite, Philippines | On-site
+
+Developed Salesforce CRM solutions supporting client onboarding, sales, customer service, promotions, loyalty programs, orders, inventory, and omnichannel retail operations.
+Configured Accounts, Contacts, Leads, Opportunities, Products, Cases, Campaigns, custom objects, page layouts, validation rules, assignment rules, reports, and dashboards.
+Built Apex classes, triggers, scheduled jobs, SOQL queries, and test classes for order processing, loyalty activity, customer synchronization, and business-rule enforcement.
+Developed Lightning Web Components and Visualforce interfaces for guided data entry and consolidated customer, order, inventory, and service information.
+Automated lead routing, customer follow-up, order-status updates, case escalation, loyalty processing, and internal approvals using Salesforce Flow.
+Integrated Salesforce with POS, web-store, payment, inventory, and Messenger-based systems through REST APIs, Apex callouts, JSON processing, and external identifiers.
+Applied bulk-processing and asynchronous patterns to prevent integrations and high-volume record updates from exceeding Salesforce governor limits.
+Supported data extraction, field mapping, normalization, duplicate resolution, migration, validation, and post-load reconciliation for CRM implementations.
+Configured profiles, permission sets, sharing rules, and object- and field-level controls based on client roles and data-access requirements.
+Investigated API failures, automation defects, permission issues, and data inconsistencies while coordinating fixes with client and engineering teams.
+Participated in discovery workshops, solution design, technical testing, UAT support, deployment, documentation, and post-release maintenance.
+App It
+
+Junior Salesforce Developer / Software Engineer
+Jun 2016 – Jun 2018
+Sheung Wan, Hong Kong | On-site
+
+Supported Salesforce configuration and CRM development for booking, appointment, customer-service, payment, and notification workflows.
+Configured custom objects, fields, relationships, page layouts, validation rules, reports, dashboards, profiles, and permission sets.
+Assisted with Apex classes, triggers, SOQL queries, and unit tests under senior developer review.
+Built Flow-based automation for task creation, status updates, notifications, approvals, and guided internal processes.
+Contributed to Lightning and Visualforce interfaces used to capture and manage customer, booking, and service information.
+Assisted with REST API integrations connecting Salesforce with web, mobile, booking, notification, and payment applications.
+Performed functional testing, defect investigation, data validation, deployment support, documentation, and application maintenance.
+EDUCATION
+University of Hong Kong
+
+Bachelor of Science in Computer Science
+Second Class Honours, Upper Division
+Sep 2014 – Jun 2018
