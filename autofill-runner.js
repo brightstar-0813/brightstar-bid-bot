@@ -2623,12 +2623,6 @@ async function enrichAnswersWithAi(questions, answers, {
     return { aiHits };
   }
 
-  // The OpenAI API path is only for the explicit "openai" engine. With Codex (default) or the
-  // AI tab selected, questions are never sent to an external API; required leftovers reach
-  // the engine through the forced recovery pass above (forceAi).
-  if (engine !== "openai") {
-    return { aiHits: 0 };
-  }
   if (!forceAi && !(await isOpenAiQaAssistEnabled())) {
     return { aiHits: 0 };
   }

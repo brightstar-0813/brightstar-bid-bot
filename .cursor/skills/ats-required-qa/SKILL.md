@@ -59,8 +59,8 @@ flowchart TD
    - **`chatgpt`** → AI tab (`ensureAiTab` + `automateChatGpt`, ChatGPT or Claude from `ai_provider`).
    - **`codex`** or unset → **Codex** (ChatGPT account session; preferred for unattended batch so resume harvest tab is not stolen).
    - **`openai`** → OpenAI leftover helpers only (`enrichAnswersWithAi` API path).
-3. Codex failure → one Codex retry on a **new thread** (full `seedPrompt`: JD + profile + resume), then treat leftovers as unanswerable. **No AI-tab fallback** (user decision 2026-11-22): the AI tab is reserved for resume / cover-letter generation; it answers questions only when the engine is explicitly `chatgpt`.
-3a. The OpenAI API (`enrichAnswersWithAi` API path) runs only for the explicit `openai` engine — with Codex / AI tab selected no question is sent to an external API.
+3. Codex failure → one Codex retry on a **new thread** (full `seedPrompt`: JD + profile + resume) → then the AI-tab fallback, as before → then treat leftovers as unanswerable. Codex is the primary method for application questions (user 2026-11-22); **keep every other method working** (AI tab engine + fallback, OpenAI API key path, popup Ask panel) — user, 2026-11-22: "don't remove the other logic beside Codex".
+3a. The OpenAI API path (`enrichAnswersWithAi`, first fill pass) still runs when the OpenAI Q&A assist toggle is on and an API key is set — unchanged.
 4. Cap batch engine asks (~8 questions per pass). Bank clean **labels** (not option-formatted prompts).
 
 `forceAi: true` on recovery passes so assist toggle does not skip engine asks.

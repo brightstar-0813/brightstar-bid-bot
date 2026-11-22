@@ -1403,9 +1403,9 @@ async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuesti
     return { answer, source: answerSource };
   };
 
-  // Workflows stay separate (user decision 2026-11-22): the AI tab builds resumes / cover
-  // letters; application questions go to Codex. The AI tab answers questions only when the
-  // user picked the "chatgpt" engine.
+  // Codex first for application questions (user 2026-11-22); every other method stays
+  // available: the "chatgpt" engine uses the AI tab directly, and when Codex fails twice
+  // (job thread, then a new thread) the AI tab is still the fallback, as before.
   if (engine === "chatgpt") {
     return tryAiTab();
   }
@@ -1415,7 +1415,14 @@ async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuesti
     await setStatus(
       `Apply Q&A: Codex failed (${String(err?.message || err)}). Retrying Codex on a new thread…`
     ).catch(() => {});
-    return tryCodex({ freshThread: true });
+  }
+  try {
+    return await tryCodex({ freshThread: true });
+  } catch (err) {
+    await setStatus(
+      `Apply Q&A: Codex failed again (${String(err?.message || err)}). Falling back to AI tab…`
+    ).catch(() => {});
+    return tryAiTab();
   }
 }
 
