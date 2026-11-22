@@ -33,7 +33,7 @@ export const ROW_BUTTONS = {
 /** Same numbers as popup updateCsvSummaryFromQueue. */
 export function computeCounters(queue) {
   const q = Array.isArray(queue) ? queue : [];
-  const c = { queue: q.length, pending: 0, done: 0, applied: 0, skipped: 0, error: 0, running: 0 };
+  const c = { queue: q.length, pending: 0, done: 0, applied: 0, skipped: 0, error: 0, running: 0, built: 0 };
   for (const j of q) {
     const s = String(j?.status || "");
     if (s === "pending") c.pending += 1;
@@ -42,6 +42,7 @@ export function computeCounters(queue) {
     else if (s === "error" || s === "failed") c.error += 1;
     else if (s === "running") c.running += 1;
     if (j?.applied) c.applied += 1;
+    if (j?.jobDir) c.built += 1; // resume + cover letter saved on disk for this row
   }
   return c;
 }

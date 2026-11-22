@@ -4,10 +4,10 @@ import { buildRows, computeCounters, planCommand } from "../dashboard-bridge-cor
 
 test("computeCounters matches popup counters", () => {
   const c = computeCounters([
-    { status: "pending" }, { status: "done", applied: true }, { status: "done" },
+    { status: "pending" }, { status: "done", applied: true, jobDir: "a" }, { status: "done", jobDir: "b" },
     { status: "skipped" }, { status: "error" }, { status: "failed" }, { status: "running" }
   ]);
-  assert.deepEqual(c, { queue: 7, pending: 1, done: 2, applied: 1, skipped: 1, error: 2, running: 1 });
+  assert.deepEqual(c, { queue: 7, pending: 1, done: 2, applied: 1, skipped: 1, error: 2, running: 1, built: 2 });
 });
 
 test("buildRows: running first, limit, safe links, actions", () => {
