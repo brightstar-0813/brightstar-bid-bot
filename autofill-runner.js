@@ -2623,6 +2623,12 @@ async function enrichAnswersWithAi(questions, answers, {
     return { aiHits };
   }
 
+  // The OpenAI API path is only for the explicit "openai" engine. With Codex (default) or the
+  // AI tab selected, questions are never sent to an external API; required leftovers reach
+  // the engine through the forced recovery pass above (forceAi).
+  if (engine !== "openai") {
+    return { aiHits: 0 };
+  }
   if (!forceAi && !(await isOpenAiQaAssistEnabled())) {
     return { aiHits: 0 };
   }
@@ -4573,20 +4579,23 @@ export async function prepareCustomQaAsk({ question, skipBank = false, engine = 
 
   const jobKey = buildCustomQaJobKey(profileId, ctx.jobMeta);
   const chatMode = await resolveCustomQaChatReuse(jobKey, { engine });
-  // Follow-ups still include this job's JD excerpt (one chat per job).
+  // Full seed: JD + verified profile facts (work auth, certs, roles) + resume. Follow-ups in
+  // the same job thread send a shorter prompt that still includes this job's JD excerpt.
+  const seedPrompt = buildCustomQaAgentPrompt({
+    question: q,
+    applicantInfo: info,
+    jobMeta: ctx.jobMeta,
+    resumeText: ctx.resumeText,
+    skills: ctx.skills,
+    recentRoles: info.recentRoles || ctx.recentRoles
+  });
   const prompt = chatMode.useFollowUp
     ? buildCustomQaFollowUpPrompt(q, ctx.jobMeta)
-    : buildCustomQaAgentPrompt({
-        question: q,
-        applicantInfo: info,
-        jobMeta: ctx.jobMeta,
-        resumeText: ctx.resumeText,
-        skills: ctx.skills,
-        recentRoles: info.recentRoles || ctx.recentRoles
-      });
+    : seedPrompt;
   return {
     bankHit: null,
     prompt,
+    seedPrompt,
     profileId,
     personLabel,
     question: q,

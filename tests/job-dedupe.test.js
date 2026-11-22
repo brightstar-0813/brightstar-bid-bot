@@ -50,3 +50,69 @@ test("findAppliedSameJob only matches applied rows and skips the row itself", ()
   assert.equal(findAppliedSameJob(queue[2], queue, { excludeCsvRow: 99 }), null);
   assert.equal(findAppliedSameJob(queue[0], queue, { excludeCsvRow: 75 }), null);
 });
+
+import { extractRequisitionIds, isSameEmployer, findCoveringJob } from "../job-dedupe.js";
+
+test("requisition ids from Workday links and JD text", () => {
+  assert.deepEqual(
+    extractRequisitionIds({
+      jdLink: "https://myhrabc.wd5.myworkdayjobs.com/Global/job/Remote-Pennsylvania/Salesforce-Business-Analyst_R2618936?source=jobgether"
+    }),
+    ["R2618936"]
+  );
+  assert.deepEqual(
+    extractRequisitionIds({ jdLink: "https://veradigm.wd12.myworkdayjobs.com/VR/job/Remote---US/Expert-Business-Analyst--Salesforce_JR11186" }),
+    ["JR11186"]
+  );
+  assert.deepEqual(extractRequisitionIds({ jdText: "Req ID: 398253 · Plano, TX" }), ["398253"]);
+  assert.deepEqual(extractRequisitionIds({ jdText: "job requisition id JR11186" }), ["JR11186"]);
+  // Short numbers (years, zips) are not requisitions.
+  assert.deepEqual(extractRequisitionIds({ jdText: "Req 2026 hiring plan" }), []);
+});
+
+test("same employer: equal names, or the old/parent name appears in the other JD", () => {
+  assert.equal(isSameEmployer({ company: "Veradigm" }, { company: "Veradigm, Inc." }), true);
+  assert.equal(
+    isSameEmployer({ company: "Allscripts", jdText: "Veradigm is a healthcare technology company…" }, { company: "Veradigm" }),
+    true
+  );
+  assert.equal(isSameEmployer({ company: "Allscripts", jdText: "Healthcare IT." }, { company: "Veradigm" }), false);
+});
+
+test("findCoveringJob: Allscripts row 96 is covered by applied Veradigm row 44 (same title)", () => {
+  const queue = [
+    { csvRow: 44, company: "Veradigm", title: "Expert Business Analyst, Salesforce", applied: true, status: "done" },
+    { csvRow: 96, company: "Allscripts", title: "Expert Business Analyst, Salesforce", status: "pending" }
+  ];
+  const job = { ...queue[1], jdText: "At Veradigm, we believe…" };
+  const hit = findCoveringJob(job, queue, { excludeCsvRow: 96 });
+  assert.equal(hit?.row?.csvRow, 44);
+  assert.match(hit.reason, /applied row 44/);
+});
+
+test("findCoveringJob: same requisition id at the same employer", () => {
+  const queue = [
+    {
+      csvRow: 92,
+      company: "AmerisourceBergen",
+      title: "Salesforce Business Analyst",
+      applied: true,
+      jdLink: "https://myhrabc.wd5.myworkdayjobs.com/Global/job/X/Salesforce-Business-Analyst_R2618936"
+    }
+  ];
+  const job = {
+    csvRow: 300,
+    company: "Cencora",
+    title: "Business Analyst - Salesforce (USPAH)",
+    jdText: "AmerisourceBergen is now Cencora. job requisition id R2618936"
+  };
+  const hit = findCoveringJob(job, queue, { excludeCsvRow: 300 });
+  assert.match(hit?.reason || "", /requisition R2618936/);
+});
+
+test("findCoveringJob: built rows only count when includeBuilt (pre-generate)", () => {
+  const queue = [{ csvRow: 47, company: "EverCommerce", title: "EverHealth - Sr Salesforce Administrator / Architect (Remote, US)", status: "done" }];
+  const job = { csvRow: 218, company: "EverCommerce", title: "EverHealth - Sr Salesforce Administrator / Architect (Remote, US)" };
+  assert.equal(findCoveringJob(job, queue, { excludeCsvRow: 218 }), null);
+  assert.equal(findCoveringJob(job, queue, { excludeCsvRow: 218, includeBuilt: true })?.row?.csvRow, 47);
+});

@@ -22,7 +22,7 @@ import {
 } from "./sheet-sync.js";
 import { notifySlackBatchComplete, notifySlackAlert, notifySlackJobStatus, notifySlackDuplicates, slackKindAllowed } from "./slack.js";
 import { shouldExcludeFromAiAndBank } from "./autofill-junk.js";
-import { findAppliedSameJob } from "./job-dedupe.js";
+import { findCoveringJob } from "./job-dedupe.js";
 import { canFetchJdFromLink, cleanJobPageText, isUsableJdText } from "./jd-from-page.js";
 import {
   buildCoverLetterPrompt,
@@ -30,6 +30,7 @@ import {
   getActivePerson,
   getAutofillContact,
   getPersonSheetConfig,
+  personToApplicantInfo,
   resolveExperienceRulesForPerson,
   resolveRoleTrackForPerson,
   DEFAULT_PROFILE_ID
@@ -150,7 +151,7 @@ import {
   certificationsFromSourceText,
   mergeMissingCertifications
 } from "./resume-text.js";
-import { buildJobFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
+import { buildJobFolderName, csvRowFromFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
 import { buildResumeDocx } from "./resume-docx.js";
 import { resolveLosslessResume } from "./resume-fidelity.js";
 import {
@@ -166,8 +167,17 @@ import {
   isBatchApplyJob,
   resolveBatchApplyBoard,
   batchApplyAutoSubmitForBoard,
-  isHandoffBoard
+  isHandoffBoard,
+  BATCH_PRIORITY_KEY,
+  normalizeBatchPriority,
+  pickPriorityJob,
+  summarizePriorityGroups
 } from "./batch-apply-policy.js";
+import {
+  prefilterJob,
+  normalizeUsState,
+  parseYesNo
+} from "./job-prefilter.js";
 import {
   parseJobsCsv,
   filterJobsByChannel,
@@ -1349,12 +1359,15 @@ async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuesti
   let engine = normalizeCustomQaEngine(preferredEngine) || (await getStoredCustomQaEngine());
   if (engine === "openai") engine = "codex";
 
-  const tryCodex = async () => {
+  const tryCodex = async ({ freshThread = false } = {}) => {
     const prep = await prepareCustomQaAsk({ question: text, skipBank: true, engine: "codex" });
-    const asked = await askCodexWithChatGptSession(prep.prompt, {
-      conversationId: prep.codexConversationId,
-      parentMessageId: prep.codexParentMessageId
-    });
+    // A retry starts a new Codex thread (full JD + profile seed) instead of the job's thread.
+    const asked = await askCodexWithChatGptSession(
+      freshThread ? prep.seedPrompt || prep.prompt : prep.prompt,
+      freshThread
+        ? {}
+        : { conversationId: prep.codexConversationId, parentMessageId: prep.codexParentMessageId }
+    );
     const fresh = extractFreshCustomQaAnswer(asked.answer, { prompt: prep.prompt });
     const cleaned = fresh || cleanCustomQaAnswer(asked.answer);
     if (!cleaned) throw new Error("Codex returned an empty answer.");
@@ -1390,6 +1403,9 @@ async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuesti
     return { answer, source: answerSource };
   };
 
+  // Workflows stay separate (user decision 2026-11-22): the AI tab builds resumes / cover
+  // letters; application questions go to Codex. The AI tab answers questions only when the
+  // user picked the "chatgpt" engine.
   if (engine === "chatgpt") {
     return tryAiTab();
   }
@@ -1397,9 +1413,9 @@ async function askCustomQaEngineOnce(questionText, preferredEngine, { bankQuesti
     return await tryCodex();
   } catch (err) {
     await setStatus(
-      `Apply Q&A: Codex failed (${String(err?.message || err)}). Falling back to AI tab…`
+      `Apply Q&A: Codex failed (${String(err?.message || err)}). Retrying Codex on a new thread…`
     ).catch(() => {});
-    return tryAiTab();
+    return tryCodex({ freshThread: true });
   }
 }
 
@@ -2282,7 +2298,10 @@ function jobBelongsToPerson(job, person) {
  *   generate — any sheet row (Ready or Applied) blocks resume build
  *   apply — only Applied (or queue.applied) blocks auto-apply; Ready is expected after build
  */
-async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "generate", company = "", title = "" } = {}) {
+async function isJobLinkAlreadyCovered(
+  jdLink,
+  { excludeCsvRow, purpose = "generate", company = "", title = "", jdText = "" } = {}
+) {
   const linkKey = normalizeJobLink(jdLink || "");
   if (!linkKey) return { covered: false };
 
@@ -2290,16 +2309,20 @@ async function isJobLinkAlreadyCovered(jdLink, { excludeCsvRow, purpose = "gener
   const forApply = purpose === "apply";
 
   const queue = await getQueue();
-  // Same job via another listing site (different link): same company + matching title already Applied.
+  // Same job via another listing site (different link): same requisition id, or same employer
+  // (incl. old / parent name named in the JD) + matching title — already Applied, or (before a
+  // build) already built from another listing. Inactive rows never cover anything.
   if (company && title) {
-    const same = findAppliedSameJob({ company, title }, queue, {
+    const covering = findCoveringJob({ company, title, jdLink, jdText }, queue, {
       excludeCsvRow,
-      belongs: person ? (j) => jobBelongsToPerson(j, person) : undefined
+      includeBuilt: !forApply,
+      belongs: (j) =>
+        !isJobMarkedInactive(j) && (person ? jobBelongsToPerson(j, person) : true)
     });
-    if (same) {
+    if (covering) {
       return {
         covered: true,
-        reason: `same company and title as applied row ${same.csvRow} (different listing link)`
+        reason: `${covering.reason} (different listing link)`
       };
     }
   }
@@ -2360,12 +2383,199 @@ async function getPreGenerateSkipReason(jobMeta = {}) {
     excludeCsvRow: jobMeta.csvRow,
     purpose: "generate",
     company: jobMeta.companyName || jobMeta.company || "",
-    title: jobMeta.jobTitle || jobMeta.title || ""
+    title: jobMeta.jobTitle || jobMeta.title || "",
+    jdText: jobMeta.jdText || ""
   });
   if (linkDup.covered) {
     return linkDup.reason || "duplicate job link";
   }
   return "";
+}
+
+/* ------------------------------------------------------------------------------------------
+ * Queue pre-check (2026-11-22): text-only eligibility rules (job-prefilter.js) that run before
+ * the AI tab builds files — closed listing, non-US, state residency, required relocation.
+ * Skipped rows keep their record: status "skipped", `precheck: {code, reason, at}`, and a line
+ * in `precheck_log`. `precheck_restore` puts a row back (and exempts it from the rules).
+ * ---------------------------------------------------------------------------------------- */
+const PRECHECK_ENABLED_KEY = "precheck_enabled";
+const PRECHECK_LOG_KEY = "precheck_log";
+const PRECHECK_LOG_MAX = 500;
+
+async function isPrecheckEnabled() {
+  const data = await chrome.storage.local.get([PRECHECK_ENABLED_KEY]);
+  return data[PRECHECK_ENABLED_KEY] !== false;
+}
+
+/** Candidate facts the rules need: home state + relocation answer (blank = not permitted). */
+function precheckCandidateContext(person) {
+  if (!person) return { candidateState: "", willingToRelocate: null };
+  let info = {};
+  try {
+    info = personToApplicantInfo(person) || {};
+  } catch {
+    info = {};
+  }
+  return {
+    candidateState: normalizeUsState(info.state),
+    willingToRelocate: parseYesNo(info.willingToRelocate)
+  };
+}
+
+/** Rule verdict for one row; never skips forced rebuilds or rows the user restored. */
+function precheckVerdictForJob(job, ctx) {
+  if (!job || job.forceRebuild || job.precheckOverride) return { skip: false, code: "", reason: "" };
+  return prefilterJob(job, ctx);
+}
+
+async function appendPrecheckLog(entries = []) {
+  if (!entries.length) return;
+  const data = await chrome.storage.local.get([PRECHECK_LOG_KEY]);
+  const prev = Array.isArray(data[PRECHECK_LOG_KEY]) ? data[PRECHECK_LOG_KEY] : [];
+  const next = [...prev, ...entries].slice(-PRECHECK_LOG_MAX);
+  await chrome.storage.local.set({ [PRECHECK_LOG_KEY]: next });
+}
+
+async function markJobSkippedByPrecheck(job, verdict, person = null) {
+  const at = new Date().toISOString();
+  await updateQueueJob(job.csvRow, {
+    status: "skipped",
+    applied: false,
+    applyAttempted: true,
+    applyAttempts: MAX_HOSTED_APPLY_ATTEMPTS,
+    precheck: { code: verdict.code, reason: verdict.reason, at },
+    error: `Skipped (pre-check) — ${verdict.reason}`
+  }).catch(() => {});
+  await appendPrecheckLog([
+    {
+      at,
+      csvRow: job.csvRow,
+      profileId: person?.id || job.profileId || "",
+      company: job.company || "",
+      title: job.title || "",
+      jdLink: job.jdLink || "",
+      code: verdict.code,
+      reason: verdict.reason
+    }
+  ]).catch(() => {});
+}
+
+/**
+ * Run the text rules over every pending (or retryable) row of the active person.
+ * dryRun: report only, change nothing.
+ * @returns {{ ok: true, checked: number, skipped: Array<object>, byCode: object, groups: object }}
+ */
+async function precheckPendingQueue({ dryRun = false } = {}) {
+  const person = await getActivePerson().catch(() => null);
+  const ctx = precheckCandidateContext(person);
+  const queue = await getQueue();
+  const isOpen = (j) =>
+    j &&
+    !isJobMarkedInactive(j) &&
+    (j.status === "pending" ||
+      (j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS)) &&
+    (!person || jobBelongsToPerson(j, person));
+  const skipped = [];
+  const byCode = {};
+  let checked = 0;
+  for (const j of queue) {
+    if (!isOpen(j)) continue;
+    checked += 1;
+    const verdict = precheckVerdictForJob(j, ctx);
+    if (!verdict.skip) continue;
+    byCode[verdict.code] = (byCode[verdict.code] || 0) + 1;
+    skipped.push({
+      csvRow: j.csvRow,
+      company: j.company || "",
+      title: j.title || "",
+      code: verdict.code,
+      reason: verdict.reason
+    });
+    if (!dryRun) await markJobSkippedByPrecheck(j, verdict, person);
+  }
+  const after = dryRun ? queue : await getQueue();
+  return {
+    ok: true,
+    dryRun,
+    checked,
+    candidateState: ctx.candidateState,
+    skipped,
+    byCode,
+    groups: summarizePriorityGroups(after, isOpen)
+  };
+}
+
+/** Popup / dashboard choice of batch order; default = self-submit sites first. */
+async function getBatchPriorityOrder() {
+  try {
+    const data = await chrome.storage.local.get([BATCH_PRIORITY_KEY]);
+    return normalizeBatchPriority(data[BATCH_PRIORITY_KEY]);
+  } catch {
+    return normalizeBatchPriority("");
+  }
+}
+
+/** Next row to build: pending first, then retryable errors; self-submit tiers before hand-offs. */
+function pickNextGenerateJob(queue, order) {
+  return (
+    pickPriorityJob(queue, (j) => j?.status === "pending" && !isJobMarkedInactive(j), { order }) ||
+    pickPriorityJob(
+      queue,
+      (j) =>
+        j?.status === "error" &&
+        Number(j.attempts || 0) < MAX_JOB_ATTEMPTS &&
+        !isJobMarkedInactive(j),
+      { order }
+    )
+  );
+}
+
+/**
+ * A pending row whose resume AND cover letter are already in ITS OWN job folder — mark it built
+ * instead of asking the AI again. Strict on purpose: disk hydration also matches folders by
+ * company + title, so a repost (row 218 → row 47's folder) or an older queue load (row 144 →
+ * "189_10-21_…") looks like it has files. Reuse only when
+ *  - the folder name starts with this row's number, and
+ *  - the bot's own build history says that folder was built for this row's job link.
+ */
+async function canReuseSavedFiles(job, person) {
+  if (!job || job.forceRebuild || job.applied) return false;
+  if (job.status !== "pending" && job.status !== "error") return false;
+  const jobDir = String(job.jobDir || "").trim();
+  if (!job.hasFiles || !jobDir) return false;
+  const resume = String(job.resumeName || "");
+  const cover = String(job.coverName || "");
+  if (!resume || !cover) return false;
+  if (/resume/i.test(cover) && !/cover/i.test(cover)) return false;
+  if (person && !jobBelongsToPerson(job, person)) return false;
+  if (Number(csvRowFromFolderName(jobDir)) !== Number(job.csvRow)) return false;
+  const linkKey = normalizeJobLink(job.jdLink || "");
+  if (!linkKey) return false;
+  try {
+    const data = await chrome.storage.local.get(APPLY_HISTORY_KEY);
+    const hist = data[APPLY_HISTORY_KEY] && typeof data[APPLY_HISTORY_KEY] === "object"
+      ? data[APPLY_HISTORY_KEY]
+      : {};
+    const entry = hist[String(job.csvRow)] || {};
+    return entry.jobDir === jobDir && normalizeJobLink(entry.jdLink || "") === linkKey;
+  } catch {
+    return false;
+  }
+}
+
+function formatPrecheckSummary(result = {}) {
+  const n = Array.isArray(result.skipped) ? result.skipped.length : 0;
+  if (!n) return `Pre-check: ${result.checked || 0} open rows, none skipped.`;
+  const labels = {
+    closed: "closed",
+    non_us: "non-US",
+    state_residency: "state residency",
+    relocation_required: "relocation"
+  };
+  const parts = Object.entries(result.byCode || {}).map(
+    ([code, count]) => `${count} ${labels[code] || code}`
+  );
+  return `Pre-check: skipped ${n} of ${result.checked} before generate (${parts.join(", ")}).`;
 }
 
 /** Mark a queue row skipped for company/link coverage — no resume build, no apply. */
@@ -7459,11 +7669,9 @@ async function armInactiveProbeForNextGenerateJob() {
     !isJobMarkedInactive(j) &&
     String(j.jdLink || "").trim() &&
     String(j.jdText || "").trim();
-  const next =
-    queue.find((j) => j.status === "pending" && eligible(j)) ||
-    queue.find(
-      (j) => j.status === "error" && Number(j.attempts || 0) < MAX_JOB_ATTEMPTS && eligible(j)
-    );
+  // Probe the row the batch will actually build next (same priority pick as runBatchLoop).
+  const picked = pickNextGenerateJob(queue, await getBatchPriorityOrder());
+  const next = picked && eligible(picked) ? picked : null;
   if (!next) {
     discardInflightInactiveProbe();
     return;
@@ -10646,6 +10854,18 @@ async function runBatchLoop(outputDir) {
       );
     }
 
+    // Text-only eligibility rules over the whole open queue, before any AI build.
+    if (await isPrecheckEnabled()) {
+      try {
+        const pre = await precheckPendingQueue({ dryRun: false });
+        await setStatus(formatPrecheckSummary(pre));
+      } catch (preErr) {
+        await setStatus(
+          `Pre-check failed (${String(preErr?.message || preErr)}). Continuing; rows are still checked one by one…`
+        );
+      }
+    }
+
     while (!batchControl.stop) {
       if (batchControl.pauseAfterCurrent) {
         batchControl.pauseAfterCurrent = false;
@@ -10659,11 +10879,16 @@ async function runBatchLoop(outputDir) {
       const activePerson = await getActivePerson().catch(() => null);
       const batchAutoApply = await isBatchAutoApplyEnabled();
       const applyOpts = { allSources: await isBatchApplyAllSourcesEnabled() };
+      const priorityOrder = await getBatchPriorityOrder();
 
-      // Dice only: apply already-built rows (no ChatGPT). Other boards = generate + panel.
-      // Gated by job type — All channel is build only. Active person's rows only.
+      // Apply already-built rows first (no ChatGPT) — self-submit sites before hand-offs.
+      // Gated by job type / Batch mode. Active person's rows only.
       const backlog = batchAutoApply
-        ? queue.find((j) => isHostedApplyBacklogJob(j, activePerson, applyOpts))
+        ? pickPriorityJob(
+            queue,
+            (j) => isHostedApplyBacklogJob(j, activePerson, applyOpts),
+            { order: priorityOrder }
+          )
         : null;
       if (backlog) {
         // Apply can take long enough that a check started during cooldown goes stale.
@@ -10716,15 +10941,8 @@ async function runBatchLoop(outputDir) {
 
       // Fresh rows first, then rows that errored but still have retries left.
       // Rows at the attempt ceiling become "failed" and are never re-picked, so
-      // the loop always terminates.
-      const next =
-        queue.find((j) => j.status === "pending" && !isJobMarkedInactive(j)) ||
-        queue.find(
-          (j) =>
-            j.status === "error" &&
-            Number(j.attempts || 0) < MAX_JOB_ATTEMPTS &&
-            !isJobMarkedInactive(j)
-        );
+      // the loop always terminates. Inside each, self-submit sites before hand-offs.
+      const next = pickNextGenerateJob(queue, priorityOrder);
       if (!next) {
         const done = queue.filter((j) => j.status === "done").length;
         const failedJobs = queue.filter((j) => j.status === "failed" || j.status === "error");
@@ -10784,6 +11002,39 @@ async function runBatchLoop(outputDir) {
         await updateQueueJob(next.csvRow, { jdText: pageJd });
       }
 
+      // Eligibility rules (residency, relocation, non-US, closed) BEFORE ChatGPT.
+      if (await isPrecheckEnabled()) {
+        const verdict = precheckVerdictForJob(next, precheckCandidateContext(activePerson));
+        if (verdict.skip) {
+          await markJobSkippedByPrecheck(next, verdict, activePerson);
+          await setStatus(
+            `Row ${next.csvRow}: skipped before generate — ${verdict.reason}. Continuing…`
+          );
+          continue;
+        }
+      }
+
+      // Files for this row are already on disk (earlier Generate run): reuse, don't rebuild.
+      if (await canReuseSavedFiles(next, activePerson)) {
+        await updateQueueJob(next.csvRow, {
+          status: "done",
+          error: "",
+          reusedFiles: true,
+          profileId: activePerson?.id || next.profileId || ""
+        });
+        await rememberApplyHistory(next.csvRow, {
+          jobDir: next.jobDir,
+          jdLink: next.jdLink || "",
+          status: "done",
+          title: next.title,
+          company: next.company
+        }).catch(() => {});
+        await setStatus(
+          `Row ${next.csvRow}: resume + cover letter already saved (${next.jobDir}) — reusing them, no new build.`
+        );
+        continue;
+      }
+
       // Validate duplicates BEFORE ChatGPT — do not build a resume we will skip.
       await setStatus(
         `Row ${next.csvRow}: checking Google Sheet / queue for a duplicate job link…`
@@ -10792,6 +11043,9 @@ async function runBatchLoop(outputDir) {
         csvRow: next.csvRow,
         companyName: next.company,
         company: next.company,
+        jobTitle: next.title,
+        title: next.title,
+        jdText: next.jdText || "",
         jdLink: next.jdLink || "",
         forceRebuild: Boolean(next.forceRebuild)
       });
@@ -13017,6 +13271,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           skipped: 0,
           error: String(err?.message || err)
         });
+      }
+    })();
+    return true;
+  }
+
+  // Queue pre-check (text rules: closed / non-US / state residency / relocation).
+  // dryRun: true = report only (safe for review before Start); false = mark rows skipped.
+  if (type === "precheck_queue") {
+    (async () => {
+      try {
+        const snap = await chrome.storage.local.get([BATCH_STATE_KEY]);
+        const dryRun = message?.dryRun !== false;
+        if (!dryRun && snap[BATCH_STATE_KEY] === "running") {
+          throw new Error("Pause the batch before running the pre-check.");
+        }
+        const result = await precheckPendingQueue({ dryRun });
+        if (!dryRun) await setStatus(formatPrecheckSummary(result));
+        safeSendResponse(sendResponse, { ...result, summary: formatPrecheckSummary(result) });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  // Undo one pre-check skip: row goes back to pending and is exempt from the rules from now on.
+  if (type === "precheck_restore") {
+    (async () => {
+      try {
+        const csvRow = Number(message.csvRow);
+        if (!Number.isFinite(csvRow)) throw new Error("Missing CSV row.");
+        const queue = await getQueue();
+        const job = (queue || []).find((j) => Number(j.csvRow) === csvRow);
+        if (!job) throw new Error(`Row ${csvRow} was not found.`);
+        if (!job.precheck) throw new Error(`Row ${csvRow} was not skipped by the pre-check.`);
+        if (job.applied) throw new Error(`Row ${csvRow} is already Applied.`);
+        await updateQueueJob(csvRow, {
+          status: "pending",
+          precheckOverride: true,
+          precheckRestored: { ...job.precheck, restoredAt: new Date().toISOString() },
+          precheck: null,
+          applyAttempted: false,
+          applyAttempts: 0,
+          error: ""
+        });
+        await setStatus(`Row ${csvRow}: pre-check skip undone — back in the queue.`);
+        safeSendResponse(sendResponse, { ok: true, queue: await getQueue() });
+      } catch (err) {
+        safeSendResponse(sendResponse, { ok: false, error: String(err?.message || err) });
       }
     })();
     return true;

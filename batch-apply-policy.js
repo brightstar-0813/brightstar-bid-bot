@@ -92,6 +92,78 @@ export function isHandoffBoard(board = "") {
 }
 
 /**
+ * Batch order (user decision 2026-11-22): sites where the bot finishes the application by
+ * itself first, hand-offs (no adapter → pause for a human) as a separate group at the end.
+ * Lower tier runs first. Queue order is kept inside a tier.
+ */
+export const BATCH_PRIORITY_KEY = "batch_priority_order";
+/** "self_submit_first" (default) | "queue" (old behaviour: stored queue order). */
+export const DEFAULT_BATCH_PRIORITY = "self_submit_first";
+
+export function normalizeBatchPriority(value) {
+  return String(value || "").trim().toLowerCase() === "queue" ? "queue" : DEFAULT_BATCH_PRIORITY;
+}
+
+const BOARD_TIER = Object.freeze({
+  Workday: 1,
+  Greenhouse: 2,
+  Lever: 3,
+  Ashby: 4,
+  Dice: 5,
+  Indeed: 6, // hosted Apply on Indeed
+  Jobgether: 6 // opens the employer ATS directly; submits where that ATS has an adapter
+});
+export const HANDOFF_TIER = 8;
+export const NEVER_APPLY_TIER = 9;
+
+/** Priority tier of one queue row (1 = Workday … 6 = other adapter boards, 8 = hand-off, 9 = LinkedIn). */
+export function batchPriorityTier(j = {}) {
+  if (isNeverBatchApplyJob(j)) return NEVER_APPLY_TIER;
+  const board = resolveBatchApplyBoard(j, { allSources: true });
+  if (BOARD_TIER[board]) return BOARD_TIER[board];
+  return HANDOFF_TIER;
+}
+
+/** True when the row's site needs a human to finish (no auto-submit adapter). */
+export function isHandoffGroupJob(j = {}) {
+  return batchPriorityTier(j) >= HANDOFF_TIER;
+}
+
+/**
+ * First row matching `predicate`, preferring the lowest tier (stable: queue order inside a tier).
+ * order "queue" keeps the old first-match behaviour.
+ */
+export function pickPriorityJob(queue, predicate, { order = DEFAULT_BATCH_PRIORITY } = {}) {
+  const list = Array.isArray(queue) ? queue : [];
+  if (normalizeBatchPriority(order) === "queue") return list.find((j) => predicate(j)) || null;
+  let best = null;
+  let bestTier = Infinity;
+  for (const j of list) {
+    if (!predicate(j)) continue;
+    const tier = batchPriorityTier(j);
+    if (tier < bestTier) {
+      best = j;
+      bestTier = tier;
+      if (tier === 1) break;
+    }
+  }
+  return best;
+}
+
+/** Pending / retry counts per group, for status lines ("12 self-submit · 30 hand-off"). */
+export function summarizePriorityGroups(queue, predicate) {
+  const out = { selfSubmit: 0, handoff: 0, neverApply: 0 };
+  for (const j of Array.isArray(queue) ? queue : []) {
+    if (!predicate(j)) continue;
+    const tier = batchPriorityTier(j);
+    if (tier >= NEVER_APPLY_TIER) out.neverApply += 1;
+    else if (tier >= HANDOFF_TIER) out.handoff += 1;
+    else out.selfSubmit += 1;
+  }
+  return out;
+}
+
+/**
  * autoSubmit flag the batch passes to the runner for this board. The runner still applies the
  * adapter policy; this only withholds it where the product forbids submit outright.
  */

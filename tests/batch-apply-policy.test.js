@@ -69,3 +69,44 @@ test("Indeed: hosted keeps Indeed board, external is labelled and never auto-sub
   assert.equal(batchApplyAutoSubmitForBoard("Indeed"), true);
   assert.equal(batchApplyAutoSubmitForBoard("Other"), true);
 });
+
+import {
+  batchPriorityTier,
+  pickPriorityJob,
+  isHandoffGroupJob,
+  summarizePriorityGroups,
+  normalizeBatchPriority
+} from "../batch-apply-policy.js";
+
+const row = (csvRow, jdLink, extra = {}) => ({ csvRow, jdLink, status: "pending", ...extra });
+
+test("priority tiers: Workday, Greenhouse, Lever, Ashby, Dice, then hand-offs, LinkedIn last", () => {
+  assert.equal(batchPriorityTier(row(1, "https://acme.wd5.myworkdayjobs.com/x/job/a_R1")), 1);
+  assert.equal(batchPriorityTier(row(1, "https://job-boards.greenhouse.io/acme/jobs/1")), 2);
+  assert.equal(batchPriorityTier(row(1, "https://jobs.lever.co/acme/1")), 3);
+  assert.equal(batchPriorityTier(row(1, "https://jobs.ashbyhq.com/acme/1")), 4);
+  assert.equal(batchPriorityTier(row(1, "https://www.dice.com/job-detail/1")), 5);
+  assert.equal(batchPriorityTier(row(1, "https://jobgether.com/offer/1")), 6);
+  assert.equal(batchPriorityTier(row(1, "https://builtin.com/job/x/1")), 8);
+  assert.equal(batchPriorityTier(row(1, "https://himalayas.app/companies/a/jobs/b")), 8);
+  assert.equal(batchPriorityTier(row(1, "https://www.linkedin.com/jobs/view/1")), 9);
+  assert.equal(isHandoffGroupJob(row(1, "https://builtin.com/job/x/1")), true);
+  assert.equal(isHandoffGroupJob(row(1, "https://www.dice.com/job-detail/1")), false);
+});
+
+test("pickPriorityJob: lowest tier wins, queue order inside a tier, 'queue' keeps old behaviour", () => {
+  const queue = [
+    row(10, "https://builtin.com/job/x/10"),
+    row(11, "https://www.dice.com/job-detail/11"),
+    row(12, "https://www.dice.com/job-detail/12"),
+    row(13, "https://acme.wd5.myworkdayjobs.com/x/job/a_R13", { status: "done" })
+  ];
+  const pending = (j) => j.status === "pending";
+  assert.equal(pickPriorityJob(queue, pending).csvRow, 11);
+  assert.equal(pickPriorityJob(queue, pending, { order: "queue" }).csvRow, 10);
+  assert.equal(pickPriorityJob(queue, (j) => j.status === "done").csvRow, 13);
+  assert.equal(pickPriorityJob(queue, () => false), null);
+  assert.deepEqual(summarizePriorityGroups(queue, pending), { selfSubmit: 2, handoff: 1, neverApply: 0 });
+  assert.equal(normalizeBatchPriority(""), "self_submit_first");
+  assert.equal(normalizeBatchPriority("queue"), "queue");
+});
