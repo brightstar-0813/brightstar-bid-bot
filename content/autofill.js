@@ -7406,6 +7406,37 @@
   }
   // @pure-end bookmark-label
 
+  // @pure-begin search-label (tests/autofill-search-label.test.js runs this block alone)
+  /**
+   * Site job-search buttons ("Search", "Find jobs") are never a form Submit. Indeed job pages
+   * ended with "Reached Submit (Search)" and the batch paused on the listing (#60–#62, 2026-11-23).
+   */
+  function isSiteSearchLabel(text) {
+    const t = String(text || "")
+      .replace(/[^\p{L}\p{N} ]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return /^(search|find|go|find jobs|search jobs|search all jobs|find a job)$/i.test(t);
+  }
+  // @pure-end search-label
+
+  /** Button inside a site search box (role=search, or a form whose only text fields are search queries). */
+  function isSiteSearchControl(el) {
+    try {
+      if (el?.closest?.('[role="search"]')) return true;
+      const form = el?.form || el?.closest?.("form");
+      if (!form) return false;
+      const fields = [...form.querySelectorAll("input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select")];
+      return (
+        fields.length > 0 &&
+        fields.length <= 2 &&
+        fields.every((f) => f.type === "search" || /^(q|what|where|l|keywords?|query|search)$/i.test(f.name || ""))
+      );
+    } catch {
+      return false;
+    }
+  }
+
   // @pure-begin pager-control (tests/autofill-pager-control.test.js runs this block alone)
   /**
    * List pagination ("next" / "previous" / "page 3" inside a pagination nav) is never a form
@@ -7504,6 +7535,7 @@
           continue;
         }
         if (!autoCls && isBookmarkSaveLabel(text)) continue;
+        if (!autoCls && (isSiteSearchLabel(text) || isSiteSearchControl(btn))) continue;
         const cls = autoCls || classifyActionButton(text);
         if (cls === "next" && !next) next = { type: "next", el: btn, text: text || "Next" };
         else if (cls === "review" && !review) review = { type: "review", el: btn, text };
