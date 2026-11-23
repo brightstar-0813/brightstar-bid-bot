@@ -4732,6 +4732,46 @@ async function focusTabForInput(tabId) {
 }
 
 /**
+ * ChatGPT UI (2026-11) can stay in a phantom "generating" state after the
+ * resume reply has finished: Stop button + "Thinking", the user turn shown
+ * twice, and nothing streaming. The composer then swallows the same-chat cover
+ * prompt (nothing sent; the bot waited 4 min per attempt). A reload of the same
+ * /c/<id> clears it. Returns true when the tab was reloaded.
+ */
+async function clearStuckChatGptGeneration(tabId, provider) {
+  if (normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT) !== AI_PROVIDERS.CHATGPT) return false;
+  const state = await readAiComposerSendState(tabId, provider).catch(() => null);
+  if (!state?.generating) return false;
+  const pageTextLength = async () => {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => String(document.querySelector("main")?.innerText || "").length
+      });
+      return Number(results?.[0]?.result || 0);
+    } catch {
+      return -1;
+    }
+  };
+  const before = await pageTextLength();
+  await sleep(8000);
+  const again = await readAiComposerSendState(tabId, provider).catch(() => null);
+  if (!again?.generating) return false;
+  const after = await pageTextLength();
+  if (before < 0 || after !== before) return false; // still streaming a real reply
+  await setStatus("ChatGPT is stuck on 'Thinking' with nothing streaming — reloading the chat before the cover letter…");
+  try {
+    await chrome.tabs.reload(tabId);
+    await withTimeout(waitForTabComplete(tabId, 30000), 32000, "Timed out reloading ChatGPT.").catch(() => null);
+  } catch {
+    return false;
+  }
+  await sleep(4000);
+  await ensureChatGptDomHarvest(tabId).catch(() => {});
+  return true;
+}
+
+/**
  * Whether the AI composer still holds an unsent prompt (common after a missed
  * Send click on same-chat cover letters).
  */
@@ -9244,7 +9284,8 @@ async function saveResumeAndCoverLetter(
           if (looksLikeCoverLetterBody(coverOutput)) break;
           await setStatus("Cover letter looked wrong (JSON/stale reply). Retrying…");
         } catch (attemptErr) {
-          if (attempt === 3) throw attemptErr;
+          // Skip/Stop must end the row, not count as a failed letter attempt.
+          if (attempt === 3 || /__SKIP__/.test(String(attemptErr?.message || attemptErr))) throw attemptErr;
           await setStatus(
             `Cover letter attempt ${attempt} failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
           );
@@ -9330,6 +9371,9 @@ async function saveResumeAndCoverLetter(
       };
 
       for (let attempt = 1; attempt <= 3; attempt += 1) {
+        if (batchControl.skipCurrent || batchControl.stop) throw new Error("__SKIP__");
+        // Phantom "Thinking" after the resume reply blocks the same-chat send.
+        await clearStuckChatGptGeneration(tabId, provider).catch(() => false);
         if (attempt > 1) {
           const already = await pickCover("");
           if (looksLikeCoverLetterBody(already)) {
@@ -9373,7 +9417,8 @@ async function saveResumeAndCoverLetter(
           await setStatus("Cover letter looked wrong (JSON/stale reply). Retrying…");
           await sleep(1000);
         } catch (attemptErr) {
-          if (attempt === 3) throw attemptErr;
+          // Skip/Stop must end the row, not count as a failed letter attempt.
+          if (attempt === 3 || /__SKIP__/.test(String(attemptErr?.message || attemptErr))) throw attemptErr;
           await setStatus(
             `Cover letter attempt ${attempt} failed (${String(attemptErr?.message || attemptErr)}). Retrying…`
           );
