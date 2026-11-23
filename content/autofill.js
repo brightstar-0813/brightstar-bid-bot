@@ -1953,7 +1953,8 @@
         ) {
           continue;
         }
-        if (key === "workAuthorized" && /\bsponsorship\b/.test(primary)) continue;
+        if (key === "workAuthorized" && /\bsponsorship\b/.test(primary) && !isAuthorizedWithoutSponsorship(primary)) continue;
+        if (key === "needsSponsorship" && isAuthorizedWithoutSponsorship(primary)) continue;
         if (key === "workAuthorized" && /\bcitizen/.test(primary)) continue;
         if (key === "citizenship" && /\b(authorized|eligible)\b/.test(primary) && /\bwork\b/.test(primary) && !/\bcitizen/.test(primary)) {
           continue;
@@ -2080,6 +2081,9 @@
     }
     if (/\bcitizen/.test(primary) || /\bcitizenship\b/.test(primary) || /\bimmigration status\b/.test(primary)) {
       return workdayPolicyAllowsKey("citizenship") ? "citizenship" : null;
+    }
+    if (isAuthorizedWithoutSponsorship(primary)) {
+      return workdayPolicyAllowsKey("workAuthorized") ? "workAuthorized" : null;
     }
     if (/\b(require|need)\b/.test(primary) && /\bsponsorship\b/.test(primary)) {
       return workdayPolicyAllowsKey("needsSponsorship") ? "needsSponsorship" : null;
@@ -2289,6 +2293,22 @@
     return digits.length === 10 ? digits : "";
   }
   // @pure-end phone-dial
+
+  // @pure-begin auth-without-sponsorship (tests/autofill-auth-sponsorship.test.js runs this block alone)
+  /**
+   * "Are you legally authorized to work in the US without the need for sponsorship?"
+   * asks about authorization (answer Yes for a citizen), not about needing a visa.
+   * The words "need" + "sponsorship" must not route it to needsSponsorship (PanCAN #86).
+   */
+  function isAuthorizedWithoutSponsorship(primary) {
+    const s = String(primary || "").toLowerCase();
+    return (
+      /\b(eligible|authorized|authorised|permitted|able)\b/.test(s) &&
+      /\bwork\b/.test(s) &&
+      /\bwithout\b[^.?]{0,40}\bsponsor/.test(s)
+    );
+  }
+  // @pure-end auth-without-sponsorship
 
   function optionMatches(optionText, desired) {
     const dialStripped = stripDialCode(optionText);
@@ -3126,6 +3146,7 @@
     const primary = normalize(question);
     if (!primary) return null;
     if (/\bcitizen/.test(primary) || /\bcitizenship\b/.test(primary)) return "citizenship";
+    if (isAuthorizedWithoutSponsorship(primary)) return "workAuthorized";
     if (/\b(require|need)\b/.test(primary) && /\bsponsorship\b/.test(primary)) {
       return "needsSponsorship";
     }
