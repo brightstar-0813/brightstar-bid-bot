@@ -29,3 +29,19 @@ test("keeps 'Sincerely' followed by something that is not the name", () => {
 test("first-name-only signature", () => {
   assert.deepEqual(dropTrailingSignoff([...body, "Regards, Avash"], "Avash Chapagain"), body);
 });
+
+import { stripWritingBlockFence } from "../cover-letter-harvest.js";
+
+test("strips ChatGPT ':::writing{…}' fences (#156)", () => {
+  const raw = ':::writing{variant="document" id="62841"}\nDear Hiring Manager,\n\nBody text here.\n\nThank you for your consideration.\n:::';
+  assert.equal(stripWritingBlockFence(raw), "Dear Hiring Manager,\n\nBody text here.\n\nThank you for your consideration.");
+});
+
+test("strips fences on joined first/last paragraphs", () => {
+  assert.equal(stripWritingBlockFence(':::writing{variant="document" id="1"} Dear Hiring Manager,'), "Dear Hiring Manager,");
+  assert.equal(stripWritingBlockFence("Thank you for your consideration. :::"), "Thank you for your consideration.");
+});
+
+test("leaves normal letters alone", () => {
+  assert.equal(stripWritingBlockFence("Dear Hiring Manager,\n\nThanks."), "Dear Hiring Manager,\n\nThanks.");
+});

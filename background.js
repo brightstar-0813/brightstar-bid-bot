@@ -236,6 +236,7 @@ import { harvestContactsFromAiText } from "./email-contacts.js";
 import { harvestEmailDraftFromAiText } from "./prompts/email-compose.js";
 import {
   dropTrailingSignoff,
+  stripWritingBlockFence,
   extractCoverLetterText,
   looksLikeCoverLetterBody,
   readNewestAssistantProseInPage,
@@ -4220,7 +4221,13 @@ function cleanCoverLetterParagraphs(paragraphs, name) {
     /^(edit|copy code|copy|share|regenerate( response)?|read aloud|good response|bad response|continue|stop generating)$/i;
 
   // "Sincerely, <name>" (lines joined) + ChatGPT suggestion chips after it.
-  return dropTrailingSignoff(paragraphs, name).filter((p) => {
+  const unfenced = (Array.isArray(paragraphs) ? paragraphs : []).map((p, i, all) => {
+    let s = String(p || "");
+    if (i === 0) s = stripWritingBlockFence(s);
+    if (i === all.length - 1) s = stripWritingBlockFence(s);
+    return s;
+  });
+  return dropTrailingSignoff(unfenced, name).filter((p) => {
     const lc = p.toLowerCase().trim();
     if (!lc) return false;
     if (uiLabelRe.test(lc)) return false; // ChatGPT message-toolbar button labels

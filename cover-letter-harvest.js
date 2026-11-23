@@ -47,6 +47,20 @@ const SIGNOFF_RE =
   /^(sincerely|regards|best regards|kind regards|warm regards|best|respectfully|yours truly|thank you)\b[,.!]?(?:\s+(.{0,80}))?$/i;
 
 /**
+ * ChatGPT (2026-11) sometimes returns the letter as a raw writing block:
+ * `:::writing{variant="document" id="62841"}` … `:::`. Strip the fence lines
+ * so they never reach the PDF (#156 Yudrio).
+ */
+export function stripWritingBlockFence(text) {
+  return String(text || "")
+    .replace(/^\s*:::[a-z-]+\{[^}\n]*\}[ \t]*\n?/i, "")
+    .replace(/^\s*:::[a-z-]+\{[^}\n]*\}[ \t]*/i, "")
+    .replace(/\n?[ \t]*:::[ \t]*$/, "")
+    .replace(/[ \t]+:::$/, "")
+    .trim();
+}
+
+/**
  * The PDF template appends its own "Sincerely, <name>" block. When ChatGPT
  * writes one too (retry prompts), lines are joined per paragraph, so the
  * letter ends "Sincerely, <name>" and may be followed by ChatGPT follow-up
