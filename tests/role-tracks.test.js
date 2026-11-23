@@ -136,6 +136,7 @@ test("profile menu label puts the track acronym beside the name", () => {
     "Ewerton Luis Santos da Silva (DE)"
   );
   assert.equal(profileMenuLabel(byId("patrick-clerveaux")), "Patrick Clerveaux (DE)");
+  assert.equal(profileMenuLabel(byId("xuan-zhao")), "Xuan Zhao (DE)");
   assert.equal(
     profileMenuLabel({ label: "Jane Doe (custom)", name: "Jane Doe", roleTrack: "fs", builtin: false }),
     "Jane Doe (FS)"

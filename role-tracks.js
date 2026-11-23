@@ -355,6 +355,7 @@ export function resolveRoleTrackForPerson(person) {
     id === "thayanne-lopes" ||
     id === "ewerton-luis" ||
     id === "patrick-clerveaux" ||
+    id === "xuan-zhao" ||
     id === "david-oliveira-de" ||
     id === "victor-holanda-de" ||
     id === "everton-julio-de"

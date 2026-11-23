@@ -692,3 +692,39 @@ CERTIFICATIONS
 - Academy Accreditation — Databricks Lakehouse Fundamentals — Databricks — Issued Jul 2023
 - SCALED AGILE FRAMEWORK (SAFe) 4.0 — SAFe by Scaled Agile, Inc. — Issued Apr 2017
 - Adobe Photoshop — Adobe — Issued Feb 2008`;
+
+export const XUAN_ZHAO_MASTER = `Xuan Zhao
+Senior Data Engineer | Big Data Engineering | Data Analytics & Machine Learning
+Mountain View, California, United States | +1 (305) 709-6816 | xuan.zhao1915@outlook.com
+https://www.linkedin.com/in/xuan-zhao-18686a113/
+
+SUMMARY
+10+ years of overall technology experience, including 8+ years delivering data engineering, large-scale data systems, analytics, and machine-learning evaluation across streaming entertainment, fintech payments, professional networking Trust and Safety, and interactive gaming platforms.
+
+SKILLS
+Apache Hadoop, Apache Spark, Apache Hive, Apache Pig, ETL pipeline development, data integration, data processing, distributed data pipelines, large-scale data processing, data warehousing, data quality, data monitoring, alerting, data consistency monitoring; Amazon Web Services (AWS), Amazon S3, Amazon Redshift; risk-domain experimentation, simulation, analytical evaluation; data analysis, data modeling, statistical analysis, forecasting, performance monitoring; machine learning model evaluation, threshold optimization, precision monitoring, anti-abuse analytics, fraud and abuse detection, anomaly detection, automated alerting; A/B testing, product analytics, user behavior analysis, KPI monitoring; Tableau, dashboard development, automated reporting; Python, statistical data mining, machine learning for data science.
+
+EXPERIENCE
+Netflix — Senior Data Engineer / Data Engineer | Los Gatos, California, United States | Full-time | Feb 2023 - Present
+Global entertainment and technology company (netflix.com; HQ Los Gatos, California) specializing in streaming media, content distribution, and large-scale technology infrastructure. Data engineering supports platform measurement, experimentation, content analytics, recommendations, infrastructure monitoring, and operational decision-making across distributed computing, cloud, ML, and analytics ecosystems.
+
+PayPal — Lead Data Engineer / Data Engineer | San Francisco Bay Area, United States | Full-time | Jun 2019 - Feb 2023
+Global financial technology company (paypal.com; HQ San Jose, California) specializing in digital payments, merchant services, and payment infrastructure. Designed and maintained ETL pipelines using Apache Hadoop and Apache Spark; developed monitoring and alerting for data inconsistencies; supported experimentation, simulation, and evaluation in financial risk applications. Work spanned big data, data integration, risk analytics, and pipeline maintenance.
+
+LinkedIn — Data Analyst, Trust and Safety | Sunnyvale, California, United States | Contract | Jun 2018 - Jun 2019
+Global professional networking platform (linkedin.com; subsidiary of Microsoft; HQ Sunnyvale, California). Supported migration and maintenance of more than five datasets; collaborated with ML and business teams on detection-model monitoring and threshold optimization. Documented outcomes included more than 10% improvement in execution efficiency, 9% improvement in bad-profile detection precision, and up to 12% reduction in unnecessary manual review. Focus areas: fraud and abuse detection, anti-abuse analytics, anomaly detection, and data foundations.
+
+Roblox — Data Science and Analytics Intern | San Francisco Bay Area, United States | Internship | Jan 2018 - Apr 2018
+Global interactive entertainment platform (roblox.com; HQ San Mateo, California). Built distributed ETL pipelines with Apache Hive and Pig on AWS; processed datasets containing billions of records using Amazon S3 and Redshift; contributed to A/B testing, product analytics, and user-experience recommendations; automated Tableau dashboards and BI reports.
+
+Beijing MengShiZi Technology Co., Ltd. — Product Support Analyst | Beijing, China | Internship | Jun 2015 - Aug 2015
+Beijing technology organization focused on product development and customer research. Performed market research, analyzed user feedback, monitored product performance, and prepared findings for business and executive decision-making.
+
+EDUCATION
+Cornell University | Master's Degree in Systems Engineering | Ithaca, New York, United States | 2016 - 2017
+Coursework: Learning with Big Messy Data; Project Management; Statistical Data Mining; Machine Learning for Data Science; Python Programming and Applications in Statistics.
+
+Jilin University | Bachelor's Degree in Information and Computing Science | Changchun, China | 2012 - 2016
+
+CERTIFICATIONS
+None.`;

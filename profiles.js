@@ -18,7 +18,8 @@ import {
   SHIRA_LEFF_MASTER,
   THAYANNE_LOPES_DE_MASTER,
   VICTOR_HOLANDA_DE_MASTER,
-  VICTOR_HOLANDA_SF_MASTER
+  VICTOR_HOLANDA_SF_MASTER,
+  XUAN_ZHAO_MASTER
 } from "./prompts/builtin-master-resumes.js";
 import { PROMPT as coverLetterDePrompt } from "./prompts/cover-letter-de.js";
 import { PROMPT as genericSeniorPrompt } from "./prompts/generic-senior.js";
@@ -835,6 +836,57 @@ export const BUILTIN_PROFILES = [
       "graduation date": "2015-05"
     },
     requiredExperience: ["Deloitte", "JPMorganChase", "FedEx", "Elite Island Resorts"]
+  },
+  {
+    id: "xuan-zhao",
+    label: "Xuan Zhao",
+    roleTrack: "de",
+    promptTemplate: "",
+    templateId: "ats-modern",
+    resumeFilePrefix: "Zhao_Resume",
+    sheetTabName: "Xuan-DE",
+    outputDir: "Xuan-DE",
+    builtin: true,
+    kind: "resume",
+    name: "Xuan Zhao",
+    email: "xuan.zhao1915@outlook.com",
+    phone: "+1 (305) 709-6816",
+    linkedin: "https://www.linkedin.com/in/xuan-zhao-18686a113/",
+    portfolio: "",
+    password: DEFAULT_ATS_PASSWORD,
+    location: "Mountain View, California, United States",
+    address: "1050 Crestview Dr, Apartment 205",
+    zip: "94040",
+    gender: "",
+    ethnicity: "",
+    disability: "No, I do not have a disability",
+    veteran: "I am not a protected veteran",
+    citizenship: "US Citizen",
+    workAuthorized: "Yes",
+    sponsorship: "No",
+    hispanicLatino: "",
+    signatureTitle: "Senior Data Engineer | Big Data Engineering | Data Analytics & Machine Learning",
+    masterResume: XUAN_ZHAO_MASTER,
+    coverLetterPrompt: coverLetterDePrompt,
+    autofillExtras: {
+      "date of birth": "08/16/1993",
+      birthday: "08/16/1993",
+      dob: "08/16/1993",
+      "current employer": "Netflix",
+      "current job title": "Senior Data Engineer",
+      "years of experience": "10",
+      "school name": "Cornell University",
+      "highest degree": "Master's Degree in Systems Engineering",
+      "field of study": "Systems Engineering",
+      "graduation date": "2017-05"
+    },
+    requiredExperience: [
+      "Netflix",
+      "PayPal",
+      "LinkedIn",
+      "Roblox",
+      "Beijing MengShiZi Technology"
+    ]
   },
   {
     id: COVER_LETTER_PROFILE_ID,
