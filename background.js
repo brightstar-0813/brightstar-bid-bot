@@ -4740,26 +4740,34 @@ async function focusTabForInput(tabId) {
  */
 async function clearStuckChatGptGeneration(tabId, provider) {
   if (normalizeAiProvider(provider || AI_PROVIDERS.CHATGPT) !== AI_PROVIDERS.CHATGPT) return false;
-  const state = await readAiComposerSendState(tabId, provider).catch(() => null);
-  if (!state?.generating) return false;
-  const pageTextLength = async () => {
+  // The Stop button in this state is hidden (aria-label "Stop", no test id), so
+  // readAiComposerSendState().generating stays false. The reliable sign is the
+  // last user turn rendered twice with identical text.
+  const probe = async () => {
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId },
-        func: () => String(document.querySelector("main")?.innerText || "").length
+        func: () => {
+          const users = [...document.querySelectorAll("[data-user-message-bubble]")].map((el) =>
+            // The twin copy differs only in spacing between list items.
+            String(el.innerText || "").replace(/\s+/g, "")
+          );
+          const n = users.length;
+          const doubled = n >= 2 && users[n - 1].length > 200 && users[n - 1] === users[n - 2];
+          return { doubled, len: String(document.querySelector("main")?.innerText || "").length };
+        }
       });
-      return Number(results?.[0]?.result || 0);
+      return results?.[0]?.result || { doubled: false, len: -1 };
     } catch {
-      return -1;
+      return { doubled: false, len: -1 };
     }
   };
-  const before = await pageTextLength();
+  const first = await probe();
+  if (!first.doubled) return false;
   await sleep(8000);
-  const again = await readAiComposerSendState(tabId, provider).catch(() => null);
-  if (!again?.generating) return false;
-  const after = await pageTextLength();
-  if (before < 0 || after !== before) return false; // still streaming a real reply
-  await setStatus("ChatGPT is stuck on 'Thinking' with nothing streaming — reloading the chat before the cover letter…");
+  const second = await probe();
+  if (!second.doubled || first.len < 0 || second.len !== first.len) return false; // still streaming
+  await setStatus("ChatGPT shows the last message twice and nothing streaming — reloading the chat before the cover letter…");
   try {
     await chrome.tabs.reload(tabId);
     await withTimeout(waitForTabComplete(tabId, 30000), 32000, "Timed out reloading ChatGPT.").catch(() => null);
