@@ -625,3 +625,70 @@ Universidade de São Paulo (USP) | Bachelor's Degree in Computer Science | São 
 
 CERTIFICATIONS
 None.`;
+
+export const EWERTON_LUIS_DE_MASTER = `Ewerton Luis Santos da Silva
+Senior Data Engineer
+Recife, Pernambuco, Brazil | ewerton.l1995@outlook.com
+https://www.linkedin.com/in/ewerton-luis-75b741448/
+
+SUMMARY
+10+ years of overall technology experience, including 8+ years delivering data engineering, ETL/ELT, data migration, and lakehouse platforms for global IT consulting and nearshore engineering teams.
+
+SKILLS
+Python, SQL, Java, Scala, JavaScript, Bash/Shell, PL/SQL; Apache Spark, PySpark, Apache Kafka, ETL/ELT, batch processing, data pipelines, CDC, data integration, data migration; AWS (S3, Glue, Lambda, Redshift, EMR, Athena), Azure (Data Factory, Azure Databricks, ADLS Gen2, Synapse Analytics), Snowflake, Databricks, Delta Lake, data lakehouse architecture, medallion architecture; PostgreSQL, MySQL, SQL Server, Oracle; dimensional modeling, star schema, SCD Type 1/2, data warehouse design; Apache Airflow, dbt, Databricks Workflows; Git, GitHub, Docker, Terraform, CI/CD, Jenkins, GitHub Actions; query optimization, Spark performance tuning, pipeline monitoring, troubleshooting, logging, CloudWatch; Databricks Auto Loader, Unity Catalog, Mosaic AI, vector search, LLM; data validation, data quality testing, data reconciliation, data lineage, RBAC.
+
+EXPERIENCE
+Exadel — Senior Data Engineer | Tampa, Florida, United States | Remote | Feb 2024 - Present
+Global IT consulting and software engineering company (exadel.com; ~1,001–5,000 employees; HQ Tampa, Florida) providing enterprise software development, data engineering, analytics, AI solutions, cloud modernization, and digital transformation across financial services, healthcare, and technology.
+
+MAS Global Consulting — Senior Data Engineer | Tampa, Florida, United States | Remote | Mar 2020 - Dec 2023
+U.S.-based IT consulting and digital engineering company (masglobalconsulting.com; ~201–500 employees; HQ Tampa, Florida) specializing in enterprise software, data engineering, analytics, cloud, and AI-driven modernization with distributed engineering teams across Latin America.
+
+Stefanini IT Solutions — Data Engineer / Data Migration Developer | Fortaleza, Ceará, Brazil | On-site | Feb 2018 - Feb 2020
+Brazilian multinational technology consulting company (stefanini.com; 10,001+ employees; regional HQ São Paulo) providing software development, IT outsourcing, systems integration, infrastructure management, and digital transformation for enterprise clients worldwide.
+
+GREat — Software Engineering Intern / Python Developer | Fortaleza, Ceará, Brazil | On-site | May 2016 - Feb 2018
+University-based research and development group affiliated with UFC (great.ufc.br; ~51–200 people; HQ Fortaleza) building software solutions and applied research with technology companies and academic partners.
+
+EDUCATION
+Federal University of Ceará | Bachelor's Degree in Computer Science | Fortaleza, Ceará, Brazil | Apr 2013 - Aug 2017
+
+CERTIFICATIONS
+None.`;
+
+export const PATRICK_CLERVEAUX_MASTER = `Patrick Clerveaux
+Senior Data Engineer | AWS | Solutions Architect | Distributed Systems | AI/LLM Integration
+Brandon, Florida, United States | +1 (442) 233-0113 | patrick.cv.1990@outlook.com
+https://www.linkedin.com/in/pclerveaux/
+
+SUMMARY
+10+ years of overall technology experience, including 9+ years in cloud architecture, distributed systems, and data engineering across professional consulting, financial services, transportation/logistics, and hospitality.
+
+SKILLS
+Amazon Web Services (AWS), Microsoft Azure, Google Cloud Platform (GCP), cloud architecture, enterprise solution architecture, hybrid cloud, IaaS, AWS S3, AWS Lambda, AWS IAM, cloud security; ETL/ELT pipelines, data pipeline development, data integration, batch processing, incremental loading, data transformation, Apache NiFi, SSIS, Azure Data Factory, Apache Airflow, dbt, Databricks Auto Loader, workflow orchestration, data quality management; Azure Databricks, Apache Spark, Apache Flink, Hadoop, data lakes, lakehouse architecture, distributed data processing, stream processing; Snowflake, Google BigQuery, Amazon Redshift, Microsoft SQL Server, data warehousing, relational and dimensional modeling, star schema, fact and dimension tables, MDM, SQL query optimization; PostgreSQL, MongoDB, Azure Cosmos DB, Neo4j, pgvector, graph databases, vector similarity search, knowledge graphs; Python, SQL, Java, Scala, C++, Java EE (J2EE), Spring Boot, Spring MVC, Spring Core, microservices, REST APIs, JSON, TypeScript; AI, LLMs, RAG, semantic search, hybrid search, vector retrieval, BM25, reranking, query reformulation, graph intelligence; Snowflake Cortex AI; Salesforce integration, ServiceNow integration, Apache Kafka, TIBCO BusinessWorks, TIBCO EMS, JMS, event-driven architecture; GitHub Actions, CI/CD, Docker, AWS CDK, IaC, Microsoft IIS, LDAP; healthcare data engineering and integration, payment systems, ACH processing, financial systems integration; technical solution design, requirements gathering, data architecture, technical team leadership.
+
+EXPERIENCE
+Deloitte — Manager (Lead AI & Data Science Engineer II) | Tampa, Florida, United States | Hybrid | Jun 2026 - Present
+Deloitte — Data Engineer / Senior Consultant | Tampa, Florida, United States | Hybrid | May 2022 - Jun 2026
+Global professional services network (deloitte.com) offering consulting, audit, tax, risk advisory, and technology transformation. Technology practices modernize cloud infrastructure, develop AI and data solutions, implement digital platforms, and strengthen security and governance. Work includes AWS solutions architecture, secure data pipelines, Master Data Management, knowledge graph platforms, LLM integration, semantic search, and technical solution design.
+
+JPMorganChase — Technical Team Lead / Senior Software Engineer | Tampa, Florida, United States | Contract | Oct 2020 - May 2022
+JPMorganChase — Senior Software Engineer | Tampa, Florida, United States | Hybrid / Contract | Feb 2019 - Sep 2020
+Global financial services company (jpmorganchase.com; 300,000+ employees; HQ New York City). Built Java microservices for real-time payments, Kafka event streaming for payment processing, Neo4j customer/payments relationship graphs, and performance optimization of microservices and SQL.
+
+FedEx — Software Engineer | Greater Orlando, Florida, United States | Contract | May 2016 - Jan 2019
+Global transportation and logistics company (fedex.com). Contributed to enterprise communication and client-notification systems using Java, SQL, CSS, XHTML, TIBCO BusinessWorks, TIBCO EMS/JMS, Spring Boot REST APIs/microservices, and XPath schema mapping.
+
+Elite Island Resorts — IT Support Engineer | Deerfield Beach, Florida, United States | Jul 2015 - May 2016
+Hospitality company specializing in Caribbean resort experiences (eliteislandresorts.com; ~51–200 employees; HQ Deerfield Beach). Supported 200+ employees and 15+ servers; patched IP telephony with Visual Basic and C++; built internal IIS/PHP/HTML sites with LDAP for employee interactions.
+
+EDUCATION
+Florida Atlantic University | Bachelor of Science (B.S.) in Computer Engineering | Florida, United States | 2010 - 2015
+Northeast High School | Diploma — Academy of Information Technology (AOIT) | 2006 - 2010
+
+CERTIFICATIONS
+- Claude in Amazon Bedrock — Anthropic — Issued Jan 2026
+- CompTIA Security+ ce Certification — CompTIA — Issued Nov 2024
+- Academy Accreditation — Databricks Lakehouse Fundamentals — Databricks — Issued Jul 2023
+- SCALED AGILE FRAMEWORK (SAFe) 4.0 — SAFe by Scaled Agile, Inc. — Issued Apr 2017
+- Adobe Photoshop — Adobe — Issued Feb 2008`;

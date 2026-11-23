@@ -352,7 +352,12 @@ export function resolveRoleTrackForPerson(person) {
     id === "raquel-oliveira-de" ||
     id === "jessel-tampus-de" ||
     id === "shira-leff" ||
-    id === "thayanne-lopes"
+    id === "thayanne-lopes" ||
+    id === "ewerton-luis" ||
+    id === "patrick-clerveaux" ||
+    id === "david-oliveira-de" ||
+    id === "victor-holanda-de" ||
+    id === "everton-julio-de"
   ) {
     return "de";
   }

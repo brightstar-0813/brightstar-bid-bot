@@ -83,6 +83,8 @@ test("resolveRoleTrackForPerson infers de for built-in data-engineering profiles
   assert.equal(resolveRoleTrackForPerson({ id: "thayanne-lopes" }), "de");
   assert.equal(resolveRoleTrackForPerson({ id: "jessel-tampus-de" }), "de");
   assert.equal(resolveRoleTrackForPerson({ id: "shira-leff" }), "de");
+  assert.equal(resolveRoleTrackForPerson({ id: "ewerton-luis" }), "de");
+  assert.equal(resolveRoleTrackForPerson({ id: "patrick-clerveaux" }), "de");
 });
 
 test("enforceJdSkills adds DE tools to skills rows", () => {
@@ -129,6 +131,11 @@ test("profile menu label puts the track acronym beside the name", () => {
     profileMenuLabel(byId("thayanne-lopes")),
     "Thayanne Karla Lopes da Silva (DE)"
   );
+  assert.equal(
+    profileMenuLabel(byId("ewerton-luis")),
+    "Ewerton Luis Santos da Silva (DE)"
+  );
+  assert.equal(profileMenuLabel(byId("patrick-clerveaux")), "Patrick Clerveaux (DE)");
   assert.equal(
     profileMenuLabel({ label: "Jane Doe (custom)", name: "Jane Doe", roleTrack: "fs", builtin: false }),
     "Jane Doe (FS)"
