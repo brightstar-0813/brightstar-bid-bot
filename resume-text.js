@@ -26,10 +26,13 @@ const SECTION_ALIASES = [
     re: /^(experience|work\s+experience|professional\s+experience|employment(\s+history)?|work\s+history|career\s+history)$/i
   },
   { key: "education", re: /^(education|academic|academics)$/i },
-  // Exact "Certifications"/"Licenses", or "* Certifications" (e.g. Salesforce Certifications).
+  // Exact "Certification(s)"/"Licenses"/"Credentials", or prefixed plural headings
+  // (Salesforce Certifications, Professional Certifications, Licenses & Certifications).
+  // Prefixed form requires plural "Certifications" so "CompTIA Security+ Certification"
+  // stays a credential line, not a section title.
   {
     key: "certifications",
-    re: /^(?:certifications?|licenses?|credentials?|(?:[\w.&'/+\-]+\s+){1,3}certifications?)$/i
+    re: /^(?:certifications?|licenses?(?:\s*(?:&|and)\s*certifications)?|credentials?|(?:[\w.&'/+\-]+\s+){1,3}certifications)$/i
   },
   { key: "projects", re: /^(projects?|selected\s+projects)$/i }
 ];
@@ -582,55 +585,88 @@ function stripEducationDateFromPlace(text) {
     .join(", ");
 }
 
+/** True for "None.", "N/A", or disclaimer prose that must not become a cert bullet. */
+function isCertNonCredentialLine(label) {
+  const t = String(label || "").replace(/\s+/g, " ").trim();
+  if (!t) return true;
+  if (/^(none|n\/?a|no|nil|not\s+applicable)\.?$/i.test(t)) return true;
+  if (/^no\b.{0,120}\bcertifications?\b/i.test(t)) return true;
+  if (/linkedin\.com/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * One credential per non-empty line. Never join disclaimer prose onto the prior bullet,
+ * and never keep "None." / "N/A" as a certification.
+ */
 function parseCerts(lines) {
   const out = [];
-  let buf = [];
-  const flush = () => {
-    const label = buf
-      .map((l) => stripBullet(l))
-      .filter(Boolean)
-      .join(" — ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (label) out.push(label);
-    buf = [];
-  };
   for (const line of lines || []) {
-    if (!String(line).trim()) {
-      flush();
-      continue;
-    }
-    if (isBulletLine(line) && buf.length) flush();
-    buf.push(line);
+    const label = stripBullet(line).replace(/\s+/g, " ").trim();
+    if (!label || isCertNonCredentialLine(label)) continue;
+    out.push(label);
   }
-  flush();
+  const hasSf = out.some((c) => /salesforce\s+certified/i.test(c));
+  return hasSf ? out.filter((c) => !/linkedin/i.test(c)) : out;
+}
 
-  const filtered = out.filter((c) => {
-    if (/salesforce\s+certified/i.test(c)) return true;
-    if (/linkedin/i.test(c) && out.some((x) => /salesforce\s+certified/i.test(x))) return false;
-    return c.length <= 120;
-  });
-  return filtered.length ? filtered : out;
+/**
+ * Authoritative master-resume certifications.
+ * `explicitEmpty` is true when a Certifications section exists but lists None / N/A / disclaimer only —
+ * callers must clear AI-invented certs in that case.
+ */
+export function extractMasterCertifications(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { certifications: [], explicitEmpty: false, hasSection: false };
+  const sections = splitSections(raw, { extras: true });
+  const hasSection = Object.prototype.hasOwnProperty.call(sections, "certifications");
+  if (!hasSection) return { certifications: [], explicitEmpty: false, hasSection: false };
+  const lines = sections.certifications || [];
+  const certifications = parseCerts(lines);
+  if (certifications.length) return { certifications, explicitEmpty: false, hasSection: true };
+  const body = lines.map((l) => stripBullet(l).replace(/\s+/g, " ").trim()).filter(Boolean);
+  const onlyPlaceholders = !body.length || body.every(isCertNonCredentialLine);
+  return { certifications: [], explicitEmpty: onlyPlaceholders, hasSection: true };
 }
 
 /** Certification labels from the source resume text (same parser as pasted resumes). */
 export function certificationsFromSourceText(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return [];
-  const sections = splitSections(raw, { extras: true });
-  return parseCerts(sections.certifications || []);
+  return extractMasterCertifications(text).certifications;
 }
 
 /** Comparable name of a certification: the part before the issuer, lowercased, letters and digits only. */
 function certNameKey(value) {
   const label = typeof value === "string" || typeof value === "number"
     ? String(value)
-    : String(value?.name || value?.title || value?.certification || value?.label || value?.text || "");
+    : String(
+        value?.name ||
+          value?.title ||
+          value?.certification ||
+          value?.label ||
+          value?.credential ||
+          value?.text ||
+          ""
+      );
   return label
     .split(/\s+[—–|-]\s+/)[0]
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+/** True when keys match without treating "developer i" as covering "developer ii". */
+function certKeysMatch(have, key) {
+  if (!have || !key) return false;
+  if (have === key) return true;
+  if (Math.min(key.length, have.length) < 8) return false;
+  const [shorter, longer] = have.length <= key.length ? [have, key] : [key, have];
+  if (!longer.includes(shorter)) return false;
+  if (longer.startsWith(shorter)) {
+    const rest = longer.slice(shorter.length).trim();
+    // Prefix + Roman/Arabic numeral → different credentials (PD I vs PD II).
+    if (/^(i{1,3}|iv|v|vi{0,3}|ix|x|\d+)\b/i.test(rest)) return false;
+  }
+  return true;
 }
 
 /**
@@ -647,11 +683,7 @@ export function mergeMissingCertifications(resumeData, sourceCerts) {
   for (const label of source) {
     const key = certNameKey(label);
     if (!key) continue;
-    const present = haveKeys.some(
-      (have) =>
-        have === key ||
-        (Math.min(key.length, have.length) >= 8 && (have.includes(key) || key.includes(have)))
-    );
+    const present = haveKeys.some((have) => certKeysMatch(have, key));
     if (present) continue;
     added.push(String(label).trim());
     haveKeys.push(key);

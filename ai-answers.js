@@ -5,6 +5,7 @@
 
 import { chatCompletion as openAiChatCompletion, DEFAULT_OPENAI_MODEL } from "./openai.js";
 import { isPageScriptAnswer } from "./autofill-junk.js";
+import { extractMasterCertifications } from "./resume-text.js";
 
 /** Default completer; callers may pass Anthropic chatCompletion via `complete`. */
 const chatCompletion = openAiChatCompletion;
@@ -35,7 +36,15 @@ export function parseCertificationList(value) {
         if (item == null) return "";
         if (typeof item === "string") return item.trim();
         if (typeof item === "object") {
-          return String(item.name || item.title || item.certification || "").trim();
+          return String(
+            item.name ||
+              item.title ||
+              item.certification ||
+              item.label ||
+              item.credential ||
+              item.text ||
+              ""
+          ).trim();
         }
         return String(item).trim();
       })
@@ -61,38 +70,24 @@ function cleanCertificationLine(line) {
     .trim();
 }
 
-/** Keep section lines that are not empty / "None" (no keyword filter). */
-function isSectionCertificationLine(line) {
-  const row = cleanCertificationLine(line);
-  if (row.length < 8) return false;
-  if (/^(none|no)\b/i.test(row)) return false;
-  return true;
-}
-
 function looksLikeCertificationLine(line) {
   const row = cleanCertificationLine(line);
-  if (!isSectionCertificationLine(row)) return false;
+  if (row.length < 8) return false;
+  if (/^(none|n\/?a|no)\b/i.test(row)) return false;
   return CERT_CREDENTIAL_RE.test(row);
 }
 
-/** Pull credential names out of a master resume or prompt blob. */
+/**
+ * Pull credential names out of a master resume or prompt blob.
+ * Prefers the shared section parser (Markdown / Professional / Licenses headings)
+ * so built-in and custom masters stay in sync with paste + restore.
+ */
 export function certificationsFromText(text) {
   const raw = String(text || "");
   if (!raw) return [];
 
-  // Prefer an explicit CERTIFICATIONS section (master resumes + pasted text).
-  // Section lines are authoritative — keep every credential, including AWS Specialty,
-  // SnowPro, Practitioner, Lynda, etc. that fail the keyword fallback filter.
-  const section = raw.match(
-    /(?:^|\n)\s*(?:SALESFORCE\s+)?CERTIFICATIONS?\s*\r?\n([\s\S]*?)(?=\r?\n\s*(?:EDUCATION|EXPERIENCE|SKILLS|SUMMARY|PROFESSIONAL|TECHNICAL|PROJECTS|LICENSES)\b|\r?\n\s*$|$)/i
-  );
-  if (section) {
-    const fromSection = section[1]
-      .split(/\r?\n/)
-      .map((line) => cleanCertificationLine(line))
-      .filter((row) => isSectionCertificationLine(row));
-    if (fromSection.length) return fromSection;
-  }
+  const extracted = extractMasterCertifications(raw);
+  if (extracted.hasSection) return extracted.certifications;
 
   const jsonBlock = raw.match(/"certifications"\s*:\s*\[([\s\S]*?)\]/);
   if (jsonBlock) {
@@ -103,7 +98,7 @@ export function certificationsFromText(text) {
   }
   const found = [];
   const re =
-    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft|SnowPro|Snowflake|Domo|Datorama)[^\n]{1,140}?(?:Certified|Certification|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional|Specialist|Specialty|Practitioner)[^\n]{0,60})/gi;
+    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft|SnowPro|Snowflake|Domo|Datorama|CompTIA)[^\n]{1,140}?(?:Certified|Certification|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional|Specialist|Specialty|Practitioner)[^\n]{0,60})/gi;
   let match;
   while ((match = re.exec(raw))) {
     const row = cleanCertificationLine(match[1]);
@@ -113,19 +108,24 @@ export function certificationsFromText(text) {
 }
 
 /**
- * Master resume certifications are authoritative. When the master lists any,
- * replace the AI certifications array so JD tailoring cannot drop or invent them.
+ * Master resume certifications are authoritative.
+ * - Master lists credentials → replace AI list with the full master list.
+ * - Master has an explicit empty Certifications section (None / N/A) → clear AI inventions.
+ * - Master has no Certifications section → leave AI list alone.
  */
 export function enforceMasterCertifications(data, masterSource) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return data;
-  let masterCerts = [];
   if (Array.isArray(masterSource)) {
-    masterCerts = parseCertificationList(masterSource);
-  } else if (typeof masterSource === "string" && masterSource.trim()) {
-    masterCerts = certificationsFromText(masterSource);
+    const masterCerts = parseCertificationList(masterSource);
+    if (!masterCerts.length) return data;
+    return { ...data, certifications: masterCerts };
   }
-  if (!masterCerts.length) return data;
-  return { ...data, certifications: masterCerts };
+  if (typeof masterSource === "string" && masterSource.trim()) {
+    const extracted = extractMasterCertifications(masterSource);
+    if (extracted.explicitEmpty) return { ...data, certifications: [] };
+    if (extracted.certifications.length) return { ...data, certifications: extracted.certifications };
+  }
+  return data;
 }
 
 export function isCertificationQuestion(label) {

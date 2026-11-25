@@ -148,8 +148,7 @@ import {
 import {
   resolvePastedResume,
   isStyledExportResume,
-  certificationsFromSourceText,
-  mergeMissingCertifications
+  certificationsFromSourceText
 } from "./resume-text.js";
 import { buildJobFolderName, csvRowFromFolderName, jobDirMatchesCsvRow } from "./job-folder.js";
 import { buildResumeDocx } from "./resume-docx.js";
@@ -9653,21 +9652,29 @@ async function persistOneOffDraft({
 }
 
 /**
- * The model sometimes returns fewer certifications than the person's master resume.
- * Restore the dropped ones so the draft (and the PDF/DOCX made from it) keeps them all.
- * Returns the resume data plus a short status line for the progress bar.
+ * Lock certifications to the person's master resume (built-in or custom).
+ * Replaces the AI list when the master has credentials, or clears inventions when
+ * the master Certifications section is explicitly empty (None / N/A).
+ */
+function lockSourceCertifications(resumeData, person) {
+  return enforceMasterCertifications(resumeData, person?.masterResume || "") || resumeData;
+}
+
+/**
+ * The model sometimes returns fewer (or invented) certifications vs the master.
+ * Lock to the master list so draft preview and PDF/DOCX stay correct.
  */
 async function restoreSourceCertifications(resumeData, person, rowLabel = "", companyName = "") {
+  const before = Array.isArray(resumeData?.certifications) ? resumeData.certifications.length : 0;
+  const locked = lockSourceCertifications(resumeData, person);
+  const after = Array.isArray(locked?.certifications) ? locked.certifications.length : 0;
+  if (before === after && locked === resumeData) return { resumeData, status: "" };
   const sourceCerts = certificationsFromSourceText(person?.masterResume || "");
-  if (!sourceCerts.length) return { resumeData, status: "" };
-  const merged = mergeMissingCertifications(resumeData, sourceCerts);
-  const haveCount = Array.isArray(merged.data?.certifications) ? merged.data.certifications.length : 0;
-  const restored = merged.added.length
-    ? ` (restored ${merged.added.length} the model had dropped)`
-    : "";
   return {
-    resumeData: merged.data,
-    status: `Row ${rowLabel}${companyName}: ${sourceCerts.length} certifications in source, ${haveCount} in resume${restored}`
+    resumeData: locked,
+    status: `Row ${rowLabel}${companyName}: ${sourceCerts.length} certifications in source, ${after} in resume${
+      before !== after ? ` (locked from ${before})` : ""
+    }`
   };
 }
 
@@ -10110,7 +10117,10 @@ async function runAutoJobViaApi(jobMeta, { draftOnly = false } = {}) {
             model,
             prompt: buildJdSkillsRetryPrompt(resumeData, jd, { roles: 2, minBullets: 3, roleTrack })
           });
-          const improved = enforceJdSkills(extractResumeJson(bulletsRaw), jd, roleTrack);
+          const improved = lockSourceCertifications(
+            enforceJdSkills(extractResumeJson(bulletsRaw), jd, roleTrack),
+            person
+          );
           if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
             const before = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2, roleTrack }).length;
             const after = rolesMissingJdSkills(improved, jd, { roles: 2, minBullets: 2, roleTrack }).length;
@@ -10149,7 +10159,7 @@ async function runAutoJobViaApi(jobMeta, { draftOnly = false } = {}) {
       companyName: atsCompany
     });
     if (boosted.changed) {
-      resumeData = boosted.data;
+      resumeData = lockSourceCertifications(boosted.data, person);
       atsEvaluation = boosted.evaluation;
       await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
     }
@@ -10173,7 +10183,7 @@ async function runAutoJobViaApi(jobMeta, { draftOnly = false } = {}) {
           companyName: atsCompany
         })
       });
-      const improved = extractResumeJson(retryRaw);
+      const improved = lockSourceCertifications(extractResumeJson(retryRaw), person);
       if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
         const nextEval = evaluateAtsScore(improved, {
           jdText: atsJd,
@@ -10197,6 +10207,7 @@ async function runAutoJobViaApi(jobMeta, { draftOnly = false } = {}) {
       await setStatus(`ATS retry skipped (${err?.message || "failed"}). Keeping resume.`);
     }
   }
+  resumeData = lockSourceCertifications(resumeData, person);
   if (jobMeta.csvRow != null) {
     const atsPatch = {
       atsScore: atsEvaluation.score,
@@ -10612,10 +10623,9 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
   }
 
   {
-    const certPerson = await getActivePerson().catch(() => null);
     const certRestore = await restoreSourceCertifications(
       resumeData,
-      certPerson,
+      person,
       jobMeta.csvRow != null ? `${jobMeta.csvRow} · ` : "",
       jobMeta.companyName
     );
@@ -10649,7 +10659,10 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
               statusLabel: `Same chat · JD-skill bullets (${jobMeta.companyName || "job"})…`
             }
           );
-          const improved = enforceJdSkills(extractResumeJson(bulletsRaw), jd, roleTrack);
+          const improved = lockSourceCertifications(
+            enforceJdSkills(extractResumeJson(bulletsRaw), jd, roleTrack),
+            person
+          );
           if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
             const before = rolesMissingJdSkills(resumeData, jd, { roles: 2, minBullets: 2, roleTrack }).length;
             const after = rolesMissingJdSkills(improved, jd, { roles: 2, minBullets: 2, roleTrack }).length;
@@ -10691,7 +10704,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       companyName: atsCompany
     });
     if (boosted.changed) {
-      resumeData = boosted.data;
+      resumeData = lockSourceCertifications(boosted.data, person);
       atsEvaluation = boosted.evaluation;
       await setStatus(`ATS cleanup → ${atsEvaluation.score}/100 (${atsEvaluation.grade}).`);
     }
@@ -10721,7 +10734,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
           statusLabel: `Same chat · ATS retry (${jobMeta.companyName || "job"})…`
         }
       );
-      const improved = extractResumeJson(retryRaw);
+      const improved = lockSourceCertifications(extractResumeJson(retryRaw), person);
       if (isUsableResumeJson(improved) || isMinimallySaveableResume(improved)) {
         const nextEval = evaluateAtsScore(improved, {
           jdText: atsJd,
@@ -10745,6 +10758,7 @@ async function runAutoJob(jobMeta, { draftOnly = false } = {}) {
       await setStatus(`ATS retry skipped (${err?.message || "failed"}). Keeping resume.`);
     }
   }
+  resumeData = lockSourceCertifications(resumeData, person);
   if (jobMeta.csvRow != null) {
     const atsPatch = {
       atsScore: atsEvaluation.score,

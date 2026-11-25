@@ -47,13 +47,48 @@ test("enforceMasterCertifications replaces a truncated AI cert list", () => {
   assert.match(out.certifications[4], /Nonprofit Cloud Consultant/i);
 });
 
-test("enforceMasterCertifications leaves AI certs alone when master has none", () => {
+test("enforceMasterCertifications clears AI inventions when master Certifications is None", () => {
+  const out = enforceMasterCertifications(
+    { name: "Nobody", certifications: ["Made Up Cert"] },
+    "CERTIFICATIONS\nNone."
+  );
+  assert.deepEqual(out.certifications, []);
+});
+
+test("enforceMasterCertifications leaves AI certs alone when master has no Certifications section", () => {
   const original = ["Made Up Cert"];
   const out = enforceMasterCertifications(
     { name: "Nobody", certifications: original },
-    "CERTIFICATIONS\nNone."
+    "SUMMARY\nBuilds things.\nEXPERIENCE\nAcme — Engineer"
   );
   assert.deepEqual(out.certifications, original);
+});
+
+test("custom markdown Certifications heading survives finalize", () => {
+  const master = `Pat Custom
+## Certifications
+- CompTIA Security+ Certification
+- AWS Cloud Practitioner
+`;
+  const out = enforceMasterCertifications(
+    { name: "Pat", certifications: ["AWS Cloud Practitioner"] },
+    master
+  );
+  assert.equal(out.certifications.length, 2);
+  assert.ok(out.certifications.some((c) => /CompTIA Security\+/.test(c)));
+});
+
+test("Professional Certifications heading locks the full custom list", () => {
+  const master = `Custom Person
+Professional Certifications
+- SnowPro Core Certification — Snowflake
+- Domo Certified Consultant — Domo
+`;
+  const out = enforceMasterCertifications(
+    { name: "Custom", certifications: [] },
+    master
+  );
+  assert.equal(out.certifications.length, 2);
 });
 
 const DE_STYLE_MASTER = `Michael Haries Namuco Ibea

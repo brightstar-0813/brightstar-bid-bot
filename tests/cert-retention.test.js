@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { certificationsFromSourceText, mergeMissingCertifications } from "../resume-text.js";
+import {
+  certificationsFromSourceText,
+  extractMasterCertifications,
+  mergeMissingCertifications
+} from "../resume-text.js";
+import { enforceMasterCertifications } from "../ai-answers.js";
+import {
+  SHIRA_LEFF_MASTER,
+  VICTOR_HOLANDA_SF_MASTER,
+  VICTOR_HOLANDA_DE_MASTER
+} from "../prompts/builtin-master-resumes.js";
 
 const SOURCE = `Michael Haries Namuco Ibea
 Senior Salesforce Developer
@@ -74,4 +84,60 @@ test("object-shaped certifications from the model are matched by name", () => {
 test("a draft without a certifications field receives the source list", () => {
   const merged = mergeMissingCertifications({ name: "X" }, ["SnowPro Core Certification — Snowflake"]);
   assert.deepEqual(merged.data.certifications, ["SnowPro Core Certification — Snowflake"]);
+});
+
+test("None. masters never yield a literal None certification", () => {
+  const extracted = extractMasterCertifications("Name\nCERTIFICATIONS\nNone.\n");
+  assert.equal(extracted.hasSection, true);
+  assert.equal(extracted.explicitEmpty, true);
+  assert.deepEqual(extracted.certifications, []);
+  assert.deepEqual(certificationsFromSourceText("Name\nCERTIFICATIONS\nNone.\n"), []);
+});
+
+test("DMario-style disclaimer is not glued onto the SCA bullet", () => {
+  const master = `DMario
+CERTIFICATIONS
+- Salesforce Certified Administrator (SCA)
+No developer-track, architect-track, or consultant-track Salesforce certification.
+`;
+  const certs = certificationsFromSourceText(master);
+  assert.deepEqual(certs, ["Salesforce Certified Administrator (SCA)"]);
+});
+
+test("Platform Developer I does not suppress Platform Developer II", () => {
+  const merged = mergeMissingCertifications(
+    { certifications: ["Salesforce Certified Platform Developer I"] },
+    [
+      "Salesforce Certified Platform Developer I",
+      "Salesforce Certified Platform Developer II"
+    ]
+  );
+  assert.equal(merged.added.length, 1);
+  assert.match(merged.added[0], /Developer II/);
+});
+
+test("built-in Victor SF master locks six Salesforce credentials", () => {
+  const out = enforceMasterCertifications(
+    { name: "Victor", certifications: ["Made Up"] },
+    VICTOR_HOLANDA_SF_MASTER
+  );
+  assert.equal(out.certifications.length, 6);
+  assert.ok(out.certifications.every((c) => /Salesforce Certified/i.test(c)));
+});
+
+test("built-in Victor DE master clears invented certs (explicit None)", () => {
+  const out = enforceMasterCertifications(
+    { name: "Victor", certifications: ["AWS Solutions Architect"] },
+    VICTOR_HOLANDA_DE_MASTER
+  );
+  assert.deepEqual(out.certifications, []);
+});
+
+test("built-in Shira master keeps every DE credential including Teaching Certificate", () => {
+  const certs = certificationsFromSourceText(SHIRA_LEFF_MASTER);
+  assert.ok(certs.length >= 7);
+  assert.ok(certs.some((c) => /SnowPro/i.test(c)));
+  assert.ok(certs.some((c) => /Teaching Certificate/i.test(c)));
+  const locked = enforceMasterCertifications({ certifications: ["Domo Certified Consultant"] }, SHIRA_LEFF_MASTER);
+  assert.equal(locked.certifications.length, certs.length);
 });

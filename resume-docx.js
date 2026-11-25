@@ -367,7 +367,13 @@ function certLines(certs) {
     .map((cert) => {
       const label =
         cert && typeof cert === "object"
-          ? cert.name || cert.title || cert.label || ""
+          ? cert.name ||
+            cert.title ||
+            cert.certification ||
+            cert.label ||
+            cert.credential ||
+            cert.text ||
+            ""
           : cert;
       return fieldParagraphs(label, { size: 11, font: "Calibri" }, 40);
     })

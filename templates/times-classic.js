@@ -294,10 +294,12 @@ export const timesClassicTemplate = {
       ${eduHtml || "<p></p>"}
     </section>
 
-    <section>
+    ${(data.certifications || []).length
+      ? `<section>
       <h2>Certifications</h2>
       ${renderCerts(data.certifications)}
-    </section>
+    </section>`
+      : ""}
 
     <section class="skills">
       <h2>Skills</h2>

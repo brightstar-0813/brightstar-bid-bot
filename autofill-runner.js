@@ -1674,14 +1674,19 @@ function shortAnswerBankMatchIsSpecific(questionLabel, recordQuestion, answer) {
 
 async function loadAutofillCertifications(applicantInfo = {}) {
   const chunks = [applicantInfo.certifications];
+  let person = null;
   try {
-    const resume = await getStoredResumeJson();
+    person = await getActivePerson();
+  } catch {
+    /* ignore */
+  }
+  try {
+    const resume = await getStoredResumeJson(person?.id || "");
     chunks.push(resume?.certifications);
   } catch {
     /* ignore */
   }
   try {
-    const person = await getActivePerson();
     chunks.push(person?.autofillExtras?.certifications);
     chunks.push(person?.masterResume);
     chunks.push(person?.promptTemplate);
