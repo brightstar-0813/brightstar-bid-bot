@@ -539,7 +539,7 @@ test("Orange Banner puts company above the title and uses orange section bars", 
   assert.ok(companyAt > -1 && titleAt > companyAt);
 });
 
-test("contact line: P/E/L on one row, LinkedIn URL on its own row", () => {
+test("contact line: phone, email, location, and LinkedIn on one row", () => {
   assert.equal(
     linkedInDisplay("https://www.linkedin.com/in/example/"),
     "linkedin.com/in/example"
@@ -555,11 +555,10 @@ test("contact line: P/E/L on one row, LinkedIn URL on its own row", () => {
     location: "Trece Martires, Calabarzon"
   });
   const rows = [...line.matchAll(/<span class="contact-row"[^>]*>([\s\S]*?)<\/span>(?=<span class="contact-row"|$)/g)].map((m) => m[1]);
-  assert.equal(rows.length, 2);
-  assert.doesNotMatch(rows[0], /linkedin/);
+  assert.equal(rows.length, 1);
   assert.match(rows[0], /\+63 948 803 6855[\s\S]*michaelhariesibea3@gmail\.com[\s\S]*Trece Martires/);
-  assert.match(rows[1], />linkedin\.com\/in\/michael-haries-ibea-0baa0a417</);
-  assert.match(rows[1], /href="https:\/\/www\.linkedin\.com\/in\/michael-haries-ibea-0baa0a417"/);
+  assert.match(rows[0], />linkedin\.com\/in\/michael-haries-ibea-0baa0a417</);
+  assert.match(rows[0], /href="https:\/\/www\.linkedin\.com\/in\/michael-haries-ibea-0baa0a417"/);
   assert.match(line, /white-space:nowrap/);
   const orange = resumeJsonToHtml(
     {
@@ -574,8 +573,12 @@ test("contact line: P/E/L on one row, LinkedIn URL on its own row", () => {
     },
     "orange-banner"
   );
-  // Orange Banner puts LinkedIn on its own row, shown in full.
-  assert.match(orange, /<p class="contact contact-li"><span class="tag">LI:<\/span> <a[^>]*>linkedin\.com\/in\/michael-haries-ibea-0baa0a417<\/a><\/p>/);
+  // Orange Banner keeps LinkedIn on the same contact row, shown in full.
+  assert.match(
+    orange,
+    /<p class="contact [^"]*">[\s\S]*9488036855[\s\S]*<span class="tag">LI:<\/span> <a[^>]*>linkedin\.com\/in\/michael-haries-ibea-0baa0a417<\/a>/
+  );
+  assert.doesNotMatch(orange, /<p class="contact contact-li">/);
   assert.match(orange, /white-space:\s*nowrap/);
 });
 

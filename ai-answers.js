@@ -51,7 +51,7 @@ export function parseCertificationList(value) {
 }
 
 const CERT_CREDENTIAL_RE =
-  /\b(certified|architect|administrator|developer|consultant|builder|designer|associate|professional|specialist)\b/i;
+  /\b(certified|certification|architect|administrator|developer|consultant|builder|designer|associate|professional|specialist|specialty|practitioner)\b/i;
 
 function cleanCertificationLine(line) {
   return String(line || "")
@@ -61,10 +61,17 @@ function cleanCertificationLine(line) {
     .trim();
 }
 
-function looksLikeCertificationLine(line) {
+/** Keep section lines that are not empty / "None" (no keyword filter). */
+function isSectionCertificationLine(line) {
   const row = cleanCertificationLine(line);
   if (row.length < 8) return false;
   if (/^(none|no)\b/i.test(row)) return false;
+  return true;
+}
+
+function looksLikeCertificationLine(line) {
+  const row = cleanCertificationLine(line);
+  if (!isSectionCertificationLine(row)) return false;
   return CERT_CREDENTIAL_RE.test(row);
 }
 
@@ -74,6 +81,8 @@ export function certificationsFromText(text) {
   if (!raw) return [];
 
   // Prefer an explicit CERTIFICATIONS section (master resumes + pasted text).
+  // Section lines are authoritative — keep every credential, including AWS Specialty,
+  // SnowPro, Practitioner, Lynda, etc. that fail the keyword fallback filter.
   const section = raw.match(
     /(?:^|\n)\s*(?:SALESFORCE\s+)?CERTIFICATIONS?\s*\r?\n([\s\S]*?)(?=\r?\n\s*(?:EDUCATION|EXPERIENCE|SKILLS|SUMMARY|PROFESSIONAL|TECHNICAL|PROJECTS|LICENSES)\b|\r?\n\s*$|$)/i
   );
@@ -81,7 +90,7 @@ export function certificationsFromText(text) {
     const fromSection = section[1]
       .split(/\r?\n/)
       .map((line) => cleanCertificationLine(line))
-      .filter((row) => looksLikeCertificationLine(row));
+      .filter((row) => isSectionCertificationLine(row));
     if (fromSection.length) return fromSection;
   }
 
@@ -94,7 +103,7 @@ export function certificationsFromText(text) {
   }
   const found = [];
   const re =
-    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft)[^\n]{1,140}?(?:Certified|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional|Specialist)[^\n]{0,60})/gi;
+    /(?:^|\n)\s*[-•*]?\s*((?:Salesforce|AWS|Google|Microsoft|SnowPro|Snowflake|Domo|Datorama)[^\n]{1,140}?(?:Certified|Certification|Architect|Administrator|Developer|Consultant|Builder|Designer|Associate|Professional|Specialist|Specialty|Practitioner)[^\n]{0,60})/gi;
   let match;
   while ((match = re.exec(raw))) {
     const row = cleanCertificationLine(match[1]);

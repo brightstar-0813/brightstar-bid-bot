@@ -17,7 +17,7 @@ const base = {
   education: []
 };
 
-// Templates with a shared P/E/L row + LinkedIn row. executive-navy keeps a stacked
+// Templates with a shared one-line contact row. executive-navy keeps a stacked
 // sidebar (62mm column is too narrow for one row) and orange-banner has its own test.
 const SHARED_ROW_TEMPLATES = getAllTemplates()
   .map((t) => t.id)
@@ -29,23 +29,23 @@ const rowsOf = (html) =>
   );
 
 for (const id of SHARED_ROW_TEMPLATES) {
-  test(`${id}: phone, email and location share one row; LinkedIn is on the next row`, () => {
+  test(`${id}: phone, email, location, and LinkedIn share one contact row`, () => {
     const rows = rowsOf(resumeJsonToHtml(base, id));
-    assert.equal(rows.length, 2, `${id} should render exactly two contact rows`);
+    assert.equal(rows.length, 1, `${id} should render exactly one contact row`);
     assert.match(rows[0], /9488036855[\s\S]*michaelhariesibea3@gmail\.com[\s\S]*Trece Martires/);
-    assert.doesNotMatch(rows[0], /linkedin/i);
-    assert.match(rows[1], />linkedin\.com\/in\/michael-haries-ibea-0baa0a417</);
+    assert.match(rows[0], />linkedin\.com\/in\/michael-haries-ibea-0baa0a417</);
   });
 
   test(`${id}: no LinkedIn means a single contact row`, () => {
     const rows = rowsOf(resumeJsonToHtml({ ...base, linkedin: "" }, id));
     assert.equal(rows.length, 1);
+    assert.doesNotMatch(rows[0], /linkedin/i);
   });
 }
 
-test("contact rows never wrap (nowrap on each row)", () => {
+test("contact row never wraps (nowrap on the single row)", () => {
   const html = contactLine(base);
-  assert.equal([...html.matchAll(/white-space:nowrap/g)].length, 2);
+  assert.equal([...html.matchAll(/white-space:nowrap/g)].length, 1);
 });
 
 test("very long rows step the font down so they still fit the page", () => {

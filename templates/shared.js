@@ -181,10 +181,10 @@ export function linkedInDisplay(value) {
 }
 
 /**
- * Contact information as two rows:
- *   main     - location, phone, email on one row (joined with " | ")
- *   linkedin - the LinkedIn URL on its own row
- * Returned as HTML fragments; wrap each non-empty row with contactRow().
+ * Contact information parts:
+ *   main     - phone, email, location (joined with " | ")
+ *   linkedin - the LinkedIn URL fragment (optional)
+ * Callers join these into one row via contactLine / renderContactBlock.
  */
 export function contactRows(data, { linkColor } = {}) {
   const style = linkColor ? ` style="color:${linkColor}"` : "";
@@ -229,17 +229,18 @@ function contactRow(html) {
   return `<span class="contact-row" style="display:block;white-space:nowrap;${size}">${html}</span>`;
 }
 
-/** Contact line for the header `<p class="contact">`: P/E/L on one row, LinkedIn on the next. */
+/** Contact line for the header `<p class="contact">`: phone | email | location | LinkedIn on one row. */
 export function contactLine(data, opts = {}) {
   const { main, linkedin } = contactRows(data, opts);
-  return [main && contactRow(main), linkedin && contactRow(linkedin)].filter(Boolean).join("");
+  const joined = [main, linkedin].filter(Boolean).join(" | ");
+  return joined ? contactRow(joined) : "";
 }
 
-/** Stacked contact block (left column under name/headline). */
+/** Contact block under name/headline: phone | email | location | LinkedIn on one row. */
 export function renderContactBlock(data, { linkColor = "#000" } = {}) {
   const { main, linkedin } = contactRows(data, { linkColor });
-  const rows = [main && contactRow(main), linkedin && contactRow(linkedin)].filter(Boolean);
-  return rows.length ? `<div class="contact-block">${rows.join("\n")}</div>` : "";
+  const joined = [main, linkedin].filter(Boolean).join(" | ");
+  return joined ? `<div class="contact-block">${contactRow(joined)}</div>` : "";
 }
 
 /** Two-column skills table: Category | Technologies (ATS-friendly HTML table). */

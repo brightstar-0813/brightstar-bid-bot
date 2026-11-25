@@ -56,6 +56,43 @@ test("enforceMasterCertifications leaves AI certs alone when master has none", (
   assert.deepEqual(out.certifications, original);
 });
 
+const DE_STYLE_MASTER = `Michael Haries Namuco Ibea
+Senior Salesforce Developer
+
+Certifications
+- AWS Data Analytics Specialty — Amazon Web Services (AWS)
+- SnowPro Core Certification — Snowflake
+- AWS Big Data Specialty — Amazon Web Services (AWS)
+- AWS Cloud Practitioner — Amazon Web Services (AWS)
+- Datorama Certified Consultant — Datorama, a Salesforce company
+- Data Science Foundations: Fundamentals — Lynda.com
+- Domo Certified Consultant — Domo
+`;
+
+test("certificationsFromText keeps every DE-style section credential without keyword filter", () => {
+  const certs = certificationsFromText(DE_STYLE_MASTER);
+  assert.equal(certs.length, 7);
+  assert.match(certs[0], /AWS Data Analytics Specialty/);
+  assert.match(certs[1], /SnowPro Core Certification/);
+  assert.match(certs[3], /AWS Cloud Practitioner/);
+  assert.match(certs[5], /Data Science Foundations/);
+  assert.match(certs[6], /Domo Certified Consultant/);
+});
+
+test("enforceMasterCertifications restores full DE-style master list over truncated AI certs", () => {
+  const out = enforceMasterCertifications(
+    {
+      name: "Michael Haries Namuco Ibea",
+      certifications: ["Datorama Certified Consultant", "Domo Certified Consultant"]
+    },
+    DE_STYLE_MASTER
+  );
+  assert.equal(out.certifications.length, 7);
+  assert.ok(out.certifications.some((c) => /SnowPro Core Certification/.test(c)));
+  assert.ok(out.certifications.some((c) => /AWS Data Analytics Specialty/.test(c)));
+  assert.ok(out.certifications.some((c) => /Cloud Practitioner/.test(c)));
+});
+
 test("answerCertificationQuestion returns Yes/No from profile certs", () => {
   assert.equal(
     answerCertificationQuestion(
